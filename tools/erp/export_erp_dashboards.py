@@ -68,7 +68,7 @@ def main():
         servers = listing('Server Script', ['*'])
 
     def references(method, source):
-        return bool(re.search(r'''["'`](?:/api/method/)?''' + re.escape(method) + r'''["'`]''', source))
+        return bool(re.search(r'''["'`](?:/api/method/)?''' + re.escape(method) + r'''(?:["'`?])''', source))
     if args.dashboards:
         requested = json.loads(Path(args.dashboards).read_text(encoding='utf-8'))
         available = {row['name']: row for row in blocks}

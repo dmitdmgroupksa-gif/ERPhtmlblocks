@@ -118,6 +118,13 @@ function agg(rows){var a={net:0,over:0,nd:0,cr:0,gross:0,b:[0,0,0,0,0,0],bp:[0,0
 function bySup(rows){var m={};rows.forEach(function(r){var k=r.co+'|'+r.sup;var s=m[k]||(m[k]={key:k,co:r.co,sup:r.sup,name:r.name,grp:r.grp,rows:[],net:0,over:0,nd:0,cr:0,oldest:null,maxOver:0,b:[0,0,0,0,0,0],bp:[0,0,0,0,0,0]});s.rows.push(r);s.net+=r.out;s.b[bk(r.age)]+=r.out;if(r.out>0){s.bp[bk(r.age)]+=r.out;if(r.age>0){s.over+=r.out;if(r.age>s.maxOver)s.maxOver=r.age;}else s.nd+=r.out;if(!s.oldest||r.post<s.oldest)s.oldest=r.post;}else if(r.out<0)s.cr+=r.out;});return Object.keys(m).map(function(k){return m[k];});}
 function perRows(kind){var out=[];if(!D.data||!D.data.per)return out;var f=S.f;(D.data.per[kind]||[]).forEach(function(r){var sid=kind==='pi'?r.supplier:r.party,nm=kind==='pi'?r.supplier_name:r.party_name;if(f.company&&r.company!==f.company)return;if(!supMatch(sid,nm,f))return;if(!textMatch([sid,nm,r.name,r.reference_no],f))return;out.push(r);});return out;}
 function inRange(d){return d>=S.f.from&&d<=S.f.to;}
+function invoiceBalance(r){
+ var target=curOf(r.company), party=r.party_account_currency;
+ if(!party)throw new Error('Missing party account currency');
+ if(party===target)return Number(r.outstanding_amount)||0;
+ if(party!==r.currency || !(Number(r.conversion_rate)>0))throw new Error('Unsupported party currency conversion: '+party);
+ return (Number(r.outstanding_amount)||0)*Number(r.conversion_rate);
+}
 function curOf(co){var c=(D.companies||[]).filter(function(x){return x.name===co;})[0];return c?c.default_currency:'SAR';}
 function scopeCur(){var cs={};(D.companies||[]).forEach(function(c){if(!S.f.company||c.name===S.f.company)cs[c.default_currency]=1;});var k=Object.keys(cs);return k.length===1?k[0]:'SAR';}
 function mixedCur(){var cs={};(D.companies||[]).forEach(function(c){cs[c.default_currency]=1;});return Object.keys(cs).length>1;}
@@ -305,7 +312,7 @@ if(s.dfrom)flt.push(['due_date','>=',s.dfrom]);if(s.dto)flt.push(['due_date','<=
 if(s.period==='1'){flt.push(['posting_date','>=',S.f.from]);flt.push(['posting_date','<=',S.f.to]);}
 var order='posting_date desc, name desc';if(s.sort==='out'){order='outstanding_amount desc';flt.push(['outstanding_amount','>',0]);}if(s.sort==='old'){order='due_date asc';flt.push(['outstanding_amount','>',0]);flt.push(['due_date','<',TODAY]);}
 var cnt=function(f2){return getList('Purchase Invoice',['count(name) as c'],f2,{limit:1,or_filters:of}).then(function(r){return (r&&r[0]&&r[0].c)||0;});};
-Promise.all([getList('Purchase Invoice',['name','supplier','supplier_name','company','posting_date','due_date','grand_total','base_grand_total','outstanding_amount','conversion_rate','currency','status','is_return','bill_no'],flt,{limit:15,start:s.page*15,order:order,or_filters:of}),cnt(flt),
+Promise.all([getList('Purchase Invoice',['name','supplier','supplier_name','company','posting_date','due_date','grand_total','base_grand_total','outstanding_amount','party_account_currency','conversion_rate','currency','status','is_return','bill_no'],flt,{limit:15,start:s.page*15,order:order,or_filters:of}),cnt(flt),
 cnt(b.concat([['is_return','=',0],['posting_date','>=',S.f.from],['posting_date','<=',S.f.to]])),cnt(b.concat([['status','=','Unpaid']])),cnt(b.concat([['status','=','Partly Paid']])),cnt(b.concat([['status','=','Overdue']])),cnt(b.concat([['is_return','=',0],['outstanding_amount','>',0],['due_date','>=',TODAY],['due_date','<=',addD(TODAY,7)]]))]).then(function(r){
 if(key!==s.key)return;s.data=r[0];s.total=r[1];s.kpi={sub:r[2],unpaid:r[3],part:r[4],over:r[5],soon:r[6]};s.loading=false;paintTab('invoices');},function(e){if(key!==s.key)return;s.err=e.message;s.loading=false;paintTab('invoices');});}
 function piApply(o){var s=S.pi;s.status=o.status||'';s.dfrom=o.dfrom||'';s.dto=o.dto||'';s.period=o.period||'';s.sort=o.sort||'post';s.page=0;fetchPI(true);}
@@ -328,7 +335,7 @@ fld(t('f_sort'),selectEl([['post',t('so_new')],['out',t('so_out')],['old',t('so_
 var body;if(s.err)body=errBox(s.err,function(){fetchPI(true);});else if(s.loading||!s.data)body=loadBox();else body=table({cols:[
 {k:'name',l:t('c_pi'),r:function(r){return a('Purchase Invoice',r.name);}},{k:'supplier_name',l:t('c_sup'),r:function(r){return el('button',{class:'lk',type:'button',onclick:function(){supplierPanel(r.supplier,r.supplier_name||r.supplier);},text:r.supplier_name||r.supplier});}},{k:'company',l:t('c_co')},{k:'posting_date',l:t('c_post')},{k:'due_date',l:t('c_due')},
 {k:'base_grand_total',l:t('c_inv'),num:1,r:function(r){return el('span',null,[fmt(r.base_grand_total),r.currency!==curOf(r.company)?el('div',{class:'src',text:r.currency+' '+fmt(r.grand_total)}):null]);}},
-{k:'outstanding_amount',l:t('c_out'),num:1,r:function(r){return amt((r.outstanding_amount||0)*(r.conversion_rate||1));}},
+{k:'outstanding_amount',l:t('c_out'),num:1,r:function(r){return amt(invoiceBalance(r));}},
 {k:'status',l:t('c_status'),r:function(r){return statusBadge(r.status);}},
 {k:'od',l:t('c_age'),num:1,r:function(r){return r.outstanding_amount>0&&r.due_date&&r.due_date<TODAY?String(diff(r.due_date,TODAY)):'—';}},
 {k:'v',l:t('c_view'),r:function(r){return a('Purchase Invoice',r.name,t('view'));}}],rows:s.data,size:15,server:{total:s.total,page:s.page,size:15,go:function(p){s.page=p;fetchPI();}},st:{page:0}});
@@ -468,3 +475,12 @@ S.loading=false;S.updated=new Date();S.pi.key='';S.pe.key='';S.pe.wfKey='';reset
 gon(document,'keydown',function(e){if(e.key==='Escape'&&ovStack.length){ovStack[ovStack.length-1]();}});
 build();load();
 })();
+
+/* ==== DM theme sync v1 · generated by tools/erp/shell/dark_theme.py ==== */
+;(function () {
+  var r = typeof root_element !== 'undefined' ? root_element : null, h = r && r.host;
+  if (!h || h.__dmsTheme) return; h.__dmsTheme = 1;
+  var s = function () { h.setAttribute('data-dms-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'); };
+  s(); new MutationObserver(s).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+})();
+/* ==== end DM theme sync v1 ==== */

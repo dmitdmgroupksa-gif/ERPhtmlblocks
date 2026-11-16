@@ -27,23 +27,24 @@ var PAL = ['#1d4ed8', '#3b82f6', '#0ea5e9', '#64748b', '#93c5fd', '#0b2a5b', '#9
 var L = {
  title: ['CREDIT CONTROLLER DASHBOARD', 'لوحة مراقب الائتمان'], sub: ['Receivables, Overdue Aging, Credit Limits & Collections', 'الذمم المدينة وأعمار الديون وحدود الائتمان والتحصيلات'],
  refresh: ['Refresh', 'تحديث'], updated: ['Last updated', 'آخر تحديث'], reset: ['Reset Filters', 'إعادة ضبط الفلاتر'],
- company: ['Company', 'الشركة'], division: ['Division', 'القسم / الشعبة'], location: ['Location', 'الموقع'], customer: ['Customer', 'العميل'], asof: ['As of Date', 'كما في تاريخ'], all: ['All', 'الكل'],
+ company: ['Company', 'الشركة'], division: ['Division', 'القسم / الشعبة'], location: ['Location', 'الموقع'], customer: ['Customer', 'العميل'], asof: ['Current balance date', 'تاريخ الرصيد الحالي'], all: ['All', 'الكل'],
  t_overview: ['Overview', 'نظرة عامة'], t_aging: ['Customer Aging', 'أعمار ديون العملاء'], t_invoices: ['Open Invoices', 'الفواتير المفتوحة'], t_limits: ['Credit Limits', 'حدود الائتمان'], t_coll: ['Collections', 'التحصيلات'],
  k_out: ['Total Outstanding', 'إجمالي المستحق'], k_nd: ['Not Yet Due', 'غير مستحق بعد'], k_od: ['Overdue', 'متأخر'], k_odp: ['Overdue %', 'نسبة المتأخر'], k_90: ['Overdue > 90 days', 'متأخر أكثر من 90 يومًا'],
- k_inv: ['Open Invoices', 'فواتير مفتوحة'], k_cust: ['Customers with Balance', 'عملاء لديهم رصيد'], k_cr: ['Unapplied Credit Notes', 'إشعارات دائنة غير مطبقة'], k_mtd: ['Collected This Month', 'المحصّل هذا الشهر'], k_30: ['Collected Last 30 Days', 'المحصّل آخر 30 يومًا'],
+ k_inv: ['Open Invoices', 'فواتير مفتوحة'], k_cust: ['Customers with Balance', 'عملاء لديهم رصيد'], k_cr: ['Unapplied Credit Notes', 'إشعارات دائنة غير مطبقة'], k_mtd: ['Customer receipts this month — gross', 'متحصلات العملاء هذا الشهر — إجمالي'], k_30: ['Collected Last 30 Days', 'المحصّل آخر 30 يومًا'],
  k_lm: ['Collected Last Month', 'المحصّل الشهر الماضي'], k_rc: ['Receipts This Month', 'عدد السندات هذا الشهر'],
  c_age: ['Aging of Receivables', 'أعمار الذمم المدينة'], c_top: ['Top 10 Customers by Outstanding', 'أعلى 10 عملاء حسب المستحق'], c_comp: ['Outstanding by Company', 'المستحق حسب الشركة'], c_coll: ['Collections – last 6 months', 'التحصيلات – آخر 6 أشهر'],
  b_nd: ['Not yet due', 'غير مستحق'], b_1: ['1–30 days', '1–30 يومًا'], b_2: ['31–60 days', '31–60 يومًا'], b_3: ['61–90 days', '61–90 يومًا'], b_4: ['91–180 days', '91–180 يومًا'], b_5: ['Over 180 days', 'أكثر من 180 يومًا'],
  overdue_all: ['All overdue', 'كل المتأخر'], total: ['Total', 'الإجمالي'], search: ['Search…', 'بحث…'], csv: ['Export CSV', 'تصدير CSV'], exportall: ['Export all (max 5,000)', 'تصدير الكل (حتى 5,000)'], open: ['Open', 'فتح'], close: ['Close', 'إغلاق'],
  page: ['Page', 'صفحة'], of: ['of', 'من'], prev: ['Prev', 'السابق'], next: ['Next', 'التالي'], showing: ['Showing', 'عرض'], loading: ['Loading…', 'جارٍ التحميل…'], empty: ['No records found for the selected filters.', 'لا توجد سجلات للفلاتر المحددة.'],
  err: ['Could not load some data', 'تعذر تحميل بعض البيانات'], inv: ['Invoice', 'الفاتورة'], posting: ['Posting Date', 'تاريخ الفاتورة'], due: ['Due Date', 'تاريخ الاستحقاق'], dover: ['Days Overdue', 'أيام التأخير'], outst: ['Outstanding', 'المستحق'], gt: ['Invoice Total', 'إجمالي الفاتورة'],
- invs: ['Invoices', 'الفواتير'], limit: ['Credit Limit', 'حد الائتمان'], util: ['Utilization', 'نسبة الاستخدام'], status: ['Status', 'الحالة'], overdue: ['Overdue', 'المتأخر'], over: ['Over limit', 'تجاوز الحد'], near: ['Near limit (≥80%)', 'قريب من الحد (≥80%)'], okk: ['Within limit', 'ضمن الحد'], nolimit: ['No limit set', 'لا يوجد حد'],
+ invs: ['Invoices', 'الفواتير'], limit: ['Credit Limit', 'حد الائتمان'], util: ['Utilization', 'نسبة الاستخدام'], status: ['Status', 'الحالة'], overdue: ['Overdue', 'المتأخر'], over: ['Above positive limit — selected company', 'تجاوز حد موجب — الشركة المحددة'], near: ['Near limit (≥80%)', 'قريب من الحد (≥80%)'], okk: ['Within limit', 'ضمن الحد'], nolimit: ['No limit set', 'لا يوجد حد'],
  receipt: ['Receipt', 'السند'], date: ['Date', 'التاريخ'], amount: ['Amount', 'المبلغ'], mode: ['Mode of Payment', 'طريقة الدفع'], ref: ['Reference', 'المرجع'], party: ['Customer', 'العميل'],
- note_l: ['Outstanding = submitted Sales Invoices with a positive outstanding amount. Overdue is measured from the Due Date against the As-of date. Credit limits come from the Customer Credit Limit table. Amounts are shown as stored (company currency assumed).', 'المستحق = فواتير مبيعات معتمدة برصيد موجب. التأخير يُحسب من تاريخ الاستحقاق مقابل تاريخ "كما في". حدود الائتمان من جدول حد ائتمان العميل. المبالغ كما هي مخزنة (بعملة الشركة).'],
+ note_l: ['Outstanding = submitted Sales Invoices with a positive outstanding amount. Overdue is measured from the Due Date against the As-of date. Credit limits come from the Customer Credit Limit table. Current balances only; party accounts are restricted to the displayed currency. Collections use company-base receipts. Historical and foreign-currency ageing: native Accounts Receivable report.', 'المستحق = فواتير مبيعات معتمدة برصيد موجب. التأخير يُحسب من تاريخ الاستحقاق مقابل تاريخ "كما في". حدود الائتمان من جدول حد ائتمان العميل. المبالغ كما هي مخزنة (بعملة الشركة).'],
  note_c: ['Collections use submitted Payment Entries of type Receive (Division filter does not apply to them).', 'التحصيلات من سندات الدفع المعتمدة من نوع Receive (فلتر القسم لا ينطبق عليها).'],
  nolimits: ['No credit limits are defined (or not visible to your user).', 'لا توجد حدود ائتمان معرّفة (أو غير مرئية لمستخدمك).'], openc: ['Open customer', 'فتح العميل'], partial: ['Showing the first rows only – narrow the filters for the full list.', 'عرض الصفوف الأولى فقط – ضيّق الفلاتر لعرض القائمة كاملة.']
 };
 function t(k) { var v = L[k]; return v ? v[S.lang === 'ar' ? 1 : 0] : k; }
+var DISPLAY_CURRENCY=(frappe.boot.sysdefaults||{}).currency||'SAR';
 var S = { lang: window.__dmccLang || 'en', tab: 'overview', ts: null, ready: false, epoch: 0, bucket: 'od', f: { company: '', division: '', location: '', customer: '', asof: todayStr() } };
 var D = {}, OPT = { company: [], division: [], location: [] }, HAS = {};
 
@@ -56,8 +57,10 @@ function api(method, args) {
   var p = new Promise(function (ok, no) { Q.q.push({ fn: function () { return new Promise(function (res, rej) { frappe.call({ method: method, args: JSON.parse(JSON.stringify(args)), silent: true, callback: function (r) { res(r ? r.message : null); }, error: function (e) { rej(e || new Error('api')); } }); }); }, ok: ok, no: no }); pump(); });
   CACHE[key] = p; p.catch(function () { if (CACHE[key] === p) { delete CACHE[key]; } }); return p;
 }
-function gcount(dt, f) { return api('frappe.client.get_count', { doctype: dt, filters: f || [] }); }
-function glist(dt, o) { var a = { doctype: dt, fields: o.fields, filters: o.filters || [], limit_start: o.start || 0, limit_page_length: o.limit || 20 }; ['order_by', 'group_by', 'or_filters', 'parent'].forEach(function (k) { if (o[k]) { a[k] = o[k]; } }); return api('frappe.client.get_list', a); }
+function gcount(dt, f) { if(dt==='Sales Invoice')f=(f||[]).concat([['party_account_currency','=',DISPLAY_CURRENCY]]);return api('frappe.client.get_count', { doctype: dt, filters: f || [] }); }
+function glist(dt, o) {
+ if(dt==='Sales Invoice')o=Object.assign({},o,{filters:(o.filters||[]).concat([['party_account_currency','=',DISPLAY_CURRENCY]])});
+ var a = { doctype: dt, fields: o.fields, filters: o.filters || [], limit_start: o.start || 0, limit_page_length: o.limit || 20 }; ['order_by', 'group_by', 'or_filters', 'parent'].forEach(function (k) { if (o[k]) { a[k] = o[k]; } }); return api('frappe.client.get_list', a); }
 function loadMeta(dt) { return new Promise(function (res) { var to = setTimeout(res, 15000); try { frappe.model.with_doctype(dt, function () { try { var f = {}; frappe.get_meta(dt).fields.forEach(function (x) { f[x.fieldname] = 1; }); HAS[dt] = f; } catch (e) { } clearTimeout(to); res(); }); } catch (e) { clearTimeout(to); res(); } }); }
 function has(dt, f) { return !!(HAS[dt] && HAS[dt][f]); }
 
@@ -65,14 +68,14 @@ function has(dt, f) { return !!(HAS[dt] && HAS[dt][f]); }
 var SI = 'Sales Invoice', PE = 'Payment Entry';
 var BK = [{ id: 'nd', k: 'b_nd', c: '#16a34a' }, { id: 'b1', k: 'b_1', lo: 1, hi: 30, c: '#3b82f6' }, { id: 'b2', k: 'b_2', lo: 31, hi: 60, c: '#0ea5e9' }, { id: 'b3', k: 'b_3', lo: 61, hi: 90, c: '#d97706' }, { id: 'b4', k: 'b_4', lo: 91, hi: 180, c: '#ea580c' }, { id: 'b5', k: 'b_5', lo: 181, c: '#dc2626' }];
 function bFilter(b) {
-  var a = S.f.asof;
+  var a = todayStr();
   if (b.id === 'nd') { return [[SI, 'due_date', '>=', a]]; }
   if (b.id === 'od') { return [[SI, 'due_date', '<', a]]; }
   if (!b.hi) { return [[SI, 'due_date', '<', addDays(a, -(b.lo - 1))]]; }
   return [[SI, 'due_date', 'between', [addDays(a, -b.hi), addDays(a, -b.lo)]]];
 }
 function siBase() {
-  var q = S.f, f = [[SI, 'docstatus', '=', 1], [SI, 'outstanding_amount', '>', 0]];
+  var q = S.f, f = [[SI, 'docstatus', '=', 1], [SI, 'outstanding_amount', '>', 0], [SI, 'posting_date', '<=', todayStr()]];
   if (q.company) { f.push([SI, 'company', '=', q.company]); }
   if (q.division && has(SI, 'custom_division')) { f.push([SI, 'custom_division', '=', q.division]); }
   if (q.location && has(SI, 'location')) { f.push([SI, 'location', '=', q.location]); }
@@ -80,7 +83,7 @@ function siBase() {
   return f;
 }
 function peBase() {
-  var q = S.f, f = [[PE, 'docstatus', '=', 1], [PE, 'payment_type', '=', 'Receive']];
+  var q = S.f, f = [[PE, 'docstatus', '=', 1], [PE, 'payment_type', '=', 'Receive'], [PE,'party_type','=','Customer']];
   if (q.company) { f.push([PE, 'company', '=', q.company]); }
   if (q.location && has(PE, 'location')) { f.push([PE, 'location', '=', q.location]); }
   if (q.customer) { f.push([PE, 'party_name', 'like', '%' + q.customer + '%']); }
@@ -105,7 +108,7 @@ function loadAging() {
 function loadMisc() {
   if (D.miscP) { return D.miscP; }
   var a = S.f.asof, td = todayStr(), ms = monthStart(td, 0);
-  var sumPE = function (from, to) { return glist(PE, { fields: ['sum(paid_amount) as amt', 'count(name) as n'], filters: peBase().concat([[PE, 'posting_date', 'between', [from, to]]]), limit: 1 }).then(function (r) { return { amt: r && r[0] ? r[0].amt || 0 : 0, n: r && r[0] ? r[0].n || 0 : 0 }; }).catch(function () { return null; }); };
+  var sumPE = function (from, to) { return glist(PE, { fields: ['sum(base_received_amount) as amt', 'count(name) as n'], filters: peBase().concat([[PE, 'posting_date', 'between', [from, to]]]), limit: 1 }).then(function (r) { return { amt: r && r[0] ? r[0].amt || 0 : 0, n: r && r[0] ? r[0].n || 0 : 0 }; }).catch(function () { return null; }); };
   var months = []; for (var i = 5; i >= 0; i--) { months.push({ from: monthStart(td, i), to: i === 0 ? td : monthEnd(td, i), lab: monthStart(td, i).slice(0, 7) }); }
   D.miscP = Promise.all([
     glist(SI, { fields: ['sum(outstanding_amount) as amt', 'count(name) as n'], filters: [[SI, 'docstatus', '=', 1], [SI, 'outstanding_amount', '<', 0]].concat(siBase().slice(2)), limit: 1 }).catch(function () { return null; }),
@@ -250,8 +253,35 @@ function tabInvoices() {
   }
   return h;
 }
+function reportReferenceTotal(response,field){
+  if(!response||!Array.isArray(response.result))throw new Error('Reference report unavailable');
+  var first=response.columns&&response.columns[0];first=first&&first.fieldname;
+  return response.result.reduce(function(sum,row){
+    if(!row||Array.isArray(row))throw new Error('Unsupported reference report response');
+    if(row.is_total_row||row._is_total_row||(first&&String(row[first]||'').trim().toLowerCase()==='total'))return sum;
+    if(row[field]===undefined)throw new Error('Reference report field unavailable');
+    var value=Number(row[field]);if(!isFinite(value))throw new Error('Invalid reference report value');
+    return sum+value;
+  },0);
+}
+function loadSharedReference(){
+  if(D.sharedReferenceP)return D.sharedReferenceP;
+  D.sharedReferenceP=Promise.all(['Over Credit Limit Customer','Collection Analysis Report'].map(function(name){return api('frappe.desk.query_report.run',{report_name:name,filters:{},ignore_prepared_report:true});})).then(function(r){
+    D.sharedReference={over:reportReferenceTotal(r[0],'over_credit_limit_customer_count'),collections:reportReferenceTotal(r[1],'total_collection')};sched();
+  }).catch(function(){D.sharedReference={unavailable:true};sched();});
+  return D.sharedReferenceP;
+}
+function sharedReferencePanel(){
+  loadSharedReference();var ref=D.sharedReference;
+  var heading=S.lang==='ar'?'مرجع الصفحات الأخرى — جميع الشركات':'Cross-page reference — all companies';
+  var overLabel=S.lang==='ar'?'تجاوز الحد، بما فيه الحد الصفري':'Over credit limit, including zero limits';
+  var collectionLabel=S.lang==='ar'?'تحصيل مندوبي المبيعات — التقرير القديم':'Salesperson collections — legacy adjusted report';
+  var basis=S.lang==='ar'?'هذه مراجع عامة ولا تتأثر بمرشحات هذه الصفحة. تقرير التحصيل يستبعد مندوبي مبيعات محددين ويقسم المقبوضات على 1.15؛ لا يمثل إجمالي المقبوضات.':'These are the same report definitions used by the native pages, across all companies. They do not follow this page’s company/division/location filters. The collection report excludes selected salespeople and divides receipts by 1.15; it is not gross customer receipts.';
+  if(ref&&ref.unavailable)return note(heading+': '+(S.lang==='ar'?'غير متاح لصلاحيات المستخدم':'unavailable for this user'));
+  return '<section class="cc-card"><h3>'+heading+'</h3>'+note(basis)+'<div class="cc-kpis">'+kpi(overLabel,ref?ref.over:null,'bad')+kpi(collectionLabel,ref?ref.collections:null,'')+'</div></section>';
+}
 function tabLimits() {
-  loadAging(); loadLimits(); var A = D.ag, LM = D.lim, h = note(t('note_l'));
+  loadAging(); loadLimits(); var A = D.ag, LM = D.lim, h = sharedReferencePanel()+note(t('note_l'));
   if (!A || !LM) { return h + loadingBlock(); }
   if (!LM.rows.length) { return h + '<div class="cc-empty">' + t('nolimits') + '</div>'; }
   var lim = {}; LM.rows.forEach(function (r) { lim[r.parent] = (lim[r.parent] || 0) + (r.credit_limit || 0); });
@@ -271,17 +301,17 @@ function tabLimits() {
   TB.t_lim.all = rows; return h;
 }
 function tabColl() {
-  loadMisc(); var M = D.misc, h = note(t('note_c'));
+  loadMisc(); var M = D.misc, h = sharedReferencePanel()+note(t('note_c'));
   h += '<div class="cc-kpis">' + kpi(t('k_mtd'), M && M.mtd ? M.mtd.amt : (M ? 0 : null), 'ok') + kpi(t('k_rc'), M && M.mtd ? M.mtd.n : (M ? 0 : null), '') + kpi(t('k_lm'), M && M.lm ? M.lm.amt : (M ? 0 : null), '') + kpi(t('k_30'), M && M.d30 ? M.d30.amt : (M ? 0 : null), 'ok') + '</div><div class="cc-card"><div data-tbx="t_pe"></div></div>';
   var sg = JSON.stringify(S.f) + S.lang;
   if (!TB.t_pe || TB.t_pe.sig !== sg) {
-    var fields = ['name', 'party', 'party_name', 'posting_date', 'paid_amount', 'mode_of_payment', 'reference_no', 'company'].filter(function (f) { return f === 'name' || has(PE, f); });
+    var fields = ['name', 'party', 'party_name', 'posting_date', 'base_received_amount', 'mode_of_payment', 'reference_no', 'company'].filter(function (f) { return f === 'name' || has(PE, f); });
     var load = function (o) { var q = {}; if (o.q) { q.or_filters = [[PE, 'name', 'like', '%' + o.q + '%'], [PE, 'party_name', 'like', '%' + o.q + '%']]; } return Promise.all([glist(PE, Object.assign({ fields: fields, filters: peBase(), order_by: o.order, start: o.start, limit: o.limit }, q)), gcount(PE, peBase())]).then(function (x) { return { rows: x[0] || [], total: x[1] || 0 }; }); };
     mk('t_pe', { mode: 'server', sig: sg, sort: { k: 'posting_date', d: 'desc', sf: 'posting_date' }, cols: [
       { k: 'name', h: 'receipt', sf: 'name', r: function (x) { return '<a href="' + docUrl(PE, x.name) + '" data-act="open" data-v="Payment Entry|' + esc(x.name) + '">' + esc(x.name) + '</a>'; }, c: function (x) { return x.name; } },
       { k: 'party_name', h: 'party', sf: 'party_name', r: function (x) { return esc(x.party_name || x.party); }, c: function (x) { return x.party_name; } },
       { k: 'posting_date', h: 'date', sf: 'posting_date', r: function (x) { return esc(x.posting_date); }, c: function (x) { return x.posting_date; } },
-      { k: 'paid_amount', h: 'amount', num: 1, sf: 'paid_amount', r: function (x) { return '<b>' + fmt(x.paid_amount) + '</b>'; }, c: function (x) { return x.paid_amount; } },
+      { k: 'base_received_amount', h: 'amount', num: 1, sf: 'base_received_amount', r: function (x) { return '<b>' + fmt(x.base_received_amount) + '</b>'; }, c: function (x) { return x.base_received_amount; } },
       { k: 'mode_of_payment', h: 'mode', sf: 'mode_of_payment', r: function (x) { return esc(x.mode_of_payment || ''); }, c: function (x) { return x.mode_of_payment; } },
       { k: 'reference_no', h: 'ref', r: function (x) { return esc(x.reference_no || ''); }, c: function (x) { return x.reference_no; } },
       { k: 'company', h: 'company', sf: 'company', r: function (x) { return esc(x.company || ''); }, c: function (x) { return x.company; } }],
@@ -299,7 +329,7 @@ function drawFilters() {
   var f = S.f, el = $('#cc-fl'); if (!el) { return; }
   function sel(k, lab, list) { return '<div><label>' + t(lab) + '</label><select data-f="' + k + '">' + opt('', t('all'), !f[k]) + list.map(function (x) { return opt(x, x, f[k] === x); }).join('') + '</select></div>'; }
   el.innerHTML = sel('company', 'company', OPT.company) + sel('division', 'division', OPT.division) + sel('location', 'location', OPT.location) +
-    '<div><label>' + t('customer') + '</label><input type="search" data-f="customer" value="' + esc(f.customer) + '" placeholder="' + esc(t('search')) + '"></div><div><label>' + t('asof') + '</label><input type="date" data-f="asof" value="' + esc(f.asof) + '"></div><div><button class="cc-btn" data-act="reset" style="width:100%">' + t('reset') + '</button></div>';
+    '<div><label>' + t('customer') + '</label><input type="search" data-f="customer" value="' + esc(f.customer) + '" placeholder="' + esc(t('search')) + '"></div><div><label>' + t('asof') + '</label><input type="date" data-f="asof" disabled value="' + esc(todayStr()) + '"></div><div><button class="cc-btn" data-act="reset" style="width:100%">' + t('reset') + '</button></div>';
 }
 function drawTabs() { $('#cc-tabs').innerHTML = TABS.map(function (x) { return '<button class="cc-tab' + (S.tab === x[0] ? ' on' : '') + '" data-act="tab" data-v="' + x[0] + '">' + t(x[1]) + '</button>'; }).join(''); }
 function shellHtml() {
@@ -308,13 +338,13 @@ function shellHtml() {
   drawFilters(); drawTabs(); ts();
 }
 function ts() { var e = $('#cc-ts'); if (e && S.ts) { e.textContent = t('updated') + ': ' + S.ts.toLocaleString('en-GB'); } }
-function renderBody() {
+function renderBody() { if(!S.f.company){$('#cc-body').innerHTML='<div class="cc-note">Select one company. Current receivables are limited to '+esc(DISPLAY_CURRENCY)+' party accounts; use the <a href="/app/query-report/Accounts%20Receivable">native Accounts Receivable report</a> for historical or foreign-currency balances.</div>';return;}
   var b = $('#cc-body'); if (!b) { return; } if (!S.ready) { b.innerHTML = loadingBlock(); return; }
   var h; try { h = TABS.filter(function (x) { return x[0] === S.tab; })[0][2](); } catch (e) { h = '<div class="cc-note err">' + esc(t('err')) + ': ' + esc(e && e.message) + '</div>'; if (window.console) { console.error('Credit Controller', e); } }
   b.innerHTML = h; $$('[data-tbx]', b).forEach(function (box) { var id = box.getAttribute('data-tbx'); if (TB[id]) { box.innerHTML = tshell(id); draw(id); } });
 }
 function resetData() { S.epoch++; CACHE = {}; D = {}; TB = {}; closeModal(); }
-function onFilters() { resetData(); renderBody(); }
+function onFilters() { S.f.asof=todayStr(); resetData(); renderBody(); }
 host.addEventListener('click', function (ev) {
   var el = ev.target.closest ? ev.target.closest('[data-act]') : null; if (!el || !host.contains(el)) { return; }
   var act = el.getAttribute('data-act'), v = el.getAttribute('data-v') || '';
@@ -342,7 +372,7 @@ host.addEventListener('input', function (ev) {
 });
 host.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && MD) { closeModal(); } });
 
-function names(dt) { return glist(dt, { fields: ['name'], limit: 500, order_by: 'name asc' }).then(function (r) { return (r || []).map(function (x) { return x.name; }); }).catch(function () { return []; }); }
+function names(dt) { return glist(dt, { fields: dt==='Company'?['name','default_currency']:['name'], limit: 500, order_by: 'name asc' }).then(function (r) { return (r || []).filter(function(x){return dt!=='Company'||x.default_currency===DISPLAY_CURRENCY;}).map(function (x) { return x.name; }); }).catch(function () { return []; }); }
 function init() {
   if (typeof frappe === 'undefined' || !frappe.call) { host.innerHTML = '<div class="cc-note err">Frappe client not available.</div>'; return; }
   shellHtml(); renderBody();
@@ -354,3 +384,12 @@ function init() {
 }
 init();
 })();
+
+/* ==== DM theme sync v1 · generated by tools/erp/shell/dark_theme.py ==== */
+;(function () {
+  var r = typeof root_element !== 'undefined' ? root_element : null, h = r && r.host;
+  if (!h || h.__dmsTheme) return; h.__dmsTheme = 1;
+  var s = function () { h.setAttribute('data-dms-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'); };
+  s(); new MutationObserver(s).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+})();
+/* ==== end DM theme sync v1 ==== */

@@ -1,0 +1,14 @@
+{
+  "private": true,
+  "scripts": {
+    "test": "node tests/regression.cjs",
+    "test:production": "node tests/production-browser.cjs",
+    "test:folder-navigation": "node tests/folder-navigation-browser.cjs",
+    "test:ceo": "node tests/ceo-command-center-browser.cjs",
+    "test:shell": "python shell/apply_shell.py --check && python shell/dark_theme.py --check && python shell/i18n.py --check"
+  },
+  "devDependencies": {
+    "acorn": "^8.15.0",
+    "playwright": "1.65.1"
+  }
+}

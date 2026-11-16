@@ -12,7 +12,8 @@
    * Read-only.
    */
 
-  const ROOT = document.querySelector(".pcc");
+  const BLOCK_ROOT = typeof root_element !== "undefined" ? root_element : document;
+  const ROOT = BLOCK_ROOT.querySelector(".pcc");
   if (!ROOT || ROOT.dataset.pccLiveV2 === "yes") return;
   ROOT.dataset.pccLiveV2 = "yes";
 
@@ -20,14 +21,11 @@
   const $$ = (q, host = ROOT) =>
     Array.from(host.querySelectorAll(q));
 
-  const MAX_RECORDS = 1000;
+  let tableSequence=0;
+  const TABLE_PAGES={},TABLE_SIZES={};
   const PAGE_SIZE = 100;
 
-  const WH = {
-    "28": "28 DM FACTORY - DMG",
-    "34": "34 DM STORE - DMG"
-  };
-
+  let FACTORIES = [], COMPANIES = {};
   const state = {
     factory: "all",
     period: "month",
@@ -46,7 +44,7 @@
       doctype: "Work Order",
       date: "planned_start_date",
       fields: [
-        "name", "status", "production_item",
+        "name", "docstatus", "company", "status", "production_item", "stock_uom", "total_operating_cost",
         "qty", "produced_qty", "fg_warehouse",
         "planned_start_date"
       ]
@@ -66,7 +64,7 @@
       doctype: "Stock Entry",
       date: "posting_date",
       fields: [
-        "name", "posting_date", "to_warehouse",
+        "name", "company", "posting_date", "to_warehouse",
         "stock_entry_type", "docstatus"
       ],
       filters: [
@@ -86,8 +84,8 @@
     {
       key: "costs",
       doctype: "Daily Production Cost",
-      date: null,
-      fields: ["name", "modified"]
+      date: "date",
+      fields: ["name", "date", "branch", "docstatus", "total_cost_summary", "modified"]
     },
     {
       key: "targets",
@@ -101,7 +99,8 @@
   ];
 
   function tr(en, ar) {
-    return state.lang === "AR" ? ar : en;
+    const labels={"All factories": "\u062c\u0645\u064a\u0639 \u0627\u0644\u0645\u0635\u0627\u0646\u0639", "This month": "\u0647\u0630\u0627 \u0627\u0644\u0634\u0647\u0631", "Today": "\u0627\u0644\u064a\u0648\u0645", "This week": "\u0647\u0630\u0627 \u0627\u0644\u0623\u0633\u0628\u0648\u0639", "This year": "\u0647\u0630\u0647 \u0627\u0644\u0633\u0646\u0629", "Custom": "\u0645\u062e\u0635\u0635", "Source": "\u0627\u0644\u0645\u0635\u062f\u0631", "Finding": "\u0627\u0644\u0645\u0644\u0627\u062d\u0638\u0629", "Document": "\u0627\u0644\u0645\u0633\u062a\u0646\u062f", "Date": "\u0627\u0644\u062a\u0627\u0631\u064a\u062e", "Branch": "\u0627\u0644\u0641\u0631\u0639", "Group": "\u0627\u0644\u0645\u062c\u0645\u0648\u0639\u0629", "Recorded total": "\u0627\u0644\u0625\u062c\u0645\u0627\u0644\u064a \u0627\u0644\u0645\u0633\u062c\u0644", "Recorded total cost": "\u0625\u062c\u0645\u0627\u0644\u064a \u0627\u0644\u062a\u0643\u0644\u0641\u0629 \u0627\u0644\u0645\u0633\u062c\u0644", "Employees with recorded activity": "\u0627\u0644\u0645\u0648\u0638\u0641\u0648\u0646 \u0630\u0648\u0648 \u0646\u0634\u0627\u0637 \u0645\u0633\u062c\u0644", "Recorded duty hours": "\u0633\u0627\u0639\u0627\u062a \u0627\u0644\u0639\u0645\u0644 \u0627\u0644\u0645\u0633\u062c\u0644\u0629", "Recorded overtime hours": "\u0627\u0644\u0633\u0627\u0639\u0627\u062a \u0627\u0644\u0625\u0636\u0627\u0641\u064a\u0629 \u0627\u0644\u0645\u0633\u062c\u0644\u0629", "Linked quality inspections": "\u0641\u062d\u0648\u0635\u0627\u062a \u0627\u0644\u062c\u0648\u062f\u0629 \u0627\u0644\u0645\u0631\u062a\u0628\u0637\u0629", "Source and mapping checks": "\u0641\u062d\u0635 \u0627\u0644\u0645\u0635\u0627\u062f\u0631 \u0648\u0627\u0644\u0631\u0628\u0637", "Inspection": "\u0627\u0644\u0641\u062d\u0635", "Status": "\u0627\u0644\u062d\u0627\u0644\u0629", "Item": "\u0627\u0644\u0635\u0646\u0641", "Finished output by item and stock UOM": "\u0627\u0644\u0625\u0646\u062a\u0627\u062c \u0627\u0644\u0646\u0647\u0627\u0626\u064a \u062d\u0633\u0628 \u0627\u0644\u0635\u0646\u0641 \u0648\u0648\u062d\u062f\u0629 \u0627\u0644\u0645\u062e\u0632\u0648\u0646", "Finished valuation by company currency": "\u0642\u064a\u0645\u0629 \u0627\u0644\u0625\u0646\u062a\u0627\u062c \u062d\u0633\u0628 \u0639\u0645\u0644\u0629 \u0627\u0644\u0634\u0631\u0643\u0629", "Consumed materials by item and stock UOM": "\u0627\u0644\u0645\u0648\u0627\u062f \u0627\u0644\u0645\u0633\u062a\u0647\u0644\u0643\u0629 \u062d\u0633\u0628 \u0627\u0644\u0635\u0646\u0641 \u0648\u0627\u0644\u0648\u062d\u062f\u0629", "Scrap receipts by item and stock UOM": "\u0627\u0633\u062a\u0644\u0627\u0645 \u0627\u0644\u062e\u0631\u062f\u0629 \u062d\u0633\u0628 \u0627\u0644\u0635\u0646\u0641 \u0648\u0627\u0644\u0648\u062d\u062f\u0629", "Production targets by item and UOM": "\u0623\u0647\u062f\u0627\u0641 \u0627\u0644\u0625\u0646\u062a\u0627\u062c \u062d\u0633\u0628 \u0627\u0644\u0635\u0646\u0641 \u0648\u0627\u0644\u0648\u062d\u062f\u0629", "Job rows without employee assignment": "\u0635\u0641\u0648\u0641 \u0639\u0645\u0644 \u062f\u0648\u0646 \u062a\u0639\u064a\u064a\u0646 \u0645\u0648\u0638\u0641", "Achieved process amount by branch": "\u0642\u064a\u0645\u0629 \u0627\u0644\u0639\u0645\u0644\u064a\u0627\u062a \u0627\u0644\u0645\u0646\u062c\u0632\u0629 \u062d\u0633\u0628 \u0627\u0644\u0641\u0631\u0639", "Recorded process costs by branch and activity": "\u062a\u0643\u0627\u0644\u064a\u0641 \u0627\u0644\u0639\u0645\u0644\u064a\u0627\u062a \u0627\u0644\u0645\u0633\u062c\u0644\u0629 \u062d\u0633\u0628 \u0627\u0644\u0641\u0631\u0639 \u0648\u0627\u0644\u0646\u0634\u0627\u0637", "Basis": "\u0623\u0633\u0627\u0633 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a", "Planning basis": "\u0623\u0633\u0627\u0633 \u0627\u0644\u062a\u062e\u0637\u064a\u0637", "The source is incomplete. Complete totals are suppressed.": "\u0627\u0644\u0645\u0635\u062f\u0631 \u063a\u064a\u0631 \u0645\u0643\u062a\u0645\u0644. \u0644\u0627 \u062a\u0639\u0631\u0636 \u0625\u062c\u0645\u0627\u0644\u064a\u0627\u062a \u062c\u0632\u0626\u064a\u0629."};
+    return state.lang === "AR" ? (ar || labels[en] || en) : en;
   }
 
   function esc(v) {
@@ -125,7 +124,7 @@
   }
 
   function dateRange(period) {
-    const today = new Date();
+    const today = new Date((typeof frappe!=="undefined"&&frappe.datetime?frappe.datetime.get_today():new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Riyadh"}).format(new Date()))+"T12:00:00");
     const start = new Date(today.getFullYear(),
       today.getMonth(), today.getDate());
 
@@ -172,6 +171,7 @@
       window.frappe.call({
         method,
         args,
+        timeout: 60000,
         callback: function (res) {
           if (res?.exc) {
             reject(new Error("ERP returned an exception"));
@@ -187,9 +187,9 @@
   }
 
   async function fetchSource(config, from, to) {
-    const filters = [...(config.filters || [])];
+    const filters = [...(config.filters || []), ["docstatus", "=", 1]];
 
-    if (config.date) {
+    if (config.date && config.key !== "daily") {
       filters.push([
         config.date,
         "between",
@@ -202,16 +202,15 @@
     let rows = [];
     let offset = 0;
 
-    // One extra record establishes whether a result is capped.
-    while (rows.length <= MAX_RECORDS) {
-      const remaining = MAX_RECORDS + 1 - rows.length;
-      const limit = Math.min(PAGE_SIZE, remaining);
+    // Read every page with stable ordering; never silently truncate totals.
+    while (true) {
+      const limit = PAGE_SIZE;
 
       const batch = await callERP("frappe.client.get_list", {
         doctype: config.doctype,
         fields: config.fields,
         filters,
-        order_by: "modified desc",
+        order_by: "name asc",
         limit_start: offset,
         limit_page_length: limit
       });
@@ -231,20 +230,7 @@
         };
       }
 
-      if (rows.length > MAX_RECORDS) {
-        return {
-          rows: rows.slice(0, MAX_RECORDS),
-          complete: false,
-          error: null
-        };
-      }
     }
-
-    return {
-      rows: rows.slice(0, MAX_RECORDS),
-      complete: false,
-      error: null
-    };
   }
 
   function source(key) {
@@ -255,39 +241,34 @@
     };
   }
 
-  function belongsToFactory(row, key) {
-    if (state.factory === "all") return true;
-
-    if (key === "wo") {
-      return row.fg_warehouse === WH[state.factory];
-    }
-
-    if (key === "stock") {
-      return row.to_warehouse === WH[state.factory];
-    }
-
-    if (key === "jobs" || key === "daily") {
-      const branch = String(row.branch || "")
-        .trim().toLowerCase();
-
-      const accepted = state.factory === "28"
-        ? ["28 factory"]
-        : ["34 factory", "34 store", "34 stores"];
-
-      // Mixed branches are intentionally excluded.
-      return accepted.includes(branch);
-    }
-
-    if (key === "targets") {
-      const factory = String(row.factory || "").toLowerCase();
-      return factory.includes(state.factory);
-    }
-
-    // Factory mapping for Daily Production Cost is not
-    // verified, so never assign all costs to one factory.
-    return false;
+  function belongsToFactory(row,key){
+    if(state.factory==='all')return true;
+    const f=FACTORIES.find(f=>f.name===state.factory);if(!f)return false;
+    if(key==='targets')return row.factory===f.name;
+    if(key==='stock')return (row.items||[]).some(i=>f.confirmedWarehouses.includes(i.t_warehouse)||f.confirmedWarehouses.includes(i.s_warehouse));
+    if(key==='wo')return row.company===f.company&&f.confirmedWarehouses.includes(row.fg_warehouse);
+    return !!f.legacy_branch_label && row.branch===f.legacy_branch_label;
   }
-
+  function details(key,field){return rows(key).flatMap(d=>(d[field||'details']||[]).map(r=>Object.assign({_document:d.name,_company:d.company,_branch:d.branch},r)));}
+  function groupValues(records,key,value){const m=new Map();records.forEach(r=>{const k=key(r);m.set(k,(m.get(k)||0)+(Number(value(r))||0));});return [...m].map(([group,total])=>({group,total}));}
+  function groupedPanel(title,records,key,value){return panel(title,table([{key:'group',en:'Group',ar:'المجموعة'},{key:'total',en:'Recorded total',ar:'الإجمالي المسجل'}],groupValues(records,key,value),null));}
+  function itemRows(){const f=FACTORIES.find(f=>f.name===state.factory);return details('stock','items').filter(i=>!f||f.confirmedWarehouses.includes(i.t_warehouse)||f.confirmedWarehouses.includes(i.s_warehouse));}
+  async function enrich(config,result,from,to){
+    if(!['stock','daily','costs','jobs'].includes(config.key))return result;
+    const docs=[];let cursor=0;
+    async function worker(){while(cursor<result.rows.length){const row=result.rows[cursor++];docs.push(await callERP('frappe.client.get',{doctype:config.doctype,name:row.name}));}}
+    await Promise.all([worker(),worker(),worker(),worker()]);
+    if(config.key==='daily')for(const d of docs)d.details=(d.details||[]).filter(r=>r.date&&r.date>=from&&r.date<=to);
+    return Object.assign({},result,{rows:config.key==='daily'?docs.filter(d=>d.details.length):docs});
+  }
+  async function factoryMetadata(){
+    const [factories,companies]=await Promise.all([callERP('frappe.client.get_list',{doctype:'Manufacturing Factory',fields:['name','factory_name','company','legacy_branch_label'],filters:{is_active:1},limit_page_length:0}),callERP('frappe.client.get_list',{doctype:'Company',fields:['name','default_currency'],limit_page_length:0})]);
+    COMPANIES=Object.fromEntries(companies.map(c=>[c.name,c.default_currency]));
+    const docs=[];for(const f of factories)docs.push(await callERP('frappe.client.get',{doctype:'Manufacturing Factory',name:f.name}));
+    FACTORIES=docs.map(f=>Object.assign(f,{confirmedWarehouses:(f.warehouses||[]).filter(w=>w.mapping_status==='Confirmed').map(w=>w.warehouse)}));
+    const select=$('.pcc-filterbar select');if(select)select.innerHTML='<option value="all">All factories</option>'+FACTORIES.map(f=>'<option value="'+esc(f.name)+'">'+esc(f.factory_name||f.name)+'</option>').join('');
+    if(select){if(state.factory!=='all'&&!FACTORIES.some(f=>f.name===state.factory)){state.factory='all';}select.value=state.factory;}
+  }
   function rows(key) {
     return source(key).rows.filter(row =>
       belongsToFactory(row, key)
@@ -295,6 +276,9 @@
   }
 
   function verified(key) {
+    const f=FACTORIES.find(f=>f.name===state.factory);
+    if(f&&['stock','wo'].includes(key)&&!f.confirmedWarehouses.length)return false;
+    if(f&&['jobs','daily','costs'].includes(key)&&(!f.legacy_branch_label||FACTORIES.filter(x=>x.legacy_branch_label===f.legacy_branch_label).length!==1))return false;
     return source(key).complete && !source(key).error;
   }
 
@@ -330,11 +314,14 @@
       ))}</div>`;
     }
 
+    const tableId="table-"+(++tableSequence),size=50;
+    TABLE_SIZES[tableId]=Math.ceil(records.length/size);
+    const current=Math.min(TABLE_PAGES[tableId]||1,TABLE_SIZES[tableId]);
     const headers = columns.map(c =>
       `<th>${esc(tr(c.en, c.ar))}</th>`
     ).join("");
 
-    const body = records.slice(0, 100).map(record => {
+    const body = records.slice((current-1)*size,current*size).map(record => {
       return `<tr>${columns.map(c => {
         const value = record[c.key];
 
@@ -348,7 +335,7 @@
           return `<td>${badge(value)}</td>`;
         }
 
-        return `<td>${esc(value == null ? "—" : value)}</td>`;
+        return `<td>${esc(value == null ? "—" : typeof value==="number"?Number(value).toLocaleString(state.lang==="AR"?"ar-SA":"en-US",{maximumFractionDigits:2}):value)}</td>`;
       }).join("")}</tr>`;
     }).join("");
 
@@ -358,25 +345,20 @@
         <tbody>${body}</tbody>
       </table>
     </div>` +
-    (records.length > 100
-      ? `<p class="pcc-note">${esc(tr(
-          "Showing first 100 loaded records.",
-          "عرض أول 100 سجل محمل."
-        ))}</p>`
-      : "");
+    `<div class="pcc-pager"><button type="button" data-page-table="${tableId}" data-page-delta="-1" ${current===1?'disabled':''}>${tr('Previous','السابق')}</button><span>${current} / ${TABLE_SIZES[tableId]} · ${records.length} ${tr('records','سجل')}</span><button type="button" data-page-table="${tableId}" data-page-delta="1" ${current===TABLE_SIZES[tableId]?'disabled':''}>${tr('Next','التالي')}</button></div>`;
   }
 
   function metric(title, value, description, key) {
     const partial = key && !verified(key);
 
     return `<div class="pcc-live-metric">
-      <div class="pcc-live-metric-label">${esc(title)}</div>
+      <div class="pcc-live-metric-label">${esc(tr(title))}</div>
       <strong>${esc(partial ? "—" : value)}</strong>
       <small>${esc(
         partial
           ? tr("Unavailable or incomplete source",
                "المصدر غير متاح أو غير مكتمل")
-          : description
+          : tr(description)
       )}</small>
     </div>`;
   }
@@ -389,13 +371,16 @@
 
   function panel(title, content) {
     return `<div class="pcc-panel">
-      <div class="pcc-panel-head"><h4>${esc(title)}</h4></div>
+      <div class="pcc-panel-head"><h4>${esc(tr(title))}</h4></div>
       ${content}
     </div>`;
   }
 
   function sourceWarning(key) {
     const s = source(key);
+    const factory=FACTORIES.find(f=>f.name===state.factory);
+    if(factory&&["jobs","daily","costs"].includes(key)&&(!factory.legacy_branch_label||FACTORIES.filter(f=>f.legacy_branch_label===factory.legacy_branch_label).length!==1))return '<div class="pcc-live-warning">'+esc(tr("A unique legacy branch mapping is required for this factory.","يلزم ربط فريد لفرع هذا المصنع."))+'</div>';
+    if(["stock","wo"].includes(key)&&factory&&!factory.confirmedWarehouses.length)return '<div class="pcc-live-warning">This factory has no confirmed warehouse mapping. Warehouse metrics are unavailable.</div>';
 
     if (s.error) {
       return `<div class="pcc-live-warning">
@@ -406,8 +391,8 @@
 
     if (!s.complete) {
       return `<div class="pcc-live-warning">${esc(tr(
-        "Only a 1,000-record sample was loaded. Complete totals are suppressed.",
-        "تم تحميل عينة من 1000 سجل فقط. الإجماليات الكاملة غير معروضة."
+        "The source is incomplete. Complete totals are suppressed.",
+        "\u0627\u0644\u0645\u0635\u062f\u0631 \u063a\u064a\u0631 \u0645\u0643\u062a\u0645\u0644. \u0644\u0627 \u062a\u0639\u0631\u0636 \u0625\u062c\u0645\u0627\u0644\u064a\u0627\u062a \u062c\u0632\u0626\u064a\u0629."
       ))}</div>`;
     }
 
@@ -473,10 +458,10 @@
       metric(tr("Manufacture Entry Headers","قيود التصنيع"),
         fmt(stock.length), "Header selection only", "stock"),
       metric(tr("Daily Production Documents","مستندات الإنتاج اليومية"),
-        fmt(daily.length), "Header date basis", "daily"),
+        fmt(daily.length), "Activity dates within the selected period", "daily"),
       metric(tr("Production Targets","أهداف الإنتاج"),
         verified("targets") && rows("targets").length === 0
-          ? tr("Not Set","غير محدد") : "—",
+          ? tr("Not Set","غير محدد") : fmt(rows("targets").length),
         "Target records", "targets")
     ]) +
     `<div class="pcc-grid2">
@@ -494,38 +479,11 @@
       ],jobs,"Factory Job Order"));
   }
 
-  function renderOutput() {
-    const stock = rows("stock");
-
-    return metrics([
-      metric(tr("Manufacture Entry Headers","قيود التصنيع"),
-        fmt(stock.length), "Submitted Manufacture entries", "stock"),
-      metric(tr("Finished Quantity","كمية الإنتاج النهائي"),
-        "—", tr("Requires child-row calculation",
-          "تتطلب حساب الصفوف الفرعية")),
-      metric(tr("Finished Production Value","قيمة الإنتاج النهائي"),
-        "—", tr("Pending valuation review",
-          "بانتظار التحقق من القيمة")),
-      metric(tr("Output by UOM","الإنتاج حسب الوحدة"),
-        "—", tr("Requires item details",
-          "تتطلب تفاصيل الأصناف"))
-    ]) +
-    sourceWarning("stock") +
-    panel(tr("Manufacture Entry Register","سجل قيود التصنيع"),
-      `<p class="pcc-note">${esc(tr(
-        "These are Stock Entry headers. Some valid production receipts may use child warehouses rather than the header destination.",
-        "هذه رؤوس قيود المخزون. قد توجد استلامات إنتاج صحيحة في مستودعات الصفوف الفرعية وليس في وجهة المستند."
-      ))}</p>` +
-      table([
-        {key:"name",en:"Stock Entry",ar:"قيد المخزون"},
-        {key:"posting_date",en:"Date",ar:"التاريخ"},
-        {key:"to_warehouse",en:"Destination",ar:"الوجهة"},
-        {key:"stock_entry_type",en:"Type",ar:"النوع"}
-      ],stock,"Stock Entry"));
-  }
+  function renderOutput(){if(!verified("stock"))return sourceWarning("stock");const records=itemRows().filter(i=>i.is_finished_item&&!i.is_scrap_item);return sourceWarning('stock')+groupedPanel('Finished output by item and stock UOM',records,i=>i.item_code+' / '+i.stock_uom,i=>i.transfer_qty)+groupedPanel('Finished valuation by company currency',records,i=>i._company+' / '+(COMPANIES[i._company]||'Currency unavailable'),i=>i.amount); }
 
   function renderWorkOrders() {
     const data = rows("wo");
+    if(!verified("wo"))return sourceWarning("wo");
     const completed = data.filter(r =>
       String(r.status).toLowerCase() === "completed"
     );
@@ -540,8 +498,8 @@
         fmt(completed.length),"Native status","wo"),
       metric(tr("In Process","قيد التنفيذ"),
         fmt(inProcess.length),"Native status","wo"),
-      metric(tr("Remaining Quantity","الكمية المتبقية"),
-        "—","Mixed UOM cannot be summed")
+      metric(tr("Distinct production items","أصناف الإنتاج"),
+        fmt(new Set(data.map(r=>r.production_item)).size),"See remaining quantity by item and UOM below","wo")
     ]) +
     sourceWarning("wo") +
     panel(tr("Work Order Register","سجل أوامر التصنيع"),
@@ -552,11 +510,12 @@
         {key:"produced_qty",en:"Produced Qty",ar:"الكمية المنتجة"},
         {key:"fg_warehouse",en:"Warehouse",ar:"المستودع"},
         {key:"status",en:"Status",ar:"الحالة",status:true}
-      ],data,"Work Order"));
+      ],data,"Work Order"))+groupedPanel(tr("Remaining quantity by item and stock UOM","الكميات المتبقية حسب الصنف والوحدة"),data,r=>r.production_item+" / "+(r.stock_uom||tr("Unit not recorded","الوحدة غير مسجلة")),r=>Math.max(0,Number(r.qty)-Number(r.produced_qty)));
   }
 
   function renderJobs() {
     const data = rows("jobs");
+    if(!verified("jobs"))return sourceWarning("jobs");
     const completed = data.filter(r =>
       String(r.jo_status).toLowerCase() === "completed"
     );
@@ -591,157 +550,29 @@
       ],data,"Factory Job Order"));
   }
 
-  function renderCosts() {
-    const data = rows("costs");
+  function renderCosts(){if(!verified("costs"))return sourceWarning("costs");const docs=rows('costs'), data=details('costs');return sourceWarning('costs')+panel('Recorded Daily Production Cost — submitted documents in selected period',table([{key:'name',en:'Document'},{key:'date',en:'Date'},{key:'branch',en:'Branch'},{key:'total_cost_summary',en:'Recorded total cost'}],docs,'Daily Production Cost'))+groupedPanel('Recorded process costs by branch and activity',data,r=>r._branch+' / '+r.activity,r=>r.total_cost)+panel('Basis','Recorded Daily Production Cost amounts; this is not a full inventory valuation or a reconciled financial manufacturing-cost statement.'); }
 
-    return metrics([
-      metric(tr("Manufacturing Cost","تكلفة التصنيع"),
-        "—","Pending value reconciliation"),
-      metric(tr("Material Cost","تكلفة المواد"),
-        "—","Pending item valuation"),
-      metric(tr("Labour / Process Cost","تكلفة العمالة والعمليات"),
-        "—","Child-row calculation required"),
-      metric(tr("Daily Cost Documents","مستندات التكلفة اليومية"),
-        state.factory === "all" ? fmt(data.length) : "—",
-        "All-date documents; not selected period",
-        state.factory === "all" ? "costs" : null)
-    ]) +
-    `<div class="pcc-live-warning">${esc(tr(
-      "Daily Production Cost date and factory mappings are not verified. These records are not used for period-specific SAR totals.",
-      "لم يتم التحقق من تاريخ التكلفة وربطها بالمصنع. لذلك لا تستخدم لحساب التكاليف المالية للفترة."
-    ))}</div>` +
-    (state.factory === "all"
-      ? panel(tr("Cost Documents — All Dates","مستندات التكلفة - جميع التواريخ"),
-          sourceWarning("costs") +
-          table([
-            {key:"name",en:"Document",ar:"المستند"},
-            {key:"modified",en:"Modified",ar:"آخر تعديل"}
-          ],data,"Daily Production Cost"))
-      : "");
+  function renderMaterials(){if(!verified("stock"))return sourceWarning("stock");const data=itemRows();return sourceWarning('stock')+groupedPanel('Consumed materials by item and stock UOM',data.filter(i=>i.s_warehouse&&!i.t_warehouse),i=>i.item_code+' / '+i.stock_uom,i=>i.transfer_qty)+groupedPanel('Scrap receipts by item and stock UOM',data.filter(i=>i.is_scrap_item&&i.t_warehouse),i=>i.item_code+' / '+i.stock_uom,i=>i.transfer_qty); }
+
+  function renderWorkforce(){if(!verified("daily"))return sourceWarning("daily");const data=details('daily');return sourceWarning('daily')+metrics([metric('Employees with recorded activity',fmt(new Set(data.map(r=>r.employee).filter(Boolean)).size),'Distinct employees in activity-date range','daily'),metric('Recorded duty hours',fmt(data.reduce((s,r)=>s+(Number(r.duty_hours)||0),0)),'Recorded hours; not attendance-derived','daily'),metric('Recorded overtime hours',fmt(data.reduce((s,r)=>s+(Number(r.ot_hrs)||0),0)),'Recorded activity overtime','daily')])+groupedPanel('Achieved process amount by branch',data,r=>r._branch,r=>r.total_price); }
+
+  function renderPlanning(){if(!verified("targets"))return sourceWarning("targets");const targets=rows('targets'),jobs=details('jobs');return sourceWarning('targets')+sourceWarning('jobs')+groupedPanel('Production targets by item and UOM',targets,r=>r.item_code+' / '+r.uom,r=>r.target_qty)+metrics([metric('Job rows without employee assignment',fmt(jobs.filter(r=>!r.employee).length),'Submitted job documents in selected issue period','jobs')])+panel('Planning basis','Targets are planning records. Capacity and material availability require an agreed capacity calendar and BOM/stock calculation; they are not inferred from job counts.'); }
+
+  async function loadQualityReferences(){
+    const token=state.requestId;
+    if(!source('stock').complete||source('stock').error){state.data.quality={rows:[],complete:false,error:'Stock source unavailable'};return;}
+    const ids=[...new Set(source('stock').rows.flatMap(d=>(d.items||[]).map(i=>i.quality_inspection)).filter(Boolean))],records=[];
+    try{for(let i=0;i<ids.length;i+=100){let offset=0;while(true){const page=await callERP('frappe.client.get_list',{doctype:'Quality Inspection',fields:['name','status','report_date','item_code','reference_name','docstatus'],filters:[['name','in',ids.slice(i,i+100)],['docstatus','<',2]],limit_start:offset,limit_page_length:100,order_by:'name asc'});records.push(...page);if(page.length<100)break;offset+=page.length;}}
+      if(token!==state.requestId)return;state.data.quality={rows:records,complete:true,error:null};
+    }catch(e){if(token!==state.requestId)return;state.data.quality={rows:[],complete:false,error:errorMessage(e)};}
   }
-
-  function renderMaterials() {
-    return metrics([
-      metric(tr("Material Consumption","استهلاك المواد"),
-        "—","Requires Stock Entry Detail"),
-      metric(tr("Material Value","قيمة المواد"),
-        "—","Not yet reconciled"),
-      metric(tr("Scrap Quantity","كمية الخردة"),
-        "—","Requires item/UOM aggregation"),
-      metric(tr("Shortages","النواقص"),
-        "—","Requires stock balance")
-    ]) +
-    panel(tr("Material Analysis","تحليل المواد"),
-      `<p class="pcc-note">${esc(tr(
-        "The audit confirmed scrap receipts in both factories. The child-row aggregation API must distinguish finished goods, consumed materials and scrap.",
-        "أكد التدقيق وجود استلامات خردة في المصنعين. يجب أن تفصل واجهة التجميع بين المنتجات النهائية والمواد المستهلكة والخردة."
-      ))}</p>`);
-  }
-
-  function renderWorkforce() {
-    const data = rows("daily");
-
-    return metrics([
-      metric(tr("Production Documents","مستندات الإنتاج"),
-        fmt(data.length),"Header-date records","daily"),
-      metric(tr("Recorded Employees","الموظفون المسجلون"),
-        "—","Child rows required"),
-      metric(tr("Process Achieved Amount","قيمة العمليات المنجزة"),
-        "—","Child rows required"),
-      metric(tr("Overtime Hours","الساعات الإضافية"),
-        "—","Child rows required")
-    ]) +
-    sourceWarning("daily") +
-    panel(tr("Daily Production Documents","مستندات الإنتاج اليومية"),
-      `<p class="pcc-note">${esc(tr(
-        "Factory Daily Production uses header Month and child-row activity dates. The selected period currently applies to the header date only.",
-        "يستخدم مستند الإنتاج اليومي تاريخ الشهر في الرأس وتواريخ النشاط في الصفوف الفرعية. يتم تطبيق الفترة حاليًا على تاريخ الرأس فقط."
-      ))}</p>` +
-      table([
-        {key:"name",en:"Document",ar:"المستند"},
-        {key:"date",en:"Header Date",ar:"تاريخ المستند"},
-        {key:"branch",en:"Branch",ar:"الفرع"},
-        {key:"workflow_state",en:"Workflow",ar:"حالة الاعتماد",status:true}
-      ],data,"Factory Daily Production"));
-  }
-
-  function renderPlanning() {
-    const data = rows("jobs");
-    const today = localISO(new Date());
-    const upcoming = data.filter(r =>
-      r.start_date && r.start_date >= today
-    ).sort((a,b) =>
-      String(a.start_date).localeCompare(String(b.start_date))
-    );
-
-    return metrics([
-      metric(tr("Upcoming Jobs in Selected Issue Period",
-        "الأعمال القادمة ضمن فترة الإصدار المحددة"),
-        fmt(upcoming.length),"Based on job start date","jobs"),
-      metric(tr("Material Ready","المواد الجاهزة"),
-        "—","Requires warehouse stock"),
-      metric(tr("Available Capacity","الطاقة المتاحة"),
-        "—","Capacity not configured"),
-      metric(tr("Unassigned Jobs","الأعمال غير المسندة"),
-        "—","Requires job child rows")
-    ]) +
-    sourceWarning("jobs") +
-    panel(tr("Upcoming Factory Jobs","أعمال المصنع القادمة"),
-      table([
-        {key:"name",en:"Job Order",ar:"أمر العمل"},
-        {key:"branch",en:"Factory",ar:"المصنع"},
-        {key:"start_date",en:"Start",ar:"البداية"},
-        {key:"end_date",en:"End",ar:"النهاية"},
-        {key:"jo_status",en:"Status",ar:"الحالة",status:true}
-      ],upcoming,"Factory Job Order"));
-  }
-
-  function renderQuality() {
-    const issues = [];
-
-    SOURCES.forEach(cfg => {
-      const s = source(cfg.key);
-
-      if (s.error) {
-        issues.push({
-          issue:cfg.doctype,
-          detail:tr("Source unavailable","المصدر غير متاح"),
-          severity:"Review"
-        });
-      } else if (!s.complete) {
-        issues.push({
-          issue:cfg.doctype,
-          detail:tr("Source capped at 1,000","المصدر محدود بـ 1000"),
-          severity:"Review"
-        });
-      }
-    });
-
-    if (verified("targets") && rows("targets").length === 0) {
-      issues.push({
-        issue:"Manufacturing Production Target",
-        detail:tr("No targets configured in selection",
-          "لا توجد أهداف في النطاق المحدد"),
-        severity:"Review"
-      });
-    }
-
-    return metrics([
-      metric(tr("Visible Data Exceptions","ملاحظات البيانات"),
-        fmt(issues.length),"Data-source checks"),
-      metric(tr("Quality Inspections","فحوصات الجودة"),
-        "—","Source unverified"),
-      metric(tr("Cost Reconciliation","مطابقة التكلفة"),
-        "—","Pending audit"),
-      metric(tr("Material Exceptions","ملاحظات المواد"),
-        "—","Requires detail API")
-    ]) +
-    panel(tr("Data Exceptions Register","سجل ملاحظات البيانات"),
-      table([
-        {key:"issue",en:"Source",ar:"المصدر"},
-        {key:"detail",en:"Finding",ar:"الملاحظة"},
-        {key:"severity",en:"Severity",ar:"الأهمية",status:true}
-      ],issues,null));
+  function renderQuality(){
+    const issues=[];for(const cfg of SOURCES){if(!verified(cfg.key))issues.push({issue:cfg.doctype,detail:source(cfg.key).error||tr('Incomplete source or factory mapping','مصدر أو ربط مصنع غير مكتمل')});}
+    if(verified('targets')&&!rows('targets').length)issues.push({issue:'Manufacturing Production Target',detail:tr('No targets in the selected period','لا توجد أهداف للفترة المحددة')});
+    const refs=new Set(itemRows().map(i=>i.quality_inspection).filter(Boolean)),q=source('quality'),visible=q.rows.filter(r=>refs.has(r.name));
+    if(q.complete&&visible.length<refs.size)issues.push({issue:'Quality Inspection',detail:tr('Some linked inspections are cancelled, missing or inaccessible','بعض الفحوصات المرتبطة ملغاة أو مفقودة أو غير متاحة')});
+    return panel(tr('Source and mapping checks','فحص المصادر والربط'),table([{key:'issue',en:'Source',ar:'المصدر'},{key:'detail',en:'Finding',ar:'الملاحظة'}],issues,null))+
+      (q.error?sourceWarning('quality'):panel(tr('Linked quality inspections','فحوصات الجودة المرتبطة'),table([{key:'name',en:'Inspection',ar:'الفحص'},{key:'report_date',en:'Date',ar:'التاريخ'},{key:'item_code',en:'Item',ar:'الصنف'},{key:'status',en:'Status',ar:'الحالة'}],visible,'Quality Inspection')));
   }
 
   const renderers = {
@@ -757,6 +588,11 @@
   };
 
   function render() {
+    tableSequence=0;
+    const periodLabels={month:tr('This month'),today:tr('Today'),week:tr('This week'),year:tr('This year'),custom:tr('Custom')};
+    for(const option of $$('.pcc-filterbar select[data-filter="period"] option'))option.textContent=periodLabels[option.value];
+    const allOption=$('.pcc-filterbar select[data-filter="factory"] option[value="all"]');if(allOption)allOption.textContent=tr('All factories');
+    for (const label of $$(".pcc-nav label"))label.setAttribute("aria-selected",String($("#"+label.htmlFor).checked));
     for (const [tab, fn] of Object.entries(renderers)) {
       const page = $(".pcc-page-" + tab);
       if (!page) continue;
@@ -768,7 +604,7 @@
         page.appendChild(host);
       }
 
-      host.innerHTML = fn();
+      try{host.innerHTML=state.busy?'<div class="pcc-live-empty">'+esc(tr("Loading current selection…","جار تحميل النطاق المحدد…"))+'</div>':fn();}catch(e){host.innerHTML='<div class="pcc-live-warning">'+esc(errorMessage(e))+'</div>';}
     }
   }
 
@@ -814,17 +650,20 @@
     const id = ++state.requestId;
     state.busy = true;
     updateRefreshButton();
-
+    render();
     setStatus(tr(
       "Loading ERP data...",
       "جار تحميل بيانات النظام..."
     ),"loading");
 
+    Object.keys(TABLE_PAGES).forEach(k=>delete TABLE_PAGES[k]);
     const from = state.from;
     const to = state.to;
 
+    try{await factoryMetadata();}catch(e){if(id!==state.requestId)return;state.busy=false;state.data={};updateRefreshButton();render();setStatus(errorMessage(e),"error");return;}
+    if(id!==state.requestId)return;
     const fetched = await Promise.allSettled(
-      SOURCES.map(cfg => fetchSource(cfg, from, to))
+      SOURCES.map(async cfg => enrich(cfg, await fetchSource(cfg, from, to), from, to))
     );
 
     if (id !== state.requestId) return;
@@ -841,6 +680,8 @@
           };
     });
 
+    await loadQualityReferences();
+    if(id!==state.requestId)return;
     state.busy = false;
     updateRefreshButton();
     render();
@@ -861,7 +702,7 @@
       " · " + tr("Failed","فشل") + ": " + errors +
       " · " + tr("Capped","جزئي") + ": " + capped +
       " · " + new Date().toLocaleTimeString(),
-      errors ? "warning" : "success"
+      errors || capped ? "warning" : "success"
     );
   }
 
@@ -885,11 +726,10 @@
       selects[0].selectedIndex = 0;
 
       selects[0].addEventListener("change",function () {
-        state.factory = this.selectedIndex === 1
-          ? "28"
-          : this.selectedIndex === 2 ? "34" : "all";
+        state.factory = this.value;
 
         // Factory filtering uses already fetched rows.
+        Object.keys(TABLE_PAGES).forEach(k=>delete TABLE_PAGES[k]);
         render();
 
         setStatus(tr(
@@ -906,7 +746,7 @@
           "month","today","week","year","custom"
         ];
 
-        state.period = choices[this.selectedIndex] || "month";
+        state.period = this.value || choices[this.selectedIndex] || "month";
 
         if (state.period !== "custom") {
           dateRange(state.period);
@@ -956,11 +796,14 @@
       const button = document.createElement("button");
       button.type = "button";
       button.className = "pcc-refresh-live";
-      button.addEventListener("click",refresh);
       actions.appendChild(button);
     }
 
-    // Replace static notice with accurate scope information.
+    const refreshButton=$(".pcc-refresh-live");if(refreshButton)refreshButton.addEventListener("click",refresh);
+    updateRefreshButton();
+    $(".pcc-preview")?.remove();
+
+    // Live scope notice.
     const notice = $(".pcc-notice");
 
     if (notice) {
@@ -977,6 +820,9 @@
         </span>`;
     }
 
+    ROOT.addEventListener('click',e=>{const button=e.target.closest('[data-page-table]');if(!button)return;const key=button.dataset.pageTable;TABLE_PAGES[key]=Math.max(1,Math.min(TABLE_SIZES[key],(TABLE_PAGES[key]||1)+Number(button.dataset.pageDelta)));render();});
+    ROOT.addEventListener('keydown',e=>{const label=e.target.closest('label[for]');if(label&&['Enter',' '].includes(e.key)){e.preventDefault();const radio=$('#'+label.htmlFor);radio.checked=true;radio.dispatchEvent(new Event('change',{bubbles:true}));render();}});
+    for(const radio of $$('.pcc-toggle[name="pcc-tab"]'))radio.addEventListener('change',render);
     ROOT.classList.add("pcc-live-mode");
   }
 
@@ -986,3 +832,12 @@
   refresh();
 
 })();
+
+/* ==== DM theme sync v1 · generated by tools/erp/shell/dark_theme.py ==== */
+;(function () {
+  var r = typeof root_element !== 'undefined' ? root_element : null, h = r && r.host;
+  if (!h || h.__dmsTheme) return; h.__dmsTheme = 1;
+  var s = function () { h.setAttribute('data-dms-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'); };
+  s(); new MutationObserver(s).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+})();
+/* ==== end DM theme sync v1 ==== */

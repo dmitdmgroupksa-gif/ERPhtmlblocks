@@ -1,22 +1,36 @@
-# CEO Command Center
+# CEO Command Center (v2 · decision & escalation centre)
 
-ERP Custom HTML Block: `CEO Command Center`
+ERP Custom HTML Block: `CEO Command Center` · Workspace: `CEO Command Center`
 
-- [JavaScript](dashboard.js)
-- [CSS](dashboard.css)
-- [HTML](dashboard.html)
-- [Original record](source.json)
+- [JavaScript](dashboard.js) · [CSS](dashboard.css) · [HTML](dashboard.html) · [Original record](source.json)
+- Single API: [ceo_command_center_api](server_scripts/ceo_command_center_api.py) (Server Script, type API, method `ceo_command_center_api`)
+- Approved plan: [ceo-command-centre-plan.md](../../reports/2026-11-16/ceo-command-centre-plan.md) · Build and deployment notes: [ceo-command-centre-build.md](../../reports/2026-11-16/ceo-command-centre-build.md)
 
-## Server scripts
+## What it shows
 
-- [CEO Command Center Collections API](server_scripts/ceo_command_center_collections_34bb7e8d.py)
-- [CEO Command Center Finance Details API](server_scripts/ceo_command_center_finance_details_47275876.py)
-- [CEO Command Center Legal Taradhi API](server_scripts/ceo_command_center_legal_taradhi_dee38552.py)
-- [CEO Command Center Procurement API](server_scripts/ceo_command_center_procurement_e3c79d3a.py)
-- [CEO Command Center Receivables API](server_scripts/ceo_command_center_receivables_41b5a5d2.py)
-- [CEO Command Center Sales API](server_scripts/ceo_command_center_sales_5839ca76.py)
-- [CEO Command Center Sales Backlog API](server_scripts/ceo_command_center_sales_backlog_a1bc50db.py)
-- [CEO Command Center Sales Order API](server_scripts/ceo_command_center_sales_orders_4d772bd0.py)
-- [CEO Command Center Sales Support API](server_scripts/ceo_command_center_sales_support_dd012a98.py)
+Top tabs: Overview · Sales · Procurement · Finance · People & Admin · Projects · Operations · Manufacturing · IT & Assets · Legal & Compliance · DMCC.
 
-Sources are copied exactly. Server matches include transitive API references. Shared scripts are copied into each dashboard that references them; changes to shared APIs should be kept consistent across these copies.
+Every action carries what / who / when / impact / next step, and is in one of four groups: **My decisions** (documents where your role has a permitted workflow transition), **Escalations**, **Department follow-up**, **Data verification**. Department tabs have Actions · Performance · Upcoming · Data checks. Clicking a row opens a detail drawer with the original ERP record.
+
+Read-only. Approvals happen in the original ERP form.
+
+## API actions
+
+| Action | Returns |
+| --- | --- |
+| `bootstrap` | Companies, departments, dashboard links, policy |
+| `overview` | Attention counts, top 12 per group, department matrix, upcoming commitments, company pulse, source health |
+| `department` | All actions for one department (up to 1,500), indicators, performance, upcoming, data checks |
+| `actions` | Paginated, filtered queue (`group`, `severity`, `q`, `page`, `page_size`) |
+| `drilldown` | Assignment, open ToDos, created/modified, related links for one record |
+| `source_health` | Per-source state: complete / partial / restricted / not configured / unavailable |
+
+Policy thresholds (stalled 14 days, receivables follow-up 60 / escalation 120 days, bundle above 25 rows, 30-day expiry window) are in `POLICY` at the top of the API and are shown in the dashboard footnote.
+
+## Legacy
+
+`legacy/dashboard.v1.*` and the nine `ceo_command_center_*` scripts (collections, finance_details, legal_taradhi, procurement, receivables, sales, sales_backlog, sales_orders, sales_support) are v1. No other dashboard in this repository calls them. Retire them on the live site only after the v2 comparison period and a live search of Server Scripts for other callers.
+
+## Tests
+
+`npm --prefix tools/erp test` (static checks incl. single-API, read-only, no min()/max() aggregates) and `npm --prefix tools/erp run test:ceo` (browser: tabs, drawer, keyboard, RTL, phone width, restricted/not-configured states).

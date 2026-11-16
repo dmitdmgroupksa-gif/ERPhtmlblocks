@@ -10,3 +10,5 @@ python tools/erp/organize_dashboards.py --source .local/erp_exports/EXPORT_TIMES
 Credentials are read from `config/erpapi.env` and are excluded from Git. New exports go under `.local/erp_exports/`. The organizer refuses to replace existing dashboard folders, preserving local edits.
 
 `dashboard_hierarchy.json` maps department folders and display names to exact ERP block names. `dashboard_directory_manifest.json` records the organized source inventory and file hashes. Original ERP records remain in each dashboard?s `source.json`.
+
+Regression checks: `npm install --prefix tools/erp` then `npm --prefix tools/erp test` from the repository root. See [remediation status](../../reports/2026-11-16/fix-status.md) before deploying sources.

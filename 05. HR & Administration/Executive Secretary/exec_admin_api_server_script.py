@@ -18,13 +18,11 @@ CFG = {
     # Materials Service General Request Form types that count as admin requests
     "request_types": ["General Payment/Service Requests", "Vehicle Related Requests", "General Requests", "Renewal Requests"],
     "closed_states": ["Rejected", "Cancelled", "Canceled", "Closed"],   # workflow states that are finished even while docstatus = 0
-    "request_lookback_days": 180,     # open drafts older than this are treated as abandoned and left out
     "request_overdue_days": 7,        # an open request older than this is "overdue"
     "renewal_horizon_days": 120,      # renewals listed when they expire within this many days (expired ones are always listed)
     "renewal_due_days": 30,           # "due soon" window (amber) and the KPI
     "rent_horizon_days": 45,          # unpaid rent instalments listed when due within this many days (overdue always listed)
     "register_days": 90,              # letters / memos dated within this many days
-    "max_rows": 400,
 }
 U = frappe.utils
 
@@ -87,12 +85,11 @@ def has_col(doctype, col):
 
 
 def get_requests(today):
-    since = U.add_days(today, -U.cint(CFG["request_lookback_days"]))
     rows = frappe.db.sql("select name, date, employee, department, branch_req, request_type, description_req, workflow_state, "
                          "total_amount, docstatus, prepared_by, modified from `tabMaterials Service General Request Form` "
-                         "where docstatus = 0 and request_type in %(types)s and ifnull(date, date(creation)) >= %(since)s "
-                         "order by date asc, creation asc limit %(lim)s",
-                         {"types": tuple(CFG["request_types"]), "since": since, "lim": U.cint(CFG["max_rows"])}, as_dict=True)
+                         "where docstatus = 0 and request_type in %(types)s and ifnull(workflow_state, '') not in %(closed)s "
+                         "order by date asc, creation asc ",
+                         {"types": tuple(CFG["request_types"]), "closed": tuple(CFG["closed_states"])}, as_dict=True)
     rows = [r for r in rows if (r.workflow_state or "") not in CFG["closed_states"]]
     names = employee_names([r.employee for r in rows] + [r.prepared_by for r in rows])
     out = []
@@ -156,11 +153,11 @@ def get_register(today):
     out = []
     letters = frappe.db.sql("select name, date, company, subject, request_by, workflow_state, docstatus, printed as was_printed, under_review, filed "
                             "from `tabDM Letters` where docstatus < 2 and (date >= %(s)s or docstatus = 0) "
-                            "order by date desc limit %(lim)s", {"s": since, "lim": U.cint(CFG["max_rows"])}, as_dict=True)
+                            "order by date desc ", {"s": since}, as_dict=True)
     memos = frappe.db.sql("select name, memo_date, memo_type, to_whome, memo_subject, issued_by, workflow_state, docstatus, "
                           "attch_signed, received, under_review, filed from `tabDM Official Memo` "
                           "where docstatus < 2 and (memo_date >= %(s)s or docstatus = 0) "
-                          "order by memo_date desc limit %(lim)s", {"s": since, "lim": U.cint(CFG["max_rows"])}, as_dict=True)
+                          "order by memo_date desc ", {"s": since}, as_dict=True)
     names = employee_names([r.request_by for r in letters] + [r.issued_by for r in memos])
     for r in letters:
         out.append(register_row("Letter", "DM Letters", r.name, r.date, r.subject, r.company, names.get(r.request_by) or r.request_by,

@@ -1,0 +1,3561 @@
+{
+  "review_date": "2026-11-16",
+  "timezone": "Asia/Riyadh",
+  "map_extracted": "2026-11-13 18:26",
+  "schema_checks": [
+    {
+      "doctype": "Web Analytics Daily",
+      "modified": "2026-11-02 09:25:58.907302",
+      "fields": [
+        {
+          "fieldname": "date",
+          "fieldtype": "Date",
+          "options": null
+        },
+        {
+          "fieldname": "channel_group",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "sessions",
+          "fieldtype": "Int",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_jyxft",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "users",
+          "fieldtype": "Int",
+          "options": null
+        },
+        {
+          "fieldname": "new_users",
+          "fieldtype": "Int",
+          "options": null
+        },
+        {
+          "fieldname": "engaged_sessions",
+          "fieldtype": "Int",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_opazw",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "bounce_rate",
+          "fieldtype": "Percent",
+          "options": null
+        },
+        {
+          "fieldname": "average_session_duration",
+          "fieldtype": "Float",
+          "options": null
+        },
+        {
+          "fieldname": "conversions",
+          "fieldtype": "Int",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_9uaug",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "search_impressions",
+          "fieldtype": "Int",
+          "options": null
+        },
+        {
+          "fieldname": "search_clicks",
+          "fieldtype": "Int",
+          "options": null
+        },
+        {
+          "fieldname": "average_position",
+          "fieldtype": "Float",
+          "options": null
+        }
+      ],
+      "document_keys": [
+        "doctype",
+        "name",
+        "creation",
+        "modified",
+        "modified_by",
+        "owner",
+        "docstatus",
+        "idx",
+        "issingle",
+        "is_tree",
+        "istable",
+        "editable_grid",
+        "track_changes",
+        "module",
+        "name_case",
+        "sort_field",
+        "sort_order",
+        "read_only",
+        "in_create",
+        "allow_copy",
+        "allow_rename",
+        "allow_import",
+        "hide_toolbar",
+        "track_seen",
+        "max_attachments",
+        "document_type",
+        "engine",
+        "is_submittable",
+        "show_name_in_global_search",
+        "custom",
+        "beta",
+        "has_web_view",
+        "allow_guest_to_view",
+        "email_append_to",
+        "quick_entry",
+        "track_views",
+        "is_virtual",
+        "allow_events_in_timeline",
+        "allow_auto_repeat",
+        "show_preview_popup",
+        "index_web_pages_for_search",
+        "make_attachments_public",
+        "translated_doctype",
+        "is_calendar_and_gantt",
+        "naming_rule",
+        "show_title_field_in_link",
+        "default_view",
+        "force_re_route_to_default_view",
+        "fields",
+        "permissions",
+        "is_large_table",
+        "__custom_js",
+        "__custom_list_js",
+        "__assets_loaded",
+        "actions",
+        "links",
+        "states",
+        "__js",
+        "__css",
+        "__list_js",
+        "__calendar_js",
+        "__map_js",
+        "__linked_with",
+        "__messages",
+        "__print_formats",
+        "__workflow_docs",
+        "__form_grid_templates",
+        "__listview_template",
+        "__tree_js",
+        "__dashboard",
+        "__kanban_column_fields",
+        "__templates"
+      ]
+    },
+    {
+      "doctype": "Leads Generation List",
+      "modified": "2026-11-03 15:19:48.616504",
+      "fields": [
+        {
+          "fieldname": "date",
+          "fieldtype": "Date",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_s0h1w",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "customer_name",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_rpdgj",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "customer_email",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "customer_email_2",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "section_break_oereh",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "phone",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_6voux",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "telephone",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_j1ns7",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "contact_person",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_uzqbo",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "city",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_ejwno",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "designation",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_jmzxv",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "action_taken",
+          "fieldtype": "Select",
+          "options": "Call\nWhatsapp\nEmail"
+        },
+        {
+          "fieldname": "column_break_t3rfb",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "source",
+          "fieldtype": "Select",
+          "options": "Google\nSocial Media\nIn contact\nSales Person"
+        },
+        {
+          "fieldname": "column_break_pnj7z",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "activities",
+          "fieldtype": "Text",
+          "options": null
+        },
+        {
+          "fieldname": "catalogue_status",
+          "fieldtype": "Check",
+          "options": "Send\nNot Send"
+        },
+        {
+          "fieldname": "remarks",
+          "fieldtype": "Small Text",
+          "options": null
+        },
+        {
+          "fieldname": "amended_from",
+          "fieldtype": "Link",
+          "options": "Leads Generation List"
+        }
+      ],
+      "document_keys": [
+        "doctype",
+        "name",
+        "creation",
+        "modified",
+        "modified_by",
+        "owner",
+        "docstatus",
+        "idx",
+        "issingle",
+        "is_tree",
+        "istable",
+        "editable_grid",
+        "track_changes",
+        "module",
+        "autoname",
+        "name_case",
+        "sort_field",
+        "sort_order",
+        "read_only",
+        "in_create",
+        "allow_copy",
+        "allow_rename",
+        "allow_import",
+        "hide_toolbar",
+        "track_seen",
+        "max_attachments",
+        "document_type",
+        "engine",
+        "is_submittable",
+        "show_name_in_global_search",
+        "custom",
+        "beta",
+        "has_web_view",
+        "allow_guest_to_view",
+        "email_append_to",
+        "quick_entry",
+        "track_views",
+        "is_virtual",
+        "allow_events_in_timeline",
+        "allow_auto_repeat",
+        "show_preview_popup",
+        "index_web_pages_for_search",
+        "make_attachments_public",
+        "translated_doctype",
+        "is_calendar_and_gantt",
+        "naming_rule",
+        "show_title_field_in_link",
+        "default_view",
+        "force_re_route_to_default_view",
+        "fields",
+        "permissions",
+        "is_large_table",
+        "__custom_js",
+        "__custom_list_js",
+        "__assets_loaded",
+        "actions",
+        "links",
+        "states",
+        "__js",
+        "__css",
+        "__list_js",
+        "__calendar_js",
+        "__map_js",
+        "__linked_with",
+        "__messages",
+        "__print_formats",
+        "__workflow_docs",
+        "__form_grid_templates",
+        "__listview_template",
+        "__tree_js",
+        "__dashboard",
+        "__kanban_column_fields",
+        "__templates"
+      ]
+    },
+    {
+      "doctype": "Lead Allocation",
+      "modified": "2026-11-09 08:52:26.565248",
+      "fields": [
+        {
+          "fieldname": "lead",
+          "fieldtype": "Link",
+          "options": "Leads Generation List"
+        },
+        {
+          "fieldname": "lead_information_section",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "customer_name",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "customer_email",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "contact_column",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "customer_phone_1",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "customer_phone_2",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "contact_person",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "lead_details_section",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "source",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "action_taken",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "original_activities",
+          "fieldtype": "Small Text",
+          "options": null
+        },
+        {
+          "fieldname": "assignment_section",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "sales_person",
+          "fieldtype": "Link",
+          "options": "Employee"
+        },
+        {
+          "fieldname": "assigned_user",
+          "fieldtype": "Link",
+          "options": "User"
+        },
+        {
+          "fieldname": "assigned_by",
+          "fieldtype": "Link",
+          "options": "User"
+        },
+        {
+          "fieldname": "assignment_column",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "assignment_date",
+          "fieldtype": "Date",
+          "options": null
+        },
+        {
+          "fieldname": "priority",
+          "fieldtype": "Select",
+          "options": "Low\nMedium\nHigh\nUrgent"
+        },
+        {
+          "fieldname": "follow_up_section",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "status",
+          "fieldtype": "Select",
+          "options": "Assigned\nContacted\nFollow Up\nInterested\nQuotation Required\nNo Response\nNot Interested\nConverted\nClosed\nUnassigned"
+        },
+        {
+          "fieldname": "last_contacted",
+          "fieldtype": "Datetime",
+          "options": null
+        },
+        {
+          "fieldname": "next_follow_up",
+          "fieldtype": "Datetime",
+          "options": null
+        },
+        {
+          "fieldname": "follow_up_column",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "outcome",
+          "fieldtype": "Select",
+          "options": "Pending\nFollow Up Required\nMeeting Required\nQuotation Required\nCustomer Interested\nCustomer Not Interested\nNo Response\nConverted\nLost"
+        },
+        {
+          "fieldname": "remarks",
+          "fieldtype": "Small Text",
+          "options": null
+        },
+        {
+          "fieldname": "conversion_section",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "unassignment_section",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "converted",
+          "fieldtype": "Check",
+          "options": null
+        },
+        {
+          "fieldname": "unassigned_on",
+          "fieldtype": "Datetime",
+          "options": null
+        },
+        {
+          "fieldname": "conversion_date",
+          "fieldtype": "Date",
+          "options": null
+        },
+        {
+          "fieldname": "unassigned_by",
+          "fieldtype": "Link",
+          "options": "User"
+        },
+        {
+          "fieldname": "converted_by",
+          "fieldtype": "Link",
+          "options": "User"
+        },
+        {
+          "fieldname": "status_before_unassign",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "unassign_column",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "unassign_reason",
+          "fieldtype": "Small Text",
+          "options": null
+        }
+      ],
+      "document_keys": [
+        "doctype",
+        "name",
+        "creation",
+        "modified",
+        "modified_by",
+        "owner",
+        "docstatus",
+        "idx",
+        "issingle",
+        "is_tree",
+        "istable",
+        "editable_grid",
+        "track_changes",
+        "module",
+        "autoname",
+        "name_case",
+        "sort_field",
+        "sort_order",
+        "read_only",
+        "in_create",
+        "allow_copy",
+        "allow_rename",
+        "allow_import",
+        "hide_toolbar",
+        "track_seen",
+        "max_attachments",
+        "document_type",
+        "engine",
+        "is_submittable",
+        "show_name_in_global_search",
+        "custom",
+        "beta",
+        "has_web_view",
+        "allow_guest_to_view",
+        "email_append_to",
+        "quick_entry",
+        "track_views",
+        "is_virtual",
+        "allow_events_in_timeline",
+        "allow_auto_repeat",
+        "show_preview_popup",
+        "index_web_pages_for_search",
+        "make_attachments_public",
+        "translated_doctype",
+        "is_calendar_and_gantt",
+        "naming_rule",
+        "show_title_field_in_link",
+        "default_view",
+        "force_re_route_to_default_view",
+        "fields",
+        "permissions",
+        "is_large_table",
+        "__custom_js",
+        "__custom_list_js",
+        "__assets_loaded",
+        "actions",
+        "links",
+        "states",
+        "__js",
+        "__css",
+        "__list_js",
+        "__calendar_js",
+        "__map_js",
+        "__linked_with",
+        "__messages",
+        "__print_formats",
+        "__workflow_docs",
+        "__form_grid_templates",
+        "__listview_template",
+        "__tree_js",
+        "__dashboard",
+        "__kanban_column_fields",
+        "__templates"
+      ]
+    },
+    {
+      "doctype": "Lead",
+      "modified": "2025-01-31 13:40:08.094759",
+      "fields": [
+        {
+          "fieldname": "naming_series",
+          "fieldtype": "Select",
+          "options": "CRM-LEAD-.YYYY.-"
+        },
+        {
+          "fieldname": "salutation",
+          "fieldtype": "Link",
+          "options": "Salutation"
+        },
+        {
+          "fieldname": "first_name",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "middle_name",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "last_name",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "lead_name",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "job_title",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "request_type",
+          "fieldtype": "Select",
+          "options": "\nProduct Enquiry\nRequest for Information\nSuggestions\nOther"
+        },
+        {
+          "fieldname": "column_break_1",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "gender",
+          "fieldtype": "Link",
+          "options": "Gender"
+        },
+        {
+          "fieldname": "source",
+          "fieldtype": "Link",
+          "options": "Lead Source"
+        },
+        {
+          "fieldname": "lead_owner",
+          "fieldtype": "Link",
+          "options": "User"
+        },
+        {
+          "fieldname": "status",
+          "fieldtype": "Select",
+          "options": "Lead\nOpen\nReplied\nOpportunity\nQuotation\nLost Quotation\nInterested\nConverted\nDo Not Contact"
+        },
+        {
+          "fieldname": "customer",
+          "fieldtype": "Link",
+          "options": "Customer"
+        },
+        {
+          "fieldname": "custom_allocation_status",
+          "fieldtype": "Select",
+          "options": "\nAllocated\nNon Allocated\nIrrelevant\nClosed"
+        },
+        {
+          "fieldname": "col_break123",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "custom_sales_person_",
+          "fieldtype": "Link",
+          "options": "Sales Person"
+        },
+        {
+          "fieldname": "custom_email",
+          "fieldtype": "Data",
+          "options": ""
+        },
+        {
+          "fieldname": "custom_location",
+          "fieldtype": "Select",
+          "options": "CP\nEP\nNP\nWP\nMP\nCSD\nNB\nBS"
+        },
+        {
+          "fieldname": "type",
+          "fieldtype": "Select",
+          "options": "\nClient\nChannel Partner\nConsultant"
+        },
+        {
+          "fieldname": "contact_info_tab",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "email_id",
+          "fieldtype": "Data",
+          "options": "Email"
+        },
+        {
+          "fieldname": "website",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_20",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "mobile_no",
+          "fieldtype": "Data",
+          "options": "Phone"
+        },
+        {
+          "fieldname": "whatsapp_no",
+          "fieldtype": "Data",
+          "options": "Phone"
+        },
+        {
+          "fieldname": "column_break_16",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "phone",
+          "fieldtype": "Data",
+          "options": "Phone"
+        },
+        {
+          "fieldname": "phone_ext",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "organization_section",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "company_name",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "annual_revenue",
+          "fieldtype": "Currency",
+          "options": null
+        },
+        {
+          "fieldname": "custom_expected_value",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "no_of_employees",
+          "fieldtype": "Select",
+          "options": "1-10\n11-50\n51-200\n201-500\n501-1000\n1000+"
+        },
+        {
+          "fieldname": "column_break_28",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "industry",
+          "fieldtype": "Link",
+          "options": "Industry Type"
+        },
+        {
+          "fieldname": "market_segment",
+          "fieldtype": "Link",
+          "options": "Market Segment"
+        },
+        {
+          "fieldname": "custom_address",
+          "fieldtype": "Small Text",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_31",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "territory",
+          "fieldtype": "Link",
+          "options": "Territory"
+        },
+        {
+          "fieldname": "fax",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "custom_link",
+          "fieldtype": "Data",
+          "options": "URL"
+        },
+        {
+          "fieldname": "address_section",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "address_html",
+          "fieldtype": "HTML",
+          "options": null
+        },
+        {
+          "fieldname": "city",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_38",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "state",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "country",
+          "fieldtype": "Link",
+          "options": "Country"
+        },
+        {
+          "fieldname": "column_break2",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "contact_html",
+          "fieldtype": "HTML",
+          "options": null
+        },
+        {
+          "fieldname": "qualification_tab",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "qualification_status",
+          "fieldtype": "Select",
+          "options": "Unqualified\nIn Process\nQualified"
+        },
+        {
+          "fieldname": "column_break_64",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "qualified_by",
+          "fieldtype": "Link",
+          "options": "User"
+        },
+        {
+          "fieldname": "qualified_on",
+          "fieldtype": "Date",
+          "options": null
+        },
+        {
+          "fieldname": "other_info_tab",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "campaign_name",
+          "fieldtype": "Link",
+          "options": "Campaign"
+        },
+        {
+          "fieldname": "company",
+          "fieldtype": "Link",
+          "options": "Company"
+        },
+        {
+          "fieldname": "column_break_22",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "language",
+          "fieldtype": "Link",
+          "options": "Language"
+        },
+        {
+          "fieldname": "image",
+          "fieldtype": "Attach Image",
+          "options": null
+        },
+        {
+          "fieldname": "title",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_50",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "disabled",
+          "fieldtype": "Check",
+          "options": null
+        },
+        {
+          "fieldname": "unsubscribed",
+          "fieldtype": "Check",
+          "options": null
+        },
+        {
+          "fieldname": "blog_subscriber",
+          "fieldtype": "Check",
+          "options": null
+        },
+        {
+          "fieldname": "activities_tab",
+          "fieldtype": "Tab Break",
+          "options": null
+        },
+        {
+          "fieldname": "open_activities_html",
+          "fieldtype": "HTML",
+          "options": null
+        },
+        {
+          "fieldname": "all_activities_section",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "all_activities_html",
+          "fieldtype": "HTML",
+          "options": null
+        },
+        {
+          "fieldname": "notes_tab",
+          "fieldtype": "Tab Break",
+          "options": null
+        },
+        {
+          "fieldname": "notes_html",
+          "fieldtype": "HTML",
+          "options": null
+        },
+        {
+          "fieldname": "notes",
+          "fieldtype": "Table",
+          "options": "CRM Note"
+        },
+        {
+          "fieldname": "dashboard_tab",
+          "fieldtype": "Tab Break",
+          "options": null
+        }
+      ],
+      "document_keys": [
+        "doctype",
+        "name",
+        "creation",
+        "modified",
+        "modified_by",
+        "owner",
+        "docstatus",
+        "idx",
+        "search_fields",
+        "issingle",
+        "is_tree",
+        "istable",
+        "editable_grid",
+        "track_changes",
+        "module",
+        "autoname",
+        "name_case",
+        "title_field",
+        "image_field",
+        "sort_field",
+        "sort_order",
+        "read_only",
+        "in_create",
+        "allow_copy",
+        "allow_rename",
+        "allow_import",
+        "hide_toolbar",
+        "track_seen",
+        "max_attachments",
+        "document_type",
+        "icon",
+        "engine",
+        "is_submittable",
+        "show_name_in_global_search",
+        "custom",
+        "beta",
+        "has_web_view",
+        "allow_guest_to_view",
+        "email_append_to",
+        "subject_field",
+        "sender_field",
+        "migration_hash",
+        "quick_entry",
+        "track_views",
+        "is_virtual",
+        "allow_events_in_timeline",
+        "allow_auto_repeat",
+        "show_preview_popup",
+        "default_email_template",
+        "index_web_pages_for_search",
+        "make_attachments_public",
+        "translated_doctype",
+        "is_calendar_and_gantt",
+        "naming_rule",
+        "show_title_field_in_link",
+        "force_re_route_to_default_view",
+        "sender_name_field",
+        "fields",
+        "permissions",
+        "field_order",
+        "_table_fields",
+        "is_large_table",
+        "__js",
+        "__list_js",
+        "__custom_js",
+        "__custom_list_js",
+        "__assets_loaded",
+        "actions",
+        "links",
+        "states",
+        "__css",
+        "__calendar_js",
+        "__map_js",
+        "__linked_with",
+        "__messages",
+        "__print_formats",
+        "__workflow_docs",
+        "__form_grid_templates",
+        "__listview_template",
+        "__tree_js",
+        "__dashboard",
+        "__kanban_column_fields",
+        "__templates"
+      ]
+    },
+    {
+      "doctype": "Daily Production Cost",
+      "modified": "2026-02-09 09:44:58.461069",
+      "fields": [
+        {
+          "fieldname": "workflow_state",
+          "fieldtype": "Link",
+          "options": "Workflow State"
+        },
+        {
+          "fieldname": "date",
+          "fieldtype": "Date",
+          "options": null
+        },
+        {
+          "fieldname": "branch",
+          "fieldtype": "Select",
+          "options": "28 Factory\n34 Factory"
+        },
+        {
+          "fieldname": "column_break_iym2a",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "prepared_by",
+          "fieldtype": "Link",
+          "options": "Employee"
+        },
+        {
+          "fieldname": "approved_by",
+          "fieldtype": "Link",
+          "options": "Employee"
+        },
+        {
+          "fieldname": "section_break_hf81o",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "details",
+          "fieldtype": "Table",
+          "options": "Daily Production Cost Table"
+        },
+        {
+          "fieldname": "total_cost_summary",
+          "fieldtype": "Currency",
+          "options": null
+        },
+        {
+          "fieldname": "letter_head",
+          "fieldtype": "Link",
+          "options": "Letter Head"
+        },
+        {
+          "fieldname": "amended_from",
+          "fieldtype": "Link",
+          "options": "Daily Production Cost"
+        }
+      ],
+      "document_keys": [
+        "doctype",
+        "name",
+        "creation",
+        "modified",
+        "modified_by",
+        "owner",
+        "docstatus",
+        "idx",
+        "issingle",
+        "is_tree",
+        "istable",
+        "editable_grid",
+        "track_changes",
+        "module",
+        "autoname",
+        "name_case",
+        "sort_field",
+        "sort_order",
+        "read_only",
+        "in_create",
+        "allow_copy",
+        "allow_rename",
+        "allow_import",
+        "hide_toolbar",
+        "track_seen",
+        "max_attachments",
+        "document_type",
+        "engine",
+        "default_print_format",
+        "is_submittable",
+        "show_name_in_global_search",
+        "custom",
+        "beta",
+        "has_web_view",
+        "allow_guest_to_view",
+        "email_append_to",
+        "quick_entry",
+        "track_views",
+        "is_virtual",
+        "allow_events_in_timeline",
+        "allow_auto_repeat",
+        "show_preview_popup",
+        "index_web_pages_for_search",
+        "make_attachments_public",
+        "translated_doctype",
+        "is_calendar_and_gantt",
+        "naming_rule",
+        "show_title_field_in_link",
+        "default_view",
+        "force_re_route_to_default_view",
+        "fields",
+        "permissions",
+        "_table_fields",
+        "is_large_table",
+        "__custom_js",
+        "__custom_list_js",
+        "__workflow_docs",
+        "__assets_loaded",
+        "actions",
+        "links",
+        "states",
+        "__js",
+        "__css",
+        "__list_js",
+        "__calendar_js",
+        "__map_js",
+        "__linked_with",
+        "__messages",
+        "__print_formats",
+        "__form_grid_templates",
+        "__listview_template",
+        "__tree_js",
+        "__dashboard",
+        "__kanban_column_fields",
+        "__templates"
+      ]
+    },
+    {
+      "doctype": "Manufacturing Factory",
+      "modified": "2026-10-19 15:05:54.545940",
+      "fields": [
+        {
+          "fieldname": "factory_name",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "company",
+          "fieldtype": "Link",
+          "options": "Company"
+        },
+        {
+          "fieldname": "is_active",
+          "fieldtype": "Check",
+          "options": null
+        },
+        {
+          "fieldname": "legacy_branch_label",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "sb_wh",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "warehouses",
+          "fieldtype": "Table",
+          "options": "Manufacturing Factory Warehouse"
+        },
+        {
+          "fieldname": "notes",
+          "fieldtype": "Small Text",
+          "options": null
+        }
+      ],
+      "document_keys": [
+        "doctype",
+        "name",
+        "creation",
+        "modified",
+        "modified_by",
+        "owner",
+        "docstatus",
+        "idx",
+        "search_fields",
+        "issingle",
+        "is_tree",
+        "istable",
+        "editable_grid",
+        "track_changes",
+        "module",
+        "autoname",
+        "name_case",
+        "title_field",
+        "sort_field",
+        "sort_order",
+        "read_only",
+        "in_create",
+        "allow_copy",
+        "allow_rename",
+        "allow_import",
+        "hide_toolbar",
+        "track_seen",
+        "max_attachments",
+        "document_type",
+        "engine",
+        "is_submittable",
+        "show_name_in_global_search",
+        "custom",
+        "beta",
+        "has_web_view",
+        "allow_guest_to_view",
+        "email_append_to",
+        "quick_entry",
+        "track_views",
+        "is_virtual",
+        "allow_events_in_timeline",
+        "allow_auto_repeat",
+        "show_preview_popup",
+        "index_web_pages_for_search",
+        "make_attachments_public",
+        "translated_doctype",
+        "is_calendar_and_gantt",
+        "naming_rule",
+        "show_title_field_in_link",
+        "force_re_route_to_default_view",
+        "fields",
+        "permissions",
+        "_table_fields",
+        "is_large_table",
+        "__custom_js",
+        "__custom_list_js",
+        "__assets_loaded",
+        "actions",
+        "links",
+        "states",
+        "__js",
+        "__css",
+        "__list_js",
+        "__calendar_js",
+        "__map_js",
+        "__linked_with",
+        "__messages",
+        "__print_formats",
+        "__workflow_docs",
+        "__form_grid_templates",
+        "__listview_template",
+        "__tree_js",
+        "__dashboard",
+        "__kanban_column_fields",
+        "__templates"
+      ]
+    },
+    {
+      "doctype": "Custom HTML Block",
+      "modified": "2023-05-30 14:33:31.994738",
+      "fields": [
+        {
+          "fieldname": "private",
+          "fieldtype": "Check",
+          "options": null
+        },
+        {
+          "fieldname": "preview_section",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "preview",
+          "fieldtype": "HTML",
+          "options": null
+        },
+        {
+          "fieldname": "html_section",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "html",
+          "fieldtype": "Code",
+          "options": "HTML"
+        },
+        {
+          "fieldname": "javascript_section",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "js_message",
+          "fieldtype": "HTML",
+          "options": "<p>To interact with above HTML you will have to use `root_element` as a parent selector.</p><p>For example:</p><pre class=\"p-3 bg-gray-100 border-radius rounded-sm mb-0\" style=\"width: fit-content;\"><code>// here root_element is provided by default\nlet some_class_element = root_element.querySelector('.some-class');\nsome_class_element.textContent = \"New content\";\n</code></pre>"
+        },
+        {
+          "fieldname": "script",
+          "fieldtype": "Code",
+          "options": "JS"
+        },
+        {
+          "fieldname": "css_section",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "style",
+          "fieldtype": "Code",
+          "options": "CSS"
+        },
+        {
+          "fieldname": "roles_section",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "roles",
+          "fieldtype": "Table",
+          "options": "Has Role"
+        },
+        {
+          "fieldname": "custom_so",
+          "fieldtype": "Table",
+          "options": "Pending Sales Order"
+        }
+      ],
+      "document_keys": [
+        "doctype",
+        "name",
+        "creation",
+        "modified",
+        "modified_by",
+        "owner",
+        "docstatus",
+        "idx",
+        "issingle",
+        "is_tree",
+        "istable",
+        "editable_grid",
+        "track_changes",
+        "module",
+        "autoname",
+        "sort_field",
+        "sort_order",
+        "read_only",
+        "in_create",
+        "allow_copy",
+        "allow_rename",
+        "allow_import",
+        "hide_toolbar",
+        "track_seen",
+        "max_attachments",
+        "engine",
+        "is_submittable",
+        "show_name_in_global_search",
+        "custom",
+        "beta",
+        "has_web_view",
+        "allow_guest_to_view",
+        "email_append_to",
+        "migration_hash",
+        "quick_entry",
+        "track_views",
+        "is_virtual",
+        "allow_events_in_timeline",
+        "allow_auto_repeat",
+        "show_preview_popup",
+        "index_web_pages_for_search",
+        "make_attachments_public",
+        "translated_doctype",
+        "is_calendar_and_gantt",
+        "show_title_field_in_link",
+        "force_re_route_to_default_view",
+        "fields",
+        "permissions",
+        "field_order",
+        "_table_fields",
+        "is_large_table",
+        "__js",
+        "__custom_js",
+        "__custom_list_js",
+        "__assets_loaded",
+        "actions",
+        "links",
+        "states",
+        "__css",
+        "__list_js",
+        "__calendar_js",
+        "__map_js",
+        "__linked_with",
+        "__messages",
+        "__print_formats",
+        "__workflow_docs",
+        "__form_grid_templates",
+        "__listview_template",
+        "__tree_js",
+        "__dashboard",
+        "__kanban_column_fields",
+        "__templates"
+      ]
+    },
+    {
+      "doctype": "Bank Account",
+      "modified": "2024-10-30 09:41:14.113414",
+      "fields": [
+        {
+          "fieldname": "workflow_state",
+          "fieldtype": "Link",
+          "options": "Workflow State"
+        },
+        {
+          "fieldname": "account_name",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "account",
+          "fieldtype": "Link",
+          "options": "Account"
+        },
+        {
+          "fieldname": "bank",
+          "fieldtype": "Link",
+          "options": "Bank"
+        },
+        {
+          "fieldname": "account_type",
+          "fieldtype": "Link",
+          "options": "Bank Account Type"
+        },
+        {
+          "fieldname": "account_subtype",
+          "fieldtype": "Link",
+          "options": "Bank Account Subtype"
+        },
+        {
+          "fieldname": "column_break_7",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "disabled",
+          "fieldtype": "Check",
+          "options": null
+        },
+        {
+          "fieldname": "is_default",
+          "fieldtype": "Check",
+          "options": null
+        },
+        {
+          "fieldname": "is_company_account",
+          "fieldtype": "Check",
+          "options": null
+        },
+        {
+          "fieldname": "company",
+          "fieldtype": "Link",
+          "options": "Company"
+        },
+        {
+          "fieldname": "section_break_11",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "party_type",
+          "fieldtype": "Link",
+          "options": "DocType"
+        },
+        {
+          "fieldname": "column_break_14",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "party",
+          "fieldtype": "Dynamic Link",
+          "options": "party_type"
+        },
+        {
+          "fieldname": "account_details_section",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "iban",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "ifsc_code",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_12",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "branch_code",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "bank_account_no",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "address_and_contact",
+          "fieldtype": "Section Break",
+          "options": "fa fa-map-marker"
+        },
+        {
+          "fieldname": "address_html",
+          "fieldtype": "HTML",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_13",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "contact_html",
+          "fieldtype": "HTML",
+          "options": null
+        },
+        {
+          "fieldname": "integration_details_section",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "integration_id",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "last_integration_date",
+          "fieldtype": "Date",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_27",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "mask",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "account_statemnt_and_balance_details",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "fetch_balance",
+          "fieldtype": "Button",
+          "options": null
+        },
+        {
+          "fieldname": "balance_amount",
+          "fieldtype": "Float",
+          "options": null
+        },
+        {
+          "fieldname": "balance_last_synced_on",
+          "fieldtype": "Datetime",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_30",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "fetch_account_statement",
+          "fieldtype": "Button",
+          "options": null
+        },
+        {
+          "fieldname": "statement_last_synced_on",
+          "fieldtype": "Datetime",
+          "options": null
+        }
+      ],
+      "document_keys": [
+        "doctype",
+        "name",
+        "creation",
+        "modified",
+        "modified_by",
+        "owner",
+        "docstatus",
+        "idx",
+        "search_fields",
+        "issingle",
+        "is_tree",
+        "istable",
+        "editable_grid",
+        "track_changes",
+        "module",
+        "sort_field",
+        "sort_order",
+        "read_only",
+        "in_create",
+        "allow_copy",
+        "allow_rename",
+        "allow_import",
+        "hide_toolbar",
+        "track_seen",
+        "max_attachments",
+        "document_type",
+        "engine",
+        "is_submittable",
+        "show_name_in_global_search",
+        "custom",
+        "beta",
+        "has_web_view",
+        "allow_guest_to_view",
+        "email_append_to",
+        "migration_hash",
+        "quick_entry",
+        "track_views",
+        "is_virtual",
+        "allow_events_in_timeline",
+        "allow_auto_repeat",
+        "show_preview_popup",
+        "index_web_pages_for_search",
+        "make_attachments_public",
+        "translated_doctype",
+        "is_calendar_and_gantt",
+        "show_title_field_in_link",
+        "force_re_route_to_default_view",
+        "fields",
+        "permissions",
+        "links",
+        "is_large_table",
+        "__js",
+        "__custom_js",
+        "__custom_list_js",
+        "__workflow_docs",
+        "__assets_loaded",
+        "actions",
+        "states",
+        "__css",
+        "__list_js",
+        "__calendar_js",
+        "__map_js",
+        "__linked_with",
+        "__messages",
+        "__print_formats",
+        "__form_grid_templates",
+        "__listview_template",
+        "__tree_js",
+        "__dashboard",
+        "__kanban_column_fields",
+        "__templates"
+      ]
+    },
+    {
+      "doctype": "Customer",
+      "modified": "2024-07-30 21:07:01.670489",
+      "fields": [
+        {
+          "fieldname": "basic_info",
+          "fieldtype": "Section Break",
+          "options": "fa fa-user"
+        },
+        {
+          "fieldname": "naming_series",
+          "fieldtype": "Select",
+          "options": "CUST-.YYYY.-"
+        },
+        {
+          "fieldname": "dashboard_tab",
+          "fieldtype": "Tab Break",
+          "options": null
+        },
+        {
+          "fieldname": "disabled",
+          "fieldtype": "Check",
+          "options": null
+        },
+        {
+          "fieldname": "salutation",
+          "fieldtype": "Link",
+          "options": "Salutation"
+        },
+        {
+          "fieldname": "customer_name",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "customer_name_in_arabic",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "party_no",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "customer_type",
+          "fieldtype": "Select",
+          "options": "Company\nIndividual\nPartnership"
+        },
+        {
+          "fieldname": "customer_group",
+          "fieldtype": "Link",
+          "options": "Customer Group"
+        },
+        {
+          "fieldname": "custom_division",
+          "fieldtype": "Link",
+          "options": "Division"
+        },
+        {
+          "fieldname": "column_break0",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "territory",
+          "fieldtype": "Link",
+          "options": "Territory"
+        },
+        {
+          "fieldname": "gender",
+          "fieldtype": "Link",
+          "options": "Gender"
+        },
+        {
+          "fieldname": "lead_name",
+          "fieldtype": "Link",
+          "options": "Lead"
+        },
+        {
+          "fieldname": "opportunity_name",
+          "fieldtype": "Link",
+          "options": "Opportunity"
+        },
+        {
+          "fieldname": "account_manager",
+          "fieldtype": "Link",
+          "options": "User"
+        },
+        {
+          "fieldname": "image",
+          "fieldtype": "Attach Image",
+          "options": null
+        },
+        {
+          "fieldname": "custom_customer_status",
+          "fieldtype": "Select",
+          "options": "\nLegal\nTaradhi"
+        },
+        {
+          "fieldname": "defaults_tab",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "default_price_list",
+          "fieldtype": "Link",
+          "options": "Price List"
+        },
+        {
+          "fieldname": "default_bank_account",
+          "fieldtype": "Link",
+          "options": "Bank Account"
+        },
+        {
+          "fieldname": "column_break_14",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "default_currency",
+          "fieldtype": "Link",
+          "options": "Currency"
+        },
+        {
+          "fieldname": "custom_section_break_gdjge",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "custom_customer_project",
+          "fieldtype": "Table",
+          "options": "Customer Project"
+        },
+        {
+          "fieldname": "internal_customer_section",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "is_internal_customer",
+          "fieldtype": "Check",
+          "options": null
+        },
+        {
+          "fieldname": "represents_company",
+          "fieldtype": "Link",
+          "options": "Company"
+        },
+        {
+          "fieldname": "column_break_70",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "companies",
+          "fieldtype": "Table",
+          "options": "Allowed To Transact With"
+        },
+        {
+          "fieldname": "more_info",
+          "fieldtype": "Section Break",
+          "options": "fa fa-file-text"
+        },
+        {
+          "fieldname": "market_segment",
+          "fieldtype": "Link",
+          "options": "Market Segment"
+        },
+        {
+          "fieldname": "industry",
+          "fieldtype": "Link",
+          "options": "Industry Type"
+        },
+        {
+          "fieldname": "customer_pos_id",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "website",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "language",
+          "fieldtype": "Link",
+          "options": "Language"
+        },
+        {
+          "fieldname": "column_break_45",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "customer_details",
+          "fieldtype": "Text",
+          "options": null
+        },
+        {
+          "fieldname": "contact_and_address_tab",
+          "fieldtype": "Tab Break",
+          "options": null
+        },
+        {
+          "fieldname": "address_contacts",
+          "fieldtype": "Section Break",
+          "options": "fa fa-map-marker"
+        },
+        {
+          "fieldname": "custom_address",
+          "fieldtype": "Small Text",
+          "options": null
+        },
+        {
+          "fieldname": "custom_reminder_email_",
+          "fieldtype": "Data",
+          "options": "Email"
+        },
+        {
+          "fieldname": "custom_remainder_cc_",
+          "fieldtype": "Small Text",
+          "options": null
+        },
+        {
+          "fieldname": "custom_phone",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "custom_contact_person_",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "address_html",
+          "fieldtype": "HTML",
+          "options": null
+        },
+        {
+          "fieldname": "column_break1",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "contact_html",
+          "fieldtype": "HTML",
+          "options": null
+        },
+        {
+          "fieldname": "custom_section_break_33ijs",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "custom_total_amount_earned",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "custom_fixed_price",
+          "fieldtype": "Currency",
+          "options": null
+        },
+        {
+          "fieldname": "primary_address_and_contact_detail",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "customer_primary_contact",
+          "fieldtype": "Link",
+          "options": "Contact"
+        },
+        {
+          "fieldname": "mobile_no",
+          "fieldtype": "Read Only",
+          "options": null
+        },
+        {
+          "fieldname": "email_id",
+          "fieldtype": "Read Only",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_26",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "customer_primary_address",
+          "fieldtype": "Link",
+          "options": "Address"
+        },
+        {
+          "fieldname": "primary_address",
+          "fieldtype": "Text",
+          "options": null
+        },
+        {
+          "fieldname": "tax_tab",
+          "fieldtype": "Tab Break",
+          "options": null
+        },
+        {
+          "fieldname": "taxation_section",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "tax_id",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "customer_cr",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "custom_uid",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_21",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "tax_category",
+          "fieldtype": "Link",
+          "options": "Tax Category"
+        },
+        {
+          "fieldname": "tax_withholding_category",
+          "fieldtype": "Link",
+          "options": "Tax Withholding Category"
+        },
+        {
+          "fieldname": "accounting_tab",
+          "fieldtype": "Tab Break",
+          "options": null
+        },
+        {
+          "fieldname": "credit_limit_section",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "payment_terms",
+          "fieldtype": "Link",
+          "options": "Payment Terms Template"
+        },
+        {
+          "fieldname": "credit_limits",
+          "fieldtype": "Table",
+          "options": "Customer Credit Limit"
+        },
+        {
+          "fieldname": "custom_promissory_note_detail",
+          "fieldtype": "Table",
+          "options": "Promissory Note Detail"
+        },
+        {
+          "fieldname": "custom_balance_confirmation_detail",
+          "fieldtype": "Table",
+          "options": "Balance Confirmation Details Table"
+        },
+        {
+          "fieldname": "custom_section_break_karcy",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "custom_balance_confirmation_status",
+          "fieldtype": "Select",
+          "options": "\nReceived\nPending\nNot Available"
+        },
+        {
+          "fieldname": "custom_last_balance_confirmation_date",
+          "fieldtype": "Date",
+          "options": null
+        },
+        {
+          "fieldname": "custom_column_break_xsd11",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "custom_collection_status",
+          "fieldtype": "Select",
+          "options": "\nNormal\nFollow up\nEscalated\nCritical"
+        },
+        {
+          "fieldname": "custom_customer_account_status",
+          "fieldtype": "Select",
+          "options": "\nActive\nBlocked\nLegal"
+        },
+        {
+          "fieldname": "custom_reason_for_block",
+          "fieldtype": "Select",
+          "options": "\nPayment Overdue\nCredit Exceeded\nDocumentation"
+        },
+        {
+          "fieldname": "default_receivable_accounts",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "accounts",
+          "fieldtype": "Table",
+          "options": "Party Account"
+        },
+        {
+          "fieldname": "loyalty_points_tab",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "loyalty_program",
+          "fieldtype": "Link",
+          "options": "Loyalty Program"
+        },
+        {
+          "fieldname": "column_break_54",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "loyalty_program_tier",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "sales_team_tab",
+          "fieldtype": "Tab Break",
+          "options": "fa fa-group"
+        },
+        {
+          "fieldname": "sales_team",
+          "fieldtype": "Table",
+          "options": "Sales Team"
+        },
+        {
+          "fieldname": "sales_team_section",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "default_sales_partner",
+          "fieldtype": "Link",
+          "options": "Sales Partner"
+        },
+        {
+          "fieldname": "custom_sales_person",
+          "fieldtype": "Link",
+          "options": "Sales Person"
+        },
+        {
+          "fieldname": "column_break_66",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "default_commission_rate",
+          "fieldtype": "Float",
+          "options": null
+        },
+        {
+          "fieldname": "settings_tab",
+          "fieldtype": "Tab Break",
+          "options": null
+        },
+        {
+          "fieldname": "so_required",
+          "fieldtype": "Check",
+          "options": null
+        },
+        {
+          "fieldname": "dn_required",
+          "fieldtype": "Check",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_53",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "is_frozen",
+          "fieldtype": "Check",
+          "options": null
+        }
+      ],
+      "document_keys": [
+        "doctype",
+        "name",
+        "creation",
+        "modified",
+        "modified_by",
+        "owner",
+        "docstatus",
+        "idx",
+        "search_fields",
+        "issingle",
+        "is_tree",
+        "istable",
+        "editable_grid",
+        "track_changes",
+        "module",
+        "autoname",
+        "name_case",
+        "title_field",
+        "image_field",
+        "sort_field",
+        "sort_order",
+        "description",
+        "read_only",
+        "in_create",
+        "allow_copy",
+        "allow_rename",
+        "allow_import",
+        "hide_toolbar",
+        "track_seen",
+        "max_attachments",
+        "document_type",
+        "icon",
+        "engine",
+        "is_submittable",
+        "show_name_in_global_search",
+        "custom",
+        "beta",
+        "has_web_view",
+        "allow_guest_to_view",
+        "email_append_to",
+        "migration_hash",
+        "quick_entry",
+        "track_views",
+        "is_virtual",
+        "allow_events_in_timeline",
+        "allow_auto_repeat",
+        "show_preview_popup",
+        "index_web_pages_for_search",
+        "make_attachments_public",
+        "translated_doctype",
+        "is_calendar_and_gantt",
+        "naming_rule",
+        "show_title_field_in_link",
+        "force_re_route_to_default_view",
+        "fields",
+        "permissions",
+        "links",
+        "links_order",
+        "field_order",
+        "_table_fields",
+        "is_large_table",
+        "__js",
+        "__list_js",
+        "__custom_js",
+        "__custom_list_js",
+        "__assets_loaded",
+        "actions",
+        "states",
+        "__css",
+        "__calendar_js",
+        "__map_js",
+        "__linked_with",
+        "__messages",
+        "__print_formats",
+        "__workflow_docs",
+        "__form_grid_templates",
+        "__listview_template",
+        "__tree_js",
+        "__dashboard",
+        "__kanban_column_fields",
+        "__templates"
+      ]
+    },
+    {
+      "doctype": "Factory Job Order",
+      "modified": "2026-10-27 09:11:09.529700",
+      "fields": [
+        {
+          "fieldname": "date",
+          "fieldtype": "Date",
+          "options": null
+        },
+        {
+          "fieldname": "start_date",
+          "fieldtype": "Date",
+          "options": null
+        },
+        {
+          "fieldname": "end_date",
+          "fieldtype": "Date",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_iym2a",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "branch",
+          "fieldtype": "Select",
+          "options": "28 Factory\n34 Factory"
+        },
+        {
+          "fieldname": "jo_type",
+          "fieldtype": "Select",
+          "options": "Regular\nSpecial"
+        },
+        {
+          "fieldname": "jo_status",
+          "fieldtype": "Select",
+          "options": "Open\nCompleted\nInprogress\nAssigned"
+        },
+        {
+          "fieldname": "column_break_7hffx",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "prepared_by",
+          "fieldtype": "Link",
+          "options": "Employee"
+        },
+        {
+          "fieldname": "approved_by",
+          "fieldtype": "Link",
+          "options": "Employee"
+        },
+        {
+          "fieldname": "section_break_hf81o",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "details",
+          "fieldtype": "Table",
+          "options": "Daily Factory Utilization Table"
+        },
+        {
+          "fieldname": "letter_head",
+          "fieldtype": "Link",
+          "options": "Letter Head"
+        },
+        {
+          "fieldname": "amended_from",
+          "fieldtype": "Link",
+          "options": "Factory Job Order"
+        }
+      ],
+      "document_keys": [
+        "doctype",
+        "name",
+        "creation",
+        "modified",
+        "modified_by",
+        "owner",
+        "docstatus",
+        "idx",
+        "issingle",
+        "is_tree",
+        "istable",
+        "editable_grid",
+        "track_changes",
+        "module",
+        "autoname",
+        "name_case",
+        "sort_field",
+        "sort_order",
+        "read_only",
+        "in_create",
+        "allow_copy",
+        "allow_rename",
+        "allow_import",
+        "hide_toolbar",
+        "track_seen",
+        "max_attachments",
+        "document_type",
+        "engine",
+        "default_print_format",
+        "is_submittable",
+        "show_name_in_global_search",
+        "custom",
+        "beta",
+        "has_web_view",
+        "allow_guest_to_view",
+        "email_append_to",
+        "quick_entry",
+        "track_views",
+        "is_virtual",
+        "allow_events_in_timeline",
+        "allow_auto_repeat",
+        "show_preview_popup",
+        "index_web_pages_for_search",
+        "make_attachments_public",
+        "translated_doctype",
+        "is_calendar_and_gantt",
+        "naming_rule",
+        "show_title_field_in_link",
+        "default_view",
+        "force_re_route_to_default_view",
+        "fields",
+        "permissions",
+        "_table_fields",
+        "is_large_table",
+        "__custom_js",
+        "__custom_list_js",
+        "__assets_loaded",
+        "actions",
+        "links",
+        "states",
+        "__js",
+        "__css",
+        "__list_js",
+        "__calendar_js",
+        "__map_js",
+        "__linked_with",
+        "__messages",
+        "__print_formats",
+        "__workflow_docs",
+        "__form_grid_templates",
+        "__listview_template",
+        "__tree_js",
+        "__dashboard",
+        "__kanban_column_fields",
+        "__templates"
+      ]
+    },
+    {
+      "doctype": "Taradhi Cases",
+      "modified": "2026-10-29 10:25:21.532844",
+      "fields": [
+        {
+          "fieldname": "customer",
+          "fieldtype": "Link",
+          "options": "Customer"
+        },
+        {
+          "fieldname": "column_break_naz6p",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "amount",
+          "fieldtype": "Currency",
+          "options": null
+        },
+        {
+          "fieldname": "section_break_6n7pi",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "judgement_no",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_mupy2",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "expected_collection",
+          "fieldtype": "Date",
+          "options": null
+        },
+        {
+          "fieldname": "section_break_rsngn",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "remarks",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_ga0lo",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "order_no",
+          "fieldtype": "Link",
+          "options": "Sales Order"
+        },
+        {
+          "fieldname": "section_break_m5e3i",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "sales_person",
+          "fieldtype": "Link",
+          "options": "Sales Person"
+        },
+        {
+          "fieldname": "column_break_t8dg2",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "date",
+          "fieldtype": "Date",
+          "options": null
+        },
+        {
+          "fieldname": "customer_communication_section",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_c3wv1",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "phone_number",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_vt0vz",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "email",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_yx6h7",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "contact_person_name",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "section_break_0a3xv",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "first_session_date",
+          "fieldtype": "Date",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_j8kuw",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "time_1",
+          "fieldtype": "Time",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_odpkt",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "notes_from_first_session",
+          "fieldtype": "Small Text",
+          "options": null
+        },
+        {
+          "fieldname": "section_break_ermlq",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "second_session_date",
+          "fieldtype": "Date",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_52qdm",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "time_2",
+          "fieldtype": "Time",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_iejdt",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "notes_from_second_session",
+          "fieldtype": "Small Text",
+          "options": null
+        },
+        {
+          "fieldname": "payment_details_section_section",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "payment_term",
+          "fieldtype": "Select",
+          "options": "1\n2\n3\n4\n5\n6"
+        },
+        {
+          "fieldname": "section_break_khsw9",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "first_payment",
+          "fieldtype": "Currency",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_di7oe",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "second_payment",
+          "fieldtype": "Currency",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_xehhw",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "third_payment",
+          "fieldtype": "Currency",
+          "options": null
+        },
+        {
+          "fieldname": "section_break_nzahe",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "fourth_payment",
+          "fieldtype": "Currency",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_vwyqi",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "fifth_payment",
+          "fieldtype": "Currency",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_hwljk",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "sixth_payment",
+          "fieldtype": "Currency",
+          "options": null
+        },
+        {
+          "fieldname": "section_break_bzkwc",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "receive_payment_1",
+          "fieldtype": "Currency",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_ft9ei",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "receive_payment_2",
+          "fieldtype": "Currency",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_e2efz",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "receive_payment_3",
+          "fieldtype": "Currency",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_ibmdt",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "receive_payment_4",
+          "fieldtype": "Currency",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_g5hmn",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "receive_payment_5",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_8zdoh",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "receive_payment_6",
+          "fieldtype": "Currency",
+          "options": null
+        },
+        {
+          "fieldname": "section_break_aebeq",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "total_payment",
+          "fieldtype": "Currency",
+          "options": null
+        },
+        {
+          "fieldname": "section_break_kyccc",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "payment_status",
+          "fieldtype": "Select",
+          "options": "\nPaid\nPartial\nNot Paid\nLost"
+        },
+        {
+          "fieldname": "section_break_kxua8",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "remaining_balance",
+          "fieldtype": "Currency",
+          "options": null
+        },
+        {
+          "fieldname": "section_break_vclno",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "first_payment_date",
+          "fieldtype": "Date",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_dkpvy",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "second_payment_date",
+          "fieldtype": "Date",
+          "options": null
+        },
+        {
+          "fieldname": "section_break_qwmcl",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "upload_file",
+          "fieldtype": "Attach",
+          "options": null
+        },
+        {
+          "fieldname": "amended_from",
+          "fieldtype": "Link",
+          "options": "Taradhi Cases"
+        }
+      ],
+      "document_keys": [
+        "doctype",
+        "name",
+        "creation",
+        "modified",
+        "modified_by",
+        "owner",
+        "docstatus",
+        "idx",
+        "issingle",
+        "is_tree",
+        "istable",
+        "editable_grid",
+        "track_changes",
+        "module",
+        "autoname",
+        "name_case",
+        "sort_field",
+        "sort_order",
+        "read_only",
+        "in_create",
+        "allow_copy",
+        "allow_rename",
+        "allow_import",
+        "hide_toolbar",
+        "track_seen",
+        "max_attachments",
+        "document_type",
+        "engine",
+        "default_print_format",
+        "is_submittable",
+        "show_name_in_global_search",
+        "custom",
+        "beta",
+        "has_web_view",
+        "allow_guest_to_view",
+        "email_append_to",
+        "quick_entry",
+        "track_views",
+        "is_virtual",
+        "allow_events_in_timeline",
+        "allow_auto_repeat",
+        "show_preview_popup",
+        "index_web_pages_for_search",
+        "make_attachments_public",
+        "translated_doctype",
+        "is_calendar_and_gantt",
+        "naming_rule",
+        "show_title_field_in_link",
+        "default_view",
+        "force_re_route_to_default_view",
+        "fields",
+        "permissions",
+        "is_large_table",
+        "__custom_js",
+        "__custom_list_js",
+        "__assets_loaded",
+        "actions",
+        "links",
+        "states",
+        "__js",
+        "__css",
+        "__list_js",
+        "__calendar_js",
+        "__map_js",
+        "__linked_with",
+        "__messages",
+        "__print_formats",
+        "__workflow_docs",
+        "__form_grid_templates",
+        "__listview_template",
+        "__tree_js",
+        "__dashboard",
+        "__kanban_column_fields",
+        "__templates"
+      ]
+    },
+    {
+      "doctype": "Court Cases",
+      "modified": "2026-01-01 14:52:41.358126",
+      "fields": [
+        {
+          "fieldname": "customer_name",
+          "fieldtype": "Link",
+          "options": "Customer"
+        },
+        {
+          "fieldname": "column_break_naz6p",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "amount",
+          "fieldtype": "Currency",
+          "options": null
+        },
+        {
+          "fieldname": "section_break_6n7pi",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "judgement_no",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_mupy2",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "expected_collection",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "section_break_rsngn",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "remarks",
+          "fieldtype": "Small Text",
+          "options": null
+        },
+        {
+          "fieldname": "amended_from",
+          "fieldtype": "Link",
+          "options": "Court Cases"
+        }
+      ],
+      "document_keys": [
+        "doctype",
+        "name",
+        "creation",
+        "modified",
+        "modified_by",
+        "owner",
+        "docstatus",
+        "idx",
+        "issingle",
+        "is_tree",
+        "istable",
+        "editable_grid",
+        "track_changes",
+        "module",
+        "autoname",
+        "name_case",
+        "sort_field",
+        "sort_order",
+        "read_only",
+        "in_create",
+        "allow_copy",
+        "allow_rename",
+        "allow_import",
+        "hide_toolbar",
+        "track_seen",
+        "max_attachments",
+        "document_type",
+        "engine",
+        "is_submittable",
+        "show_name_in_global_search",
+        "custom",
+        "beta",
+        "has_web_view",
+        "allow_guest_to_view",
+        "email_append_to",
+        "quick_entry",
+        "track_views",
+        "is_virtual",
+        "allow_events_in_timeline",
+        "allow_auto_repeat",
+        "show_preview_popup",
+        "index_web_pages_for_search",
+        "make_attachments_public",
+        "translated_doctype",
+        "is_calendar_and_gantt",
+        "naming_rule",
+        "show_title_field_in_link",
+        "default_view",
+        "force_re_route_to_default_view",
+        "fields",
+        "permissions",
+        "is_large_table",
+        "__custom_js",
+        "__custom_list_js",
+        "__assets_loaded",
+        "actions",
+        "links",
+        "states",
+        "__js",
+        "__css",
+        "__list_js",
+        "__calendar_js",
+        "__map_js",
+        "__linked_with",
+        "__messages",
+        "__print_formats",
+        "__workflow_docs",
+        "__form_grid_templates",
+        "__listview_template",
+        "__tree_js",
+        "__dashboard",
+        "__kanban_column_fields",
+        "__templates"
+      ]
+    },
+    {
+      "doctype": "Legal Case List",
+      "modified": "2026-11-12 14:16:26.261199",
+      "fields": [
+        {
+          "fieldname": "case_filing_date",
+          "fieldtype": "Date",
+          "options": null
+        },
+        {
+          "fieldname": "order_no",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "amount",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "assigned_lawyer",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_dwpzj",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "customer",
+          "fieldtype": "Link",
+          "options": "Customer"
+        },
+        {
+          "fieldname": "legal_case_authority",
+          "fieldtype": "Select",
+          "options": "\nLegal\nTaradhi"
+        },
+        {
+          "fieldname": "remarks",
+          "fieldtype": "Small Text",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_dppcw",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "party",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "sales_person",
+          "fieldtype": "Link",
+          "options": "Sales Person"
+        },
+        {
+          "fieldname": "legal_case_status",
+          "fieldtype": "Select",
+          "options": "\nOpened\nUnderway\nCompleted\nClosed\nSettled"
+        }
+      ],
+      "document_keys": [
+        "doctype",
+        "name",
+        "creation",
+        "modified",
+        "modified_by",
+        "owner",
+        "docstatus",
+        "idx",
+        "issingle",
+        "is_tree",
+        "istable",
+        "editable_grid",
+        "track_changes",
+        "module",
+        "autoname",
+        "name_case",
+        "sort_field",
+        "sort_order",
+        "read_only",
+        "in_create",
+        "allow_copy",
+        "allow_rename",
+        "allow_import",
+        "hide_toolbar",
+        "track_seen",
+        "max_attachments",
+        "document_type",
+        "engine",
+        "is_submittable",
+        "show_name_in_global_search",
+        "custom",
+        "beta",
+        "has_web_view",
+        "allow_guest_to_view",
+        "email_append_to",
+        "quick_entry",
+        "track_views",
+        "is_virtual",
+        "allow_events_in_timeline",
+        "allow_auto_repeat",
+        "show_preview_popup",
+        "index_web_pages_for_search",
+        "make_attachments_public",
+        "translated_doctype",
+        "is_calendar_and_gantt",
+        "naming_rule",
+        "show_title_field_in_link",
+        "default_view",
+        "force_re_route_to_default_view",
+        "fields",
+        "permissions",
+        "is_large_table",
+        "__custom_js",
+        "__custom_list_js",
+        "__assets_loaded",
+        "actions",
+        "links",
+        "states",
+        "__js",
+        "__css",
+        "__list_js",
+        "__calendar_js",
+        "__map_js",
+        "__linked_with",
+        "__messages",
+        "__print_formats",
+        "__workflow_docs",
+        "__form_grid_templates",
+        "__listview_template",
+        "__tree_js",
+        "__dashboard",
+        "__kanban_column_fields",
+        "__templates"
+      ]
+    },
+    {
+      "doctype": "Accounting Period",
+      "modified": "2019-08-01 19:14:47.593753",
+      "fields": [
+        {
+          "fieldname": "period_name",
+          "fieldtype": "Data",
+          "options": null
+        },
+        {
+          "fieldname": "start_date",
+          "fieldtype": "Date",
+          "options": null
+        },
+        {
+          "fieldname": "end_date",
+          "fieldtype": "Date",
+          "options": null
+        },
+        {
+          "fieldname": "column_break_4",
+          "fieldtype": "Column Break",
+          "options": null
+        },
+        {
+          "fieldname": "company",
+          "fieldtype": "Link",
+          "options": "Company"
+        },
+        {
+          "fieldname": "section_break_7",
+          "fieldtype": "Section Break",
+          "options": null
+        },
+        {
+          "fieldname": "closed_documents",
+          "fieldtype": "Table",
+          "options": "Closed Document"
+        }
+      ],
+      "document_keys": [
+        "doctype",
+        "name",
+        "creation",
+        "modified",
+        "modified_by",
+        "owner",
+        "docstatus",
+        "idx",
+        "issingle",
+        "is_tree",
+        "istable",
+        "editable_grid",
+        "track_changes",
+        "module",
+        "autoname",
+        "name_case",
+        "sort_field",
+        "sort_order",
+        "read_only",
+        "in_create",
+        "allow_copy",
+        "allow_rename",
+        "allow_import",
+        "hide_toolbar",
+        "track_seen",
+        "max_attachments",
+        "document_type",
+        "engine",
+        "is_submittable",
+        "show_name_in_global_search",
+        "custom",
+        "beta",
+        "has_web_view",
+        "allow_guest_to_view",
+        "email_append_to",
+        "migration_hash",
+        "quick_entry",
+        "track_views",
+        "is_virtual",
+        "allow_events_in_timeline",
+        "allow_auto_repeat",
+        "show_preview_popup",
+        "index_web_pages_for_search",
+        "make_attachments_public",
+        "translated_doctype",
+        "is_calendar_and_gantt",
+        "show_title_field_in_link",
+        "force_re_route_to_default_view",
+        "fields",
+        "permissions",
+        "_table_fields",
+        "is_large_table",
+        "__js",
+        "__custom_js",
+        "__custom_list_js",
+        "__assets_loaded",
+        "actions",
+        "links",
+        "states",
+        "__css",
+        "__list_js",
+        "__calendar_js",
+        "__map_js",
+        "__linked_with",
+        "__messages",
+        "__print_formats",
+        "__workflow_docs",
+        "__form_grid_templates",
+        "__listview_template",
+        "__tree_js",
+        "__dashboard",
+        "__kanban_column_fields",
+        "__templates"
+      ]
+    }
+  ],
+  "read_only_probe_results": {
+    "accounting_period_invalid_filter": {
+      "status": 417,
+      "exc_type": "DataError",
+      "exception": "frappe.exceptions.DataError: Field not permitted in query: disabled"
+    },
+    "Web Analytics Daily": {
+      "count": 0,
+      "status": 200
+    },
+    "Marketing Daily Metrics": {
+      "count": 0,
+      "status": 200
+    },
+    "Marketing Budget": {
+      "count": 0,
+      "status": 200
+    },
+    "Marketing Channel": {
+      "count": 0,
+      "status": 200
+    },
+    "Marketing Content": {
+      "count": 0,
+      "status": 200
+    },
+    "Lead Allocation": {
+      "count": 0,
+      "status": 200
+    },
+    "workflows": [
+      {
+        "name": "Journal Entry",
+        "document_type": "Journal Entry",
+        "states": [
+          {
+            "state": "Pending",
+            "doc_status": "0"
+          },
+          {
+            "state": "Pending",
+            "doc_status": "0"
+          },
+          {
+            "state": "submitted",
+            "doc_status": "0"
+          },
+          {
+            "state": "Approved",
+            "doc_status": "1"
+          },
+          {
+            "state": "Rejected",
+            "doc_status": "1"
+          },
+          {
+            "state": "Review",
+            "doc_status": "0"
+          },
+          {
+            "state": "Finally Rejected",
+            "doc_status": "2"
+          },
+          {
+            "state": "Approved",
+            "doc_status": "1"
+          },
+          {
+            "state": "Rejected",
+            "doc_status": "0"
+          },
+          {
+            "state": "Review",
+            "doc_status": "0"
+          },
+          {
+            "state": "Finally Rejected",
+            "doc_status": "2"
+          },
+          {
+            "state": "Submitted After Review",
+            "doc_status": "1"
+          }
+        ]
+      },
+      {
+        "name": "Payment Entry",
+        "document_type": "Payment Entry",
+        "states": [
+          {
+            "state": "Pending",
+            "doc_status": "0"
+          },
+          {
+            "state": "submitted",
+            "doc_status": "0"
+          },
+          {
+            "state": "Submitted After Review",
+            "doc_status": "1"
+          },
+          {
+            "state": "Approved",
+            "doc_status": "1"
+          },
+          {
+            "state": "Rejected",
+            "doc_status": "0"
+          },
+          {
+            "state": "Review",
+            "doc_status": "0"
+          },
+          {
+            "state": "Finally Rejected",
+            "doc_status": "2"
+          },
+          {
+            "state": "cancelled",
+            "doc_status": "2"
+          },
+          {
+            "state": "Approved",
+            "doc_status": "1"
+          },
+          {
+            "state": "Rejected",
+            "doc_status": "0"
+          },
+          {
+            "state": "Review",
+            "doc_status": "0"
+          },
+          {
+            "state": "Finally Rejected",
+            "doc_status": "2"
+          },
+          {
+            "state": "cancelled",
+            "doc_status": "2"
+          },
+          {
+            "state": "Approved",
+            "doc_status": "1"
+          },
+          {
+            "state": "Rejected",
+            "doc_status": "0"
+          },
+          {
+            "state": "Review",
+            "doc_status": "0"
+          },
+          {
+            "state": "Finally Rejected",
+            "doc_status": "2"
+          },
+          {
+            "state": "Finally Rejected",
+            "doc_status": "2"
+          },
+          {
+            "state": "cancelled",
+            "doc_status": "2"
+          }
+        ]
+      }
+    ],
+    "Sales Invoice_currency_groups": [
+      {
+        "currency": "SAR",
+        "party_account_currency": "SAR",
+        "conversion_rate": 1.0,
+        "n": 574
+      }
+    ],
+    "Purchase Invoice_currency_groups": [
+      {
+        "currency": "AED",
+        "party_account_currency": "SAR",
+        "conversion_rate": 1.0238,
+        "n": 5
+      },
+      {
+        "currency": "AED",
+        "party_account_currency": "SAR",
+        "conversion_rate": 1.024,
+        "n": 31
+      },
+      {
+        "currency": "AED",
+        "party_account_currency": "SAR",
+        "conversion_rate": 1.0254,
+        "n": 1
+      },
+      {
+        "currency": "AED",
+        "party_account_currency": "SAR",
+        "conversion_rate": 1.028,
+        "n": 2
+      },
+      {
+        "currency": "AED",
+        "party_account_currency": "SAR",
+        "conversion_rate": 1.082627736,
+        "n": 1
+      },
+      {
+        "currency": "AED",
+        "party_account_currency": "SAR",
+        "conversion_rate": 1.11208644,
+        "n": 1
+      },
+      {
+        "currency": "AED",
+        "party_account_currency": "SAR",
+        "conversion_rate": 1.113511653,
+        "n": 1
+      },
+      {
+        "currency": "SAR",
+        "party_account_currency": "SAR",
+        "conversion_rate": 1.0,
+        "n": 137
+      },
+      {
+        "currency": "USD",
+        "party_account_currency": "SAR",
+        "conversion_rate": 3.755,
+        "n": 62
+      },
+      {
+        "currency": "USD",
+        "party_account_currency": "SAR",
+        "conversion_rate": 4.573645714,
+        "n": 1
+      }
+    ]
+  }
+}

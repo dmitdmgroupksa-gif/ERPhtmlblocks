@@ -1,0 +1,548 @@
+[
+  {
+    "id": "A01",
+    "severity": "High",
+    "kind": "Incorrect calculation / missing currency field",
+    "title": "Purchase invoice outstanding is converted twice",
+    "affected": [
+      "Accounts Payable Dashboard",
+      "Finance internal  controller",
+      "Customs & Post-Procurement Dashboard"
+    ],
+    "detail": "The three views multiply Purchase Invoice.outstanding_amount by conversion_rate without fetching/checking party_account_currency. The map declares outstanding_amount as Currency with options=party_account_currency, while conversion_rate converts invoice currency to company currency. Live grouping found 105 submitted invoices with positive outstanding whose invoice currency is AED/USD but whose party_account_currency is already SAR (42 AED and 63 USD). Accounts Payable is specifically affected in its invoice-table outstanding renderer; this finding does not imply its report-backed headline KPIs are wrong.",
+    "impact": "Already-SAR balances are multiplied again; a USD-document balance already stored in SAR is multiplied by rates such as 3.755. Internal Controller AP sums and Customs supplier-payable figures are affected too.",
+    "action": "Fetch party_account_currency and company default currency. Keep balances unchanged when those currencies match; otherwise use a verified party-currency conversion or native Accounts Payable ledger report. Treasury already demonstrates a party-currency guard.",
+    "evidence": [
+      {
+        "file": "04. Finance & Credit Control/Accounts Payable/dashboard.js",
+        "line": 308
+      },
+      {
+        "file": "04. Finance & Credit Control/Accounts Payable/dashboard.js",
+        "line": 331
+      },
+      {
+        "file": "04. Finance & Credit Control/Finance Internal Controller/dashboard.js",
+        "line": 459
+      },
+      {
+        "file": "03. Procurement & Supply Chain/Customs & Post-Processing/dashboard.js",
+        "line": 132
+      },
+      {
+        "file": "04. Finance & Credit Control/Treasury Dashboard/server_scripts/treasury_dashboard_data_66d24f75.py",
+        "line": 132
+      }
+    ],
+    "confidence": "Confirmed against map, live effective schema, and live currency-group counts; no financial amounts exported"
+  },
+  {
+    "id": "A02",
+    "severity": "High",
+    "kind": "Invalid field in filter",
+    "title": "Accounting Period.disabled breaks the closed-period control",
+    "affected": [
+      "Finance internal  controller"
+    ],
+    "detail": "periodHits() starts with disabled=0 on Accounting Period. Neither the map nor live effective metadata has this field. A read-only list request using that filter returned HTTP 417 / DataError: Field not permitted in query: disabled.",
+    "impact": "The closed-period exception check cannot load its dataset.",
+    "action": "Remove the nonexistent filter and use Accounting Period start_date/end_date/company plus its Closed Document child table to identify applicable restrictions.",
+    "evidence": [
+      {
+        "file": "04. Finance & Credit Control/Finance Internal Controller/dashboard.js",
+        "line": 834
+      }
+    ],
+    "confidence": "Reproduced through live read-only API"
+  },
+  {
+    "id": "A03",
+    "severity": "Medium",
+    "kind": "Wrong field names",
+    "title": "Web Analytics uses avg_* instead of average_*",
+    "affected": [
+      "Digital Marketing Dashboard"
+    ],
+    "detail": "Requested/rendered avg_session_duration and avg_position do not exist. Both the map and live schema use average_session_duration and average_position. dsq() filters nonexistent fields out before querying, so this is a silent data omission rather than an invalid SQL request.",
+    "impact": "Average session duration and search-position charts become zero/default values even after valid Web Analytics Daily records are populated.",
+    "action": "Update both requested fields and chart property reads; keep missing measurements unavailable rather than coercing them to zero.",
+    "evidence": [
+      {
+        "file": "07. IT & Digital Systems/Digital Marketing Dashboard/dashboard.js",
+        "line": 930
+      },
+      {
+        "file": "07. IT & Digital Systems/Digital Marketing Dashboard/dashboard.js",
+        "line": 1003
+      },
+      {
+        "file": "07. IT & Digital Systems/Digital Marketing Dashboard/dashboard.js",
+        "line": 1791
+      },
+      {
+        "file": "07. IT & Digital Systems/Digital Marketing Dashboard/dashboard.js",
+        "line": 1796
+      }
+    ],
+    "confidence": "Confirmed against map and live effective schema"
+  },
+  {
+    "id": "A04",
+    "severity": "Medium",
+    "kind": "Missing data model integration",
+    "title": "Marketing attribution and conversion-value fields are not installed",
+    "affected": [
+      "Digital Marketing Dashboard"
+    ],
+    "detail": "Absent in both map and live metadata: Leads Generation List.marketing_channel/campaign; Lead Allocation.marketing_channel/campaign/deal_value/converted_customer/lost_reason; Lead.marketing_channel. These eight optional fields are removed by schema filtering. The Setup tab acknowledges missing fields, so this is incomplete integration rather than a crashing fetch.",
+    "impact": "Custom-lead campaign filtering, channel attribution, revenue/ROI and loss-reason analysis cannot be complete. Campaign filtering is skipped when the underlying field is missing.",
+    "action": "Agree the attribution model, map any equivalent native fields, and add only the custom fields the business actually intends to maintain. Do not silently treat unfiltered records as campaign-specific.",
+    "evidence": [
+      {
+        "file": "07. IT & Digital Systems/Digital Marketing Dashboard/dashboard.js",
+        "line": 467
+      },
+      {
+        "file": "07. IT & Digital Systems/Digital Marketing Dashboard/dashboard.js",
+        "line": 936
+      },
+      {
+        "file": "07. IT & Digital Systems/Digital Marketing Dashboard/dashboard.js",
+        "line": 942
+      },
+      {
+        "file": "07. IT & Digital Systems/Digital Marketing Dashboard/dashboard.js",
+        "line": 946
+      }
+    ],
+    "confidence": "Confirmed against map and live effective schema"
+  },
+  {
+    "id": "A05",
+    "severity": "Medium",
+    "kind": "Empty source / setup dependency",
+    "title": "Marketing and allocation source tables currently have no records",
+    "affected": [
+      "Digital Marketing Dashboard",
+      "My Leads Dashboard",
+      "Lead Management Dashboard"
+    ],
+    "detail": "Live permission-scoped counts returned zero for Marketing Channel, Marketing Daily Metrics, Marketing Budget, Marketing Content, Web Analytics Daily, and Lead Allocation. The map also recorded zero. My Leads uses Lead Allocation; Lead Management uses Leads Generation List and can still show its existing source leads.",
+    "impact": "Marketing charts lack source observations; My Leads has no allocation rows for this API user. Existing leads do not imply allocations or marketing performance data exist.",
+    "action": "Populate/verify the intended import and allocation workflows; distinguish not connected/not populated from measured zero performance. Verify with the target user roles as well.",
+    "evidence": [
+      {
+        "file": "02. Sales & CRM/My Leads/dashboard.js",
+        "line": 3
+      },
+      {
+        "file": "07. IT & Digital Systems/Digital Marketing Dashboard/dashboard.js",
+        "line": 981
+      }
+    ],
+    "confidence": "Live counts under the supplied API user; not proof that every other role has the same visibility"
+  },
+  {
+    "id": "A06",
+    "severity": "High",
+    "kind": "Incorrect historical scope",
+    "title": "Credit Controller As-of Date does not produce historical outstanding",
+    "affected": [
+      "Credit Controller Dashboard"
+    ],
+    "detail": "As-of date only changes due-date buckets. siBase() reads current outstanding_amount and has no posting_date <= asof filter. Past-date selections can therefore include invoices created after the selected date, and invoices paid since that date disappear from historical outstanding.",
+    "impact": "Past-date receivables and ageing do not represent balances as of that date. The current-date view is a different case and is not proven wrong by this finding.",
+    "action": "Use native Accounts Receivable/payment-ledger ageing at the selected date, or explicitly restrict the UI to current outstanding with an ageing reference date. A posting-date filter alone does not reconstruct settlements.",
+    "evidence": [
+      {
+        "file": "04. Finance & Credit Control/Credit Controller Dashboard/dashboard.js",
+        "line": 67
+      },
+      {
+        "file": "04. Finance & Credit Control/Credit Controller Dashboard/dashboard.js",
+        "line": 74
+      },
+      {
+        "file": "04. Finance & Credit Control/Credit Controller Dashboard/dashboard.js",
+        "line": 96
+      }
+    ],
+    "confidence": "Confirmed from source"
+  },
+  {
+    "id": "A07",
+    "severity": "Medium",
+    "kind": "Currency-scope risk",
+    "title": "Credit Controller sums account-currency amounts without currency grouping",
+    "affected": [
+      "Credit Controller Dashboard"
+    ],
+    "detail": "Receivables use sum(outstanding_amount), and collections use sum(paid_amount), without grouping or normalizing their currency basis. The map defines outstanding_amount in party_account_currency and paid_amount in paid_from_account_currency. The note explicitly assumes company currency. Live open Sales Invoice groups are currently SAR/SAR, so mixed-currency receivables are a latent risk rather than an observed current mismatch.",
+    "impact": "Totals can mix incompatible currencies when companies/customer accounts/payment accounts use different currencies.",
+    "action": "Choose a company/currency scope; validate currencies, use the matching base payment field, and normalize outstanding via the party account currency.",
+    "evidence": [
+      {
+        "file": "04. Finance & Credit Control/Credit Controller Dashboard/dashboard.js",
+        "line": 42
+      },
+      {
+        "file": "04. Finance & Credit Control/Credit Controller Dashboard/dashboard.js",
+        "line": 96
+      },
+      {
+        "file": "04. Finance & Credit Control/Credit Controller Dashboard/dashboard.js",
+        "line": 108
+      }
+    ],
+    "confidence": "Confirmed structural risk; currently open sales-invoice groups are SAR/SAR"
+  },
+  {
+    "id": "A08",
+    "severity": "Medium",
+    "kind": "Capped scan represented too strongly",
+    "title": "Internal Controller duplicate counts stop at 300 groups",
+    "affected": [
+      "Finance internal  controller"
+    ],
+    "detail": "dupGroups() fetches only 300 grouped rows, filters those groups to duplicates on the client, and reports g.length with conf=confirmed. It does not retrieve the total duplicate-group count or detect an additional page.",
+    "impact": "The matching groups shown are real, but the total number of duplicate groups can be understated above the cap. Whether the cap is reached for a particular selection was not measured.",
+    "action": "Count duplicate groups server-side with HAVING, paginate all groups, or mark the displayed figure as a capped lower bound.",
+    "evidence": [
+      {
+        "file": "04. Finance & Credit Control/Finance Internal Controller/dashboard.js",
+        "line": 822
+      },
+      {
+        "file": "04. Finance & Credit Control/Finance Internal Controller/dashboard.js",
+        "line": 857
+      }
+    ],
+    "confidence": "Confirmed cap; actual undercount is conditional on result volume"
+  },
+  {
+    "id": "A09",
+    "severity": "Medium",
+    "kind": "Control proxy / semantic mismatch",
+    "title": "Closed-period check compares creation to period end, not closure time",
+    "affected": [
+      "Finance internal  controller"
+    ],
+    "detail": "Even after the invalid disabled filter is fixed, the exception labelled Posted after accounting period was closed checks creation > end_date 23:59:59, then labels the count confirmed. A period end date does not establish when the period was actually closed. The query also does not prove the submit timestamp.",
+    "impact": "A legitimate backdated document created before a later closure can be labelled a confirmed posting-after-closure exception.",
+    "action": "Use an actual closure/submission audit trail if available. Otherwise relabel as an indicative backdated-document check and keep it separate from confirmed control violations.",
+    "evidence": [
+      {
+        "file": "04. Finance & Credit Control/Finance Internal Controller/dashboard.js",
+        "line": 806
+      },
+      {
+        "file": "04. Finance & Credit Control/Finance Internal Controller/dashboard.js",
+        "line": 841
+      },
+      {
+        "file": "04. Finance & Credit Control/Finance Internal Controller/dashboard.js",
+        "line": 867
+      }
+    ],
+    "confidence": "Confirmed from source"
+  },
+  {
+    "id": "A10",
+    "severity": "Medium",
+    "kind": "Incomplete date scope / unverified status",
+    "title": "Vacation tracker omits earlier leaves and assumes unmatched past leaves completed",
+    "affected": [
+      "Employee Vacation Tracker"
+    ],
+    "detail": "The initial Leave Application fetch excludes all leaves with to_date before January 1 of the current year, regardless of UI-selected range or whether a linked Employee Vacation Record remains overdue. It also restricts leave to two annual-leave types and durations strictly greater than two days. When no vacation record matches, a past leave becomes Completed without actual return evidence.",
+    "impact": "Earlier-year overdue cases and short annual leaves cannot appear; missing return tracking can look like a confirmed completion. The type/duration rules may be intentional policy and need business confirmation.",
+    "action": "Load the selected overlap range plus all still-open vacation records, clearly disclose the annual-leave scope, and mark unmatched past leaves Return unverified until a return record exists.",
+    "evidence": [
+      {
+        "file": "05. HR & Administration/Employee Vacation/dashboard.js",
+        "line": 302
+      },
+      {
+        "file": "05. HR & Administration/Employee Vacation/dashboard.js",
+        "line": 324
+      },
+      {
+        "file": "05. HR & Administration/Employee Vacation/dashboard.js",
+        "line": 349
+      }
+    ],
+    "confidence": "Confirmed from source"
+  },
+  {
+    "id": "A11",
+    "severity": "High",
+    "kind": "Incomplete implementation",
+    "title": "Production dashboard omits mapped child data needed for its key metrics",
+    "affected": [
+      "Production Dashboard"
+    ],
+    "detail": "Cost source fetches only name/modified even though Daily Production Cost has date, branch, details and total_cost_summary. Cost, materials, workforce and quality views explicitly show placeholders. Stock Entry fetch omits Stock Entry Detail; Factory Daily Production fetch omits its detail rows. Manufacturing Factory/warehouse mappings exist in the map, but this dashboard hardcodes two warehouse/branch mappings instead.",
+    "impact": "Costs, material consumption, scrap, workforce hours and quality/yield are not implemented, and additional factories are outside its two-factory mapping. This is disclosed in the UI rather than false zero data.",
+    "action": "Design a permission-checked aggregate API over the mapped detail tables; resolve factories from Manufacturing Factory and its warehouse table; reconcile units and cost basis before enabling totals.",
+    "evidence": [
+      {
+        "file": "08. Operations & Logistics/Production Dashboard/dashboard.js",
+        "line": 25
+      },
+      {
+        "file": "08. Operations & Logistics/Production Dashboard/dashboard.js",
+        "line": 87
+      },
+      {
+        "file": "08. Operations & Logistics/Production Dashboard/dashboard.js",
+        "line": 258
+      },
+      {
+        "file": "08. Operations & Logistics/Production Dashboard/dashboard.js",
+        "line": 594
+      },
+      {
+        "file": "08. Operations & Logistics/Production Dashboard/dashboard.js",
+        "line": 623
+      },
+      {
+        "file": "08. Operations & Logistics/Production Dashboard/dashboard.js",
+        "line": 641
+      }
+    ],
+    "confidence": "Confirmed from source"
+  },
+  {
+    "id": "A12",
+    "severity": "Medium",
+    "kind": "Runtime hosting risk",
+    "title": "Production uses document rather than the supplied block root",
+    "affected": [
+      "Production Dashboard"
+    ],
+    "detail": "Initialization calls document.querySelector(\".pcc\") and returns immediately if it finds no element. It never uses root_element. A class inside the Custom HTML Block shadow root is not discoverable from document.querySelector.",
+    "impact": "When hosted in the shadow-root setup described by the other blocks, the live script does not initialize; a matching element elsewhere could also select the wrong instance. The browser flow was not exercised.",
+    "action": "Resolve the host through root_element with a document fallback, then test in the actual ERP workspace.",
+    "evidence": [
+      {
+        "file": "08. Operations & Logistics/Production Dashboard/dashboard.js",
+        "line": 15
+      }
+    ],
+    "confidence": "Confirmed root-selection behavior; actual browser impact requires host verification"
+  },
+  {
+    "id": "A13",
+    "severity": "Medium",
+    "kind": "Static source / missing integration",
+    "title": "CEO Legal/Taradhi figures are a static journal reference",
+    "affected": [
+      "CEO Command Center"
+    ],
+    "detail": "The legal API defines a fixed list of 14 entries copied from one journal entry, all classified legal. It never queries Taradhi Cases, Court Cases or Legal Case List and never refreshes the reference amounts from the ledger. The UI/API explicitly label it static; sales-support enquiry SLA is also explicitly unconnected.",
+    "impact": "These CEO tabs cannot serve as live case balances/statuses or enquiry SLA, even though the dedicated Legal Dashboard queries the actual case DocTypes.",
+    "action": "Retain the reference as a separately labelled snapshot; implement a distinct live legal/case pipeline and verified enquiry timestamps if those figures are required.",
+    "evidence": [
+      {
+        "file": "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_legal_taradhi_dee38552.py",
+        "line": 1
+      },
+      {
+        "file": "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_legal_taradhi_dee38552.py",
+        "line": 12
+      },
+      {
+        "file": "01. Leadership & Corporate/CEO Command Center/dashboard.js",
+        "line": 3291
+      }
+    ],
+    "confidence": "Confirmed from source"
+  },
+  {
+    "id": "A14",
+    "severity": "Medium",
+    "kind": "Unconnected integration",
+    "title": "Fleet fuel portal is not connected",
+    "affected": [
+      "Fleet Dashboard"
+    ],
+    "detail": "ALDREES_API_METHOD is the empty string. The dashboard intentionally renders API not connected for the portal-backed fuel figures. Existing ERP fuel records are a separate source.",
+    "impact": "Portal balance/transactions/consumption cannot be complete through this block.",
+    "action": "Implement and configure the approved server-side proxy; keep ERP and portal measurements clearly distinguished.",
+    "evidence": [
+      {
+        "file": "08. Operations & Logistics/Fleet Dashboard/dashboard.js",
+        "line": 23
+      },
+      {
+        "file": "08. Operations & Logistics/Fleet Dashboard/dashboard.js",
+        "line": 24
+      },
+      {
+        "file": "08. Operations & Logistics/Fleet Dashboard/dashboard.js",
+        "line": 1305
+      }
+    ],
+    "confidence": "Confirmed from source"
+  },
+  {
+    "id": "A15",
+    "severity": "High",
+    "kind": "External source / exposed credential",
+    "title": "DMCC reads Base44 entities and includes a client-side API key",
+    "affected": [
+      "DMCC Dashboard"
+    ],
+    "detail": "The dashboard fetches an external Base44 endpoint and entity names such as Invoice, PurchaseOrder and ReturnNote, not native ERPNext DocTypes. The script embeds an API key and sends it in x-api-key. The key value is intentionally omitted from this report; the external service was not called.",
+    "impact": "The ERP map cannot validate the external entity schema, synchronization, permissions or balances. The key is visible to anyone able to inspect the delivered script.",
+    "action": "Document the ERP-to-external mapping and sync ownership; move privileged external access behind a server-side authorized proxy and rotate the exposed key through the service owner.",
+    "evidence": [
+      {
+        "file": "01. Leadership & Corporate/DMCC Dashboard/dashboard.js",
+        "line": 3
+      },
+      {
+        "file": "01. Leadership & Corporate/DMCC Dashboard/dashboard.js",
+        "line": 7
+      },
+      {
+        "file": "01. Leadership & Corporate/DMCC Dashboard/dashboard.js",
+        "line": 20
+      }
+    ],
+    "confidence": "Confirmed from source"
+  },
+  {
+    "id": "A16",
+    "severity": "Low",
+    "kind": "External source / audit limitation",
+    "title": "Inventory Dashboard is an external BI iframe",
+    "affected": [
+      "Inventory Dashboard"
+    ],
+    "detail": "The HTML is an external public-dashboard iframe and the JavaScript source is empty. Its underlying queries/model are not present in this repository or the ERP map.",
+    "impact": "No conclusion about its DocTypes, selected fields, stock valuation, filtering or row completeness can be made from these files.",
+    "action": "Obtain the BI questions/model SQL, data-source details and refresh schedule for a separate reconciliation.",
+    "evidence": [
+      {
+        "file": "03. Procurement & Supply Chain/Inventory Dashboard/dashboard.html",
+        "line": 1
+      }
+    ],
+    "confidence": "Confirmed from source"
+  },
+  {
+    "id": "A17",
+    "severity": "Medium",
+    "kind": "Silent capped dataset",
+    "title": "Executive Secretary limits queues to 400 without completeness metadata",
+    "affected": [
+      "Executive Secretary"
+    ],
+    "detail": "max_rows=400 truncates the admin request query and each letters/memos query. Bootstrap returns rows/errors and config, but not source totals or a capped flag. Request closed-state filtering occurs after SQL LIMIT; old open requests are separately excluded by the 180-day lookback.",
+    "impact": "KPI/table totals are bounded queue counts and may omit qualifying records without a truncation warning. Actual current cap activation was not measured.",
+    "action": "Return matching counts and has_more per section, apply state filters before limiting, and paginate or label bounded queue KPIs. Make the lookback policy explicit.",
+    "evidence": [
+      {
+        "file": "05. HR & Administration/Executive Secretary/exec_admin_api_server_script.py",
+        "line": 21
+      },
+      {
+        "file": "05. HR & Administration/Executive Secretary/exec_admin_api_server_script.py",
+        "line": 27
+      },
+      {
+        "file": "05. HR & Administration/Executive Secretary/exec_admin_api_server_script.py",
+        "line": 91
+      },
+      {
+        "file": "05. HR & Administration/Executive Secretary/exec_admin_api_server_script.py",
+        "line": 157
+      },
+      {
+        "file": "05. HR & Administration/Executive Secretary/exec_admin_api_server_script.py",
+        "line": 263
+      }
+    ],
+    "confidence": "Confirmed cap; actual current omissions are conditional"
+  },
+  {
+    "id": "A18",
+    "severity": "Medium",
+    "kind": "Join-grain risk",
+    "title": "Blocked Customer cards count customer-salesperson rows as customers",
+    "affected": [
+      "CP Blocked Customer",
+      "CSD Blocked Customer",
+      "EP Blocked Customer",
+      "MP Blocked Customer",
+      "SRD Blocked Customer",
+      "WP Blocked Customer"
+    ],
+    "detail": "All six mapped reports aggregate invoices by customer, join Customer Sales Team, then group detail rows by customer and salesperson. The cards count report rows and sum each row outstanding. If a customer has multiple qualifying salespersons, its full customer-level balance can appear more than once. The queries also hardcode one company, which is a deliberate fixed scope rather than all companies.",
+    "impact": "Customer counts/blocked percentages and balances can be inflated by one-to-many salesperson assignments. Actual duplicate assignments were not counted in live data.",
+    "action": "Choose whether the grain is customer or customer-salesperson. For company/customer KPIs, deduplicate on customer ID and compute balances once, or allocate an explicit split.",
+    "evidence": [
+      {
+        "file": "04. Finance & Credit Control/Blocked Customer Dashboard/CP Blocked Customer/dashboard.js",
+        "line": 55
+      },
+      {
+        "file": "04. Finance & Credit Control/Blocked Customer Dashboard/CP Blocked Customer/dashboard.js",
+        "line": 58
+      }
+    ],
+    "confidence": "Confirmed query structure from map; observed inflation not established"
+  },
+  {
+    "id": "A19",
+    "severity": "Low",
+    "kind": "Incomplete local dependency export",
+    "title": "ERP User Access is missing its directory API source in the organized folder",
+    "affected": [
+      "ERP User Access Dashboard"
+    ],
+    "detail": "The browser calls /api/method/user_access_directory?..., but its organized server_scripts directory has no user_access_directory script. The complete ignored ERP snapshot does contain the enabled API. The exporter matches quoted method literals ending at a quote, so a URL ending in ? escapes its match.",
+    "impact": "The local package is incomplete for editing/reviewing the User Directory endpoint. This is a local export defect, not evidence that the live endpoint is missing.",
+    "action": "Include that source and teach dependency discovery to parse API URLs, including query strings, rather than relying only on exact quoted text.",
+    "evidence": [
+      {
+        "file": "07. IT & Digital Systems/ERP User Access/dashboard.js",
+        "line": 72
+      },
+      {
+        "file": "tools/erp/export_erp_dashboards.py",
+        "line": 80
+      },
+      {
+        "file": "tools/erp/organize_dashboards.py",
+        "line": 63
+      }
+    ],
+    "confidence": "Confirmed from source"
+  },
+  {
+    "id": "A20",
+    "severity": "Low",
+    "kind": "Missing dashboard implementation",
+    "title": "Customer Dashboard and PN Dashboard are placeholders",
+    "affected": [
+      "Customer Dashboard",
+      "PN Dashboard"
+    ],
+    "detail": "Only README placeholders exist; no exact Custom HTML Block was identified and no JS/CSS/HTML implementation was exported for these labels.",
+    "impact": "These two entries cannot be audited or edited as functioning dashboards yet.",
+    "action": "Resolve their actual ERP source names or confirm that they are new dashboard requests.",
+    "evidence": [
+      {
+        "file": "02. Sales & CRM/Customer Dashboard/README.md",
+        "line": 3
+      },
+      {
+        "file": "11. To Be Classified/PN Dashboard/README.md",
+        "line": 3
+      }
+    ],
+    "confidence": "Confirmed from source"
+  }
+]

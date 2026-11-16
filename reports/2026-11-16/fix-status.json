@@ -1,0 +1,40 @@
+{
+  "local_only": true,
+  "deployed_to_erp": false,
+  "fixed_in_local_source": [
+    "A01",
+    "A02",
+    "A03",
+    "A06",
+    "A07",
+    "A08",
+    "A09",
+    "A10",
+    "A12",
+    "A16",
+    "A17",
+    "A18",
+    "A19",
+    "A20"
+  ],
+  "prepared_requires_schema_and_data": [
+    "A04"
+  ],
+  "empty_source_requires_business_data": [
+    "A05"
+  ],
+  "partially_implemented": [
+    "A11",
+    "A13",
+    "A15"
+  ],
+  "external_connector_missing": [
+    "A14"
+  ],
+  "tests": {
+    "regression_checks": 12,
+    "javascript_files": 57,
+    "python_files": 57
+  },
+  "notes": "See fix-status.md for each scope decision, review limitation, and deployment order. No production completeness claim."
+}

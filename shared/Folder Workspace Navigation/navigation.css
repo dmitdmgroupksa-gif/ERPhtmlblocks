@@ -1,0 +1,34 @@
+/* Scoped to this block. Typography and surfaces inherit the ERP Desk theme. */
+.fnav{--fn-text:var(--text-color,#1f2937);--fn-muted:var(--text-muted,#667085);--fn-line:var(--border-color,#e3e7ed);--fn-surface:var(--card-bg,#fff);--fn-soft:var(--subtle-fg,#f5f7f9);--fn-accent:#24466a;color:var(--fn-text);font-family:inherit;font-size:13px;line-height:1.55;padding:4px 0 18px;min-width:0}
+.fnav *{box-sizing:border-box}.fnav [hidden]{display:none!important}
+.fnav-header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:26px}
+.fnav-heading{min-width:0}.fnav-heading h2{font-size:20px;line-height:1.35;letter-spacing:-.3px;font-weight:600;color:inherit;margin:0 0 6px}
+.fnav-heading p{color:var(--fn-muted);font-size:13px;margin:0;overflow-wrap:anywhere}
+.fnav-controls{display:flex;align-items:center;gap:9px;flex-shrink:0}
+.fnav-language{display:flex;border:1px solid var(--fn-line);border-radius:7px;padding:3px;background:var(--fn-surface)}
+.fnav button{font:inherit;color:inherit;cursor:pointer}
+.fnav-language button{border:0;background:transparent;color:var(--fn-muted);border-radius:4px;padding:4px 9px;font-size:12px;line-height:1.5}
+.fnav-language button[aria-pressed=true]{background:var(--fn-soft);color:var(--fn-text);font-weight:600}
+.fnav-refresh{display:grid;place-items:center;width:34px;height:34px;border:1px solid var(--fn-line);border-radius:7px;background:var(--fn-surface)}
+.fnav svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.fnav-refresh svg{width:16px;height:16px;color:var(--fn-muted)}
+.fnav button:disabled{cursor:wait;opacity:.55}
+.fnav-search{display:flex;align-items:center;gap:9px;max-width:360px;border:1px solid var(--fn-line);border-radius:7px;padding:8px 11px;margin-bottom:20px;background:var(--fn-surface);color:var(--fn-muted)}
+.fnav-search svg{width:16px;height:16px}.fnav-search input{width:100%;min-width:0;font:inherit;color:var(--fn-text);background:transparent;border:0;outline:none;padding:0}
+.fnav-search:focus-within{outline:2px solid var(--fn-accent);outline-offset:2px}
+.fnav-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.fnav-card{display:flex;align-items:flex-start;gap:13px;min-height:146px;padding:20px 18px;border:1px solid var(--fn-line);border-radius:9px;background:var(--fn-surface);color:var(--fn-text)!important;text-decoration:none!important;transition:border-color .15s,background-color .15s}
+.fnav-card:hover{border-color:#aebbc9;background:var(--fn-soft)}
+.fnav-icon{display:grid;place-items:center;width:35px;height:35px;border-radius:7px;background:var(--fn-soft);color:var(--fn-accent);flex-shrink:0}
+.fnav-copy{min-width:0;flex:1}.fnav-title{display:block;font-size:14px;font-weight:600;line-height:1.5;overflow-wrap:anywhere;margin:0 0 7px}
+.fnav-description{display:block;font-size:12.5px;color:var(--fn-muted);line-height:1.65;overflow-wrap:anywhere}
+.fnav-arrow{width:14px!important;height:14px!important;margin-top:10px;color:var(--fn-muted)}
+.fnav[dir=rtl] .fnav-arrow{transform:rotate(180deg)}.fnav[dir=rtl] h2{letter-spacing:0}
+.fnav-status{margin:0;border:1px dashed var(--fn-line);border-radius:9px;background:var(--fn-soft);padding:24px;color:var(--fn-muted);font-size:13px}
+.fnav-status[data-error=true]{border-style:solid}.fnav-footnote{font-size:11.5px;color:var(--fn-muted);margin:18px 0 0}
+.fnav :is(a,button):focus-visible{outline:2px solid var(--fn-accent);outline-offset:3px}
+.fnav-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+:host-context([data-theme=dark]) .fnav{--fn-accent:#a7bfdc}
+@media(max-width:1050px){.fnav-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.fnav-header{flex-direction:column;gap:14px;margin-bottom:20px}.fnav-controls{align-self:flex-end}.fnav-grid{grid-template-columns:1fr}.fnav-card{min-height:122px;padding:17px}.fnav-search{max-width:none}.fnav-heading h2{font-size:18px}}
+@media(prefers-reduced-motion:reduce){.fnav-card{transition:none}}

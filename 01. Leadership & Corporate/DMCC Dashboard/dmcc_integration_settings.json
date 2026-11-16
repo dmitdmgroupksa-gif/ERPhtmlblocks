@@ -1,0 +1,15 @@
+{
+  "doctype": "DocType",
+  "name": "DMCC Integration Settings",
+  "module": "Custom",
+  "custom": 1,
+  "issingle": 1,
+  "track_changes": 1,
+  "fields": [
+    {"fieldname": "enabled", "label": "Enabled", "fieldtype": "Check", "default": "0"},
+    {"fieldname": "api_key", "label": "External DMCC API Key", "fieldtype": "Password"}
+  ],
+  "permissions": [
+    {"role": "System Manager", "read": 1, "write": 1, "create": 1}
+  ]
+}

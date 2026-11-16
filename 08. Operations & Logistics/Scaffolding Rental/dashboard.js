@@ -2,6 +2,17 @@
 'use strict';
 var R = (typeof root_element !== 'undefined' && root_element) ? root_element : document;
 
+/* Repair only this block's own transient Frappe widget heading. No Workspace record is changed. */
+function repairBlockHeading(blockRoot,label){
+  if(!blockRoot)return;
+  var shadow=blockRoot.getRootNode?blockRoot.getRootNode():blockRoot;
+  var host=blockRoot.host||(shadow&&shadow.host);
+  var widget=host&&host.closest?host.closest('.custom-block-widget-box'):null;
+  var heading=widget&&widget.querySelector('.widget-head .widget-title');
+  if(heading&&['','undefined','null'].indexOf(heading.textContent.trim())!==-1){heading.textContent=label;heading.setAttribute('title',label);}
+}
+repairBlockHeading(R, 'Scaffolding Rental — Employee Dashboard');
+
 /* The Custom HTML Block's HTML section is left BLANK: the whole DOM is built here inside root_element. */
 var HOST = (R && R.querySelector) ? R : document.body;
 var old0 = HOST.querySelector('#dmemp-root'); if (old0) { old0.remove(); }

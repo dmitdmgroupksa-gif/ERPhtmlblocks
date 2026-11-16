@@ -192,10 +192,22 @@ function call(method, args) {
   CACHE[key] = p; p.catch(function () { delete CACHE[key]; });
   return p;
 }
+var COMPANY_CURRENCIES = {}, currencyReady;
+function currencyMetadata(){
+ if(!currencyReady) currencyReady=call('frappe.client.get_list',{doctype:'Company',fields:['name','default_currency'],limit_page_length:0}).then(function(r){(r.message||[]).forEach(function(c){COMPANY_CURRENCIES[c.name]=c.default_currency;});}).catch(function(e){currencyReady=null;throw e;});
+ return currencyReady;
+}
+function baseBalance(r){
+ var co=COMPANY_CURRENCIES[r.company],party=r.party_account_currency,amount=Number(r.o==null?r.outstanding_amount:r.o)||0;
+ if(!co || co!==CUR)throw new Error('Select a company whose base currency is '+CUR);
+ if(party===co)return amount;
+ if(party!==r.currency || !(Number(r.conversion_rate)>0))throw new Error('Unsupported party account currency conversion');
+ return amount*Number(r.conversion_rate);
+}
 function gl(dt, o) {
-  var a = { doctype: dt, fields: o.fields, filters: o.filters || [], order_by: o.order || '', limit_start: o.start || 0, limit_page_length: o.limit || 20 };
+  var a = { doctype: dt, fields: o.fields, filters: o.filters || [], order_by: o.order || '', limit_start: o.start || 0, limit_page_length: o.limit == null ? 20 : o.limit };
   if (o.or && o.or.length) a.or_filters = o.or; if (o.group) a.group_by = o.group; if (o.parent) a.parent = o.parent;
-  return call('frappe.client.get_list', a).then(function (r) { return r.message || []; });
+  return currencyMetadata().then(function(){return call('frappe.client.get_list', a);}).then(function (r) { return r.message || []; });
 }
 function cnt(dt, filters, or) { return gl(dt, { fields: ['count(name) as n'], filters: filters, or: or, limit: 1 }).then(function (r) { return (r[0] && r[0].n) || 0; }); }
 function sumOf(dt, field, filters) { return gl(dt, { fields: ['sum(' + field + ') as s', 'count(name) as n'], filters: filters, limit: 1 }).then(function (r) { return { s: (r[0] && r[0].s) || 0, n: (r[0] && r[0].n) || 0 }; }); }
@@ -244,8 +256,8 @@ var FIELDS = {
  'Payment Entry':['name','posting_date','company','payment_type','party_type','party_name','party','paid_amount','received_amount','mode_of_payment','reference_no','workflow_state','status','docstatus','owner','creation','modified_by','unallocated_amount'],
  'Journal Entry':['name','posting_date','company','voucher_type','total_debit','total_credit','difference','workflow_state','docstatus','owner','creation','modified_by','reversal_of'],
  'Expense Claim':['name','posting_date','company','employee','employee_name','total_claimed_amount','total_sanctioned_amount','total_amount_reimbursed','approval_status','status','workflow_state','docstatus','owner'],
- 'Purchase Invoice':['name','posting_date','due_date','company','supplier','supplier_name','bill_no','currency','conversion_rate','grand_total','base_grand_total','outstanding_amount','status','docstatus','owner','is_return'],
- 'Sales Invoice':['name','posting_date','due_date','company','customer','customer_name','currency','conversion_rate','grand_total','base_grand_total','outstanding_amount','status','docstatus','owner','is_return'],
+ 'Purchase Invoice':['name','posting_date','due_date','company','supplier','supplier_name','bill_no','currency','conversion_rate','grand_total','base_grand_total','outstanding_amount','party_account_currency','status','docstatus','owner','is_return'],
+ 'Sales Invoice':['name','posting_date','due_date','company','customer','customer_name','currency','conversion_rate','grand_total','base_grand_total','outstanding_amount','party_account_currency','status','docstatus','owner','is_return'],
  'Bank Transaction':['name','date','company','bank_account','deposit','withdrawal','unallocated_amount','status','reference_number','currency','docstatus']
 };
 function norm(dt, r) {
@@ -416,8 +428,8 @@ var DETAIL_KEYS = {
  'Payment Entry':['payment_type','posting_date','company','party_type','party','party_name','mode_of_payment','paid_from','paid_to','paid_amount','received_amount','base_paid_amount','unallocated_amount','reference_no','reference_date','cheque_no','workflow_state','status','owner','creation','modified_by','remarks'],
  'Journal Entry':['voucher_type','posting_date','company','total_debit','total_credit','difference','workflow_state','is_opening','reversal_of','cheque_no','owner','creation','modified_by','user_remark'],
  'Expense Claim':['employee','employee_name','company','posting_date','total_claimed_amount','total_sanctioned_amount','total_amount_reimbursed','approval_status','status','workflow_state','expense_approver','mode_of_payment','owner','creation','remark'],
- 'Purchase Invoice':['supplier','supplier_name','company','posting_date','due_date','bill_no','bill_date','currency','conversion_rate','grand_total','base_grand_total','outstanding_amount','status','is_return','owner','creation'],
- 'Sales Invoice':['customer','customer_name','company','posting_date','due_date','currency','conversion_rate','grand_total','base_grand_total','outstanding_amount','status','is_return','owner','creation'],
+ 'Purchase Invoice':['supplier','supplier_name','company','posting_date','due_date','bill_no','bill_date','currency','conversion_rate','grand_total','base_grand_total','outstanding_amount','party_account_currency','status','is_return','owner','creation'],
+ 'Sales Invoice':['customer','customer_name','company','posting_date','due_date','currency','conversion_rate','grand_total','base_grand_total','outstanding_amount','party_account_currency','status','is_return','owner','creation'],
  'Bank Transaction':['date','company','bank_account','deposit','withdrawal','unallocated_amount','allocated_amount','status','reference_number','description','currency']
 };
 var CHILD = { 'Journal Entry':[['accounts','lines',['account','party','debit','credit']]], 'Payment Entry':[['references','refs',['reference_doctype','reference_name','total_amount','outstanding_amount','allocated_amount']]],
@@ -456,8 +468,8 @@ function closeDoc() { q('#fc-modal').hidden = true; }
 function balF(dt, apply) { var f = [['docstatus', '=', 1], ['outstanding_amount', '!=', 0]]; if (S.company) f.push(['company', '=', S.company]); if (apply) { if (S.from) f.push(['posting_date', '>=', S.from]); if (S.to) f.push(['posting_date', '<=', S.to]); } return f; }
 function openF(dt, apply, extra) { return balF(dt, apply).concat([['is_return', '=', 0], ['outstanding_amount', '>', 0]], extra || []); }
 function agg(dt, filters) {
-  return gl(dt, { fields: ['currency', 'conversion_rate', 'count(name) as n', 'sum(outstanding_amount) as o'], filters: filters, group: 'currency,conversion_rate', limit: 1000 })
-    .then(function (rows) { var n = 0, b = 0; rows.forEach(function (r) { n += r.n; b += (r.o || 0) * (r.conversion_rate || 1); }); return { n: n, base: b }; });
+  return gl(dt, { fields: ['company', 'party_account_currency', 'currency', 'conversion_rate', 'count(name) as n', 'sum(outstanding_amount) as o'], filters: filters, group: 'company,party_account_currency,currency,conversion_rate', limit: 0 })
+    .then(function (rows) { var n = 0, b = 0; rows.forEach(function (r) { n += r.n; b += baseBalance(r); }); return { n: n, base: b }; });
 }
 function dueF(from, to) { return [['due_date', 'between', [from, to]]]; }
 
@@ -538,7 +550,7 @@ function attention(pendP, overdueF, v) {
     var h = '<div class="grp"><h4>' + esc(t('grp_oldest')) + '<button class="fc-link" id="at-all1" type="button">' + esc(t('view_all')) + '</button></h4>' +
       (r[0].rows.length ? r[0].rows.map(function (x, i) { return '<div class="it" data-k="p' + i + '"><span>' + esc(x.name) + ' · ' + esc(dtl(x.dt)) + '</span><span class="a">' + n0(Math.max(0, dayDiff(x.date, today()))) + ' d</span></div>'; }).join('') : emptyHTML()) + '</div>';
     h += '<div class="grp"><h4>' + esc(t('grp_overdue')) + '<button class="fc-link" id="at-all2" type="button">' + esc(t('view_all')) + '</button></h4>' +
-      (r[1].length ? r[1].map(function (x, i) { return '<div class="it" data-k="o' + i + '"><span>' + esc(x.name) + ' · ' + esc(x.supplier_name) + '</span><span class="a">' + n0(x.outstanding_amount) + ' ' + esc(x.currency) + '</span></div>'; }).join('') : emptyHTML()) + '</div>';
+      (r[1].length ? r[1].map(function (x, i) { return '<div class="it" data-k="o' + i + '"><span>' + esc(x.name) + ' · ' + esc(x.supplier_name) + '</span><span class="a">' + n0(x.outstanding_amount) + ' ' + esc(x.party_account_currency || x.currency) + '</span></div>'; }).join('') : emptyHTML()) + '</div>';
     h += '<div class="grp"><h4>' + esc(t('grp_exc')) + '<button class="fc-link" id="at-all3" type="button">' + esc(t('view_all')) + '</button></h4>' +
       (r[2].length ? r[2].map(function (x, i) { return '<div class="it" data-k="e' + i + '"><span><span class="fc-badge ' + sevCls(x.sev) + '">' + esc(t('sev_' + x.sev)) + '</span> ' + esc(t(x.label)) + '</span><span class="a">' + n0(x.count) + '</span></div>'; }).join('') : emptyHTML()) + '</div>';
     box.innerHTML = h;
@@ -675,8 +687,8 @@ function ageBuckets(dt, apply) {
   return Promise.all(L.map(function (b) { return agg(dt, openF(dt, apply, b.f)).then(function (a) { return { k: b.k, f: b.f, a: a }; }); }));
 }
 function partyAgg(dt, pf, nf, filters) {
-  return gl(dt, { fields: [pf, nf, 'currency', 'conversion_rate', 'count(name) as n', 'sum(outstanding_amount) as o'], filters: filters, group: pf + ',' + nf + ',currency,conversion_rate', limit: 2000 }).then(function (rows) {
-    var m = {}; rows.forEach(function (r) { var k = r[pf]; var e = m[k] || (m[k] = { id: k, name: r[nf] || k, n: 0, base: 0 }); e.n += r.n; e.base += (r.o || 0) * (r.conversion_rate || 1); });
+  return gl(dt, { fields: [pf, nf, 'company', 'party_account_currency', 'currency', 'conversion_rate', 'count(name) as n', 'sum(outstanding_amount) as o'], filters: filters, group: pf + ',' + nf + ',company,party_account_currency,currency,conversion_rate', limit: 0 }).then(function (rows) {
+    var m = {}; rows.forEach(function (r) { var k = r[pf]; var e = m[k] || (m[k] = { id: k, name: r[nf] || k, n: 0, base: 0 }); e.n += r.n; e.base += baseBalance(r); });
     return Object.keys(m).map(function (k) { return m[k]; }).sort(function (a, b) { return b.base - a.base; });
   });
 }
@@ -684,9 +696,9 @@ function invCols(kind) {
   var pf = kind === 'ap' ? 'supplier_name' : 'customer_name';
   var c = [COL.doc, { l: kind === 'ap' ? 'c_supplier' : 'c_customer', h: function (r) { return td(esc(r.raw[pf] || '—')); } }];
   if (kind === 'ap') c.push({ l: 'c_bill', h: function (r) { return td(esc(r.raw.bill_no || '—')); } });
-  return c.concat([COL.date, { l: 'c_due', h: function (r) { return td(esc(r.raw.due_date || '—')); } }, { l: 'c_cur', h: function (r) { return td(esc(r.raw.currency)); } },
+  return c.concat([COL.date, { l: 'c_due', h: function (r) { return td(esc(r.raw.due_date || '—')); } }, { l: 'c_cur', h: function (r) { return td(esc(r.raw.currency+' (invoice); '+r.raw.party_account_currency+' (outstanding)')); } },
     { l: 'c_inv', num: 1, h: function (r) { return td(n2(r.raw.grand_total), 'num'); } }, { l: 'c_out', num: 1, h: function (r) { return td(n2(r.raw.outstanding_amount), 'num'); } },
-    { l: 'c_outbase', num: 1, h: function (r) { return td(n2((r.raw.outstanding_amount || 0) * (r.raw.conversion_rate || 1)), 'num'); } },
+    { l: 'c_outbase', num: 1, h: function (r) { return td(n2(baseBalance(r.raw)), 'num'); } },
     { l: 'c_overdue', num: 1, h: function (r) { var d = r.raw.due_date ? dayDiff(r.raw.due_date, today()) : 0; return td(d > 0 ? '<span class="fc-badge b-bad">' + n0(d) + '</span>' : '—', 'num'); } }, COL.status]);
 }
 function tabBalances(kind) {
@@ -803,11 +815,11 @@ var EXC_DEFS = [
  { id: 'attach', label: 'x_attach', sev: 'medium' }, { id: 'rejected', label: 'x_rejected', sev: 'medium' },
  { id: 'ap_over', label: 'x_ap_over', sev: 'medium' }, { id: 'ar_over', label: 'x_ar_over', sev: 'medium' }, { id: 'cancelled', label: 'x_cancelled', sev: 'low' }];
 (function () { var en = { x_je_unbal:'Journal debit/credit mismatches', x_unapproved:'Posted without approved workflow state (Payment/Journal)', x_dup_pay:'Duplicate payment references (same party + reference)',
-  x_dup_bill:'Duplicate supplier invoice numbers (same supplier + bill no.)', x_period:'Posted after accounting period was closed', x_same_user:'Created and approved by the same user', x_unalloc:'Unallocated payments',
+  x_dup_bill:'Duplicate supplier invoice numbers (same supplier + bill no.)', x_period:'Backdated documents in a currently closed period (review required)', x_same_user:'Created and approved by the same user', x_unalloc:'Unallocated payments',
   x_backdated:'Backdated transactions (posting date > ' + BACKDATE_DAYS + ' days before creation)', x_attach:'Missing supporting attachments (latest ' + ATTACH_SAMPLE + ' per type)', x_rejected:'Rejected workflow records',
   x_ap_over:'Overdue supplier invoices', x_ar_over:'Overdue customer invoices', x_cancelled:'Cancelled financial transactions' };
   var ar = { x_je_unbal:'عدم توازن مدين/دائن في القيود', x_unapproved:'مرحّل دون حالة اعتماد (دفع/قيود)', x_dup_pay:'مراجع دفع مكررة (نفس الطرف + المرجع)', x_dup_bill:'أرقام فواتير موردين مكررة (نفس المورد + الرقم)',
-  x_period:'مرحّل بعد إغلاق الفترة المحاسبية', x_same_user:'أنشأه واعتمده المستخدم نفسه', x_unalloc:'مدفوعات غير مخصصة', x_backdated:'معاملات بأثر رجعي (تاريخ الترحيل قبل الإنشاء بأكثر من ' + BACKDATE_DAYS + ' أيام)',
+  x_period:'مستندات بأثر رجعي ضمن فترة مغلقة — تتطلب المراجعة', x_same_user:'أنشأه واعتمده المستخدم نفسه', x_unalloc:'مدفوعات غير مخصصة', x_backdated:'معاملات بأثر رجعي (تاريخ الترحيل قبل الإنشاء بأكثر من ' + BACKDATE_DAYS + ' أيام)',
   x_attach:'مرفقات داعمة مفقودة (آخر ' + ATTACH_SAMPLE + ' لكل نوع)', x_rejected:'سجلات سير عمل مرفوضة', x_ap_over:'فواتير موردين متأخرة', x_ar_over:'فواتير عملاء متأخرة', x_cancelled:'معاملات مالية ملغاة' };
   Object.assign(I18N.en, en); Object.assign(I18N.ar, ar); })();
 
@@ -816,11 +828,11 @@ function groupDrill(title, dt, gf, nameF, dupF) {
     loader: function (p, s) { return dupGroups(dt, gf).then(function (g) { return staticLoader(g)(p, s); }); },
     onRow: function (r) { openDrill(r.k1 + ' · ' + r.k2, { parts: [{ dt: dt, filters: base(dt).concat(dupF(r)) }] }); } };
 }
-function dupGroups(dt, gf) {
-  var f = dt === 'Payment Entry' ? base(dt).concat([['docstatus', '=', 1], ['reference_no', 'is', 'set']]) : base(dt).concat([['docstatus', '=', 1], ['is_return', '=', 0], ['bill_no', 'is', 'set']]);
-  var k1 = dt === 'Payment Entry' ? 'party' : 'supplier', k2 = dt === 'Payment Entry' ? 'reference_no' : 'bill_no';
-  return gl(dt, { fields: [k1, k2, 'count(name) as n'], filters: f, group: k1 + ',' + k2, order: 'count(name) desc', limit: 300 }).then(function (r) {
-    return r.filter(function (x) { return x.n > 1; }).map(function (x) { return { k1: x[k1], k2: x[k2], n: x.n }; }); });
+async function dupGroups(dt, gf) {
+ var f=dt==='Payment Entry'?base(dt).concat([['docstatus','=',1],['reference_no','is','set']]):base(dt).concat([['docstatus','=',1],['is_return','=',0],['bill_no','is','set']]);
+ var k1=dt==='Payment Entry'?'party':'supplier',k2=dt==='Payment Entry'?'reference_no':'bill_no', rows=[],offset=0;
+ while(true){var page=await gl(dt,{fields:[k1,k2,'count(name) as n'],filters:f,group:k1+','+k2,order:k1+' asc,'+k2+' asc',start:offset,limit:500});rows=rows.concat(page);if(page.length<500)break;offset+=page.length;}
+ return rows.filter(function(x){return x.n>1;}).map(function(x){return {k1:x[k1],k2:x[k2],n:x.n};});
 }
 function missingAttach(dt) {
   var f = base(dt).concat([['docstatus', '=', 1]]);
@@ -831,7 +843,7 @@ function missingAttach(dt) {
       return { rows: r[0].filter(function (x) { return !has[x.name]; }).map(function (x) { return norm(dt, x); }), total: r[1], scanned: r[0].length }; }); });
 }
 function periodHits() {
-  var f = [['disabled', '=', 0]]; if (S.company) f.push(['company', '=', S.company]); if (S.from) f.push(['end_date', '>=', S.from]); if (S.to) f.push(['start_date', '<=', S.to]);
+  var f = []; if (S.company) f.push(['company', '=', S.company]); if (S.from) f.push(['end_date', '>=', S.from]); if (S.to) f.push(['start_date', '<=', S.to]);
   return gl('Accounting Period', { fields: ['name', 'company', 'start_date', 'end_date'], filters: f, limit: 200 }).then(function (ps) {
     if (!ps.length) return { hits: [], checked: 0, total: 0 };
     return gl('Closed Document', { parent: 'Accounting Period', fields: ['parent', 'document_type'], filters: [['closed', '=', 1], ['parent', 'in', ps.map(function (p) { return p.name; })], ['document_type', 'in', ['Payment Entry', 'Journal Entry', 'Purchase Invoice', 'Sales Invoice', 'Expense Claim']]], limit: 1000 }).then(function (cd) {
@@ -854,8 +866,8 @@ function excRun(id) {
     case 'cancelled': pr = C(['Payment Entry', 'Journal Entry', 'Purchase Invoice', 'Sales Invoice', 'Expense Claim'].map(function (d) { return { dt: d, filters: base(d).concat([['docstatus', '=', 2]]) }; }), 'confirmed', 'docstatus = 2 (all records)'); break;
     case 'ap_over': pr = C([{ dt: 'Purchase Invoice', filters: openF('Purchase Invoice', false, [['due_date', '<', T]]) }], 'confirmed', 'due_date < today and outstanding > 0 (all records; balance view)'); break;
     case 'ar_over': pr = C([{ dt: 'Sales Invoice', filters: openF('Sales Invoice', false, [['due_date', '<', T]]) }], 'confirmed', 'due_date < today and outstanding > 0 (all records; balance view)'); break;
-    case 'dup_pay': pr = dupGroups(PE).then(function (g) { return { count: g.length, conf: 'confirmed', basis: 'Same party + reference_no on ≥ 2 submitted Payment Entries (top 300 groups)', drill: groupDrill('', PE, 0, 0, function (r) { return [['party', '=', r.k1], ['reference_no', '=', r.k2], ['docstatus', '=', 1]]; }) }; }); break;
-    case 'dup_bill': pr = dupGroups('Purchase Invoice').then(function (g) { return { count: g.length, conf: 'confirmed', basis: 'Same supplier + bill_no on ≥ 2 submitted invoices (top 300 groups)', drill: groupDrill('', 'Purchase Invoice', 0, 0, function (r) { return [['supplier', '=', r.k1], ['bill_no', '=', r.k2], ['docstatus', '=', 1], ['is_return', '=', 0]]; }) }; }); break;
+    case 'dup_pay': pr = dupGroups(PE).then(function (g) { return { count: g.length, conf: 'confirmed', basis: 'Same party + reference_no on ≥ 2 submitted Payment Entries (all groups, paginated)', drill: groupDrill('', PE, 0, 0, function (r) { return [['party', '=', r.k1], ['reference_no', '=', r.k2], ['docstatus', '=', 1]]; }) }; }); break;
+    case 'dup_bill': pr = dupGroups('Purchase Invoice').then(function (g) { return { count: g.length, conf: 'confirmed', basis: 'Same supplier + bill_no on ≥ 2 submitted invoices (all groups, paginated)', drill: groupDrill('', 'Purchase Invoice', 0, 0, function (r) { return [['supplier', '=', r.k1], ['bill_no', '=', r.k2], ['docstatus', '=', 1], ['is_return', '=', 0]]; }) }; }); break;
     case 'backdated': pr = Promise.all([backdatedRows(JE), backdatedRows(PE)]).then(function (r) { var hits = r[0].hits.concat(r[1].hits), capped = r[0].capped || r[1].capped;
       return { count: hits.length, conf: capped ? 'indicative' : 'confirmed', basis: 'posting_date earlier than creation date by > ' + BACKDATE_DAYS + ' days; ' + t('scanned', { a: n0(r[0].rows.length + r[1].rows.length), b: n0(r[0].total + r[1].total) }), drill: { cols: GEN_COLS, loader: staticLoader(hits), onRow: function (x) { openDoc(x.dt, x.name); }, onAct: function (a, v, x) { openDoc(x.dt, x.name); } } }; }); break;
     case 'same_user': pr = Promise.all([scan(JE, [['workflow_state', '=', 'Approved']]), scan(PE, [['workflow_state', '=', 'Approved']])]).then(function (r) {
@@ -864,7 +876,7 @@ function excRun(id) {
     case 'attach': pr = Promise.all([PE, JE, 'Purchase Invoice'].map(missingAttach)).then(function (r) { var rows = [].concat.apply([], r.map(function (x) { return x.rows; })); var cap = r.some(function (x) { return x.scanned < x.total; });
       return { count: rows.length, conf: cap ? 'indicative' : 'confirmed', basis: 'No File attached (File doctype) among the latest ' + ATTACH_SAMPLE + ' submitted records per type', drill: { cols: GEN_COLS, loader: staticLoader(rows), onRow: function (x) { openDoc(x.dt, x.name); }, onAct: function (a, v, x) { openDoc(x.dt, x.name); } } }; }); break;
     case 'period': pr = periodHits().then(function (r) { var rows = r.hits;
-      return { count: sum(rows.map(function (x) { return x.n; })), conf: r.checked < r.total ? 'indicative' : 'confirmed', basis: 'Closed Accounting Period + document created after period end (' + r.checked + '/' + r.total + ' period-type checks). Users with an exempted role may legitimately post.',
+      return { count: sum(rows.map(function (x) { return x.n; })), conf: 'indicative', basis: 'Current closed period; creation is after period end, not verified closure/submission time (' + r.checked + '/' + r.total + ' period-type checks). Users with an exempted role may legitimately post.',
         drill: { cols: [{ l: 'c_exc', h: function (x) { return td(esc(x.p.name + ' · ' + dtl(x.dt))); } }, { l: 'c_cnt', num: 1, h: function (x) { return td(n0(x.n), 'num'); } }], loader: staticLoader(rows), onRow: function (x) { openDrill(x.p.name + ' · ' + dtl(x.dt), { parts: [{ dt: x.dt, filters: x.filters }] }); } } }; }); break;
   }
   EXC_CACHE[key] = pr; pr.catch(function () { delete EXC_CACHE[key]; }); return pr;
@@ -967,3 +979,12 @@ gl('Company', { fields: ['name'], filters: [], order: 'name asc', limit: 50 }).c
   loadWfStates(); showTab(S.tab, true);
 });
 })();
+
+/* ==== DM theme sync v1 · generated by tools/erp/shell/dark_theme.py ==== */
+;(function () {
+  var r = typeof root_element !== 'undefined' ? root_element : null, h = r && r.host;
+  if (!h || h.__dmsTheme) return; h.__dmsTheme = 1;
+  var s = function () { h.setAttribute('data-dms-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'); };
+  s(); new MutationObserver(s).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+})();
+/* ==== end DM theme sync v1 ==== */

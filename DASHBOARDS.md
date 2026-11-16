@@ -18,7 +18,7 @@ Each dashboard contains `dashboard.js`, `dashboard.css`, `dashboard.html`, its o
 | [10. Communication & Productivity](10.%20Communication%20%26%20Productivity/README.md) | 2 |
 | [11. To Be Classified](11.%20To%20Be%20Classified/README.md) | 0 |
 
-Unresolved names: Customer Dashboard, PN Dashboard.
+Unused Customer Dashboard and PN Dashboard placeholders were removed. Customs & Post-Procurement is under Procurement & Supply Chain.
 
 Quotation & SO Tracker maps to Sales CRM & Conversion Tracker Dashboard, whose source uses that displayed title. Blocked Customer Dashboard contains the six department-specific ERP blocks.
 
@@ -27,3 +27,5 @@ Finance Manager, Finance Internal Controller, Digital Marketing, Production, and
 Existing local SOA working files are in each dashboard?s `local/` folder. Their shared backend is in `04. Finance & Credit Control/Shared Server Scripts/`. Executive Secretary is under HR & Administration.
 
 Export and organization utilities are under [tools/erp](tools/erp/README.md). Credentials are in ignored `config/erpapi.env`; temporary exports, logs, and ERP map files are under ignored `.local/`.
+
+Reusable folder navigation block: [Folder Workspace Navigation](shared/Folder%20Workspace%20Navigation/README.md). One block can be added to every folder; child cards follow native Workspace visibility.

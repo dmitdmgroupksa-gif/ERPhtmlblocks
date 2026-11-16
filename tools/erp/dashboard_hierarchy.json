@@ -8,7 +8,6 @@
     "My Leads": "My Leads Dashboard",
     "Lead Management": "Lead Management Dashboard",
     "DMS Sales Management": "DMS Sales Manager Dashboard",
-    "Customer Dashboard": null,
     "Quotation & SO Tracker": "Sales CRM & Conversion Tracker Dashboard"
   },
   "03. Procurement & Supply Chain": {
@@ -75,7 +74,5 @@
     "Durar Messenger": "Durar Messenger",
     "Durar Sheets": "Durar Sheets"
   },
-  "11. To Be Classified": {
-    "PN Dashboard": null
-  }
+  "11. To Be Classified": {}
 }

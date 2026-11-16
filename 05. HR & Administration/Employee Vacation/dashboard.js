@@ -14,8 +14,8 @@ const fmtS=s=>s?D(s).toLocaleDateString("en-GB",{day:"2-digit",month:"short"}):"
 const sar=n=>(Number(n)||0).toLocaleString("en-US",{maximumFractionDigits:0});
 const dShort=d=>(d||"None").split(" - ")[0];
 const dLong=d=>{const p=(d||"").split(" - ");return p.length>1?p[1].toLowerCase().replace(/\b\w/g,c=>c.toUpperCase()).replace(/ Dmg$/,""):d};
-const ST={"Overdue":"crit","On Vacation":"info","Not Yet Departed":"warn","Upcoming":"mute","Re-joined":"good","Completed":"good"};
-const ST_ORDER=["Overdue","On Vacation","Not Yet Departed","Upcoming","Re-joined","Completed"];
+const ST={"Overdue":"crit","On Vacation":"info","Not Yet Departed":"warn","Upcoming":"mute","Re-joined":"good","Completed":"good","Return Unverified":"warn"};
+const ST_ORDER=["Overdue","On Vacation","Not Yet Departed","Upcoming","Re-joined","Completed","Return Unverified"];
 const COL={crit:"var(--crit)",warn:"var(--warn)",good:"var(--good)",info:"var(--info)",mute:"var(--mute)",accent:"var(--accent)"};
 const chip=(t,c)=>`<span class="chip c-${c}">${esc(t)}</span>`;
 const sChip=s=>s?chip(s==="Completed"?"Completed":s,ST[s]||"mute"):"–";
@@ -299,7 +299,7 @@ const tip=$("#tip");
 R.addEventListener("pointermove",e=>{const t=e.target.closest&&e.target.closest("[data-tip]");if(!t){tip.hidden=true;return}tip.textContent=t.dataset.tip;tip.hidden=false;tip.style.left=Math.min(e.clientX+14,innerWidth-270)+"px";tip.style.top=(e.clientY+14)+"px"});
 
 /* ---------- data from ERPNext doctypes ---------- */
-const LEAVE_TYPES=["Annual Leave DIRECT","Annual Leave INDIRECT"], MIN_DAYS=2, EX_LOC=["back office","work at home","work from home","work at site"];
+const LEAVE_TYPES=["Annual Leave DIRECT","Annual Leave INDIRECT"], MIN_DAYS=0, EX_LOC=["back office","work at home","work from home","work at site"];
 const exLoc=l=>EX_LOC.includes(String(l||"").trim().toLowerCase());
 const get=(doctype,fields,filters)=>frappe.xcall("frappe.client.get_list",{doctype,fields,filters:filters||[],limit_page_length:0});
 
@@ -322,15 +322,11 @@ function build(leave,evr,emps,comps){
           re:e.reentry_status,reexp:e.reentry_expiry_date,redays:e.reentry_days_left,prio:e.action_priority||"",cm:e.action_comment||"",abs:e.absence_reported});
       }else{
         Object.assign(r,{exp:addDays(l.to_date,1),rev:null,act:null,over:0,tk:"No Ticket Record",tkno:null,air:null,cl:0,rc:0,pd:0,rf:"Not Applicable",re:null,reexp:null,redays:0,prio:"",cm:"",abs:0,
-          st:SNAP<l.from_date?"Upcoming":SNAP<=l.to_date?"On Vacation":"Completed"});
+          st:SNAP<l.from_date?"Upcoming":SNAP<=l.to_date?"On Vacation":"Return Unverified"});
       }
       r.late=(r.act&&r.exp)?Math.max(0,days(r.exp,r.act)):0;r.rejoin=r.rev||r.exp;
       return r;
     });
-  // an employee with several overdue records: only the latest stays overdue
-  const latest={};
-  DATA.filter(r=>r.st==="Overdue").forEach(r=>{if(!latest[r.employee]||r.frm>latest[r.employee].frm)latest[r.employee]=r});
-  DATA.forEach(r=>{if(r.st==="Overdue"&&latest[r.employee]!==r){r.st="Completed";r.over=0;r.prio="";r.cm=""}});
   COMPANIES=comps.map(c=>c.name).sort();
 }
 function fillFilters(){
@@ -346,7 +342,7 @@ async function load(){
   try{
     const [leave,evr,emps,comps]=await Promise.all([
       get("Leave Application",["name","employee","employee_name","company","department","leave_type","from_date","to_date","total_leave_days","status","docstatus","workflow_state","custom_destination","custom_reentry_date_as_per_exitentry","custom_job_location"],
-        [["leave_type","in",LEAVE_TYPES],["total_leave_days",">",MIN_DAYS],["status","=","Approved"],["docstatus","=",1],["to_date",">=",SNAP.slice(0,4)+"-01-01"]]),
+        [["leave_type","in",LEAVE_TYPES],["total_leave_days",">",MIN_DAYS],["status","=","Approved"],["docstatus","=",1]]),
       get("Employee Vacation Record",["name","employee","leave_application","vacation_from","vacation_to","revised_rejoin_date","expected_rejoin_date","actual_rejoin_date","vacation_status","days_overdue","ticket_no","airline","ticket_status","refund_claimed","refund_received","refund_pending","refund_status","reentry_expiry_date","reentry_status","reentry_days_left","absence_reported","action_priority","action_comment"]),
       get("Employee",["name","employee_name","company","department","custom_job_location","status"]),
       get("Company",["name"])

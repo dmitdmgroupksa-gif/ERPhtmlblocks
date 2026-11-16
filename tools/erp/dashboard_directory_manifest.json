@@ -30,7 +30,9 @@
       "name": "DMCC Dashboard",
       "directory": "01. Leadership & Corporate/DMCC Dashboard",
       "modified": "2026-11-08 14:32:34.336413",
-      "server_scripts": []
+      "server_scripts": [
+        "01. Leadership & Corporate/DMCC Dashboard/server_scripts/dmcc_dashboard_proxy.py"
+      ]
     },
     {
       "name": "My Leads Dashboard",
@@ -292,7 +294,8 @@
         "07. IT & Digital Systems/ERP User Access/server_scripts/user_access_analytics_29d483ec.py",
         "07. IT & Digital Systems/ERP User Access/server_scripts/user_access_period_f6f5474c.py",
         "07. IT & Digital Systems/ERP User Access/server_scripts/user_access_roles_325182d2.py",
-        "07. IT & Digital Systems/ERP User Access/server_scripts/user_access_summary_40e2f275.py"
+        "07. IT & Digital Systems/ERP User Access/server_scripts/user_access_summary_40e2f275.py",
+        "07. IT & Digital Systems/ERP User Access/server_scripts/user_access_directory.py"
       ]
     },
     {
@@ -390,20 +393,11 @@
       ]
     }
   ],
-  "unresolved": [
-    {
-      "label": "Customer Dashboard",
-      "directory": "02. Sales & CRM/Customer Dashboard"
-    },
-    {
-      "label": "PN Dashboard",
-      "directory": "11. To Be Classified/PN Dashboard"
-    }
-  ],
+  "unresolved": [],
   "files": [
     {
       "path": "01. Leadership & Corporate/CEO Command Center/dashboard.js",
-      "sha256": "f114e25404f4a2e9e60013a01cd64c4cc62d6a1d528b702155be06aed014d1c7"
+      "sha256": "a16542202aa29a832f02ae3b760da0e8fad85f470b21d3b62689c14324237f64"
     },
     {
       "path": "01. Leadership & Corporate/CEO Command Center/dashboard.css",
@@ -435,7 +429,7 @@
     },
     {
       "path": "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_legal_taradhi_dee38552.py",
-      "sha256": "18f5ae7a636b96f3cc744ada46199b84cbbf60537b0913a7c8863318308c42d6"
+      "sha256": "ea3afc1989fbb7d67eb845230a52a912dd6cd662d88d549734d68467477c896a"
     },
     {
       "path": "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_legal_taradhi_dee38552.json",
@@ -531,7 +525,7 @@
     },
     {
       "path": "01. Leadership & Corporate/DMCC Dashboard/dashboard.js",
-      "sha256": "7839db03e5a34f8de8d1803ae784c93ed2e98beb8fc06afa3d26b95af047a1d1"
+      "sha256": "0fc25128464f1c4d65d97956ea117807f135832f56962bfa6d086462c4e9b827"
     },
     {
       "path": "01. Leadership & Corporate/DMCC Dashboard/dashboard.css",
@@ -543,11 +537,11 @@
     },
     {
       "path": "01. Leadership & Corporate/DMCC Dashboard/source.json",
-      "sha256": "23dad401edf594b9490b12976cd2b99436acd1f64f27bbdfa0360b4a5a57ac8d"
+      "sha256": "9f7aa4ef2dc3ca7a1f1fe397f586d25fc7c2ae951010496cdaf520083ff92fce"
     },
     {
       "path": "01. Leadership & Corporate/DMCC Dashboard/README.md",
-      "sha256": "8a235497d932802999d60e485deb83a7dfd6886caaf333a5295b22c973552338"
+      "sha256": "1bdcd46c74062178f40c34fb46c2f9577dda88faff839a2aa2e2a1b12a7204dd"
     },
     {
       "path": "02. Sales & CRM/My Leads/dashboard.js",
@@ -666,10 +660,6 @@
       "sha256": "173ec8306464db44ea605e1588f82cfdfdb8576a904fd6d0f1b064045ca695f1"
     },
     {
-      "path": "02. Sales & CRM/Customer Dashboard/README.md",
-      "sha256": "941bbe6a04e3e75417971ed2a219869616248b6d36cb45cd716520119d7adbd3"
-    },
-    {
       "path": "02. Sales & CRM/Quotation & SO Tracker/dashboard.js",
       "sha256": "8d2671a431e0d5c6cee7531f8862840760cb2c2816274128c3ecc9e77652de2e"
     },
@@ -691,7 +681,7 @@
     },
     {
       "path": "03. Procurement & Supply Chain/Pre-Procurement/dashboard.js",
-      "sha256": "91eac9ea8dce829ac0844c55677691c0fd3fc0d1febf20c648d193c2ce1645f9"
+      "sha256": "6b0ed662902ee4081daaadcced7c6668c94d01806b2bbf87a3b0f7e98872332b"
     },
     {
       "path": "03. Procurement & Supply Chain/Pre-Procurement/dashboard.css",
@@ -731,7 +721,7 @@
     },
     {
       "path": "03. Procurement & Supply Chain/Customs & Post-Processing/dashboard.js",
-      "sha256": "d17c200d61c93c42814110d8146ef7159798665c0140410a68485c8460e8e329"
+      "sha256": "0c63fc772d08a21be350b45107a5f927b394914e0d947e14ccf7a8c601241564"
     },
     {
       "path": "03. Procurement & Supply Chain/Customs & Post-Processing/dashboard.css",
@@ -751,15 +741,15 @@
     },
     {
       "path": "03. Procurement & Supply Chain/Inventory Dashboard/dashboard.js",
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      "sha256": "b0aa47ed510bcc2e63b118940097c5f1bebdbb2d2625e97649378e5e5f36e9b8"
     },
     {
       "path": "03. Procurement & Supply Chain/Inventory Dashboard/dashboard.css",
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      "sha256": "f5d3fe192d65464ec75017bbebd50df3a61cac8bc4f9c7c604b9f0dc92c5ef0d"
     },
     {
       "path": "03. Procurement & Supply Chain/Inventory Dashboard/dashboard.html",
-      "sha256": "2363cea37ee0f5e167d6ba452a59251cdd8203e1b7d3b2a937f0b0d90439d9a8"
+      "sha256": "1aed8b513f25b603daacd13eda676edd37efeff18c005dd438b4403dca1d80cf"
     },
     {
       "path": "03. Procurement & Supply Chain/Inventory Dashboard/source.json",
@@ -767,11 +757,11 @@
     },
     {
       "path": "03. Procurement & Supply Chain/Inventory Dashboard/README.md",
-      "sha256": "24f972703c6e4a535300e4fd452ee8c8922b538241e49f3dc650e4bb026e412e"
+      "sha256": "23e2aeacc66f0801f333f18c97b3009897e868513088228674235a99a98e111b"
     },
     {
       "path": "04. Finance & Credit Control/Accounts Payable/dashboard.js",
-      "sha256": "626f304deef09c44ed62301e6c1cb9e94181d31a2ded5259ffb9ecd32d7eb2c4"
+      "sha256": "0bfadac39bad6526551a03df9c4a0e57162a6630549c7191abd8742c3ed5255f"
     },
     {
       "path": "04. Finance & Credit Control/Accounts Payable/dashboard.css",
@@ -859,7 +849,7 @@
     },
     {
       "path": "04. Finance & Credit Control/Credit Controller Dashboard/dashboard.js",
-      "sha256": "1f37edefde3f0f80689ce3ecf0e11f3d3d9bf6524433c400a84a19ffb209e9b5"
+      "sha256": "218c872933698c69e45439d84616e250ed0cdd81190188f9b76230dc4a497c4a"
     },
     {
       "path": "04. Finance & Credit Control/Credit Controller Dashboard/dashboard.css",
@@ -879,7 +869,7 @@
     },
     {
       "path": "04. Finance & Credit Control/Blocked Customer Dashboard/CP Blocked Customer/dashboard.js",
-      "sha256": "6e813f812a813780b3a127d7d03931e8ce05c6067a0d223934be3796a726b68f"
+      "sha256": "849701266b388233d0423c972b51b7e2c7fe5c5fa98cf5f24243e87937abad5a"
     },
     {
       "path": "04. Finance & Credit Control/Blocked Customer Dashboard/CP Blocked Customer/dashboard.css",
@@ -899,7 +889,7 @@
     },
     {
       "path": "04. Finance & Credit Control/Blocked Customer Dashboard/CSD Blocked Customer/dashboard.js",
-      "sha256": "be06721a7416b4e814184e228017415cac54a0d3676dac32e131bdc526602322"
+      "sha256": "e47caba42054495e327c43518d498caf05fed8271e0228a428aae24a61717c66"
     },
     {
       "path": "04. Finance & Credit Control/Blocked Customer Dashboard/CSD Blocked Customer/dashboard.css",
@@ -919,7 +909,7 @@
     },
     {
       "path": "04. Finance & Credit Control/Blocked Customer Dashboard/EP Blocked Customer/dashboard.js",
-      "sha256": "8247613301315d2b816b1275a418f2119fa173d79258b91c72a11e03c021ff59"
+      "sha256": "5626ce81e1a3215ac51a4fbccd16b4bed56bfc067afdb7ca5a1a2fa2cf5e0772"
     },
     {
       "path": "04. Finance & Credit Control/Blocked Customer Dashboard/EP Blocked Customer/dashboard.css",
@@ -939,7 +929,7 @@
     },
     {
       "path": "04. Finance & Credit Control/Blocked Customer Dashboard/MP Blocked Customer/dashboard.js",
-      "sha256": "4f4f6cda6957e8ef301b3ce030027ad931562920cdbeb23e53b3797983773a05"
+      "sha256": "039de287cd97f190a153908c7c64e8c113727b31eb207255585387f985c00e44"
     },
     {
       "path": "04. Finance & Credit Control/Blocked Customer Dashboard/MP Blocked Customer/dashboard.css",
@@ -959,7 +949,7 @@
     },
     {
       "path": "04. Finance & Credit Control/Blocked Customer Dashboard/SRD Blocked Customer/dashboard.js",
-      "sha256": "a7e021741105bc6d69053fcc70a672ad9eeff388dbffd635d56706282a332517"
+      "sha256": "14b824a67763af911b8df154e55991e3e14fa4e1a34be32a21cfbc22ddfb5ccc"
     },
     {
       "path": "04. Finance & Credit Control/Blocked Customer Dashboard/SRD Blocked Customer/dashboard.css",
@@ -979,7 +969,7 @@
     },
     {
       "path": "04. Finance & Credit Control/Blocked Customer Dashboard/WP Blocked Customer/dashboard.js",
-      "sha256": "65883212317ba8a05a18abdf000c8e600ca693de3e44743e95fe7c94fda2eba7"
+      "sha256": "cbc419da295a1ce6d15da147725cb6c7552d55d924ca73eb47c03b74b553114a"
     },
     {
       "path": "04. Finance & Credit Control/Blocked Customer Dashboard/WP Blocked Customer/dashboard.css",
@@ -1127,7 +1117,7 @@
     },
     {
       "path": "04. Finance & Credit Control/Finance Internal Controller/dashboard.js",
-      "sha256": "4174fc1d793393801c5b66d6c5501e28c22b1c8f35f6d45c9e45254e0c1676cd"
+      "sha256": "edb1b42edd96aabcbd8f35741197ab7295c5bbf13a00ba1e2c6d2c574b6d4f44"
     },
     {
       "path": "04. Finance & Credit Control/Finance Internal Controller/dashboard.css",
@@ -1287,7 +1277,7 @@
     },
     {
       "path": "05. HR & Administration/Employee Vacation/dashboard.js",
-      "sha256": "e153838807af81374ad52e3903116d2ade895b5ea280727f0d3f183ad2cf650e"
+      "sha256": "ec177fa5487b31df0681cf0ad3599aef5f7b30c22111f8c4e590ffd23724cb4d"
     },
     {
       "path": "05. HR & Administration/Employee Vacation/dashboard.css",
@@ -1435,7 +1425,7 @@
     },
     {
       "path": "06. Technical & Projects/DM Contracting Dashboard/dashboard.js",
-      "sha256": "c9da0c62b66218031adf0c02343a2974f24bf4f798531f2acce5bdd29ddc60be"
+      "sha256": "a203e592a96187fe46f2c6aaf7a24b5c9a1200dc69a1d51f9004c65f8535a8be"
     },
     {
       "path": "06. Technical & Projects/DM Contracting Dashboard/dashboard.css",
@@ -1543,11 +1533,11 @@
     },
     {
       "path": "07. IT & Digital Systems/ERP User Access/README.md",
-      "sha256": "07af09c49fb30f9dae7a2e40a4f50378a57f5e78967c8ad4195ba86038d1eb78"
+      "sha256": "4374b36e3a5c0430bb7c90e26999eabf7bd1518e558cd075a958970f91882417"
     },
     {
       "path": "07. IT & Digital Systems/Digital Marketing Dashboard/dashboard.js",
-      "sha256": "ea377944dfc4e79937a7db45db8c036e83b5e13e440daeab654d948628cab5ec"
+      "sha256": "5b12c668025adac43089bf1b5180a48fc6e401eea578c4844d233a4c987aa31e"
     },
     {
       "path": "07. IT & Digital Systems/Digital Marketing Dashboard/dashboard.css",
@@ -1675,7 +1665,7 @@
     },
     {
       "path": "08. Operations & Logistics/Scaffolding Rental/dashboard.js",
-      "sha256": "c41f9d94b6933d0168d4b523dc1a9eade231eca9a940d70d179cbf7931503da7"
+      "sha256": "10244f8aa6b5038bd04fa01fc6d049c0f35f81bb955d421a074c329928975ebb"
     },
     {
       "path": "08. Operations & Logistics/Scaffolding Rental/dashboard.css",
@@ -1739,15 +1729,15 @@
     },
     {
       "path": "08. Operations & Logistics/Production Dashboard/dashboard.js",
-      "sha256": "5a449b375367ec4307ad51b23de7872137f08a36b9dd11fd2b41c356f570290e"
+      "sha256": "6835de1a90850a35de2485464b020a01c6773beecd8512784d3699d1ed1d53cc"
     },
     {
       "path": "08. Operations & Logistics/Production Dashboard/dashboard.css",
-      "sha256": "6fa8af4750c033e7882f0e14bc1fecfd7e646a3aa442159b203946f68afa6f7d"
+      "sha256": "03cdde0d68e85a4ce1935d7331fbc5aa4adc58faa615109ea7a014b3f4a4a22a"
     },
     {
       "path": "08. Operations & Logistics/Production Dashboard/dashboard.html",
-      "sha256": "e4c528fb8cbea77e097d007eb5cda536ab3c9ebef4f1489ffd65d99768be7033"
+      "sha256": "1b0f79d28bf599df03993d37810c24a20070b7dbeba691362d7dfded28a04332"
     },
     {
       "path": "08. Operations & Logistics/Production Dashboard/source.json",
@@ -1755,7 +1745,7 @@
     },
     {
       "path": "08. Operations & Logistics/Production Dashboard/README.md",
-      "sha256": "516d2de985673c0a38329cd52f89133846f6fd73b79cdaa454e7d6946d18c843"
+      "sha256": "18794f779f0a30c4b1ca95164349bc6895a7c0a455ac5e3dc6e60f9e9a16f356"
     },
     {
       "path": "08. Operations & Logistics/Plant & Furniture Asset Dashboard/dashboard.js",
@@ -1874,16 +1864,12 @@
       "sha256": "940134e7b0fb89a5cb427f1bb6c959a0687bf058b88cb0465efb14b28e2fdceb"
     },
     {
-      "path": "11. To Be Classified/PN Dashboard/README.md",
-      "sha256": "df98dedbad31ea7bcd675a83f191607d917330df2ded0cea6216521baae67a8a"
-    },
-    {
       "path": "01. Leadership & Corporate/README.md",
       "sha256": "c49ec69f5822272f6d8cb10260c2840bd3b89fb104b71787d675be99c5146531"
     },
     {
       "path": "02. Sales & CRM/README.md",
-      "sha256": "d4f920ee6391246e091e80a6bca12db865070e269e3f7817b4e0ee0accca0e1d"
+      "sha256": "c0bd7703b9606549896c5d0416391a13419f1429eb4fd306fdeae769fdc25ddf"
     },
     {
       "path": "03. Procurement & Supply Chain/README.md",
@@ -1919,11 +1905,87 @@
     },
     {
       "path": "11. To Be Classified/README.md",
-      "sha256": "449de1bc09255bd94fa678d4c1deab6a737495af1a66b21f8731524e88e01a82"
+      "sha256": "76feda33c46a567a96e667ceb96fc64b58530f9fc63071b5805a2cfe47f70bc1"
     },
     {
       "path": "DASHBOARDS.md",
-      "sha256": "fd6d7ff2d159d6587586f40ec6c6a6b5b8e1f7ae2e4998470f8ec6a0e2ed12dc"
+      "sha256": "ceaca063e57073065877773998a0daaee3e8bec74e2f7ed45c109d4e96244e3a"
+    },
+    {
+      "path": "01. Leadership & Corporate/DMCC Dashboard/dmcc_integration_settings.json",
+      "sha256": "bb2dfe7d2bec498c2d6768a42cd8bd4895e9cffd6e1a2119b1f39c203e9f37a1"
+    },
+    {
+      "path": "01. Leadership & Corporate/DMCC Dashboard/server_scripts/dmcc_dashboard_proxy.py",
+      "sha256": "de121a3a5342f731b00c1a478d13b06671dd54690542050ec14715f98e3b26e3"
+    },
+    {
+      "path": "04. Finance & Credit Control/Collector/local/soa_collector_dashboard.css",
+      "sha256": "63dfb95f94f6d4261cdd4efedbf246e3e84aca79cc590c8f6adb27a227993e42"
+    },
+    {
+      "path": "04. Finance & Credit Control/Collector/local/soa_collector_dashboard.js",
+      "sha256": "fa2ba201ab85f870a0f202504ad64155933bc071b0c6a76b6ca226864b89e22c"
+    },
+    {
+      "path": "04. Finance & Credit Control/Shared Server Scripts/collections_daily_build.py",
+      "sha256": "6e64decff1fdd77f9a135ed7cbbcf39ec0e5d3771dc8afc75f16a0e7c2ef568f"
+    },
+    {
+      "path": "04. Finance & Credit Control/Shared Server Scripts/README.md",
+      "sha256": "beebd3a105e99f9fa42ed6bcd04556b93b2d02dc37151baaf6332c143c747319"
+    },
+    {
+      "path": "04. Finance & Credit Control/Shared Server Scripts/soa_api_server_script.py",
+      "sha256": "818dcf46b2a0aa23fd108a70fce23bff7e4e576e8f11e9eb08c9b10c47cb2c36"
+    },
+    {
+      "path": "04. Finance & Credit Control/Shared Server Scripts/soa_workflow_api_server_script.py",
+      "sha256": "602b21f50767f6533e24686aa84f456d29922d52cd718be07636fcaa54b11189"
+    },
+    {
+      "path": "04. Finance & Credit Control/SOA Manager/local/soa_manager_dashboard.css",
+      "sha256": "63dfb95f94f6d4261cdd4efedbf246e3e84aca79cc590c8f6adb27a227993e42"
+    },
+    {
+      "path": "04. Finance & Credit Control/SOA Manager/local/soa_manager_dashboard.js",
+      "sha256": "3b116630c56d67fd30af59e57edb99cb2ba87913be481f6966e17e8fe5dedebd"
+    },
+    {
+      "path": "04. Finance & Credit Control/SOA Request Dashboard/local/soa_request_dashboard.css",
+      "sha256": "63dfb95f94f6d4261cdd4efedbf246e3e84aca79cc590c8f6adb27a227993e42"
+    },
+    {
+      "path": "04. Finance & Credit Control/SOA Request Dashboard/local/soa_request_dashboard.js",
+      "sha256": "629b7e8801e39f33ab423f4a75b0596afdad053cca4161f5a0da8fa3a17cfcc0"
+    },
+    {
+      "path": "05. HR & Administration/Executive Secretary/exec_admin_api_server_script.py",
+      "sha256": "9fdb7362d183b1b0108a5af807f991118bf29bf7bd83afda4306acb70d118528"
+    },
+    {
+      "path": "05. HR & Administration/Executive Secretary/exec_admin_dashboard.css",
+      "sha256": "91b494e5339fec8052fd7c5431f215e558875a249acda330786a62584c179a9c"
+    },
+    {
+      "path": "05. HR & Administration/Executive Secretary/exec_admin_dashboard.js",
+      "sha256": "f52a2a0c694603f043812ac60c21e056a3ad1261c14691beb8c91b94206cacec"
+    },
+    {
+      "path": "05. HR & Administration/Executive Secretary/README.md",
+      "sha256": "21c4f311188408707d3000ed8996a8d9d3fcdbaecb7af5cb81b8d5df58927696"
+    },
+    {
+      "path": "07. IT & Digital Systems/Digital Marketing Dashboard/custom_fields.json",
+      "sha256": "dca64a68ca67a0e1852cbcb2ea3fd135eafbd50cb66bae68d95a9840ff0144bc"
+    },
+    {
+      "path": "07. IT & Digital Systems/ERP User Access/server_scripts/user_access_directory.json",
+      "sha256": "1eb3f519f0ab5747ccf5603b372d6bbed131883bdd7107772987a35669c957be"
+    },
+    {
+      "path": "07. IT & Digital Systems/ERP User Access/server_scripts/user_access_directory.py",
+      "sha256": "05eba021b03d7bc136f26cc7636fca319f6bbfc7aa085b03ba4c4dfce31592b8"
     }
   ],
   "local_working_files": [
@@ -1985,7 +2047,7 @@
     {
       "original_path": "exec_admin_api_server_script.py",
       "path": "05. HR & Administration/Executive Secretary/exec_admin_api_server_script.py",
-      "sha256": "b15667636e07583eb29987961fd8a3a5fe4a06543a39a52d743deda0dd577b57"
+      "sha256": "9fdb7362d183b1b0108a5af807f991118bf29bf7bd83afda4306acb70d118528"
     }
   ],
   "local_dashboards": [
@@ -1993,5 +2055,8 @@
       "name": "Executive Secretary",
       "directory": "05. HR & Administration/Executive Secretary"
     }
-  ]
+  ],
+  "remediation_status": "reports/2026-11-16/fix-status.md",
+  "html_only_followup": "reports/2026-11-16/html-only-followup.md",
+  "production_completion": "reports/2026-11-16/production-completion.md"
 }
