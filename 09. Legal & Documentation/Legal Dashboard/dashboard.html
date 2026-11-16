@@ -1,0 +1,293 @@
+<div class="tld" id="tld" data-theme="light" data-w="l">
+
+  <!-- ============ SIDE RAIL ============ -->
+  <aside class="rail" id="rail">
+    <div class="rail-in">
+      <div class="brand">
+        <div class="brand-txt"><b id="brandName">Taradhi &amp; Legal Dashboard</b><span>Receivables, court cases and repayment follow-ups in one place.</span></div>
+      </div>
+
+      <nav class="tabs" role="tablist" aria-label="Dashboard sections">
+        <button class="tab active" role="tab" data-tab="overview"></button>
+        <button class="tab" role="tab" data-tab="taradhi"></button>
+        <button class="tab" role="tab" data-tab="court"></button>
+        <button class="tab" role="tab" data-tab="legal"></button>
+        <button class="tab" role="tab" data-tab="customers"></button>
+      </nav>
+
+      <div class="rail-sec">Reports &amp; lists</div>
+      <div class="rail-links">
+        <button class="rlink" data-report="Taradhi Case Payment Report"><span data-ico="file"></span><span class="lbl">Payment report</span></button>
+        <button class="rlink" data-list="Taradhi Cases"><span data-ico="list"></span><span class="lbl">Taradhi list</span></button>
+        <button class="rlink" data-list="Court Cases"><span data-ico="list"></span><span class="lbl">Court list</span></button>
+        <button class="rlink" data-list="Legal Case List"><span data-ico="list"></span><span class="lbl">Legal list</span></button>
+      </div>
+
+      <div class="rail-foot">
+        <span class="upd" id="lastUpdated">Loading…</span>
+        <button class="btn-rail ghost" id="btnCopy"></button>
+        <button class="btn-rail" id="btnRefresh"></button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <div class="main">
+
+    <!-- ============ FILTER BAR ============ -->
+    <section class="filters" aria-label="Filters">
+      <div class="f-field f-search">
+        <label for="fSearch">Search</label>
+        <div class="search"><span data-ico="search"></span>
+          <input type="search" id="fSearch" placeholder="Customer, judgement no, sales person…" autocomplete="off">
+        </div>
+      </div>
+
+      <div class="f-field drp" id="drp">
+        <label>Date range</label>
+        <button type="button" class="f-btn" id="drToggle" aria-haspopup="true">
+          <span data-ico="calendar"></span><span id="drLabel">All dates</span><span data-ico="chev"></span>
+        </button>
+        <div class="drp-pop" id="drPop" hidden>
+          <div class="drp-presets">
+            <button type="button" data-preset="all">All dates</button>
+            <button type="button" data-preset="thismonth">This month</button>
+            <button type="button" data-preset="lastmonth">Last month</button>
+            <button type="button" data-preset="last30">Last 30 days</button>
+            <button type="button" data-preset="next30">Next 30 days</button>
+            <button type="button" data-preset="quarter">This quarter</button>
+            <button type="button" data-preset="year">This year</button>
+          </div>
+          <div class="drp-custom">
+            <label>From<input type="date" id="drFrom"></label>
+            <label>To<input type="date" id="drTo"></label>
+            <button type="button" class="btn btn-primary" data-drapply>Apply</button>
+          </div>
+          <p class="drp-note">Filters Taradhi cases by <b>Expected Collection Date</b>, Court Cases by creation date and Legal cases by filing date.</p>
+        </div>
+      </div>
+
+      <div class="f-field">
+        <label for="fLocation">Location</label>
+        <select id="fLocation"><option value="all">All locations</option></select>
+      </div>
+
+      <div class="f-field">
+        <label for="fSales">Salesperson</label>
+        <select id="fSales"><option value="all">All salespersons</option></select>
+      </div>
+
+      <button type="button" class="btn btn-soft f-reset" id="btnReset"></button>
+    </section>
+
+    <div class="banner" id="banner" hidden></div>
+
+    <!-- ============ OVERVIEW ============ -->
+    <section class="view active" id="view-overview">
+
+      <div class="band" id="kpiBand"></div>
+
+      <div class="insights" id="insights"></div>
+
+      <div class="grid g-aging">
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h3>Receivables aging</h3>
+              <p class="card-sub">Open balance by days past expected collection · click a bar to drill in</p>
+            </div>
+          </div>
+          <div id="agingChart"></div>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h3>Collection rate</h3>
+              <p class="card-sub">Collected ÷ total claim</p>
+            </div>
+          </div>
+          <div id="collectionGauge"></div>
+          <div class="card-head sep">
+            <div>
+              <h3>Payment status</h3>
+              <p class="card-sub">Cases and open balance</p>
+            </div>
+          </div>
+          <div id="statusStack"></div>
+        </article>
+      </div>
+
+      <div class="grid g-2-1">
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h3>Expected collections by month</h3>
+              <p class="card-sub">Light bar = case total · solid bar = still outstanding</p>
+            </div>
+            <div class="legend-inline">
+              <span><i class="sw sw-soft"></i>Case total</span>
+              <span><i class="sw sw-solid"></i>Outstanding</span>
+            </div>
+          </div>
+          <div id="monthlyChart"></div>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h3>Needs attention</h3>
+              <p class="card-sub">Items that should be actioned</p>
+            </div>
+          </div>
+          <div class="seg" id="alertSeg" role="tablist"></div>
+          <div id="alertList" class="alert-list"></div>
+        </article>
+      </div>
+
+      <div class="grid g-1-1-1">
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h3>Outstanding by location</h3>
+              <p class="card-sub">Customer territory</p>
+            </div>
+          </div>
+          <div id="byLocation"></div>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h3>Sales person performance</h3>
+              <p class="card-sub">Open balance · % of claim collected</p>
+            </div>
+          </div>
+          <div id="bySales"></div>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h3>Top outstanding balances</h3>
+              <p class="card-sub">By customer · share of total open balance</p>
+            </div>
+          </div>
+          <div id="topDebtors"></div>
+        </article>
+      </div>
+
+      <div class="grid g-1">
+        <article class="card flush">
+          <div class="card-head pad">
+            <div>
+              <h3>Customer repayment follow-up</h3>
+              <p class="card-sub">Customers with the largest overdue balances · next action is a suggestion based on days overdue</p>
+            </div>
+            <button class="btn btn-soft" data-goto="taradhi" data-overdue="1">View all overdue</button>
+          </div>
+          <div id="followUp"></div>
+        </article>
+      </div>
+
+      <footer class="foot" id="foot"></footer>
+    </section>
+
+    <!-- ============ TARADHI ============ -->
+    <section class="view" id="view-taradhi">
+      <div class="view-head">
+        <div>
+          <h2>Taradhi Cases</h2>
+          <p class="card-sub">Settlement agreements, sessions and instalment collections</p>
+        </div>
+        <div class="view-actions">
+          <button class="btn btn-soft" data-action="export" data-target="taradhi"></button>
+          <button class="btn btn-soft" data-action="list" data-doctype="Taradhi Cases"></button>
+          <button class="btn btn-primary" data-action="new" data-doctype="Taradhi Cases"></button>
+        </div>
+      </div>
+      <div class="mini-kpis" id="taradhiMini"></div>
+      <article class="card flush"><div id="taradhiTable"></div></article>
+    </section>
+
+    <!-- ============ COURT CASES ============ -->
+    <section class="view" id="view-court">
+      <div class="view-head">
+        <div>
+          <h2>Court Cases</h2>
+          <p class="card-sub">Judgements and expected collections</p>
+        </div>
+        <div class="view-actions">
+          <button class="btn btn-soft" data-action="export" data-target="court"></button>
+          <button class="btn btn-soft" data-action="list" data-doctype="Court Cases"></button>
+          <button class="btn btn-primary" data-action="new" data-doctype="Court Cases"></button>
+        </div>
+      </div>
+      <div class="mini-kpis" id="courtMini"></div>
+      <article class="card flush"><div id="courtTable"></div></article>
+    </section>
+
+    <!-- ============ LEGAL CASES ============ -->
+    <section class="view" id="view-legal">
+      <div class="view-head">
+        <div>
+          <h2>Legal Cases</h2>
+          <p class="card-sub">Cases filed with legal authorities and assigned lawyers</p>
+        </div>
+        <div class="view-actions">
+          <button class="btn btn-soft" data-action="export" data-target="legal"></button>
+          <button class="btn btn-soft" data-action="list" data-doctype="Legal Case List"></button>
+          <button class="btn btn-primary" data-action="new" data-doctype="Legal Case List"></button>
+        </div>
+      </div>
+      <div class="mini-kpis" id="legalMini"></div>
+
+      <div class="grid g-1-1-1">
+        <article class="card">
+          <div class="card-head"><div><h3>Legal cases by status</h3><p class="card-sub">Cases and amount</p></div></div>
+          <div id="legalStatus"></div>
+        </article>
+        <article class="card">
+          <div class="card-head"><div><h3>Legal cases by authority</h3><p class="card-sub">Amount by court / authority</p></div></div>
+          <div id="legalAuthority"></div>
+        </article>
+        <article class="card">
+          <div class="card-head"><div><h3>Cases by assigned lawyer</h3><p class="card-sub">Amount by lawyer · open cases</p></div></div>
+          <div id="legalLawyer"></div>
+        </article>
+      </div>
+
+      <div class="grid g-1">
+        <article class="card">
+          <div class="card-head"><div><h3>Longest-open cases</h3><p class="card-sub">Open legal cases ordered by days since filing</p></div></div>
+          <div id="legalOldest" class="alert-list"></div>
+        </article>
+      </div>
+
+      <article class="card flush"><div id="legalTable"></div></article>
+    </section>
+
+    <!-- ============ CUSTOMERS ============ -->
+    <section class="view" id="view-customers">
+      <div class="view-head">
+        <div>
+          <h2>Customers</h2>
+          <p class="card-sub">Everything owed per customer across Taradhi cases · click a row for the full picture</p>
+        </div>
+        <div class="view-actions">
+          <button class="btn btn-soft" data-action="export" data-target="customers"></button>
+        </div>
+      </div>
+      <div class="mini-kpis" id="custMini"></div>
+      <article class="card flush"><div id="custTable"></div></article>
+    </section>
+
+  </div><!-- /main -->
+
+  <!-- ============ DETAIL DRAWER ============ -->
+  <div class="scrim" id="scrim" hidden></div>
+  <aside class="drawer" id="drawer" aria-hidden="true" role="dialog" aria-label="Record details">
+    <div class="drawer-inner" id="drawerBody"></div>
+  </aside>
+
+</div>

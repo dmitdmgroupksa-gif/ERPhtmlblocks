@@ -1,0 +1,160 @@
+<div id="gov-root">
+<header class="topbar">
+  <div>
+    <div class="brandline"><i></i>Government Relations</div>
+    <h1>Government Relations Dashboard</h1>
+    <p>EJAR Contracts &amp; Prepaid &bull; License Expiry &bull; Commercial Registration &bull; MISA &mdash; <span id="today"></span></p>
+    <p id="snap" class="snap"></p>
+  </div>
+  <div class="top-actions">
+    <input id="search" type="search" placeholder="Search entity, number, company...">
+    <select id="winSel" title="Expiring-soon window">
+      <option value="30">Alert: 30 days</option>
+      <option value="60">Alert: 60 days</option>
+      <option value="90">Alert: 90 days</option>
+    </select>
+    <select id="langSel" class="lang-select" title="Language" aria-label="Language">
+      <option value="en">English</option>
+      <option value="ar">العربية</option>
+    </select>
+    <button class="btn" id="themeBtn">Dark / Light</button>
+  </div>
+  <div class="hero-stats" id="heroStats"></div>
+</header>
+
+<div class="rangebar">
+  <span class="rl">Expiry date range</span>
+  <div class="chips" id="chips">
+    <button class="chip active" data-r="all">All time</button>
+    <button class="chip" data-r="overdue">Overdue</button>
+    <button class="chip" data-r="n30">Next 30 days</button>
+    <button class="chip" data-r="n60">Next 60 days</button>
+    <button class="chip" data-r="n90">Next 90 days</button>
+    <button class="chip" data-r="month">This month</button>
+    <button class="chip" data-r="quarter">This quarter</button>
+    <button class="chip" data-r="year">This year</button>
+  </div>
+  <label>From <input type="date" id="rFrom"></label>
+  <label>To <input type="date" id="rTo"></label>
+  <button class="chip" id="rClear">Clear</button>
+  <span id="rangeInfo" class="rinfo"></span>
+</div>
+
+<main class="wrap">
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="overview"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Overview<span class="tc" data-for="overview"></span></button>
+    <button class="tab" data-tab="ejar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg>EJAR &amp; Prepaid<span class="tc" data-for="ejar"></span></button>
+    <button class="tab" data-tab="licenses"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 4.5 3.2 8 8 9 4.8-1 8-4.5 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>License Expiry<span class="tc" data-for="licenses"></span></button>
+    <button class="tab" data-tab="cr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>Commercial Registration<span class="tc" data-for="cr"></span></button>
+    <button class="tab" data-tab="misa"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>MISA<span class="tc" data-for="misa"></span></button>
+  </nav>
+
+  <div class="hint">Tip: click any KPI tile to open the matching records in ERP.</div>
+  <section id="kpis" class="kpis"></section>
+
+  <!-- OVERVIEW -->
+  <section id="view-overview">
+    <div class="grid">
+      <div class="card c4"><h3>Overall status <small>counted items</small></h3><div class="chart-box"><canvas id="chStatus"></canvas></div><div class="legend" id="lgStatus"></div></div>
+      <div class="card c8"><h3>Expiries by month <small>overdue + next 12 months</small></h3><div class="chart-box"><canvas id="chMonth"></canvas></div><div class="legend" id="lgMonth"></div></div>
+    </div>
+    <div class="grid">
+      <div class="card c4"><h3>Compliance score <small>valid &divide; counted</small></h3><div class="chart-box"><canvas id="chGauge"></canvas></div></div>
+      <div class="card c4"><h3>Status by category</h3><div class="chart-box"><canvas id="chCatStack"></canvas></div><div class="legend" id="lgCat"></div></div>
+      <div class="card c4"><h3>Cumulative expiries <small>next 12 months</small></h3><div class="chart-box"><canvas id="chCum"></canvas></div></div>
+    </div>
+    <div class="grid">
+      <div class="card c6"><h3>Next renewals <small>soonest upcoming</small></h3><ul class="alerts nextlist" id="nextList"></ul></div>
+      <div class="card c6"><h3>Items by type <small>status mix</small></h3><div class="chart-box tall"><canvas id="chTypeAll"></canvas></div><div class="legend" id="lgTypeAll"></div></div>
+    </div>
+    <div class="card"><h3>Renewal heatmap <small>items expiring per month</small></h3><div class="table-scroll" id="heatmap"></div></div>
+    <div class="grid" style="margin-top:14px">
+      <div class="card c6"><h3>Needs action now <small>expired or within alert window</small></h3><ul class="alerts" id="alertList"></ul></div>
+      <div class="card c6"><h3>Data gaps in ERP <small>fix at source</small></h3><ul class="alerts" id="gapList"></ul></div>
+    </div>
+    <div class="card"><h3>Entity compliance matrix <small>DM Companies Management</small></h3>
+      <div class="table-scroll"><table id="tblMatrix"></table></div><div class="pager" id="pg-tblMatrix"></div>
+    </div>
+    <div class="card" style="margin-top:14px"><h3>All tracked items <small id="allCount"></small></h3>
+      <div class="table-scroll"><table id="tblAll"></table></div><div class="pager" id="pg-tblAll"></div>
+    </div>
+  </section>
+
+  <!-- EJAR -->
+  <section id="view-ejar" class="hidden">
+    <div class="filters">
+      <select id="fEjStatus"><option value="active">Active contracts only</option><option value="">All contracts (incl. closed)</option></select>
+      <select id="fEjDetail"><option value="">All facility types</option></select>
+    </div>
+    <div class="grid">
+      <div class="card c5"><h3>Contract status</h3><div class="chart-box"><canvas id="chEjar"></canvas></div><div class="legend" id="lgEjar"></div></div>
+      <div class="card c7"><h3>Days to contract end <small>soonest first</small></h3><div class="chart-box"><canvas id="chEjarDays"></canvas></div></div>
+    </div>
+    <div class="grid">
+      <div class="card c4"><h3>Contracts ending by month</h3><div class="chart-box"><canvas id="chEjMonth"></canvas></div><div class="legend" id="lgEjMonth"></div></div>
+      <div class="card c4"><h3>Total rent by facility type</h3><div class="chart-box"><canvas id="chEjType"></canvas></div><div class="legend" id="lgEjType"></div></div>
+      <div class="card c4"><h3>Total rent by company</h3><div class="chart-box"><canvas id="chEjCompany"></canvas></div></div>
+    </div>
+    <div class="card"><h3>EJAR rent contracts <small>DM Facilities Management</small></h3><div class="table-scroll"><table id="tblEjar"></table></div><div class="pager" id="pg-tblEjar"></div></div>
+    <div class="card" style="margin-top:14px"><h3>Prepaid expenses <small>Prepaid Expense doctype</small></h3>
+      <div id="prepaidNote" class="note"></div>
+      <div class="table-scroll"><table id="tblPrepaid"></table></div><div class="pager" id="pg-tblPrepaid"></div>
+    </div>
+  </section>
+
+  <!-- LICENSES -->
+  <section id="view-licenses" class="hidden">
+    <div class="filters">
+      <select id="fLicStatus"><option value="">All statuses</option><option>Expired</option><option>Expiring Soon</option><option>Valid</option></select>
+      <select id="fLicType"><option value="">All license types</option></select>
+      <select id="fLicGroup"><option value="">Government + service contracts</option><option>Government</option><option>Service Contract</option></select>
+    </div>
+    <div class="grid">
+      <div class="card c5"><h3>License status</h3><div class="chart-box"><canvas id="chLic"></canvas></div><div class="legend" id="lgLic"></div></div>
+      <div class="card c7"><h3>Days remaining <small>soonest 8</small></h3><div class="chart-box"><canvas id="chLicDays"></canvas></div></div>
+    </div>
+    <div class="grid">
+      <div class="card c6"><h3>Status by license type</h3><div class="chart-box tall"><canvas id="chLicType"></canvas></div><div class="legend" id="lgLicType"></div></div>
+      <div class="card c6"><h3>Expiries by month</h3><div class="chart-box tall"><canvas id="chLicMonth"></canvas></div><div class="legend" id="lgLicMonth"></div></div>
+    </div>
+    <div class="card"><h3>License register <small>active facilities</small></h3><div class="table-scroll"><table id="tblLic"></table></div><div class="pager" id="pg-tblLic"></div></div>
+  </section>
+
+  <!-- CR -->
+  <section id="view-cr" class="hidden">
+    <div class="grid">
+      <div class="card c5"><h3>CR status</h3><div class="chart-box"><canvas id="chCR"></canvas></div><div class="legend" id="lgCR"></div></div>
+      <div class="card c7"><h3>Days to CR expiry <small>active CRs</small></h3><div class="chart-box"><canvas id="chCRDays"></canvas></div></div>
+    </div>
+    <div class="grid">
+      <div class="card c4"><h3>Entities by location</h3><div class="chart-box"><canvas id="chCRLoc"></canvas></div><div class="legend" id="lgCRLoc"></div></div>
+      <div class="card c8"><h3>CR expiries by month</h3><div class="chart-box"><canvas id="chCRMonth"></canvas></div><div class="legend" id="lgCRMonth"></div></div>
+    </div>
+    <div class="card"><h3>Commercial registrations <small>field: CR Expiry</small></h3><div class="table-scroll"><table id="tblCR"></table></div><div class="pager" id="pg-tblCR"></div></div>
+  </section>
+
+  <!-- MISA -->
+  <section id="view-misa" class="hidden">
+    <div class="grid">
+      <div class="card c5"><h3>MISA status</h3><div class="chart-box"><canvas id="chMisa"></canvas></div><div class="legend" id="lgMisa"></div></div>
+      <div class="card c7"><h3>Days to MISA expiry <small>entities with a date</small></h3><div class="chart-box"><canvas id="chMisaDays"></canvas></div></div>
+    </div>
+    <div class="grid">
+      <div class="card c5"><h3>MISA expiry coverage</h3><div class="chart-box"><canvas id="chMisaCov"></canvas></div><div class="legend" id="lgMisaCov"></div></div>
+      <div class="card c7"><h3>MISA expiries by month</h3><div class="chart-box"><canvas id="chMisaMonth"></canvas></div><div class="legend" id="lgMisaMonth"></div></div>
+    </div>
+    <div class="card"><h3>MISA licenses <small>field: MISA Expiry</small></h3><div class="table-scroll"><table id="tblMisa"></table></div><div class="pager" id="pg-tblMisa"></div></div>
+  </section>
+</main>
+
+<footer>Government Relations Dashboard &bull; Data: DM ERPNext snapshot (see data.js)</footer>
+
+<div id="modal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head"><h3 id="mTitle"></h3><button class="chip" id="mClose">Close</button></div>
+    <div id="mBody"></div>
+  </div>
+</div>
+<div id="toast" class="toast hidden"></div>
+<div id="tip" class="tip hidden"></div>
+</div>

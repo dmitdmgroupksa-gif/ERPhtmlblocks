@@ -1,0 +1,8 @@
+erp-map/
+.env*
+*.env
+.local/
+erp_exports/
+dashboards/
+*.log
+__pycache__/

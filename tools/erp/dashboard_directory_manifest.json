@@ -1,0 +1,1997 @@
+{
+  "source_snapshot": ".local/erp_exports/20261116T080453135227Z",
+  "dashboards": [
+    {
+      "name": "CEO Command Center",
+      "directory": "01. Leadership & Corporate/CEO Command Center",
+      "modified": "2026-10-31 11:28:55.130811",
+      "server_scripts": [
+        "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_collections_34bb7e8d.py",
+        "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_finance_details_47275876.py",
+        "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_legal_taradhi_dee38552.py",
+        "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_procurement_e3c79d3a.py",
+        "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_receivables_41b5a5d2.py",
+        "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_sales_5839ca76.py",
+        "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_sales_backlog_a1bc50db.py",
+        "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_sales_orders_4d772bd0.py",
+        "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_sales_support_dd012a98.py"
+      ]
+    },
+    {
+      "name": "CEO Agent",
+      "directory": "01. Leadership & Corporate/CEO Agent",
+      "modified": "2026-11-11 13:25:39.842145",
+      "server_scripts": [
+        "01. Leadership & Corporate/CEO Agent/server_scripts/durar_ai_execute_8213b01e.py",
+        "01. Leadership & Corporate/CEO Agent/server_scripts/durar_ai_relay_bf5a7691.py"
+      ]
+    },
+    {
+      "name": "DMCC Dashboard",
+      "directory": "01. Leadership & Corporate/DMCC Dashboard",
+      "modified": "2026-11-08 14:32:34.336413",
+      "server_scripts": []
+    },
+    {
+      "name": "My Leads Dashboard",
+      "directory": "02. Sales & CRM/My Leads",
+      "modified": "2026-11-09 08:54:32.233434",
+      "server_scripts": [
+        "02. Sales & CRM/My Leads/server_scripts/bulk_allocate_leads_6deda7fb.py"
+      ]
+    },
+    {
+      "name": "Lead Management Dashboard",
+      "directory": "02. Sales & CRM/Lead Management",
+      "modified": "2026-11-09 08:54:31.872727",
+      "server_scripts": [
+        "02. Sales & CRM/Lead Management/server_scripts/bulk_allocate_leads_6deda7fb.py"
+      ]
+    },
+    {
+      "name": "DMS Sales Manager Dashboard",
+      "directory": "02. Sales & CRM/DMS Sales Management",
+      "modified": "2026-10-28 10:26:15.583989",
+      "server_scripts": [
+        "02. Sales & CRM/DMS Sales Management/server_scripts/dms_daily_sales_activity_report_09fd04d5.py",
+        "02. Sales & CRM/DMS Sales Management/server_scripts/dms_manager_contact_requests_95145350.py",
+        "02. Sales & CRM/DMS Sales Management/server_scripts/dms_project_explorer_sectors_102f870e.py",
+        "02. Sales & CRM/DMS Sales Management/server_scripts/dms_sales_dashboard_data_4db2a9af.py",
+        "02. Sales & CRM/DMS Sales Management/server_scripts/dms_share_key_personnel_contact_b1a55886.py"
+      ]
+    },
+    {
+      "name": "Sales CRM & Conversion Tracker Dashboard",
+      "directory": "02. Sales & CRM/Quotation & SO Tracker",
+      "modified": "2026-11-05 07:36:23.458093",
+      "server_scripts": []
+    },
+    {
+      "name": "Pre-Procurement Command Center",
+      "directory": "03. Procurement & Supply Chain/Pre-Procurement",
+      "modified": "2026-11-05 07:47:36.130943",
+      "server_scripts": []
+    },
+    {
+      "name": "DN & GRN Tracker Dashboard",
+      "directory": "03. Procurement & Supply Chain/DN & GRN Tracker",
+      "modified": "2026-11-05 12:57:13.005564",
+      "server_scripts": []
+    },
+    {
+      "name": "Customs & Post-Procurement Dashboard",
+      "directory": "03. Procurement & Supply Chain/Customs & Post-Processing",
+      "modified": "2026-11-05 08:27:56.838812",
+      "server_scripts": []
+    },
+    {
+      "name": "Inventory Dashboard",
+      "directory": "03. Procurement & Supply Chain/Inventory Dashboard",
+      "modified": "2026-10-06 10:19:04.039677",
+      "server_scripts": []
+    },
+    {
+      "name": "Accounts Payable Dashboard",
+      "directory": "04. Finance & Credit Control/Accounts Payable",
+      "modified": "2026-11-04 14:20:53.643231",
+      "server_scripts": []
+    },
+    {
+      "name": "Treasury Dashboard",
+      "directory": "04. Finance & Credit Control/Treasury Dashboard",
+      "modified": "2026-11-04 13:24:07.928921",
+      "server_scripts": [
+        "04. Finance & Credit Control/Treasury Dashboard/server_scripts/treasury_dashboard_data_66d24f75.py"
+      ]
+    },
+    {
+      "name": "Payroll cost center dashboard",
+      "directory": "04. Finance & Credit Control/Payroll Cost Center",
+      "modified": "2026-11-15 14:04:04.370027",
+      "server_scripts": []
+    },
+    {
+      "name": "VAT & ZATCA Command Center",
+      "directory": "04. Finance & Credit Control/VAT & ZATCA Compliance",
+      "modified": "2026-11-05 15:45:43.554007",
+      "server_scripts": []
+    },
+    {
+      "name": "Credit Controller Dashboard",
+      "directory": "04. Finance & Credit Control/Credit Controller Dashboard",
+      "modified": "2026-11-05 08:50:59.894822",
+      "server_scripts": []
+    },
+    {
+      "name": "CP Blocked Customer",
+      "directory": "04. Finance & Credit Control/Blocked Customer Dashboard/CP Blocked Customer",
+      "modified": "2026-11-02 07:53:52.434455",
+      "server_scripts": []
+    },
+    {
+      "name": "CSD Blocked Customer",
+      "directory": "04. Finance & Credit Control/Blocked Customer Dashboard/CSD Blocked Customer",
+      "modified": "2026-11-02 07:56:34.453850",
+      "server_scripts": []
+    },
+    {
+      "name": "EP Blocked Customer",
+      "directory": "04. Finance & Credit Control/Blocked Customer Dashboard/EP Blocked Customer",
+      "modified": "2026-11-02 07:57:18.544758",
+      "server_scripts": []
+    },
+    {
+      "name": "MP Blocked Customer",
+      "directory": "04. Finance & Credit Control/Blocked Customer Dashboard/MP Blocked Customer",
+      "modified": "2026-11-02 07:54:59.321734",
+      "server_scripts": []
+    },
+    {
+      "name": "SRD Blocked Customer",
+      "directory": "04. Finance & Credit Control/Blocked Customer Dashboard/SRD Blocked Customer",
+      "modified": "2026-11-02 07:58:16.449747",
+      "server_scripts": []
+    },
+    {
+      "name": "WP Blocked Customer",
+      "directory": "04. Finance & Credit Control/Blocked Customer Dashboard/WP Blocked Customer",
+      "modified": "2026-11-02 08:00:08.632516",
+      "server_scripts": []
+    },
+    {
+      "name": "SOA Request Dashboard",
+      "directory": "04. Finance & Credit Control/SOA Request Dashboard",
+      "modified": "2026-11-12 14:28:27.526310",
+      "server_scripts": [
+        "04. Finance & Credit Control/SOA Request Dashboard/server_scripts/soa_api_cca237a6.py",
+        "04. Finance & Credit Control/SOA Request Dashboard/server_scripts/soa_workflow_api_2e6f5dd7.py"
+      ]
+    },
+    {
+      "name": "SOA Manager",
+      "directory": "04. Finance & Credit Control/SOA Manager",
+      "modified": "2026-11-12 14:54:50.393548",
+      "server_scripts": [
+        "04. Finance & Credit Control/SOA Manager/server_scripts/soa_api_cca237a6.py",
+        "04. Finance & Credit Control/SOA Manager/server_scripts/soa_workflow_api_2e6f5dd7.py"
+      ]
+    },
+    {
+      "name": "SOA Collector",
+      "directory": "04. Finance & Credit Control/Collector",
+      "modified": "2026-11-12 14:29:31.015485",
+      "server_scripts": [
+        "04. Finance & Credit Control/Collector/server_scripts/soa_api_cca237a6.py"
+      ]
+    },
+    {
+      "name": "Finance Manager dashboard",
+      "directory": "04. Finance & Credit Control/Finance Manager Dashboard",
+      "modified": "2026-11-12 14:51:59.223840",
+      "server_scripts": [
+        "04. Finance & Credit Control/Finance Manager Dashboard/server_scripts/soa_workflow_api_2e6f5dd7.py"
+      ]
+    },
+    {
+      "name": "Finance internal  controller",
+      "directory": "04. Finance & Credit Control/Finance Internal Controller",
+      "modified": "2026-11-01 07:51:08.207678",
+      "server_scripts": []
+    },
+    {
+      "name": "Admin HR Dashboard",
+      "directory": "05. HR & Administration/Admin HR Dashboard",
+      "modified": "2026-11-15 12:27:07.171513",
+      "server_scripts": [
+        "05. HR & Administration/Admin HR Dashboard/server_scripts/admin_hr_compliance_data_1e9c8561.py",
+        "05. HR & Administration/Admin HR Dashboard/server_scripts/admin_hr_dashboard_data_0f894ebc.py",
+        "05. HR & Administration/Admin HR Dashboard/server_scripts/admin_hr_employee_detail_f8cf00df.py",
+        "05. HR & Administration/Admin HR Dashboard/server_scripts/admin_hr_employee_directory_1fbaa99b.py",
+        "05. HR & Administration/Admin HR Dashboard/server_scripts/admin_hr_leave_data_813b2196.py",
+        "05. HR & Administration/Admin HR Dashboard/server_scripts/admin_hr_requests_data_c9b1c2c6.py",
+        "05. HR & Administration/Admin HR Dashboard/server_scripts/admin_hr_training_data_6a904c9b.py"
+      ]
+    },
+    {
+      "name": "Admin & HR Platforms Expiry Dashboard",
+      "directory": "05. HR & Administration/Admin & HR Platform",
+      "modified": "2026-11-07 12:43:59.342598",
+      "server_scripts": []
+    },
+    {
+      "name": "Employee Dashboard Prototype",
+      "directory": "05. HR & Administration/Employee Dashboard",
+      "modified": "2026-11-01 09:31:52.474874",
+      "server_scripts": [
+        "05. HR & Administration/Employee Dashboard/server_scripts/emp_todo_dashboard_2d996ec0.py",
+        "05. HR & Administration/Employee Dashboard/server_scripts/ess_get_my_dashboard_9cb5ddf7.py",
+        "05. HR & Administration/Employee Dashboard/server_scripts/mgr_todo_dashboard_4908886c.py"
+      ]
+    },
+    {
+      "name": "Employee Vacation Tracker",
+      "directory": "05. HR & Administration/Employee Vacation",
+      "modified": "2026-11-15 13:47:05.990378",
+      "server_scripts": []
+    },
+    {
+      "name": "Govt Relation Dashboard",
+      "directory": "05. HR & Administration/Government Relations Dashboard",
+      "modified": "2026-11-07 12:51:22.635852",
+      "server_scripts": []
+    },
+    {
+      "name": "DM Technical Department Command Center",
+      "directory": "06. Technical & Projects/Technical Department",
+      "modified": "2026-11-10 14:02:47.500888",
+      "server_scripts": []
+    },
+    {
+      "name": "DMS Technical Department Dashboard",
+      "directory": "06. Technical & Projects/DMS Technical Department",
+      "modified": "2026-10-12 12:04:00.593195",
+      "server_scripts": [
+        "06. Technical & Projects/DMS Technical Department/server_scripts/dms_technical_dashboard_data_936773f5.py"
+      ]
+    },
+    {
+      "name": "DMS My Projects Dashboard",
+      "directory": "06. Technical & Projects/My DMS Projects",
+      "modified": "2026-10-18 08:28:23.618359",
+      "server_scripts": [
+        "06. Technical & Projects/My DMS Projects/server_scripts/dms_add_follow_up_612f4797.py",
+        "06. Technical & Projects/My DMS Projects/server_scripts/dms_get_shared_key_personnel_contact_64396b8b.py",
+        "06. Technical & Projects/My DMS Projects/server_scripts/dms_my_key_personnel_requests_433f7e29.py",
+        "06. Technical & Projects/My DMS Projects/server_scripts/dms_my_projects_dashboard_data_468fbe2c.py",
+        "06. Technical & Projects/My DMS Projects/server_scripts/dms_project_shared_contacts_009e0ef0.py"
+      ]
+    },
+    {
+      "name": "DM contracting Dept. Dashboard",
+      "directory": "06. Technical & Projects/DM Contracting Dashboard",
+      "modified": "2026-11-01 11:20:33.995036",
+      "server_scripts": []
+    },
+    {
+      "name": "DM IT Asset Acquisition Dashboard",
+      "directory": "07. IT & Digital Systems/IT Asset Acquisition",
+      "modified": "2026-11-01 11:50:00.000986",
+      "server_scripts": []
+    },
+    {
+      "name": "IT Platforms Expiry Dashboard",
+      "directory": "07. IT & Digital Systems/IT Platforms Expiry",
+      "modified": "2026-11-01 11:23:28.059566",
+      "server_scripts": []
+    },
+    {
+      "name": "ERP User Access Dashboard",
+      "directory": "07. IT & Digital Systems/ERP User Access",
+      "modified": "2026-10-31 10:36:50.586525",
+      "server_scripts": [
+        "07. IT & Digital Systems/ERP User Access/server_scripts/user_access_analytics_29d483ec.py",
+        "07. IT & Digital Systems/ERP User Access/server_scripts/user_access_period_f6f5474c.py",
+        "07. IT & Digital Systems/ERP User Access/server_scripts/user_access_roles_325182d2.py",
+        "07. IT & Digital Systems/ERP User Access/server_scripts/user_access_summary_40e2f275.py"
+      ]
+    },
+    {
+      "name": "Digital Marketing Dashboard",
+      "directory": "07. IT & Digital Systems/Digital Marketing Dashboard",
+      "modified": "2026-11-04 11:18:12.472117",
+      "server_scripts": []
+    },
+    {
+      "name": "Fleet Dashboard",
+      "directory": "08. Operations & Logistics/Fleet Dashboard",
+      "modified": "2026-11-04 13:39:58.420248",
+      "server_scripts": []
+    },
+    {
+      "name": "FM & Inventory Dashboard",
+      "directory": "08. Operations & Logistics/FM & Inventory Dashboard",
+      "modified": "2026-11-05 13:40:06.408168",
+      "server_scripts": []
+    },
+    {
+      "name": "Logistics Dashboard",
+      "directory": "08. Operations & Logistics/Logistics Dashboard",
+      "modified": "2026-10-29 12:02:11.554174",
+      "server_scripts": []
+    },
+    {
+      "name": "Operation Dashboard",
+      "directory": "08. Operations & Logistics/Operation Dashboard",
+      "modified": "2026-11-04 14:46:06.554548",
+      "server_scripts": []
+    },
+    {
+      "name": "Delivery Forklift Dashboard",
+      "directory": "08. Operations & Logistics/Delivery & Forklift",
+      "modified": "2026-10-22 16:00:34.884225",
+      "server_scripts": [
+        "08. Operations & Logistics/Delivery & Forklift/server_scripts/dm_delivery_forklift_dashboard_d4c45abf.py"
+      ]
+    },
+    {
+      "name": "Scaffolding rental - Employee Dashboard",
+      "directory": "08. Operations & Logistics/Scaffolding Rental",
+      "modified": "2026-11-01 11:19:33.152783",
+      "server_scripts": []
+    },
+    {
+      "name": "Manufacturing Dashboard",
+      "directory": "08. Operations & Logistics/Manufacturing Dashboard",
+      "modified": "2026-10-22 16:00:34.764812",
+      "server_scripts": [
+        "08. Operations & Logistics/Manufacturing Dashboard/server_scripts/mfg_dashboard_jobs_c93388e0.py",
+        "08. Operations & Logistics/Manufacturing Dashboard/server_scripts/mfg_dashboard_performance_edb25d32.py",
+        "08. Operations & Logistics/Manufacturing Dashboard/server_scripts/mfg_dashboard_plan_43d778d0.py"
+      ]
+    },
+    {
+      "name": "Production Dashboard",
+      "directory": "08. Operations & Logistics/Production Dashboard",
+      "modified": "2026-10-31 10:44:03.342953",
+      "server_scripts": []
+    },
+    {
+      "name": "Plant & Furniture Asset Dashboard",
+      "directory": "08. Operations & Logistics/Plant & Furniture Asset Dashboard",
+      "modified": "2026-10-31 08:54:59.158058",
+      "server_scripts": []
+    },
+    {
+      "name": "Taradhi/Legal Dashboard",
+      "directory": "09. Legal & Documentation/Legal Dashboard",
+      "modified": "2026-11-15 15:55:24.191126",
+      "server_scripts": []
+    },
+    {
+      "name": "DM Document Control Command Center",
+      "directory": "09. Legal & Documentation/Document Control",
+      "modified": "2026-11-04 12:54:58.461868",
+      "server_scripts": []
+    },
+    {
+      "name": "Durar Messenger",
+      "directory": "10. Communication & Productivity/Durar Messenger",
+      "modified": "2026-11-14 12:46:06.196502",
+      "server_scripts": [
+        "10. Communication & Productivity/Durar Messenger/server_scripts/durar_messenger_8e3641f3.py"
+      ]
+    },
+    {
+      "name": "Durar Sheets",
+      "directory": "10. Communication & Productivity/Durar Sheets",
+      "modified": "2026-11-10 14:05:47.740998",
+      "server_scripts": [
+        "10. Communication & Productivity/Durar Sheets/server_scripts/durar_sheets_5a2759eb.py"
+      ]
+    }
+  ],
+  "unresolved": [
+    {
+      "label": "Customer Dashboard",
+      "directory": "02. Sales & CRM/Customer Dashboard"
+    },
+    {
+      "label": "PN Dashboard",
+      "directory": "11. To Be Classified/PN Dashboard"
+    }
+  ],
+  "files": [
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/dashboard.js",
+      "sha256": "f114e25404f4a2e9e60013a01cd64c4cc62d6a1d528b702155be06aed014d1c7"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/dashboard.css",
+      "sha256": "b361c60d69d19eaac6ea8cff17dcca26be4be18ed19877cc44e59e06816c8653"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/dashboard.html",
+      "sha256": "70070e5acc38bc1a739ab7603ca740049987396a58be7d3e4e0d97539960bcb3"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/source.json",
+      "sha256": "e8c548958b75f2d1006ac445a43eafb88801b3a09c5a5af6b2cb5beed75e6ca4"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_collections_34bb7e8d.py",
+      "sha256": "06268bb47d7a64d07422b4226e6d9f995be1af0797c7a793ded593c76f26a919"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_collections_34bb7e8d.json",
+      "sha256": "a6b977d1f67bdcb84badebaea9000256713d397623516e56541073c97be052c6"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_finance_details_47275876.py",
+      "sha256": "1af94c320a2d0c8921faf391c13000f30daaeb6734cde978d3ba54341d45c455"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_finance_details_47275876.json",
+      "sha256": "f3b7d7045665b466effc989c7e144c56ec2131f808036971f3f11199ae58fd22"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_legal_taradhi_dee38552.py",
+      "sha256": "18f5ae7a636b96f3cc744ada46199b84cbbf60537b0913a7c8863318308c42d6"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_legal_taradhi_dee38552.json",
+      "sha256": "abd7b37551f6d9049323203f5e4e9b4f1b3871e68662413c98b148f042277891"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_procurement_e3c79d3a.py",
+      "sha256": "e10fd7afc85eb20cfb6c701f0a0d01341c10619ea52d797958ea690ab1bdfb89"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_procurement_e3c79d3a.json",
+      "sha256": "936dff2fa331f58517e58da596e6d769391278dfc153c60dc908dab2dbcb7045"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_receivables_41b5a5d2.py",
+      "sha256": "e251cfea5b5a51fd440fb1582bbc1e15f44e1a5873185fd648a92ada7bbb6623"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_receivables_41b5a5d2.json",
+      "sha256": "a9d4c7f8764fcc2ac21ed96c6b8abae2a3d1858aceebfcecbf21e2f923021d3f"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_sales_5839ca76.py",
+      "sha256": "c2752a8d596c108ff287f363595b688ce1e060aa6d0abce5820801eb0664900d"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_sales_5839ca76.json",
+      "sha256": "ab6fdcdd441f244a41a549d113cab60042ae96e29262bfc140bb6d9322e78474"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_sales_backlog_a1bc50db.py",
+      "sha256": "811951e94924fb2e6ed998bcd5a28a2d97c604bd861d1b72d43ee7cca1ea4b03"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_sales_backlog_a1bc50db.json",
+      "sha256": "a9c16058dd1bc7007ca4f5c56032e684dfacb6363659aae5659f6e501746636d"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_sales_orders_4d772bd0.py",
+      "sha256": "45f62eeb0caad3ffe771f4181a7ebc092b1df8576326821e83dcb9f11e45e148"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_sales_orders_4d772bd0.json",
+      "sha256": "ce0b60759dbc8f29516490d861a4d3b9a747ac8a9fbe8502b7dfe5060cf19d5d"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_sales_support_dd012a98.py",
+      "sha256": "f611d1054ac9908aa7a31ce172b963580e03b9f7ad033747155f28d4fdb28efa"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_sales_support_dd012a98.json",
+      "sha256": "2320b7a12439b1b1a2b79992fd5a64139240380d8ccb0842c393463087cde85b"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Command Center/README.md",
+      "sha256": "9547beedf76feeab9fde66b9b1f34295e8217ea1ff5d796588caf34746deba46"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Agent/dashboard.js",
+      "sha256": "ed3baf744e1a77aa956f4c1a91ade73d28130083a4af8f9d4a7b6cbf4d69eefa"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Agent/dashboard.css",
+      "sha256": "bdadd48e5f5ecab3641ce007110d0e621493fb3c4cc4fc9a21dc19c2e87f8c27"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Agent/dashboard.html",
+      "sha256": "93636fa047400919d3a6fa2c57a114596546d97c9681645ed857fb014fb8fb18"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Agent/source.json",
+      "sha256": "954354fbb85d7792ffec3715d4a160676037eb82182fefa2c30f36aa107ffb3b"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Agent/server_scripts/durar_ai_execute_8213b01e.py",
+      "sha256": "7a27e1ef3d7db62d1a29646de5e0cf4cc81b71d90a891536f7fdde2d1657104d"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Agent/server_scripts/durar_ai_execute_8213b01e.json",
+      "sha256": "73ddb6d7ebe9ec3281df3304c74ff64690399d1d602425cfa1da101488bc91f7"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Agent/server_scripts/durar_ai_relay_bf5a7691.py",
+      "sha256": "4af23765e81288507242f8325fd8cc7505ee3c1bd05f90cebc8cf95d1aed655f"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Agent/server_scripts/durar_ai_relay_bf5a7691.json",
+      "sha256": "59ee942e8d1b7e41e2947a06fcd8f7b25b00aadccffa2476b24bdf4bffd403df"
+    },
+    {
+      "path": "01. Leadership & Corporate/CEO Agent/README.md",
+      "sha256": "f446cf858415321e99580caeaff3e7f9d22c9b8a2371070a50a3611cdca9dd75"
+    },
+    {
+      "path": "01. Leadership & Corporate/DMCC Dashboard/dashboard.js",
+      "sha256": "7839db03e5a34f8de8d1803ae784c93ed2e98beb8fc06afa3d26b95af047a1d1"
+    },
+    {
+      "path": "01. Leadership & Corporate/DMCC Dashboard/dashboard.css",
+      "sha256": "c8cc7f48879f3caac57e62169a5bc48bda366a751390349d56d8334d39d7120c"
+    },
+    {
+      "path": "01. Leadership & Corporate/DMCC Dashboard/dashboard.html",
+      "sha256": "21c1d7f3a0d3bd3726ccb0a9250d96db60db08a33183c46a70be386a6ecd73c6"
+    },
+    {
+      "path": "01. Leadership & Corporate/DMCC Dashboard/source.json",
+      "sha256": "23dad401edf594b9490b12976cd2b99436acd1f64f27bbdfa0360b4a5a57ac8d"
+    },
+    {
+      "path": "01. Leadership & Corporate/DMCC Dashboard/README.md",
+      "sha256": "8a235497d932802999d60e485deb83a7dfd6886caaf333a5295b22c973552338"
+    },
+    {
+      "path": "02. Sales & CRM/My Leads/dashboard.js",
+      "sha256": "33b003bf6e110397548712b96a0d80ca3bc6a6faefd8da4e93977a340f861ada"
+    },
+    {
+      "path": "02. Sales & CRM/My Leads/dashboard.css",
+      "sha256": "7667ae232ceae454f94b27bf18c5177b49648d162cc8b602d632c67f50739b86"
+    },
+    {
+      "path": "02. Sales & CRM/My Leads/dashboard.html",
+      "sha256": "0da91a45f90c6bba1d89267f2e60c35b129a9b8e1bf8a3bef3a039aa50bb2c55"
+    },
+    {
+      "path": "02. Sales & CRM/My Leads/source.json",
+      "sha256": "f574ea8aa0f7c8b89eaee50ceec82ff1ccbaf052e6772db121959b5553a5e7d1"
+    },
+    {
+      "path": "02. Sales & CRM/My Leads/server_scripts/bulk_allocate_leads_6deda7fb.py",
+      "sha256": "6360e5e6bbcbba88704e4346c462c829924a188bcd07f4a8d92befd211e3591a"
+    },
+    {
+      "path": "02. Sales & CRM/My Leads/server_scripts/bulk_allocate_leads_6deda7fb.json",
+      "sha256": "6cbbd0cf660576e5663c6c9f7646a84733034f734353821fb9be205bed0d7e1a"
+    },
+    {
+      "path": "02. Sales & CRM/My Leads/README.md",
+      "sha256": "dd26edbdb3fd0354c30e433f043d3c657441aeeba8207601b4ba6586dab77cb0"
+    },
+    {
+      "path": "02. Sales & CRM/Lead Management/dashboard.js",
+      "sha256": "4196d99ed9c0472e699718f31fd1b93644f4d04f2e6121bd5283c7ff92190002"
+    },
+    {
+      "path": "02. Sales & CRM/Lead Management/dashboard.css",
+      "sha256": "95c4492f0def1e3cea2ed824f42880078fcbccc1aba0cf6bbd0c9a1e934b7cb5"
+    },
+    {
+      "path": "02. Sales & CRM/Lead Management/dashboard.html",
+      "sha256": "eda3a119b59135b6b08a05e014a9b72586121823655840f25ec035a6c288a075"
+    },
+    {
+      "path": "02. Sales & CRM/Lead Management/source.json",
+      "sha256": "b82cf507cade3cfbd6791bfb91426af5f9f21d159fda11bb6c60ad7a85ff7b9b"
+    },
+    {
+      "path": "02. Sales & CRM/Lead Management/server_scripts/bulk_allocate_leads_6deda7fb.py",
+      "sha256": "6360e5e6bbcbba88704e4346c462c829924a188bcd07f4a8d92befd211e3591a"
+    },
+    {
+      "path": "02. Sales & CRM/Lead Management/server_scripts/bulk_allocate_leads_6deda7fb.json",
+      "sha256": "6cbbd0cf660576e5663c6c9f7646a84733034f734353821fb9be205bed0d7e1a"
+    },
+    {
+      "path": "02. Sales & CRM/Lead Management/README.md",
+      "sha256": "dec0a56759f5eda5cc6698604e58537478a2433049a8759bcb57acf3c659ebe6"
+    },
+    {
+      "path": "02. Sales & CRM/DMS Sales Management/dashboard.js",
+      "sha256": "08380bb2d4f64eb3a99f3f37f0ba09dc6cf49c42b12a7887dcca460b278a57ea"
+    },
+    {
+      "path": "02. Sales & CRM/DMS Sales Management/dashboard.css",
+      "sha256": "a745dae7cc4ceb9250b815378c0d1d784ccde916efe6b5f82ae0853a1ae061e2"
+    },
+    {
+      "path": "02. Sales & CRM/DMS Sales Management/dashboard.html",
+      "sha256": "57d90f2ab4937b709e4e05bba80466f1505cfc17dc6028721fc47e06850a79de"
+    },
+    {
+      "path": "02. Sales & CRM/DMS Sales Management/source.json",
+      "sha256": "cf26f108148a34f6df43b08e0bb1a444269bfda6035797a64b24c8f3c9f0178a"
+    },
+    {
+      "path": "02. Sales & CRM/DMS Sales Management/server_scripts/dms_daily_sales_activity_report_09fd04d5.py",
+      "sha256": "cd4fad8f5977854ff98f08b83975dcf639dac15369a5501db2085684d092b48e"
+    },
+    {
+      "path": "02. Sales & CRM/DMS Sales Management/server_scripts/dms_daily_sales_activity_report_09fd04d5.json",
+      "sha256": "beaef03386614d7f9fa4096d8f05e70741e8046bf62a694d63fdaffc6a936d2f"
+    },
+    {
+      "path": "02. Sales & CRM/DMS Sales Management/server_scripts/dms_manager_contact_requests_95145350.py",
+      "sha256": "debab88d6019f744490d4385f0fbe25a4c3bb696da3ebfac7cf9621e6a983fc2"
+    },
+    {
+      "path": "02. Sales & CRM/DMS Sales Management/server_scripts/dms_manager_contact_requests_95145350.json",
+      "sha256": "dcd54a52e7c15774eecab41f95336805ba8ad90dacbe997379dde01d45ea277c"
+    },
+    {
+      "path": "02. Sales & CRM/DMS Sales Management/server_scripts/dms_project_explorer_sectors_102f870e.py",
+      "sha256": "b83d4e440d0cea8331730103426224d7509759623b8870b95d73855942643cde"
+    },
+    {
+      "path": "02. Sales & CRM/DMS Sales Management/server_scripts/dms_project_explorer_sectors_102f870e.json",
+      "sha256": "efaefa880f536292d71405704b13b3bfb2eb51b20d5747cc228776a2b0457a8b"
+    },
+    {
+      "path": "02. Sales & CRM/DMS Sales Management/server_scripts/dms_sales_dashboard_data_4db2a9af.py",
+      "sha256": "c4bae5832f939525613e7b1eff28ded5f428c62004f644c73e0249d0129e06e7"
+    },
+    {
+      "path": "02. Sales & CRM/DMS Sales Management/server_scripts/dms_sales_dashboard_data_4db2a9af.json",
+      "sha256": "b7588a35e4d7fd454359c677a2292290885441f59b9f35239dfc8c598107aaa7"
+    },
+    {
+      "path": "02. Sales & CRM/DMS Sales Management/server_scripts/dms_share_key_personnel_contact_b1a55886.py",
+      "sha256": "f01645b90cd2c4f3ec9601de5489043130f7971a0d9766836479b7dbfae1294e"
+    },
+    {
+      "path": "02. Sales & CRM/DMS Sales Management/server_scripts/dms_share_key_personnel_contact_b1a55886.json",
+      "sha256": "604f3e266d1c3f46b7d1761254936206c44e748ffdaf0fe02c109ebe43d67762"
+    },
+    {
+      "path": "02. Sales & CRM/DMS Sales Management/README.md",
+      "sha256": "173ec8306464db44ea605e1588f82cfdfdb8576a904fd6d0f1b064045ca695f1"
+    },
+    {
+      "path": "02. Sales & CRM/Customer Dashboard/README.md",
+      "sha256": "941bbe6a04e3e75417971ed2a219869616248b6d36cb45cd716520119d7adbd3"
+    },
+    {
+      "path": "02. Sales & CRM/Quotation & SO Tracker/dashboard.js",
+      "sha256": "8d2671a431e0d5c6cee7531f8862840760cb2c2816274128c3ecc9e77652de2e"
+    },
+    {
+      "path": "02. Sales & CRM/Quotation & SO Tracker/dashboard.css",
+      "sha256": "5e295b67927feb89a888ddf27e67df126ee3a50ee886dae0232a1c82a0c6ba11"
+    },
+    {
+      "path": "02. Sales & CRM/Quotation & SO Tracker/dashboard.html",
+      "sha256": "ba6033431afe3e41ac69378b624c651455b8eefc5d1b31f41c6c58c1f4744c84"
+    },
+    {
+      "path": "02. Sales & CRM/Quotation & SO Tracker/source.json",
+      "sha256": "5b3bb03a8ad54ccfa666a9f7b6c2adcdaac82e8081485eec2a19ee1bfa32d80a"
+    },
+    {
+      "path": "02. Sales & CRM/Quotation & SO Tracker/README.md",
+      "sha256": "d75dfd052da9435b4948d5a391cdb5aad8c8cd50f25a610af4d5143e402b0b1f"
+    },
+    {
+      "path": "03. Procurement & Supply Chain/Pre-Procurement/dashboard.js",
+      "sha256": "91eac9ea8dce829ac0844c55677691c0fd3fc0d1febf20c648d193c2ce1645f9"
+    },
+    {
+      "path": "03. Procurement & Supply Chain/Pre-Procurement/dashboard.css",
+      "sha256": "ba1a14b343ac0e8ab9e89384edafc940b658b9935dab6a06cd7400c4a0458ed1"
+    },
+    {
+      "path": "03. Procurement & Supply Chain/Pre-Procurement/dashboard.html",
+      "sha256": "13e83f60f964a5bda9c721a4c03e9022a7c356ff609a466defb47b999f617654"
+    },
+    {
+      "path": "03. Procurement & Supply Chain/Pre-Procurement/source.json",
+      "sha256": "bacac2b7d312fecb28d195f7a0aa76ce3a6471a00bf71388b16575c131bc1310"
+    },
+    {
+      "path": "03. Procurement & Supply Chain/Pre-Procurement/README.md",
+      "sha256": "90a86f0aac1b4eeea92fe9677d5049b48c07dd2157992ea99a12fefdda4f53bc"
+    },
+    {
+      "path": "03. Procurement & Supply Chain/DN & GRN Tracker/dashboard.js",
+      "sha256": "ecfa57072721d65af9098e4a8e7da6ee5f156ffb267c16663208e29aaba5e749"
+    },
+    {
+      "path": "03. Procurement & Supply Chain/DN & GRN Tracker/dashboard.css",
+      "sha256": "4e4a82653c4e816c550086ac5187eef1668dde3f5566895d3d455443ce999ff0"
+    },
+    {
+      "path": "03. Procurement & Supply Chain/DN & GRN Tracker/dashboard.html",
+      "sha256": "0371d50f097e7ee3fba19321fed13728516428e2462b05f5fd49c647546a7e44"
+    },
+    {
+      "path": "03. Procurement & Supply Chain/DN & GRN Tracker/source.json",
+      "sha256": "d95e797faf254fc7212861db4e925a7b43e19eed4c0908610d4f24bfe7e5c102"
+    },
+    {
+      "path": "03. Procurement & Supply Chain/DN & GRN Tracker/README.md",
+      "sha256": "aeed105e21cf8c04b429ff91a31d33972e384d0749bd8a26d638f07b05a54395"
+    },
+    {
+      "path": "03. Procurement & Supply Chain/Customs & Post-Processing/dashboard.js",
+      "sha256": "d17c200d61c93c42814110d8146ef7159798665c0140410a68485c8460e8e329"
+    },
+    {
+      "path": "03. Procurement & Supply Chain/Customs & Post-Processing/dashboard.css",
+      "sha256": "318025a6609ac9699021fbf734a5cd184a1d942be903f55223fbe13ac57601db"
+    },
+    {
+      "path": "03. Procurement & Supply Chain/Customs & Post-Processing/dashboard.html",
+      "sha256": "49b1bc4f670631646dc3c76377540ee0e5857a2721d9b304344eb022c6084d1e"
+    },
+    {
+      "path": "03. Procurement & Supply Chain/Customs & Post-Processing/source.json",
+      "sha256": "c54a9391aacc924f538fb31823381d251f558a0cb2aabcb8d6b4a6412d33ede1"
+    },
+    {
+      "path": "03. Procurement & Supply Chain/Customs & Post-Processing/README.md",
+      "sha256": "b509d6feae3e8b49d8c6bc28228bd7655a5ef7328b2da4274cc4bf10606593f2"
+    },
+    {
+      "path": "03. Procurement & Supply Chain/Inventory Dashboard/dashboard.js",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "03. Procurement & Supply Chain/Inventory Dashboard/dashboard.css",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "03. Procurement & Supply Chain/Inventory Dashboard/dashboard.html",
+      "sha256": "2363cea37ee0f5e167d6ba452a59251cdd8203e1b7d3b2a937f0b0d90439d9a8"
+    },
+    {
+      "path": "03. Procurement & Supply Chain/Inventory Dashboard/source.json",
+      "sha256": "b4fd01144f052f3fc206ac39d96528b6b7ac532d23db6d2b5d22cfb4a9f3dbe2"
+    },
+    {
+      "path": "03. Procurement & Supply Chain/Inventory Dashboard/README.md",
+      "sha256": "24f972703c6e4a535300e4fd452ee8c8922b538241e49f3dc650e4bb026e412e"
+    },
+    {
+      "path": "04. Finance & Credit Control/Accounts Payable/dashboard.js",
+      "sha256": "626f304deef09c44ed62301e6c1cb9e94181d31a2ded5259ffb9ecd32d7eb2c4"
+    },
+    {
+      "path": "04. Finance & Credit Control/Accounts Payable/dashboard.css",
+      "sha256": "b9a745326f219b5e10e084d958d2484e82aab4d8dca3f576ce1dcfda8e9728ab"
+    },
+    {
+      "path": "04. Finance & Credit Control/Accounts Payable/dashboard.html",
+      "sha256": "7599c8bf5ee6fbc315c0d51783fd06e6b3835333020c457c661ae9126e516624"
+    },
+    {
+      "path": "04. Finance & Credit Control/Accounts Payable/source.json",
+      "sha256": "477b61935e9f50e7536f555ef635d9d1dc4741b180bc59ae70dd68d5f9071ea3"
+    },
+    {
+      "path": "04. Finance & Credit Control/Accounts Payable/README.md",
+      "sha256": "d18a552dff602d2f886e635b3e3a40962b6bc3f78a61b0234092f12fc99777db"
+    },
+    {
+      "path": "04. Finance & Credit Control/Treasury Dashboard/dashboard.js",
+      "sha256": "9b2ef0ad60dcc449e56a9f1a89b372b104896a0d6cdf1f6f74cb1ad669ce0c29"
+    },
+    {
+      "path": "04. Finance & Credit Control/Treasury Dashboard/dashboard.css",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "04. Finance & Credit Control/Treasury Dashboard/dashboard.html",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "04. Finance & Credit Control/Treasury Dashboard/source.json",
+      "sha256": "9b5e73b2323980ba5f89bb9387cb4266e1c4707b8d52dae3ddb9854d93c90ee9"
+    },
+    {
+      "path": "04. Finance & Credit Control/Treasury Dashboard/server_scripts/treasury_dashboard_data_66d24f75.py",
+      "sha256": "f2861a3ccf05631a9a33b86a62b43dcc40d69bcbfadae3f29e4b2f7c9ffba494"
+    },
+    {
+      "path": "04. Finance & Credit Control/Treasury Dashboard/server_scripts/treasury_dashboard_data_66d24f75.json",
+      "sha256": "792f5302e6b3fc0abaa79f1bc689581048336a251683ea1273dc1c41456ea84c"
+    },
+    {
+      "path": "04. Finance & Credit Control/Treasury Dashboard/README.md",
+      "sha256": "589d7e0863c102f99a5c3d8560b20928b0c35316b477670e75397c965a4ea114"
+    },
+    {
+      "path": "04. Finance & Credit Control/Payroll Cost Center/dashboard.js",
+      "sha256": "f487d325a139831fcbe238d3edcb45677efe44e7d545cc5450e0d2a4d85a91ea"
+    },
+    {
+      "path": "04. Finance & Credit Control/Payroll Cost Center/dashboard.css",
+      "sha256": "dbc72cedb3679f4749611848b61423b07c958226a1f554489ed1515d277ba64f"
+    },
+    {
+      "path": "04. Finance & Credit Control/Payroll Cost Center/dashboard.html",
+      "sha256": "850307a8d4bac061f39ff4bd221713834579f7cccbdd894c5f4049c617eac7ad"
+    },
+    {
+      "path": "04. Finance & Credit Control/Payroll Cost Center/source.json",
+      "sha256": "dd7470c0f531db4b72aa611ac609ae83e6d2257504df520b6776ad5aa26a4478"
+    },
+    {
+      "path": "04. Finance & Credit Control/Payroll Cost Center/README.md",
+      "sha256": "0a57a00c28f34036193294fb0f0ca283c4bdf45c9aec677839818542a74c5c9b"
+    },
+    {
+      "path": "04. Finance & Credit Control/VAT & ZATCA Compliance/dashboard.js",
+      "sha256": "c2928e6a270149c8c63af73d3d4b5f0f7bd2a4892643f38f1e4389c0f0ed9ec4"
+    },
+    {
+      "path": "04. Finance & Credit Control/VAT & ZATCA Compliance/dashboard.css",
+      "sha256": "0305cb7656a2db54efa9511f337f189db1436ef6e9afd0ae62e1b454ed10a1dd"
+    },
+    {
+      "path": "04. Finance & Credit Control/VAT & ZATCA Compliance/dashboard.html",
+      "sha256": "b3cad27aa23d74c5df42b95766e05a39c4cbb875142a272aaf96c6affc1d7703"
+    },
+    {
+      "path": "04. Finance & Credit Control/VAT & ZATCA Compliance/source.json",
+      "sha256": "1557ed5511ccc360a2ca9d464bfc7d387968da40d4a4b0103b72d88fc38c3883"
+    },
+    {
+      "path": "04. Finance & Credit Control/VAT & ZATCA Compliance/README.md",
+      "sha256": "f1330f5225b46f8dd3eeeca3617afa4c4754f28c5844221ebd4bb3428edb6230"
+    },
+    {
+      "path": "04. Finance & Credit Control/Credit Controller Dashboard/dashboard.js",
+      "sha256": "1f37edefde3f0f80689ce3ecf0e11f3d3d9bf6524433c400a84a19ffb209e9b5"
+    },
+    {
+      "path": "04. Finance & Credit Control/Credit Controller Dashboard/dashboard.css",
+      "sha256": "c42a0e601d40178fe5f5b247e5f1e17f02c698ad3c23e517a54c97ce3702b0eb"
+    },
+    {
+      "path": "04. Finance & Credit Control/Credit Controller Dashboard/dashboard.html",
+      "sha256": "e38297f02cbbfcc34a2faab8a9f075cbbc537bcf45aed71f28e82b15340c4ecd"
+    },
+    {
+      "path": "04. Finance & Credit Control/Credit Controller Dashboard/source.json",
+      "sha256": "633c1304e2169ed0f60e071a10a95eaa8ec269481aea6b134c47960e7e88c6bb"
+    },
+    {
+      "path": "04. Finance & Credit Control/Credit Controller Dashboard/README.md",
+      "sha256": "161d70558f861f552c4aa9c42d249025a3a39fee5eb3e98e8092abf335ddbaad"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/CP Blocked Customer/dashboard.js",
+      "sha256": "6e813f812a813780b3a127d7d03931e8ce05c6067a0d223934be3796a726b68f"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/CP Blocked Customer/dashboard.css",
+      "sha256": "32eddd163912ac49e621c17b0fce903c95b7e1fed8f876ec7775e2100e850f06"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/CP Blocked Customer/dashboard.html",
+      "sha256": "44a46d30de883e143fa73d09b99dab1196e7510033fef0987f265319e8dd7848"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/CP Blocked Customer/source.json",
+      "sha256": "e85e72f32ca3a29f3161477dab14dc4a3aef342b73bb65b5013682db59985545"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/CP Blocked Customer/README.md",
+      "sha256": "3d6f0a4d4f9f91f16f5ba72c5c669a99a45cd3693f67f790e584f761f475a12a"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/CSD Blocked Customer/dashboard.js",
+      "sha256": "be06721a7416b4e814184e228017415cac54a0d3676dac32e131bdc526602322"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/CSD Blocked Customer/dashboard.css",
+      "sha256": "32eddd163912ac49e621c17b0fce903c95b7e1fed8f876ec7775e2100e850f06"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/CSD Blocked Customer/dashboard.html",
+      "sha256": "1546018100e7edbe7b931ae2e8b5608c4d045e99c97bbc5f944d2294e110b3ab"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/CSD Blocked Customer/source.json",
+      "sha256": "73b916ed6a4eefef01bc0db08d660f8fe2c01c79030f47c31a56fe4e4820ffca"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/CSD Blocked Customer/README.md",
+      "sha256": "11b217b5f5016be9dff8a3201fbf971897ed3b2ca7d6e96f946b20c9c7b93c47"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/EP Blocked Customer/dashboard.js",
+      "sha256": "8247613301315d2b816b1275a418f2119fa173d79258b91c72a11e03c021ff59"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/EP Blocked Customer/dashboard.css",
+      "sha256": "32eddd163912ac49e621c17b0fce903c95b7e1fed8f876ec7775e2100e850f06"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/EP Blocked Customer/dashboard.html",
+      "sha256": "c697103a51a6ff07749064a92391914ddfe79b344e75b795b4d47d47f62d3fdc"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/EP Blocked Customer/source.json",
+      "sha256": "7142f5a3e4040f5172b8fe51bf83b7cb1ac214a761d48362c9f8374de199b7ea"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/EP Blocked Customer/README.md",
+      "sha256": "d3443816bff300030c4c54bb27313fb4ba358dc5e2886bf4775b12cabd0e57d6"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/MP Blocked Customer/dashboard.js",
+      "sha256": "4f4f6cda6957e8ef301b3ce030027ad931562920cdbeb23e53b3797983773a05"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/MP Blocked Customer/dashboard.css",
+      "sha256": "32eddd163912ac49e621c17b0fce903c95b7e1fed8f876ec7775e2100e850f06"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/MP Blocked Customer/dashboard.html",
+      "sha256": "7166943f00f8c4b6fe325e728586241fd93cee3001ec2688a826841a2d125be9"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/MP Blocked Customer/source.json",
+      "sha256": "426df58d9ab48a32f8d528ef0ef4eecdf85aed10f23a162828a748c3e1e27060"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/MP Blocked Customer/README.md",
+      "sha256": "121bc947856c95240aba42046ab3b5d41698d607441d5522cb85ba35e664521d"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/SRD Blocked Customer/dashboard.js",
+      "sha256": "a7e021741105bc6d69053fcc70a672ad9eeff388dbffd635d56706282a332517"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/SRD Blocked Customer/dashboard.css",
+      "sha256": "32eddd163912ac49e621c17b0fce903c95b7e1fed8f876ec7775e2100e850f06"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/SRD Blocked Customer/dashboard.html",
+      "sha256": "a4d94cdb0ccdfb5e8f6215868cf0f4ce044116558872b591de58b0709c68a3d3"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/SRD Blocked Customer/source.json",
+      "sha256": "a5102ac0ec14b6e51df8565d6c380745bf2cca53b4089a14ca17b8b2dd4ff604"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/SRD Blocked Customer/README.md",
+      "sha256": "850ada5e7694f3f49d932c5ca09303b5818c4a367b5da481deba0ffca6c3a871"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/WP Blocked Customer/dashboard.js",
+      "sha256": "65883212317ba8a05a18abdf000c8e600ca693de3e44743e95fe7c94fda2eba7"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/WP Blocked Customer/dashboard.css",
+      "sha256": "32eddd163912ac49e621c17b0fce903c95b7e1fed8f876ec7775e2100e850f06"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/WP Blocked Customer/dashboard.html",
+      "sha256": "a6b90e5f5531bb6c88a8940ac26c9c7fb4b871af45e20a32b9e2a0c0cde5ff3a"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/WP Blocked Customer/source.json",
+      "sha256": "f9c023eae2fcd536d0afe5908ddc5ca51ccfae9981d21a8a16d562fa1ed82652"
+    },
+    {
+      "path": "04. Finance & Credit Control/Blocked Customer Dashboard/WP Blocked Customer/README.md",
+      "sha256": "8ed52f8cecb6d1c55bdc46ca4a01268d7461ccb7dafe66840673b723c0100c83"
+    },
+    {
+      "path": "04. Finance & Credit Control/SOA Request Dashboard/dashboard.js",
+      "sha256": "0df3607153626f3c6e2b6f4fd3d7f45ed61169cf37733379b28d369ae892eb4c"
+    },
+    {
+      "path": "04. Finance & Credit Control/SOA Request Dashboard/dashboard.css",
+      "sha256": "8faab9f6d444fd3cb9a7d2b11dfed0620c1566361e7fda34adffaa69b9557155"
+    },
+    {
+      "path": "04. Finance & Credit Control/SOA Request Dashboard/dashboard.html",
+      "sha256": "93636fa047400919d3a6fa2c57a114596546d97c9681645ed857fb014fb8fb18"
+    },
+    {
+      "path": "04. Finance & Credit Control/SOA Request Dashboard/source.json",
+      "sha256": "f9a37af8d89dd1f7834ac1033bb4eaa8489a1bcc696926a75db23fadbcd2ddad"
+    },
+    {
+      "path": "04. Finance & Credit Control/SOA Request Dashboard/server_scripts/soa_api_cca237a6.py",
+      "sha256": "818dcf46b2a0aa23fd108a70fce23bff7e4e576e8f11e9eb08c9b10c47cb2c36"
+    },
+    {
+      "path": "04. Finance & Credit Control/SOA Request Dashboard/server_scripts/soa_api_cca237a6.json",
+      "sha256": "f0f4bf249dbd5b721d72ac846ecb5d654da5c9b8afa19bd7fcafa40d5cf345bd"
+    },
+    {
+      "path": "04. Finance & Credit Control/SOA Request Dashboard/server_scripts/soa_workflow_api_2e6f5dd7.py",
+      "sha256": "602b21f50767f6533e24686aa84f456d29922d52cd718be07636fcaa54b11189"
+    },
+    {
+      "path": "04. Finance & Credit Control/SOA Request Dashboard/server_scripts/soa_workflow_api_2e6f5dd7.json",
+      "sha256": "b2008a7c7001e91c08159f2d9f93fbf89d738210a20064e25a886b2f4dab9311"
+    },
+    {
+      "path": "04. Finance & Credit Control/SOA Request Dashboard/README.md",
+      "sha256": "9a667218e591570c400b932e05e464abc34fdd8d078b3f201c1b887d58457f78"
+    },
+    {
+      "path": "04. Finance & Credit Control/SOA Manager/dashboard.js",
+      "sha256": "8b43bef5547d317cc4b1bcd3d07115a9618ba04eb144fd865850064bcbb7f9dd"
+    },
+    {
+      "path": "04. Finance & Credit Control/SOA Manager/dashboard.css",
+      "sha256": "f768455306974ce43a34beead3262ac0e872da73311443482fb654c9c5954d2f"
+    },
+    {
+      "path": "04. Finance & Credit Control/SOA Manager/dashboard.html",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "04. Finance & Credit Control/SOA Manager/source.json",
+      "sha256": "00c1bb04292e67aa9d9f0806c158d443d9a2174c43900b7017f27cf292b03169"
+    },
+    {
+      "path": "04. Finance & Credit Control/SOA Manager/server_scripts/soa_api_cca237a6.py",
+      "sha256": "818dcf46b2a0aa23fd108a70fce23bff7e4e576e8f11e9eb08c9b10c47cb2c36"
+    },
+    {
+      "path": "04. Finance & Credit Control/SOA Manager/server_scripts/soa_api_cca237a6.json",
+      "sha256": "f0f4bf249dbd5b721d72ac846ecb5d654da5c9b8afa19bd7fcafa40d5cf345bd"
+    },
+    {
+      "path": "04. Finance & Credit Control/SOA Manager/server_scripts/soa_workflow_api_2e6f5dd7.py",
+      "sha256": "602b21f50767f6533e24686aa84f456d29922d52cd718be07636fcaa54b11189"
+    },
+    {
+      "path": "04. Finance & Credit Control/SOA Manager/server_scripts/soa_workflow_api_2e6f5dd7.json",
+      "sha256": "b2008a7c7001e91c08159f2d9f93fbf89d738210a20064e25a886b2f4dab9311"
+    },
+    {
+      "path": "04. Finance & Credit Control/SOA Manager/README.md",
+      "sha256": "7a823ca8c03aea229e8d64fe769c528fd3c0dff7ac28715491e7c64bf95d596b"
+    },
+    {
+      "path": "04. Finance & Credit Control/Collector/dashboard.js",
+      "sha256": "e499547825bb86fe0c9f01dc324f6eace1b91a3855f99cd1af7fef3e88496a74"
+    },
+    {
+      "path": "04. Finance & Credit Control/Collector/dashboard.css",
+      "sha256": "bad3f8caa1783ad310c6496d1f3ff7ad5765ad6c1c2d5dabb0f27cecaa73a9ec"
+    },
+    {
+      "path": "04. Finance & Credit Control/Collector/dashboard.html",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "04. Finance & Credit Control/Collector/source.json",
+      "sha256": "7d6c105e227512f35b8bd59b1ed6fde3f8de73d78d91af39cd1ff169aa0287a1"
+    },
+    {
+      "path": "04. Finance & Credit Control/Collector/server_scripts/soa_api_cca237a6.py",
+      "sha256": "818dcf46b2a0aa23fd108a70fce23bff7e4e576e8f11e9eb08c9b10c47cb2c36"
+    },
+    {
+      "path": "04. Finance & Credit Control/Collector/server_scripts/soa_api_cca237a6.json",
+      "sha256": "f0f4bf249dbd5b721d72ac846ecb5d654da5c9b8afa19bd7fcafa40d5cf345bd"
+    },
+    {
+      "path": "04. Finance & Credit Control/Collector/README.md",
+      "sha256": "3224e13793d36a962b71295fcff1f585352b99d580bb890ba663ab26afee30f1"
+    },
+    {
+      "path": "04. Finance & Credit Control/Finance Manager Dashboard/dashboard.js",
+      "sha256": "864af70ce8883c241642aecfe946ec23973bf7f4251d68bf663caedadc60a878"
+    },
+    {
+      "path": "04. Finance & Credit Control/Finance Manager Dashboard/dashboard.css",
+      "sha256": "e64433c8d0ce05844bbfb74cbd69c5cbc5e03e7b430037907e822bf94078c7d4"
+    },
+    {
+      "path": "04. Finance & Credit Control/Finance Manager Dashboard/dashboard.html",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "04. Finance & Credit Control/Finance Manager Dashboard/source.json",
+      "sha256": "abc7950bf12ee81e583b4c605794a45e43232a5db768a741a72dfce8c68db76e"
+    },
+    {
+      "path": "04. Finance & Credit Control/Finance Manager Dashboard/server_scripts/soa_workflow_api_2e6f5dd7.py",
+      "sha256": "602b21f50767f6533e24686aa84f456d29922d52cd718be07636fcaa54b11189"
+    },
+    {
+      "path": "04. Finance & Credit Control/Finance Manager Dashboard/server_scripts/soa_workflow_api_2e6f5dd7.json",
+      "sha256": "b2008a7c7001e91c08159f2d9f93fbf89d738210a20064e25a886b2f4dab9311"
+    },
+    {
+      "path": "04. Finance & Credit Control/Finance Manager Dashboard/README.md",
+      "sha256": "2c84568f7bbdbfb7c1f997294e44ac6c234177797cb849dcc342f296e40ba376"
+    },
+    {
+      "path": "04. Finance & Credit Control/Finance Internal Controller/dashboard.js",
+      "sha256": "4174fc1d793393801c5b66d6c5501e28c22b1c8f35f6d45c9e45254e0c1676cd"
+    },
+    {
+      "path": "04. Finance & Credit Control/Finance Internal Controller/dashboard.css",
+      "sha256": "4c88bc34f961ff3d830983a9756473e3aa6d5e51f3cc059b9b2041deb6d006df"
+    },
+    {
+      "path": "04. Finance & Credit Control/Finance Internal Controller/dashboard.html",
+      "sha256": "1a1efffc10aa42b14a1c64c703177cf98c60b93e8e5575856934d362f95a807f"
+    },
+    {
+      "path": "04. Finance & Credit Control/Finance Internal Controller/source.json",
+      "sha256": "3b06e124197ebda969c4430cdcdc3c94109f32551c86a9c682f8b0d89c1dee75"
+    },
+    {
+      "path": "04. Finance & Credit Control/Finance Internal Controller/README.md",
+      "sha256": "a1ef9d864cf79ca67e434a2ce53fdacbb6a11e6f4e6b82be4c69f4d90a70bf56"
+    },
+    {
+      "path": "05. HR & Administration/Admin HR Dashboard/dashboard.js",
+      "sha256": "703ec29e64c8d1e083c4672edb23a734a200fdbc7cc307635e58ad37596c0c33"
+    },
+    {
+      "path": "05. HR & Administration/Admin HR Dashboard/dashboard.css",
+      "sha256": "e2d20c14cf2eba660ac0184ee086dfafc36f1e10e61c896b81e92e9276b4393f"
+    },
+    {
+      "path": "05. HR & Administration/Admin HR Dashboard/dashboard.html",
+      "sha256": "2925fe4ded6121373f7c798add06fe4029950601d6238d8289616b7687a7e775"
+    },
+    {
+      "path": "05. HR & Administration/Admin HR Dashboard/source.json",
+      "sha256": "50a91fe176965de86e5e3945a275096fa55421dabc58753d2d939198136af740"
+    },
+    {
+      "path": "05. HR & Administration/Admin HR Dashboard/server_scripts/admin_hr_compliance_data_1e9c8561.py",
+      "sha256": "165dfa87e2ffe817d8739347245ea98915aa7843e8a5d848df55273b567519e3"
+    },
+    {
+      "path": "05. HR & Administration/Admin HR Dashboard/server_scripts/admin_hr_compliance_data_1e9c8561.json",
+      "sha256": "764b1d1c96e22e52f9b849ef37261c0e834fb0b88530c9463413ffe3d64af459"
+    },
+    {
+      "path": "05. HR & Administration/Admin HR Dashboard/server_scripts/admin_hr_dashboard_data_0f894ebc.py",
+      "sha256": "0a746027cc3efd55d476b80cb9ea02bfb58bd64771daf621b55219c8a0677160"
+    },
+    {
+      "path": "05. HR & Administration/Admin HR Dashboard/server_scripts/admin_hr_dashboard_data_0f894ebc.json",
+      "sha256": "61365997a2029544cc8e5d2424275628ecb52b63fa162ed62aae1c59a42924a4"
+    },
+    {
+      "path": "05. HR & Administration/Admin HR Dashboard/server_scripts/admin_hr_employee_detail_f8cf00df.py",
+      "sha256": "e143291b37aebd805d320b4798dc8e7913e8072e704b386a07007347fa71fdb8"
+    },
+    {
+      "path": "05. HR & Administration/Admin HR Dashboard/server_scripts/admin_hr_employee_detail_f8cf00df.json",
+      "sha256": "f6bf78fd6a0504f0e1af6cc23992993ba9da24e9842a51803b340c3d02a282b2"
+    },
+    {
+      "path": "05. HR & Administration/Admin HR Dashboard/server_scripts/admin_hr_employee_directory_1fbaa99b.py",
+      "sha256": "1dfd4078748744a1750e674a50fcc8d1c6e64249f7defe8c7453cee6f8d0b166"
+    },
+    {
+      "path": "05. HR & Administration/Admin HR Dashboard/server_scripts/admin_hr_employee_directory_1fbaa99b.json",
+      "sha256": "709852e5648c1cb043e019a40b93e81c905952895641d14bb9860d3cd15d1a71"
+    },
+    {
+      "path": "05. HR & Administration/Admin HR Dashboard/server_scripts/admin_hr_leave_data_813b2196.py",
+      "sha256": "eb50a3e737d00ecdbbcd7a99e0dcc531fe7dc6764ceab28a30af7c9006171390"
+    },
+    {
+      "path": "05. HR & Administration/Admin HR Dashboard/server_scripts/admin_hr_leave_data_813b2196.json",
+      "sha256": "9f7cc11bb714c1bab8e45ae277d245b7f642bca1b9c59811e7b25d4fe0726534"
+    },
+    {
+      "path": "05. HR & Administration/Admin HR Dashboard/server_scripts/admin_hr_requests_data_c9b1c2c6.py",
+      "sha256": "52c09810a992c37708f05e7b55682750eafd6723c21dbb3cb290ef79d55e104a"
+    },
+    {
+      "path": "05. HR & Administration/Admin HR Dashboard/server_scripts/admin_hr_requests_data_c9b1c2c6.json",
+      "sha256": "44b96923b61f9251aab3ce59c91d683701927e2e50665cc4bb1e7398e32dd718"
+    },
+    {
+      "path": "05. HR & Administration/Admin HR Dashboard/server_scripts/admin_hr_training_data_6a904c9b.py",
+      "sha256": "059fa538f846914de0cd6b9529dbf64b3cdbbf779867ce7e20d59adb696a9baf"
+    },
+    {
+      "path": "05. HR & Administration/Admin HR Dashboard/server_scripts/admin_hr_training_data_6a904c9b.json",
+      "sha256": "4164b3f68940976019d4dfca176b312490ce29fb12ef99a553415a64dff029ab"
+    },
+    {
+      "path": "05. HR & Administration/Admin HR Dashboard/README.md",
+      "sha256": "a331f2d1189933f9efec7281754ea8a18b6281a422d3f3bec35a106236192eb6"
+    },
+    {
+      "path": "05. HR & Administration/Admin & HR Platform/dashboard.js",
+      "sha256": "b09f0eefe1168ac63f397a501b0d4fcd8c5b83121a61379d3ff3de8affbd5dcb"
+    },
+    {
+      "path": "05. HR & Administration/Admin & HR Platform/dashboard.css",
+      "sha256": "9f47af2656b94cf15503cd0849563515d5931a627a397ccb257242c1fbe7e99e"
+    },
+    {
+      "path": "05. HR & Administration/Admin & HR Platform/dashboard.html",
+      "sha256": "cf8b224b861e73d06190987146586982ff801dcb0a1fab4e384506d132277296"
+    },
+    {
+      "path": "05. HR & Administration/Admin & HR Platform/source.json",
+      "sha256": "e02908842b37ec592843dfe2c4e6a7db13d3a35eb8ecd03a4107b25b62830d33"
+    },
+    {
+      "path": "05. HR & Administration/Admin & HR Platform/README.md",
+      "sha256": "38634c218b2baeaa207d792fb227beb6f613949587de9f2fa157c3cfefb4ce71"
+    },
+    {
+      "path": "05. HR & Administration/Employee Dashboard/dashboard.js",
+      "sha256": "96d7da2b8290a12bb3f118ba3704fe4f130ae2ef9bc3daf9e4fc8fd95867a9cd"
+    },
+    {
+      "path": "05. HR & Administration/Employee Dashboard/dashboard.css",
+      "sha256": "b07715b3a25e7a7e590b8464a321a1f92bbcf49282a0045f327bbe9f5010cc8d"
+    },
+    {
+      "path": "05. HR & Administration/Employee Dashboard/dashboard.html",
+      "sha256": "f7e3a6011b33e25cb00cc7045b87cd0888ffe26647c1abdf21c573978e999cb1"
+    },
+    {
+      "path": "05. HR & Administration/Employee Dashboard/source.json",
+      "sha256": "502966209c7fe83b8318afcc30e07de94b339a07bf33c6134efef87dba92a92a"
+    },
+    {
+      "path": "05. HR & Administration/Employee Dashboard/server_scripts/emp_todo_dashboard_2d996ec0.py",
+      "sha256": "62138d6e627d72ed8dba14d075ffff0f3b26a9ca6bb6e177a0888e9b510c5f6c"
+    },
+    {
+      "path": "05. HR & Administration/Employee Dashboard/server_scripts/emp_todo_dashboard_2d996ec0.json",
+      "sha256": "f211852074a6dc17fa367781b791f18585c0b560f49231402f398a49df946b20"
+    },
+    {
+      "path": "05. HR & Administration/Employee Dashboard/server_scripts/ess_get_my_dashboard_9cb5ddf7.py",
+      "sha256": "655b82e48b7f39b8a073ed3d57ad3f549a0e1a3c9cd6f68006f0a63a9075ebac"
+    },
+    {
+      "path": "05. HR & Administration/Employee Dashboard/server_scripts/ess_get_my_dashboard_9cb5ddf7.json",
+      "sha256": "3ef91d678730ba4893b2f7bad74d1bc5a528c64a08897c6c994bf89d2721fa60"
+    },
+    {
+      "path": "05. HR & Administration/Employee Dashboard/server_scripts/mgr_todo_dashboard_4908886c.py",
+      "sha256": "049b6d454566ec0f5604134e4dd327774e41005e91dc3c90bf58cf40be77c49f"
+    },
+    {
+      "path": "05. HR & Administration/Employee Dashboard/server_scripts/mgr_todo_dashboard_4908886c.json",
+      "sha256": "459e7ff870ff496547bf016808a7b1b6662d6b9ff6fcbefff93068a7c9ce50c3"
+    },
+    {
+      "path": "05. HR & Administration/Employee Dashboard/README.md",
+      "sha256": "d72b2f1213f75a0c0ae3c762a0698d22ee6cf459a75cb5703dd4c665f6def15b"
+    },
+    {
+      "path": "05. HR & Administration/Employee Vacation/dashboard.js",
+      "sha256": "e153838807af81374ad52e3903116d2ade895b5ea280727f0d3f183ad2cf650e"
+    },
+    {
+      "path": "05. HR & Administration/Employee Vacation/dashboard.css",
+      "sha256": "82d2acfcb2a4b58c68fd418e99142cce32d10854845e53412794beaf6e285cbf"
+    },
+    {
+      "path": "05. HR & Administration/Employee Vacation/dashboard.html",
+      "sha256": "764777e9caba2f060a54e4bb4ad227a482bebcdcb7aa2d89735828414fd657e0"
+    },
+    {
+      "path": "05. HR & Administration/Employee Vacation/source.json",
+      "sha256": "9c9f5a536610e30a8d3e1a5198f1c7a7e9c49f3bbad3ce6f1587570c94765117"
+    },
+    {
+      "path": "05. HR & Administration/Employee Vacation/README.md",
+      "sha256": "1fe8992d77a84809fce94baaeab27a4a649dea61f8fdca325871ab8df5bb837e"
+    },
+    {
+      "path": "05. HR & Administration/Government Relations Dashboard/dashboard.js",
+      "sha256": "92741bdd7439ce177fb515f1ad4aa70751962e0041202860177b392aa79fd6fc"
+    },
+    {
+      "path": "05. HR & Administration/Government Relations Dashboard/dashboard.css",
+      "sha256": "c892dfab40be7b27dcd5d0eb6487018abc080fb9fa4c9fd44d327426a77e674d"
+    },
+    {
+      "path": "05. HR & Administration/Government Relations Dashboard/dashboard.html",
+      "sha256": "dda85843201309e52531ae6e53255323469f1bb2587463354f7a39b362cc3f2a"
+    },
+    {
+      "path": "05. HR & Administration/Government Relations Dashboard/source.json",
+      "sha256": "0a1d577bbd93a1eb7fad293c3182ebf73e95b6b8fa30291842c316a9770ccfe9"
+    },
+    {
+      "path": "05. HR & Administration/Government Relations Dashboard/README.md",
+      "sha256": "0b8c44fd145255138c78c4de8523af27b667ba57c95cc76cc22f59387a6098ec"
+    },
+    {
+      "path": "06. Technical & Projects/Technical Department/dashboard.js",
+      "sha256": "8d90525080f28be23ade816af8f2d3192fca8af1f00251bef2d53f2bdc8c4d0f"
+    },
+    {
+      "path": "06. Technical & Projects/Technical Department/dashboard.css",
+      "sha256": "b4d40e11370f7af479c339627bfbbd87e54d885cce799d7ef9c448fb14e3e935"
+    },
+    {
+      "path": "06. Technical & Projects/Technical Department/dashboard.html",
+      "sha256": "5c9799911911ca4ae90aa7b1a149fc5de842bfba9d881239bdce63bce30eb268"
+    },
+    {
+      "path": "06. Technical & Projects/Technical Department/source.json",
+      "sha256": "8d62333767326ff23c9d6488aa8010df92dcd310bfef8e44d1715bd9822c6faf"
+    },
+    {
+      "path": "06. Technical & Projects/Technical Department/README.md",
+      "sha256": "cb50afd299966a5bdf75a85a3d8cac12077063a7a18f0aeb9f0d90ec1540817d"
+    },
+    {
+      "path": "06. Technical & Projects/DMS Technical Department/dashboard.js",
+      "sha256": "cdb873d0f41be0cf573c8cff4b168d31d50ab062219ac88fb908d792ea57cc4f"
+    },
+    {
+      "path": "06. Technical & Projects/DMS Technical Department/dashboard.css",
+      "sha256": "3aee1e932097b50b5dc6316fd304715b8877840e0888f14c341a015e4d4015d5"
+    },
+    {
+      "path": "06. Technical & Projects/DMS Technical Department/dashboard.html",
+      "sha256": "29857681a36b940cf60edc6f059c1889ac2691a80bd3a9d6fa11101ec8d1fb07"
+    },
+    {
+      "path": "06. Technical & Projects/DMS Technical Department/source.json",
+      "sha256": "16f37be6080514cbe105235596c7dc36a1fdf2558f8978f616c20ac441b500e4"
+    },
+    {
+      "path": "06. Technical & Projects/DMS Technical Department/server_scripts/dms_technical_dashboard_data_936773f5.py",
+      "sha256": "735bba449e1afb0c9f9d15578d085563bf215b5420364c3358ab35a748b5d9d4"
+    },
+    {
+      "path": "06. Technical & Projects/DMS Technical Department/server_scripts/dms_technical_dashboard_data_936773f5.json",
+      "sha256": "6e130609c507d3365cb632607a152084824784a19490a717188cc3831542aca0"
+    },
+    {
+      "path": "06. Technical & Projects/DMS Technical Department/README.md",
+      "sha256": "f26a1b11107eccd3ce792d132763682cef1021368b4f400e3cfd810a6cbb10ce"
+    },
+    {
+      "path": "06. Technical & Projects/My DMS Projects/dashboard.js",
+      "sha256": "b0d0f0d5e3391a73e756f7b80045022198a1d2a3fb62791c20f0b230cad831e4"
+    },
+    {
+      "path": "06. Technical & Projects/My DMS Projects/dashboard.css",
+      "sha256": "5c6946ef361dbdbfcdf10e4f1a0ef68cb631b6c5194c35d0f0c360d1d046c11e"
+    },
+    {
+      "path": "06. Technical & Projects/My DMS Projects/dashboard.html",
+      "sha256": "66ae30de92fe6158f316feea35b9411d670184325d08c5a04bb85993e364dcda"
+    },
+    {
+      "path": "06. Technical & Projects/My DMS Projects/source.json",
+      "sha256": "3e774ca21603f32fcbc71f9dc40e54fc60c1600081d8c1c908e7a5ee0634fd54"
+    },
+    {
+      "path": "06. Technical & Projects/My DMS Projects/server_scripts/dms_add_follow_up_612f4797.py",
+      "sha256": "956fbbe1a827c47343ebc7248f960f1113aaec632654d7777271b6f04ac5a958"
+    },
+    {
+      "path": "06. Technical & Projects/My DMS Projects/server_scripts/dms_add_follow_up_612f4797.json",
+      "sha256": "22893d5a66e65fde9eaee69771642e11486e48ea24921c4068491d2a52cdb6ab"
+    },
+    {
+      "path": "06. Technical & Projects/My DMS Projects/server_scripts/dms_get_shared_key_personnel_contact_64396b8b.py",
+      "sha256": "382c06bbd2e6f09fd0c7909b4751295fd21fd5d3c42ce45e2184c9dfb7a94029"
+    },
+    {
+      "path": "06. Technical & Projects/My DMS Projects/server_scripts/dms_get_shared_key_personnel_contact_64396b8b.json",
+      "sha256": "0eb2f8f5f3dcc87d7fc02942447fa09de73e278135b97411c44a03f795d0c7d4"
+    },
+    {
+      "path": "06. Technical & Projects/My DMS Projects/server_scripts/dms_my_key_personnel_requests_433f7e29.py",
+      "sha256": "9ec8c5268c502ba3e2b435be4a8b38bdeac2df3cc930b07c4cc7ba4123699860"
+    },
+    {
+      "path": "06. Technical & Projects/My DMS Projects/server_scripts/dms_my_key_personnel_requests_433f7e29.json",
+      "sha256": "e00002ef7cfc55e9ae6c2faeac9300af5b8861419a26e70b3f95821b5fe8a010"
+    },
+    {
+      "path": "06. Technical & Projects/My DMS Projects/server_scripts/dms_my_projects_dashboard_data_468fbe2c.py",
+      "sha256": "7765e3982d5f754c6672756b97f121e47498b9de7bf4ae2b24ef8f33197b0873"
+    },
+    {
+      "path": "06. Technical & Projects/My DMS Projects/server_scripts/dms_my_projects_dashboard_data_468fbe2c.json",
+      "sha256": "be7a4fc33f0d36405fc0b24324c1852b7d7ca80ef03575039f1f3da9b44c0834"
+    },
+    {
+      "path": "06. Technical & Projects/My DMS Projects/server_scripts/dms_project_shared_contacts_009e0ef0.py",
+      "sha256": "130b0c4da45f3840561d8036259b0546798cc9a79cc669ef63b33585c7e76d2a"
+    },
+    {
+      "path": "06. Technical & Projects/My DMS Projects/server_scripts/dms_project_shared_contacts_009e0ef0.json",
+      "sha256": "e158f1f67e136ceac33c5ebd16586a6987b370310ff24f776dca97d5df64a7c0"
+    },
+    {
+      "path": "06. Technical & Projects/My DMS Projects/README.md",
+      "sha256": "c747eff1129e4fa6bb1ce960bd491ac99d42094420d81114656285c375209076"
+    },
+    {
+      "path": "06. Technical & Projects/DM Contracting Dashboard/dashboard.js",
+      "sha256": "c9da0c62b66218031adf0c02343a2974f24bf4f798531f2acce5bdd29ddc60be"
+    },
+    {
+      "path": "06. Technical & Projects/DM Contracting Dashboard/dashboard.css",
+      "sha256": "aff0e183f5741dbeea4437146f03f925f5a16ef212d517b9e46857f6fc51b73c"
+    },
+    {
+      "path": "06. Technical & Projects/DM Contracting Dashboard/dashboard.html",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "06. Technical & Projects/DM Contracting Dashboard/source.json",
+      "sha256": "94ee4e867edd64ec83ad7fa63345cf62e65bc17523062baca627dea141099d4a"
+    },
+    {
+      "path": "06. Technical & Projects/DM Contracting Dashboard/README.md",
+      "sha256": "854ea62a40a82bde8d1a629169f3399de255af294fd5d943dbd4b3e69b36e1a9"
+    },
+    {
+      "path": "07. IT & Digital Systems/IT Asset Acquisition/dashboard.js",
+      "sha256": "cf4ae80eadc6a29d57c8dd9305b3bf88d37ba6311ae4f9f2d0763a3a10bb2f36"
+    },
+    {
+      "path": "07. IT & Digital Systems/IT Asset Acquisition/dashboard.css",
+      "sha256": "15afc1172332e6dc85d1606a90ca177721bd459acd086eb2b97a9cc4132b1ac6"
+    },
+    {
+      "path": "07. IT & Digital Systems/IT Asset Acquisition/dashboard.html",
+      "sha256": "b90e4cfa362082c9a8a354649e67164ec106b04fe9fecab0c6e3e879fa114861"
+    },
+    {
+      "path": "07. IT & Digital Systems/IT Asset Acquisition/source.json",
+      "sha256": "f45677840057f254ca759cfc7f6bccc6bc8fdea14c546f76e66cbe61b6f1522f"
+    },
+    {
+      "path": "07. IT & Digital Systems/IT Asset Acquisition/README.md",
+      "sha256": "351fe628901bacec2ae74afd26c5452f154fdf191539b7795744ab5f34c6cdbb"
+    },
+    {
+      "path": "07. IT & Digital Systems/IT Platforms Expiry/dashboard.js",
+      "sha256": "dd31f35fff360b7655401d5574f8e639d4c364d430774d84fb6dc7c5776782be"
+    },
+    {
+      "path": "07. IT & Digital Systems/IT Platforms Expiry/dashboard.css",
+      "sha256": "0728565cd4a9fa18310af2549c2f8963dfaed13005ac95e9dd3f9b9e019fd840"
+    },
+    {
+      "path": "07. IT & Digital Systems/IT Platforms Expiry/dashboard.html",
+      "sha256": "978ab08c391e6d2c0137562c35ed1288f26334af1d390fb9a384a9d6e980364c"
+    },
+    {
+      "path": "07. IT & Digital Systems/IT Platforms Expiry/source.json",
+      "sha256": "37b54c6fbee08ddd27bb534b539e026dc7c6d25f3aabbc469a28e0b87f5da69b"
+    },
+    {
+      "path": "07. IT & Digital Systems/IT Platforms Expiry/README.md",
+      "sha256": "ef90d6562157c754b471da37d8dc07232a016e81282b16f4f6c2c6e53d72fe99"
+    },
+    {
+      "path": "07. IT & Digital Systems/ERP User Access/dashboard.js",
+      "sha256": "b198ad2fb959c3acd00befe3c4fd6e28910966d87391131161b43e87e9bbeadf"
+    },
+    {
+      "path": "07. IT & Digital Systems/ERP User Access/dashboard.css",
+      "sha256": "a6d7b4fba35b67426c315563f891140b95907d0cdf9c587e2a1f914ac30caa07"
+    },
+    {
+      "path": "07. IT & Digital Systems/ERP User Access/dashboard.html",
+      "sha256": "e42b3e120231920e684152625a1ba9395de03a8aad470eec3ad5386199e2cc71"
+    },
+    {
+      "path": "07. IT & Digital Systems/ERP User Access/source.json",
+      "sha256": "5488765e96c74d394b7c3626595d0bce6abba96b0b3e7cd7c21f68b8b1dd0463"
+    },
+    {
+      "path": "07. IT & Digital Systems/ERP User Access/server_scripts/user_access_analytics_29d483ec.py",
+      "sha256": "d2d42776b2b5538be7589887f28e3d5a914ad9d2d6408eaee447542429d8e363"
+    },
+    {
+      "path": "07. IT & Digital Systems/ERP User Access/server_scripts/user_access_analytics_29d483ec.json",
+      "sha256": "60ae53c4bf41ce3e213addbe0b18123290c4b5b8ea1929794f6e54a608733463"
+    },
+    {
+      "path": "07. IT & Digital Systems/ERP User Access/server_scripts/user_access_period_f6f5474c.py",
+      "sha256": "d530af1fac33d34053bf0aedc4738e239735d7133ee9d9daec25ddcde4d161fc"
+    },
+    {
+      "path": "07. IT & Digital Systems/ERP User Access/server_scripts/user_access_period_f6f5474c.json",
+      "sha256": "7273794b4eca1a905645a611126dd1ab173a0b7e7703a2b9fff258a358255d0c"
+    },
+    {
+      "path": "07. IT & Digital Systems/ERP User Access/server_scripts/user_access_roles_325182d2.py",
+      "sha256": "a4b4ca221601e864a5752d57335f80b3fdba7463e3a99209e2ed5bb8fb6510a1"
+    },
+    {
+      "path": "07. IT & Digital Systems/ERP User Access/server_scripts/user_access_roles_325182d2.json",
+      "sha256": "9a391f673b52255044f9e68669fe748910905716844c92ccc2541cf19c50b51a"
+    },
+    {
+      "path": "07. IT & Digital Systems/ERP User Access/server_scripts/user_access_summary_40e2f275.py",
+      "sha256": "5dd7f3d09647550195e5ce49139a2cab67248722475b363d53685952dcd29e6f"
+    },
+    {
+      "path": "07. IT & Digital Systems/ERP User Access/server_scripts/user_access_summary_40e2f275.json",
+      "sha256": "19a9101ed4e665ac886cd87f2e16c35e430fd5759288468f705d80f9dbb1402b"
+    },
+    {
+      "path": "07. IT & Digital Systems/ERP User Access/README.md",
+      "sha256": "07af09c49fb30f9dae7a2e40a4f50378a57f5e78967c8ad4195ba86038d1eb78"
+    },
+    {
+      "path": "07. IT & Digital Systems/Digital Marketing Dashboard/dashboard.js",
+      "sha256": "ea377944dfc4e79937a7db45db8c036e83b5e13e440daeab654d948628cab5ec"
+    },
+    {
+      "path": "07. IT & Digital Systems/Digital Marketing Dashboard/dashboard.css",
+      "sha256": "53d834201f7fccb13ae79e724e8d778119086db80b34aadc2a7e11ccd2ee639a"
+    },
+    {
+      "path": "07. IT & Digital Systems/Digital Marketing Dashboard/dashboard.html",
+      "sha256": "bff6f8e8dd45db699e3f2ca43f98a94160ccf9e3e078a037c679e72ec142bc8f"
+    },
+    {
+      "path": "07. IT & Digital Systems/Digital Marketing Dashboard/source.json",
+      "sha256": "78f0e2d2d5b622a3353997098dda2a012d423a05067c3f8fbb6fcb08f689762c"
+    },
+    {
+      "path": "07. IT & Digital Systems/Digital Marketing Dashboard/README.md",
+      "sha256": "cbefb189552f37f8f49e3f5b0c83bcc58b265955798b8f31c6d581a71462bda6"
+    },
+    {
+      "path": "08. Operations & Logistics/Fleet Dashboard/dashboard.js",
+      "sha256": "ae2daafb9868bf7cec015ed117492fd8874f0f06bd35e21588ece0269326744d"
+    },
+    {
+      "path": "08. Operations & Logistics/Fleet Dashboard/dashboard.css",
+      "sha256": "b6b3be88b53a6d35e58f28ae721d4749100ed92d80c35fe01c94a2a02c7ea49c"
+    },
+    {
+      "path": "08. Operations & Logistics/Fleet Dashboard/dashboard.html",
+      "sha256": "86e1ddd762d0eb8321a70116444c9cedaa80e8420e9838c7a30e7bd142c167a4"
+    },
+    {
+      "path": "08. Operations & Logistics/Fleet Dashboard/source.json",
+      "sha256": "0b88957d80a56219911ec1cdca47f790ccba59310b0073fe0972606d54d071a7"
+    },
+    {
+      "path": "08. Operations & Logistics/Fleet Dashboard/README.md",
+      "sha256": "9bf253a06a474e5031c01a852bb778810014d26845d7feefadf0fd36f69315df"
+    },
+    {
+      "path": "08. Operations & Logistics/FM & Inventory Dashboard/dashboard.js",
+      "sha256": "787f1440941d7f186c07b9ca606a359c4f53c552d82104a67657b2a2c7b466fb"
+    },
+    {
+      "path": "08. Operations & Logistics/FM & Inventory Dashboard/dashboard.css",
+      "sha256": "861081d825bc08476778a670abe828aa7f791bf3905abf94721e3632908b924f"
+    },
+    {
+      "path": "08. Operations & Logistics/FM & Inventory Dashboard/dashboard.html",
+      "sha256": "b1f84612614a92324b15ed8947d7c300e02065e20ee166dd03a77bc228c2e299"
+    },
+    {
+      "path": "08. Operations & Logistics/FM & Inventory Dashboard/source.json",
+      "sha256": "8cdbd7644bf49aea1a6257ed4d2c7bf98d0bf59317ec810e0b565456518bd65e"
+    },
+    {
+      "path": "08. Operations & Logistics/FM & Inventory Dashboard/README.md",
+      "sha256": "ba21b009eb2ef94db38ec57a6ff16cb7cf2696d0cdabaf97a0b23083ce4c443c"
+    },
+    {
+      "path": "08. Operations & Logistics/Logistics Dashboard/dashboard.js",
+      "sha256": "b2070edf8a8544005589ee05b474e8def1f9131b736b3532f0b3e4bd0f0a2a7d"
+    },
+    {
+      "path": "08. Operations & Logistics/Logistics Dashboard/dashboard.css",
+      "sha256": "800722456f2b42e02176d6a4d5d77f568183c78f2dc7f9444028de74c2acbb92"
+    },
+    {
+      "path": "08. Operations & Logistics/Logistics Dashboard/dashboard.html",
+      "sha256": "52a50ccf18293cbe3cfa77072513dbb08d6ae7e44cc06c8c0f0ed3d9b40440df"
+    },
+    {
+      "path": "08. Operations & Logistics/Logistics Dashboard/source.json",
+      "sha256": "5fe80e554a53fbea920b4e71b406ff1880b5e726c03505ed3b8d3e73022f6c0b"
+    },
+    {
+      "path": "08. Operations & Logistics/Logistics Dashboard/README.md",
+      "sha256": "4ec143fadea0b783fde8375e06af5178f57532e661dbecea153bc4790edf15e9"
+    },
+    {
+      "path": "08. Operations & Logistics/Operation Dashboard/dashboard.js",
+      "sha256": "5f3dfc3ccbb71ea58c013455be90bdec64973d5c59bd78a58a8a516e34a09072"
+    },
+    {
+      "path": "08. Operations & Logistics/Operation Dashboard/dashboard.css",
+      "sha256": "ea9c5cadb9c8495e607053955d1e89b02fbb8c383671095169519f4c0023d7fd"
+    },
+    {
+      "path": "08. Operations & Logistics/Operation Dashboard/dashboard.html",
+      "sha256": "efefe1dddbeaa73e61988321e18c86a1fa346da891ca9d7a2d4493bb8ac38a75"
+    },
+    {
+      "path": "08. Operations & Logistics/Operation Dashboard/source.json",
+      "sha256": "168d8979329f9ef5c6f63b12c24a7f9da38bf3b7ee38a40137e2ef93641b24fc"
+    },
+    {
+      "path": "08. Operations & Logistics/Operation Dashboard/README.md",
+      "sha256": "3357bab033fc70f6d59bdbd3e681271194244012c78cb2665a5098f594d47e01"
+    },
+    {
+      "path": "08. Operations & Logistics/Delivery & Forklift/dashboard.js",
+      "sha256": "23760e8bfe020a98e0017dff46661a62259e0b0cdb2881f3ad14d326da88e048"
+    },
+    {
+      "path": "08. Operations & Logistics/Delivery & Forklift/dashboard.css",
+      "sha256": "d40f9fbcaa4b6cf2c363fff29003a63642b312360d3db1bd74562da7dc02771d"
+    },
+    {
+      "path": "08. Operations & Logistics/Delivery & Forklift/dashboard.html",
+      "sha256": "9d912f6c095851d7635cadc15a0756c492ca427f9cfa4ce5ba241fe9a8f5bea2"
+    },
+    {
+      "path": "08. Operations & Logistics/Delivery & Forklift/source.json",
+      "sha256": "cf7bed308602ea98da3bc290a2c8058c30d6f16d1ba444aea83a045c6c722efb"
+    },
+    {
+      "path": "08. Operations & Logistics/Delivery & Forklift/server_scripts/dm_delivery_forklift_dashboard_d4c45abf.py",
+      "sha256": "292f45176ca005f28928806ed6c40ccc691737519a51f3d6f152320951b2d33f"
+    },
+    {
+      "path": "08. Operations & Logistics/Delivery & Forklift/server_scripts/dm_delivery_forklift_dashboard_d4c45abf.json",
+      "sha256": "92aef4ca2f02c84b39faa3db72d193edf5ea0d0797428fc147e5c425ce70a990"
+    },
+    {
+      "path": "08. Operations & Logistics/Delivery & Forklift/README.md",
+      "sha256": "06fa9126b3cedb49d1022a72b18e9fbd6f27ee17eeebcbfd6b2af5d9e3aa0dc9"
+    },
+    {
+      "path": "08. Operations & Logistics/Scaffolding Rental/dashboard.js",
+      "sha256": "c41f9d94b6933d0168d4b523dc1a9eade231eca9a940d70d179cbf7931503da7"
+    },
+    {
+      "path": "08. Operations & Logistics/Scaffolding Rental/dashboard.css",
+      "sha256": "0a1b9dec9ae6f18de983c9fb72d0af9377f169e739f055bb6a315659ae8f4061"
+    },
+    {
+      "path": "08. Operations & Logistics/Scaffolding Rental/dashboard.html",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "08. Operations & Logistics/Scaffolding Rental/source.json",
+      "sha256": "5e50eff15c17de2dee410f9bb9214c4964bd106d66a0c1638061717d21beae2a"
+    },
+    {
+      "path": "08. Operations & Logistics/Scaffolding Rental/README.md",
+      "sha256": "4260dc1525e617a59f74c472fec97374b87a743bb9e8b52374c047ae180177da"
+    },
+    {
+      "path": "08. Operations & Logistics/Manufacturing Dashboard/dashboard.js",
+      "sha256": "b7138b4f83f1bed3ef5027d9fa438a5202787c4596628ec5e2184cd93e09a65c"
+    },
+    {
+      "path": "08. Operations & Logistics/Manufacturing Dashboard/dashboard.css",
+      "sha256": "2a2e1e14a9180f0fde5022bc213131ecc854663fec536b3948fd8757546370c4"
+    },
+    {
+      "path": "08. Operations & Logistics/Manufacturing Dashboard/dashboard.html",
+      "sha256": "0c8d2c1aaa5df5f4573ae4c632755281ecca3ffb86b0a76f41b36bd3a9575540"
+    },
+    {
+      "path": "08. Operations & Logistics/Manufacturing Dashboard/source.json",
+      "sha256": "b65f739f73a1d869013f6d8da04303104d505c7a01ceb14a61b75ff3ffbaafd2"
+    },
+    {
+      "path": "08. Operations & Logistics/Manufacturing Dashboard/server_scripts/mfg_dashboard_jobs_c93388e0.py",
+      "sha256": "fd646a2d27cd7e690f93a4c5991ef29f33c6579be5b9389fc43ee56721e4d5a8"
+    },
+    {
+      "path": "08. Operations & Logistics/Manufacturing Dashboard/server_scripts/mfg_dashboard_jobs_c93388e0.json",
+      "sha256": "a02b3789968a6780e9d08f490e6a0a50c0d4c4ed8aa224610c23d68048ab31cb"
+    },
+    {
+      "path": "08. Operations & Logistics/Manufacturing Dashboard/server_scripts/mfg_dashboard_performance_edb25d32.py",
+      "sha256": "d47dcbed480f1e5154c463d2e0d3978a523dbada98eb6cf03aac7e55d5aed0b0"
+    },
+    {
+      "path": "08. Operations & Logistics/Manufacturing Dashboard/server_scripts/mfg_dashboard_performance_edb25d32.json",
+      "sha256": "e1986599cc758e554cfbb4f2a8c32a747de2cc6a973c4c3f71f7d6cb39d4d6ac"
+    },
+    {
+      "path": "08. Operations & Logistics/Manufacturing Dashboard/server_scripts/mfg_dashboard_plan_43d778d0.py",
+      "sha256": "9974c58f93cb2cb781d33515c9b33f94ae982da65017a361ec5dad2c8b2c1db0"
+    },
+    {
+      "path": "08. Operations & Logistics/Manufacturing Dashboard/server_scripts/mfg_dashboard_plan_43d778d0.json",
+      "sha256": "57e2dc2f050ba158022c97025da29aaf779c7f0d0bc92e5cbf7f5a1c28235589"
+    },
+    {
+      "path": "08. Operations & Logistics/Manufacturing Dashboard/README.md",
+      "sha256": "fcd83f1950e1bc1b55a99a5d4b899bec1e4fd6bbe16b3a23ebdef158a66779ae"
+    },
+    {
+      "path": "08. Operations & Logistics/Production Dashboard/dashboard.js",
+      "sha256": "5a449b375367ec4307ad51b23de7872137f08a36b9dd11fd2b41c356f570290e"
+    },
+    {
+      "path": "08. Operations & Logistics/Production Dashboard/dashboard.css",
+      "sha256": "6fa8af4750c033e7882f0e14bc1fecfd7e646a3aa442159b203946f68afa6f7d"
+    },
+    {
+      "path": "08. Operations & Logistics/Production Dashboard/dashboard.html",
+      "sha256": "e4c528fb8cbea77e097d007eb5cda536ab3c9ebef4f1489ffd65d99768be7033"
+    },
+    {
+      "path": "08. Operations & Logistics/Production Dashboard/source.json",
+      "sha256": "bf6f4718cbed0908f8ef1444408f36aa6ab55c7972d7ec6793045214ebf26127"
+    },
+    {
+      "path": "08. Operations & Logistics/Production Dashboard/README.md",
+      "sha256": "516d2de985673c0a38329cd52f89133846f6fd73b79cdaa454e7d6946d18c843"
+    },
+    {
+      "path": "08. Operations & Logistics/Plant & Furniture Asset Dashboard/dashboard.js",
+      "sha256": "65492696494c57d83d6f5b64a6d684507aedfa835a72e84b84f80434f64ff846"
+    },
+    {
+      "path": "08. Operations & Logistics/Plant & Furniture Asset Dashboard/dashboard.css",
+      "sha256": "8b0c5a3612b29dc6f00030c13dfbee4700add69bb440f675cea48492adaadee0"
+    },
+    {
+      "path": "08. Operations & Logistics/Plant & Furniture Asset Dashboard/dashboard.html",
+      "sha256": "79c6707db7eea2ac865d1e58ff913582d8a6ebf4075503525134f707d6397b0e"
+    },
+    {
+      "path": "08. Operations & Logistics/Plant & Furniture Asset Dashboard/source.json",
+      "sha256": "7c8a0c86f94708a3a5b6e054d51f381b87128664f87e7b1ca54c212abf82bced"
+    },
+    {
+      "path": "08. Operations & Logistics/Plant & Furniture Asset Dashboard/README.md",
+      "sha256": "87028d7696dfa98ab0e18ab22519c54da098d61dc5455e0741c4c652067e72b2"
+    },
+    {
+      "path": "09. Legal & Documentation/Legal Dashboard/dashboard.js",
+      "sha256": "be74e6f90d26db97f26ae7066c4fead00456f63e3005d9794b9f2b8e1723ce64"
+    },
+    {
+      "path": "09. Legal & Documentation/Legal Dashboard/dashboard.css",
+      "sha256": "55ecc44afc794bbf597374ff4c09fb75e88f21c184171ef3cc3b52b5d87df770"
+    },
+    {
+      "path": "09. Legal & Documentation/Legal Dashboard/dashboard.html",
+      "sha256": "8887932e9eb8eb37d4a3cbdbdb4b4276db75fcaed6abcf88a16964f0f0c75b44"
+    },
+    {
+      "path": "09. Legal & Documentation/Legal Dashboard/source.json",
+      "sha256": "f7302c0dcd8ecc823043d364c1948905d8722bfc01908480450511a85055dbf2"
+    },
+    {
+      "path": "09. Legal & Documentation/Legal Dashboard/README.md",
+      "sha256": "59e1d7d6ccbe428b59618e54e6fec7822149aa79187b872cc9cf070f4d3ab82c"
+    },
+    {
+      "path": "09. Legal & Documentation/Document Control/dashboard.js",
+      "sha256": "c1736fe1edf276278bb64c2ab8d6321aa22bf6b49c858f522f5c7c2a30259f31"
+    },
+    {
+      "path": "09. Legal & Documentation/Document Control/dashboard.css",
+      "sha256": "c60851888120ee490cac861ffafcd78e0948c7e56f30c663e2fe2126bcfff1d6"
+    },
+    {
+      "path": "09. Legal & Documentation/Document Control/dashboard.html",
+      "sha256": "8ac853ed45a09a6af2df362c3cb23b60b9f94657fe3e91071b200a3f4ebfd4de"
+    },
+    {
+      "path": "09. Legal & Documentation/Document Control/source.json",
+      "sha256": "8d0adaa2e90819ec6bbe08d94f9864db19b5bee7d132807c8b5b1110469edaa9"
+    },
+    {
+      "path": "09. Legal & Documentation/Document Control/README.md",
+      "sha256": "7b4259cb5c28e5e7b6d059cd35c4ec6e063fad4e5485789b1520f5efb83ee33d"
+    },
+    {
+      "path": "10. Communication & Productivity/Durar Messenger/dashboard.js",
+      "sha256": "680b40dfc2bd06c948641d901ff1db9c9066ef47370ce6383c17bd4cf97dd2e1"
+    },
+    {
+      "path": "10. Communication & Productivity/Durar Messenger/dashboard.css",
+      "sha256": "7d6887db8925d77d6cb365f71616384d891ee30baee2dfb24c638a86f99084e4"
+    },
+    {
+      "path": "10. Communication & Productivity/Durar Messenger/dashboard.html",
+      "sha256": "93636fa047400919d3a6fa2c57a114596546d97c9681645ed857fb014fb8fb18"
+    },
+    {
+      "path": "10. Communication & Productivity/Durar Messenger/source.json",
+      "sha256": "c06cd2ca0ab4548fe5e6e01bc6628fc3c3401f2c248e8e7ae0f458aabf13a54b"
+    },
+    {
+      "path": "10. Communication & Productivity/Durar Messenger/server_scripts/durar_messenger_8e3641f3.py",
+      "sha256": "4b313a70aed3b4330f91a5b48260e808d9557bb204da834bd88618d03dc04989"
+    },
+    {
+      "path": "10. Communication & Productivity/Durar Messenger/server_scripts/durar_messenger_8e3641f3.json",
+      "sha256": "9b9be006b653788da1539ffbcc60a6073d6deb39c7ff22116c7598631696e9bf"
+    },
+    {
+      "path": "10. Communication & Productivity/Durar Messenger/README.md",
+      "sha256": "983af714c451b8a8c1757d9c361b4875ece6b1b34b11a1d802f17deef4312222"
+    },
+    {
+      "path": "10. Communication & Productivity/Durar Sheets/dashboard.js",
+      "sha256": "f8ae6653b38919a1a1a98c2102d4b8a9a97e424a5b193602d747cbbcebfe5ed9"
+    },
+    {
+      "path": "10. Communication & Productivity/Durar Sheets/dashboard.css",
+      "sha256": "82be3fea447d92722281281d657a110e4a1e4d499bcd957ccbbbfa658d4a059d"
+    },
+    {
+      "path": "10. Communication & Productivity/Durar Sheets/dashboard.html",
+      "sha256": "4c61c9a586c70b9ebe59fbacc14c62f13631b65090719c849532127d5c6f825c"
+    },
+    {
+      "path": "10. Communication & Productivity/Durar Sheets/source.json",
+      "sha256": "04000bd56a9c7ee8f3a3a9853737f192158415d8d04d6ced42aa382dcd344291"
+    },
+    {
+      "path": "10. Communication & Productivity/Durar Sheets/server_scripts/durar_sheets_5a2759eb.py",
+      "sha256": "01d9dbe989c9f207bebe755482044b975709e57194e0184f6e7019e8919bf7d4"
+    },
+    {
+      "path": "10. Communication & Productivity/Durar Sheets/server_scripts/durar_sheets_5a2759eb.json",
+      "sha256": "6b84235912436a7106102420957aa43eaaef06c1e7d27e683282b7a75920a0d6"
+    },
+    {
+      "path": "10. Communication & Productivity/Durar Sheets/README.md",
+      "sha256": "940134e7b0fb89a5cb427f1bb6c959a0687bf058b88cb0465efb14b28e2fdceb"
+    },
+    {
+      "path": "11. To Be Classified/PN Dashboard/README.md",
+      "sha256": "df98dedbad31ea7bcd675a83f191607d917330df2ded0cea6216521baae67a8a"
+    },
+    {
+      "path": "01. Leadership & Corporate/README.md",
+      "sha256": "c49ec69f5822272f6d8cb10260c2840bd3b89fb104b71787d675be99c5146531"
+    },
+    {
+      "path": "02. Sales & CRM/README.md",
+      "sha256": "d4f920ee6391246e091e80a6bca12db865070e269e3f7817b4e0ee0accca0e1d"
+    },
+    {
+      "path": "03. Procurement & Supply Chain/README.md",
+      "sha256": "fe0a3e878460629f384baef6a8ed4a2e92698b99bbe19b4538431bf46a1273fb"
+    },
+    {
+      "path": "04. Finance & Credit Control/README.md",
+      "sha256": "da3128319b0408b9da0ceecdea00cd7709a815c2eea4e61fb11cbff1aa1ab16d"
+    },
+    {
+      "path": "05. HR & Administration/README.md",
+      "sha256": "b6b1909a00eed0bbd138fbb72dd203fb48c5ab5bce5a0a368dbb7c037add93bf"
+    },
+    {
+      "path": "06. Technical & Projects/README.md",
+      "sha256": "b86744aedbc7acc09a71efdca50267cb63c4529a2d7991ac928744c223639883"
+    },
+    {
+      "path": "07. IT & Digital Systems/README.md",
+      "sha256": "2d52347eb0d12eff441d7f4b662b51fcaa62c0e8d333ed3ed8df9a0f69ca1bed"
+    },
+    {
+      "path": "08. Operations & Logistics/README.md",
+      "sha256": "58a712f52ac2974dd167979ab5f0229713806c69f6d6cccbbcbfdf48799f1d72"
+    },
+    {
+      "path": "09. Legal & Documentation/README.md",
+      "sha256": "2ee11a4af5acb5c7c0c3b46a50c01ce50c91a4e1b7b5b00e2cd0ab3c554d05d5"
+    },
+    {
+      "path": "10. Communication & Productivity/README.md",
+      "sha256": "5a8f3b5d86b11b15c27e4e4b79ee66e2544c4d01a6935bfa9fe424c8ec3f5ad1"
+    },
+    {
+      "path": "11. To Be Classified/README.md",
+      "sha256": "449de1bc09255bd94fa678d4c1deab6a737495af1a66b21f8731524e88e01a82"
+    },
+    {
+      "path": "DASHBOARDS.md",
+      "sha256": "fd6d7ff2d159d6587586f40ec6c6a6b5b8e1f7ae2e4998470f8ec6a0e2ed12dc"
+    }
+  ],
+  "local_working_files": [
+    {
+      "original_path": "soa_request_dashboard.js",
+      "path": "04. Finance & Credit Control/SOA Request Dashboard/local/soa_request_dashboard.js",
+      "sha256": "629b7e8801e39f33ab423f4a75b0596afdad053cca4161f5a0da8fa3a17cfcc0"
+    },
+    {
+      "original_path": "soa_request_dashboard.css",
+      "path": "04. Finance & Credit Control/SOA Request Dashboard/local/soa_request_dashboard.css",
+      "sha256": "63dfb95f94f6d4261cdd4efedbf246e3e84aca79cc590c8f6adb27a227993e42"
+    },
+    {
+      "original_path": "soa_manager_dashboard.js",
+      "path": "04. Finance & Credit Control/SOA Manager/local/soa_manager_dashboard.js",
+      "sha256": "3b116630c56d67fd30af59e57edb99cb2ba87913be481f6966e17e8fe5dedebd"
+    },
+    {
+      "original_path": "soa_manager_dashboard.css",
+      "path": "04. Finance & Credit Control/SOA Manager/local/soa_manager_dashboard.css",
+      "sha256": "63dfb95f94f6d4261cdd4efedbf246e3e84aca79cc590c8f6adb27a227993e42"
+    },
+    {
+      "original_path": "soa_collector_dashboard.js",
+      "path": "04. Finance & Credit Control/Collector/local/soa_collector_dashboard.js",
+      "sha256": "fa2ba201ab85f870a0f202504ad64155933bc071b0c6a76b6ca226864b89e22c"
+    },
+    {
+      "original_path": "soa_collector_dashboard.css",
+      "path": "04. Finance & Credit Control/Collector/local/soa_collector_dashboard.css",
+      "sha256": "63dfb95f94f6d4261cdd4efedbf246e3e84aca79cc590c8f6adb27a227993e42"
+    },
+    {
+      "original_path": "collections_daily_build.py",
+      "path": "04. Finance & Credit Control/Shared Server Scripts/collections_daily_build.py",
+      "sha256": "6e64decff1fdd77f9a135ed7cbbcf39ec0e5d3771dc8afc75f16a0e7c2ef568f"
+    },
+    {
+      "original_path": "soa_api_server_script.py",
+      "path": "04. Finance & Credit Control/Shared Server Scripts/soa_api_server_script.py",
+      "sha256": "818dcf46b2a0aa23fd108a70fce23bff7e4e576e8f11e9eb08c9b10c47cb2c36"
+    },
+    {
+      "original_path": "soa_workflow_api_server_script.py",
+      "path": "04. Finance & Credit Control/Shared Server Scripts/soa_workflow_api_server_script.py",
+      "sha256": "602b21f50767f6533e24686aa84f456d29922d52cd718be07636fcaa54b11189"
+    },
+    {
+      "original_path": "exec_admin_dashboard.js",
+      "path": "05. HR & Administration/Executive Secretary/exec_admin_dashboard.js",
+      "sha256": "f52a2a0c694603f043812ac60c21e056a3ad1261c14691beb8c91b94206cacec"
+    },
+    {
+      "original_path": "exec_admin_dashboard.css",
+      "path": "05. HR & Administration/Executive Secretary/exec_admin_dashboard.css",
+      "sha256": "91b494e5339fec8052fd7c5431f215e558875a249acda330786a62584c179a9c"
+    },
+    {
+      "original_path": "exec_admin_api_server_script.py",
+      "path": "05. HR & Administration/Executive Secretary/exec_admin_api_server_script.py",
+      "sha256": "b15667636e07583eb29987961fd8a3a5fe4a06543a39a52d743deda0dd577b57"
+    }
+  ],
+  "local_dashboards": [
+    {
+      "name": "Executive Secretary",
+      "directory": "05. HR & Administration/Executive Secretary"
+    }
+  ]
+}

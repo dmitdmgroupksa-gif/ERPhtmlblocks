@@ -1,0 +1,38 @@
+<div class="tsd">
+  <div class="tsd-head">
+    <div>
+      <div class="tsd-title">Technical Department</div>
+      <div class="tsd-sub">Material &amp; technical submittal requests from DMS Projects</div>
+    </div>
+    <div class="tsd-actions">
+      <a class="tsd-btn" href="/app/dms-technical-submittal">Open list</a>
+      <button class="tsd-btn tsd-primary" data-act="refresh">Refresh</button>
+    </div>
+  </div>
+
+  <div class="tsd-filters">
+    <label>Status<select data-f="status">
+      <option value="">All</option>
+      <option>Requested</option><option>In Preparation</option><option>Submitted</option>
+      <option>Under Review</option><option>Revision Required</option><option>Approved</option>
+      <option>Approved with Comments</option><option>Rejected</option><option>Cancelled</option>
+      <option value="Overdue">Overdue</option>
+    </select></label>
+    <label>Department<select data-f="department"><option value="">All</option></select></label>
+    <label>Salesperson<select data-f="sales_person"><option value="">All</option></select></label>
+    <label>Project<select data-f="dms_project"><option value="">All</option></select></label>
+    <label>Priority<select data-f="priority">
+      <option value="">All</option><option>Urgent</option><option>High</option><option>Normal</option>
+    </select></label>
+    <label>Requested from<input type="date" data-f="from_date"></label>
+    <label>to<input type="date" data-f="to_date"></label>
+    <button class="tsd-btn" data-act="reset">Reset</button>
+  </div>
+
+  <div class="tsd-cards"></div>
+
+  <div class="tsd-section" data-s="action"></div>
+  <div class="tsd-section" data-s="review"></div>
+  <div class="tsd-section" data-s="approved"></div>
+  <div class="tsd-section" data-s="recent"></div>
+</div>

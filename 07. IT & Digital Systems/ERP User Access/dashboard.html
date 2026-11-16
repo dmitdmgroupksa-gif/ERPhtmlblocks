@@ -1,0 +1,183 @@
+<div class="uad">
+  <header class="uad-head">
+    <div class="uad-brand">
+      <div class="uad-logo"><svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3z"/></svg></div>
+      <div><h1>ERP User Access Dashboard</h1><p>DM Group KSA · Account status, roles &amp; department access</p></div>
+    </div>
+    <div class="uad-tools">
+      <label class="uad-sel"><span>Department</span><select data-role="dept" disabled><option value="">All Departments</option></select></label>
+      <div class="uad-meta"><span class="uad-pill" data-role="state">Loading…</span><button class="uad-refresh" data-role="refresh" title="Refresh">↻ Refresh</button></div>
+    </div>
+  </header>
+
+  <nav class="uad-tabs" role="tablist">
+    <button class="active" data-tab="overview" role="tab">Overview</button>
+    <button data-tab="directory" role="tab">User Directory</button>
+    <button data-tab="roles" role="tab">Role Access</button>
+    <button data-tab="departments" role="tab">Department View</button>
+  </nav>
+
+  <div class="uad-period" data-role="period">
+  <div class="uad-presets" role="group"><button type="button" data-preset="today">Today</button><button type="button" data-preset="week">This Week</button><button type="button" data-preset="month">This Month</button><button type="button" data-preset="year">This Year</button><button type="button" data-preset="custom">Custom</button></div>
+  <label class="uad-pf"><span>Start Date</span><input type="date" data-role="p-from" class="uad-in" min="2000-01-01"></label>
+  <label class="uad-pf"><span>End Date</span><input type="date" data-role="p-to" class="uad-in" min="2000-01-01"></label>
+  <button type="button" class="uad-btn primary" data-role="p-apply">Apply</button><button type="button" class="uad-btn" data-role="p-reset">Reset</button>
+  <span class="uad-muted">Asia/Riyadh · dates inclusive</span>
+</div>
+<div class="uad-error" data-role="p-error" hidden></div>
+<section class="uad-pane active" data-pane="overview">
+    <div class="uad-error" data-role="error" hidden></div>
+    <div class="uad-snap">Current snapshot · not filtered by date</div>
+    <div class="uad-kpis">
+      <button class="uad-kpi k-active" data-drill="Active"><i><svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4M12 22a10 10 0 1 1 0-20 10 10 0 0 1 0 20z"/></svg></i><div><span class="lbl">Active Users</span><b class="val" data-kpi="active_users">—</b><small data-sub="active_users">Enabled · login within 15 days</small></div></button>
+      <button class="uad-kpi k-inactive" data-drill="Inactive"><i><svg viewBox="0 0 24 24"><path d="M12 6v6l4 2M12 22a10 10 0 1 1 0-20 10 10 0 0 1 0 20z"/></svg></i><div><span class="lbl">Inactive Users</span><b class="val" data-kpi="inactive_users">—</b><small data-sub="inactive_users">Enabled · no login in 15+ days</small></div></button>
+      <button class="uad-kpi k-disabled" data-drill="Disabled"><i><svg viewBox="0 0 24 24"><path d="M4.9 4.9l14.2 14.2M12 22a10 10 0 1 1 0-20 10 10 0 0 1 0 20z"/></svg></i><div><span class="lbl">Disabled Users</span><b class="val" data-kpi="disabled_users">—</b><small data-sub="disabled_users">Account disabled</small></div></button>
+      <button class="uad-kpi k-priv" data-drill="Privileged"><i><svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3z"/></svg></i><div><span class="lbl">Privileged Users</span><b class="val" data-kpi="privileged_users">—</b><small>Enabled · admin roles (overlaps)</small></div></button>
+    </div>
+    <div class="uad-grid">
+      <div class="uad-card">
+        <div class="uad-card-h"><h3>Account Status Distribution</h3><span class="uad-muted" data-role="total">—</span></div>
+        <div data-role="status"><div class="uad-skel"></div></div>
+      </div>
+      <div class="uad-card">
+        <div class="uad-card-h"><h3>Users by Department</h3><button class="uad-link" data-role="dept-more" hidden>Show all</button></div>
+        <div data-role="depts"><div class="uad-skel"></div></div>
+      </div>
+      <div class="uad-card wide">
+        <div class="uad-card-h"><h3>Access Review Recommendations</h3><span class="uad-muted">Categories overlap — not additive</span></div>
+        <div data-role="recs"><div class="uad-skel"></div></div>
+      </div>
+    </div>
+
+    <div class="uad-card wide uad-psec" data-role="psec">
+  <div class="uad-card-h"><h3>Selected Period Analysis</h3><span class="uad-muted" data-role="ps-range">—</span></div>
+  <div class="uad-pkpis">
+    <button type="button" class="uad-pk" data-pk="created"><span class="lbl">New Users Created</span><b data-pv="new">—</b><small>User.creation within selected dates</small></button>
+    <button type="button" class="uad-pk" data-pk="last_login"><span class="lbl">Users with Last Login in Period</span><b data-pv="ll">—</b><small>Last login in selected period (current last login, not login events)</small></button>
+    <div class="uad-pk static"><span class="lbl">Login Events in Period</span><b data-pv="ev">—</b><small data-pv="evnote">—</small></div>
+  </div>
+  <div class="uad-grid">
+    <div class="uad-card"><div class="uad-card-h"><h3>User Creation Trend</h3><span class="uad-muted" data-pv="gran1"></span></div><div data-role="ps-trend"><div class="uad-skel"></div></div></div>
+    <div class="uad-card"><div class="uad-card-h"><h3>Last Login Date Distribution</h3><span class="uad-muted" data-pv="gran2"></span></div><div data-role="ps-dist"><div class="uad-skel"></div></div></div>
+  </div>
+  <p class="uad-muted" style="margin:10px 0 0">Current snapshot: the KPI cards, status distribution, departments and recommendations reflect current account state and are not filtered by date.</p>
+</div>
+<div class="uaa" data-role="uaa">
+      <div class="uaa-head">
+        <h2>User Analytics</h2>
+        <div class="uaa-filters">
+          <label><span>Department</span><select data-a="department"><option value="">All Departments</option></select></label>
+          <label><span>User Type</span><select data-a="user_type"><option value="">All user types</option><option value="System User">System User</option><option value="Website User">Website User</option></select></label>
+          <label><span>Status</span><select data-a="status"><option value="">All statuses</option><option value="Active">Active</option><option value="Inactive">Inactive</option><option value="Disabled">Disabled</option></select></label>
+        </div>
+        <small class="uad-muted">Snapshot filters apply to charts A–E and the trend; they use current data, not history.</small>
+      </div>
+      <div class="uaa-grid">
+        <div class="uad-card"><div class="uad-card-h"><h3>A · Account Status</h3></div><small class="uaa-fl">Filters: Department, User type, Status</small><div data-c="status"></div></div>
+        <div class="uad-card"><div class="uad-card-h"><h3>B · User Type</h3></div><small class="uaa-fl">Filters: Department, User type, Status</small><div data-c="type"></div></div>
+        <div class="uad-card"><div class="uad-card-h"><h3>D · Login Ageing</h3></div><small class="uaa-fl">Filters: Department, User type, Status</small><div data-c="age"></div></div>
+        <div class="uad-card wide2"><div class="uad-card-h"><h3>C · Department Status Comparison</h3></div><small class="uaa-fl">Filters: Department, User type, Status</small><div data-c="dept"></div></div>
+        <div class="uad-card"><div class="uad-card-h"><h3>E · Users by Role (Top 10)</h3></div><small class="uaa-fl">Filters: Department, User type, Status</small><div data-c="roles"></div></div>
+        <div class="uad-card wide3"><div class="uad-card-h"><h3>F · User Creation Trend</h3>
+          <span class="uaa-dr"><label><span>From</span><input type="date" data-a="from_date"></label><label><span>To</span><input type="date" data-a="to_date"></label><button class="uad-link" data-role="uaa-apply">Apply</button></span></div>
+          <small class="uaa-fl">Filters: Department, User type, Status, Date range</small>
+          <small class="uaa-err-inline" data-role="uaa-dmsg" hidden>Select a valid date range.</small>
+          <div data-c="trend"></div></div>
+      </div>
+      <div class="uaa-head"><h2>Security &amp; Data Quality</h2><small class="uad-muted">All users · not affected by filters · click to open the User Directory</small></div>
+      <div class="uaa-dq" data-role="uaa-dq"><div class="uad-skel" style="height:70px"></div></div>
+    </div>
+  </section>
+
+  <section class="uad-pane" data-pane="directory">
+    <div class="uad-card">
+      <div class="uad-card-h"><h3>User Directory</h3><span class="uad-muted" data-role="dir-count">—</span></div>
+      <div class="uad-filters">
+        <input type="search" data-f="search" placeholder="Search name or email…" maxlength="100" class="uad-in uad-search">
+        <select data-f="status" class="uad-in"><option value="all">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option><option value="disabled">Disabled</option><option value="privileged">Privileged</option></select>
+        <select data-f="department" class="uad-in"><option value="">All departments</option></select>
+        <select data-f="user_type" class="uad-in"><option value="">All user types</option><option>System User</option><option>Website User</option></select>
+        <select data-f="role" class="uad-in"><option value="">All roles</option></select>
+        <select data-f="date_basis" class="uad-in" title="Date basis"><option value="">Any date</option><option value="created">Created between dates</option><option value="last_login">Last login between dates</option></select>
+        <select data-f="inactivity" class="uad-in"><option value="">Any last login</option><option value="15">No login in 15+ days</option><option value="30">No login in 30+ days</option><option value="60">No login in 60+ days</option><option value="never">Never logged in</option><option value="b16_30">Last login 16–30 days ago</option><option value="b31_60">Last login 31–60 days ago</option><option value="b61">Last login over 60 days ago</option></select>
+        <button class="uad-btn" data-role="reset">Reset filters</button>
+      </div>
+      <div class="uad-chips" data-role="dir-filter"></div>
+      <div class="uad-error" data-role="dir-error" hidden></div>
+      <div class="uad-tablewrap">
+        <table class="uad-table">
+          <thead><tr>
+            <th data-sort="full_name">Full Name</th><th data-sort="user">User ID / Email</th><th data-sort="department">Department</th>
+            <th data-sort="user_type">User Type</th><th data-sort="status">Status</th><th>Assigned Roles</th><th data-sort="last_login">Last Login</th><th>Actions</th>
+          </tr></thead>
+          <tbody data-role="dir-body"><tr><td colspan="8"><div class="uad-skel" style="height:60px"></div></td></tr></tbody>
+        </table>
+      </div>
+      <div class="uad-pager">
+        <label class="uad-muted">Rows <select data-f="page_size" class="uad-in uad-sm"><option>20</option><option>50</option><option>100</option></select></label>
+        <div class="uad-pagebtns"><button class="uad-btn" data-page="prev">‹ Prev</button><span class="uad-muted" data-role="page-info">—</span><button class="uad-btn" data-page="next">Next ›</button></div>
+      </div>
+    </div>
+    <div class="uad-modal" data-role="modal" hidden>
+      <div class="uad-modal-box" role="dialog" aria-modal="true">
+        <div class="uad-modal-h"><h3 data-role="m-title">User details</h3><button class="uad-x" data-role="m-close" aria-label="Close">×</button></div>
+        <div data-role="m-body"></div>
+        <div class="uad-modal-f"><span class="uad-muted" data-role="m-note"></span><a class="uad-btn primary" data-role="m-open" target="_blank" rel="noopener" hidden>Open User in ERPNext</a></div>
+      </div>
+    </div>
+  </section>
+  <section class="uad-pane" data-pane="roles">
+    <div class="uad-error" data-role="r-error" hidden></div>
+    <div class="uad-kpis uad-rkpis">
+      <div class="uad-kpi k-priv uad-static"><i><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg></i><div><span class="lbl">Total ERP Roles</span><b class="val" data-rk="total_roles">—</b><small data-rk-sub="total_roles">All Role records</small></div></div>
+      <div class="uad-kpi k-active uad-static"><i><svg viewBox="0 0 24 24"><path d="M16 11a4 4 0 1 0-8 0M4 21a8 8 0 0 1 16 0"/></svg></i><div><span class="lbl">Roles Assigned to Users</span><b class="val" data-rk="roles_assigned">—</b><small data-rk-sub="roles_assigned">≥1 in-scope user</small></div></div>
+      <div class="uad-kpi k-disabled uad-static"><i><svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3z"/></svg></i><div><span class="lbl">Privileged Roles</span><b class="val" data-rk="privileged_role_count">—</b><small>Approved privileged set</small></div></div>
+      <button class="uad-kpi k-inactive" data-role="r-privusers"><i><svg viewBox="0 0 24 24"><path d="M12 15a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM5 21a7 7 0 0 1 14 0"/></svg></i><div><span class="lbl">Users with Privileged Access</span><b class="val" data-rk="users_with_privileged_access">—</b><small>Enabled · counted once</small></div></button>
+    </div>
+    <div class="uad-card" style="margin-top:14px">
+      <div class="uad-card-h"><h3>Role Distribution</h3><span class="uad-muted" data-role="r-count">—</span></div>
+      <div class="uad-filters uad-rfilters">
+        <input type="search" data-rf="search" placeholder="Search role name…" maxlength="100" class="uad-in uad-search">
+        <select data-rf="kind" class="uad-in"><option value="all">All roles</option><option value="privileged">Privileged roles</option><option value="standard">Standard roles</option><option value="important">Highlighted roles</option></select>
+        <select data-rf="assigned" class="uad-in"><option value="assigned">Assigned roles only</option><option value="all">Include unassigned</option><option value="unassigned">Unassigned only</option></select>
+        <button class="uad-btn" data-role="r-reset">Reset filters</button>
+      </div>
+      <div class="uad-legendrow"><span class="uad-role p">Privileged</span><span class="uad-role imp">Highlighted (not privileged)</span><span class="uad-muted">Counts include each user once per role · in-scope users only</span></div>
+      <div class="uad-tablewrap">
+        <table class="uad-table">
+          <thead><tr>
+            <th data-rsort="role">Role Name</th><th data-rsort="total" class="num">Total Users</th><th data-rsort="active" class="num">Active</th>
+            <th data-rsort="inactive" class="num">Inactive</th><th data-rsort="disabled" class="num">Disabled</th><th data-rsort="privileged">Privileged Role</th><th>Details</th>
+          </tr></thead>
+          <tbody data-role="r-body"><tr><td colspan="7" class="full"><div class="uad-skel" style="height:60px"></div></td></tr></tbody>
+        </table>
+      </div>
+      <div class="uad-pager">
+        <label class="uad-muted">Rows <select data-rf="page_size" class="uad-in uad-sm"><option>20</option><option>50</option><option>100</option></select></label>
+        <div class="uad-pagebtns"><button class="uad-btn" data-rpage="prev">‹ Prev</button><span class="uad-muted" data-role="r-page">—</span><button class="uad-btn" data-rpage="next">Next ›</button></div>
+      </div>
+    </div>
+    <div class="uad-modal" data-role="rmodal" hidden>
+      <div class="uad-modal-box wide" role="dialog" aria-modal="true">
+        <div class="uad-modal-h"><h3 data-role="rm-title">Role</h3><button class="uad-x" data-role="rm-close" aria-label="Close">×</button></div>
+        <div class="uad-chips" data-role="rm-chips"></div>
+        <div class="uad-subtabs"><button class="active" data-rmtab="users">Assigned Users</button><button data-rmtab="perms">Role Permission Configuration</button></div>
+        <div data-rmpane="users">
+          <div class="uad-error" data-role="rm-error" hidden></div>
+          <div class="uad-tablewrap"><table class="uad-table"><thead><tr><th>Full Name</th><th>Email</th><th>Department</th><th>Status</th><th>User Type</th><th>Last Login</th></tr></thead><tbody data-role="rm-body"></tbody></table></div>
+          <div class="uad-pager"><span class="uad-muted" data-role="rm-count">—</span><div class="uad-pagebtns"><button class="uad-btn" data-rmpage="prev">‹ Prev</button><span class="uad-muted" data-role="rm-page">—</span><button class="uad-btn" data-rmpage="next">Next ›</button></div></div>
+        </div>
+        <div data-rmpane="perms" hidden>
+          <p class="uad-note">⚠ Role-level permission <b>configuration</b> only (permission level 0, from DocPerm / Custom DocPerm). It is <b>not</b> guaranteed effective access — User Permissions, ownership, sharing, permission levels and a user's other roles also affect what they can actually do.</p>
+          <input type="search" data-role="pm-search" placeholder="Filter DocType…" class="uad-in" style="width:100%;margin-bottom:8px">
+          <div class="uad-tablewrap" style="max-height:380px"><table class="uad-table uad-pm"><thead><tr><th>DocType</th><th>Read</th><th>Write</th><th>Create</th><th>Delete</th><th>Submit</th><th>Export</th></tr></thead><tbody data-role="pm-body"></tbody></table></div>
+          <p class="uad-muted" data-role="pm-count" style="margin:8px 0 0"></p>
+        </div>
+        <div class="uad-modal-f"><span class="uad-muted">Read-only · no roles or permissions are changed here</span><button class="uad-btn primary" data-role="rm-dir">View in User Directory</button></div>
+      </div>
+    </div>
+  </section>
+  <section class="uad-pane" data-pane="departments"><div class="uad-card"><h3>Department View</h3><div class="uad-empty">Department status breakdown — built in Step 7</div></div></section>
+
+  <footer class="uad-foot" data-role="foot">Read-only · Asia/Riyadh</footer>
+</div>

@@ -1,0 +1,49 @@
+.erp { font-family: inherit; color: #0f172a; padding: 8px; }
+.erp-bar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; background: linear-gradient(180deg, #000000 0%, #1a1a1a 100%); border-radius: 10px; padding: 12px 16px; }
+.erp-logo { height: 44px; width: auto; display: block; }
+.erp-filters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; color: #cbd5e1; }
+.erp-filters input { border: 1px solid #475569; background: #111; color: #fff; border-radius: 6px; padding: 4px 6px; }
+.erp-filters button { background: #eab308; color: #000; font-weight: 600; border: 0; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+.erp-filters button#f-reload { background: #334155; color: #fff; }
+.erp-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px; }
+.erp-tab { padding: 6px 14px; border-radius: 8px; background: #fff; border: 1px solid #e2e8f0; color: #475569; cursor: pointer; font-size: 13px; font-weight: 500; }
+.erp-tab:hover { background: #f8fafc; }
+.erp-tab.on { background: #eab308; border-color: #eab308; color: #000; }
+.erp-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.erp-kpi { background: #fff; border: 1px solid #e2e8f0; border-left: 4px solid #eab308; border-radius: 8px; padding: 12px; }
+.erp-kpi.red { background: #fef2f2; border-color: #fecaca; border-left-color: #ef4444; }
+.erp-kpi.amber { background: #fffbeb; border-color: #fde68a; border-left-color: #f59e0b; }
+.erp-kpi.green { background: #ecfdf5; border-color: #a7f3d0; border-left-color: #10b981; }
+.erp-kpi .l { font-size: 11px; text-transform: uppercase; color: #64748b; }
+.erp-kpi .v { font-size: 22px; font-weight: 700; margin-top: 2px; }
+.erp-kpi .s { font-size: 11px; color: #94a3b8; }
+.erp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; }
+.erp-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; overflow-x: auto; }
+.erp-card h4 { margin: 0 0 10px; font-size: 14px; }
+.erp-row { display: grid; grid-template-columns: 38% 1fr auto; gap: 8px; align-items: center; font-size: 12px; margin-bottom: 6px; }
+.erp-row .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.erp-track { background: #f1f5f9; border-radius: 4px; height: 10px; min-width: 60px; }
+.erp-fill { background: #eab308; height: 10px; border-radius: 4px; }
+.erp-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.erp-table th { text-align: left; background: #f8fafc; padding: 6px; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+.erp-table td { padding: 6px; border-bottom: 1px solid #f1f5f9; }
+.erp-neg { color: #dc2626; font-weight: 600; }
+.erp-pos { color: #16a34a; font-weight: 600; }
+.erp-empty { color: #94a3b8; font-size: 12px; }
+.erp-donut-wrap { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.erp-donut { width: 130px; height: 130px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.erp-donut .hole { width: 76px; height: 76px; border-radius: 50%; background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.erp-donut .hole b { font-size: 16px; }
+.erp-donut .hole span { font-size: 10px; color: #94a3b8; }
+.erp-legend { font-size: 12px; display: grid; gap: 4px; }
+.erp-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
+.erp-cols { display: flex; align-items: stretch; gap: 6px; height: 180px; }
+.erp-col { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 22px; }
+.erp-col .cv { font-size: 10px; color: #475569; }
+.erp-col .cw { flex: 1; width: 100%; display: flex; align-items: flex-end; }
+.erp-col .cb { width: 100%; background: #eab308; border-radius: 4px 4px 0 0; min-height: 2px; }
+.erp-col .cl { font-size: 10px; color: #94a3b8; margin-top: 4px; }
+.erp-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.erp-badge.red { background: #fee2e2; color: #b91c1c; }
+.erp-badge.amber { background: #fef3c7; color: #b45309; }
+.erp-badge.green { background: #d1fae5; color: #047857; }

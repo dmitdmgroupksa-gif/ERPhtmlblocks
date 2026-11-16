@@ -1,0 +1,40 @@
+<div id="dmgtr" class="tr" dir="ltr">
+  <header class="tr-head">
+    <div class="tr-ttl">
+      <h1 data-i="title">DN &amp; GRN Tracker</h1>
+      <p data-i="subtitle">Delivery &amp; Goods Receipt Management</p>
+    </div>
+    <div class="tr-acts">
+      <span class="tr-last" id="tr-last"></span>
+      <button type="button" class="tr-btn tr-prim" id="tr-refresh" data-i="refresh">Refresh</button>
+      <div class="tr-lang" role="group" aria-label="Language">
+        <button type="button" data-lang="en">EN</button>
+        <button type="button" data-lang="ar">عربي</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="tr-filters" id="tr-filters">
+    <label><span data-i="company">Company</span><select id="f-company"></select></label>
+    <label><span data-i="division">Division</span><select id="f-division"></select></label>
+    <label><span data-i="wh">Location / Warehouse</span><select id="f-warehouse"></select></label>
+    <label><span data-i="from">Date From</span><input type="date" id="f-from"></label>
+    <label><span data-i="to">Date To</span><input type="date" id="f-to"></label>
+    <label><span data-i="party">Customer / Supplier</span><input type="search" id="f-party" autocomplete="off"></label>
+    <label><span data-i="status">Document Status</span>
+      <select id="f-status">
+        <option value="" data-i="all">All</option>
+        <option value="draft" data-i="s_draft">Draft</option>
+        <option value="submitted" data-i="s_submitted">Submitted</option>
+        <option value="cancelled" data-i="s_cancelled">Cancelled</option>
+        <option value="returned" data-i="s_returned">Returned</option>
+      </select>
+    </label>
+    <button type="button" class="tr-btn" id="f-reset" data-i="reset">Reset</button>
+  </section>
+  <div class="tr-hint" id="tr-hint"></div>
+
+  <nav class="tr-tabs" id="tr-tabs" role="tablist"></nav>
+  <main id="tr-main" class="tr-main"></main>
+  <div id="tr-modal" class="tr-modal" hidden></div>
+</div>

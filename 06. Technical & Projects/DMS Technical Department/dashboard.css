@@ -1,0 +1,54 @@
+.tsd { font-family: var(--font-stack, inherit); color: var(--text-color, #1f272e); padding: 4px 0 24px; }
+.tsd-head { display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+.tsd-title { font-size:20px; font-weight:700; }
+.tsd-sub { font-size:12px; color: var(--text-muted, #6c7680); margin-top:2px; }
+.tsd-actions { display:flex; gap:8px; }
+.tsd-btn { font:inherit; font-size:12px; padding:6px 12px; border-radius:8px; border:1px solid var(--border-color, #e2e6e9);
+  background: var(--card-bg, #fff); color: inherit; cursor:pointer; text-decoration:none; white-space:nowrap; }
+.tsd-btn:hover { background: var(--fg-hover-color, #f3f3f3); }
+.tsd-primary { background: var(--primary, #2490ef); border-color: var(--primary, #2490ef); color:#fff; }
+.tsd-primary:hover { opacity:.9; background: var(--primary, #2490ef); }
+
+.tsd-filters { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; padding:12px; margin-bottom:14px;
+  border:1px solid var(--border-color, #e2e6e9); border-radius:12px; background: var(--card-bg, #fff); }
+.tsd-filters label { display:flex; flex-direction:column; gap:4px; font-size:11px; color: var(--text-muted, #6c7680); }
+.tsd-filters select, .tsd-filters input { font:inherit; font-size:12px; color: var(--text-color, #1f272e); min-width:130px; max-width:220px;
+  padding:6px 8px; border-radius:8px; border:1px solid var(--border-color, #e2e6e9); background: var(--control-bg, #f4f5f6); }
+
+.tsd-cards { display:grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap:10px; margin-bottom:18px; }
+.tsd-card { text-align:left; font:inherit; color:inherit; cursor:pointer; padding:12px 14px; border-radius:12px;
+  border:1px solid var(--border-color, #e2e6e9); background: var(--card-bg, #fff); border-left:4px solid var(--c, #98a1a9); }
+.tsd-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.tsd-card.on { outline:2px solid var(--c, #98a1a9); outline-offset:-1px; }
+.tsd-card .n { font-size:24px; font-weight:700; line-height:1.1; }
+.tsd-card .l { font-size:11px; color: var(--text-muted, #6c7680); margin-top:4px; }
+
+.tsd-section { margin-bottom:18px; border:1px solid var(--border-color, #e2e6e9); border-radius:12px; background: var(--card-bg, #fff); overflow:hidden; }
+.tsd-section h3 { margin:0; padding:12px 14px; font-size:14px; font-weight:600; display:flex; gap:8px; align-items:center;
+  border-bottom:1px solid var(--border-color, #e2e6e9); }
+.tsd-section h3 .cnt { font-size:11px; font-weight:600; padding:1px 8px; border-radius:10px; background: var(--control-bg, #f4f5f6); color: var(--text-muted, #6c7680); }
+.tsd-section h3 .hint { font-size:11px; font-weight:400; color: var(--text-muted, #6c7680); margin-left:auto; }
+.tsd-wrap { overflow-x:auto; }
+.tsd table { width:100%; border-collapse:collapse; font-size:12px; }
+.tsd th { text-align:left; font-weight:600; color: var(--text-muted, #6c7680); padding:8px 12px; white-space:nowrap; background: var(--subtle-fg, #fafbfc); }
+.tsd td { padding:8px 12px; border-top:1px solid var(--border-color, #eef0f2); vertical-align:top; }
+.tsd tr.row { cursor:pointer; }
+.tsd tr.row:hover td { background: var(--fg-hover-color, #f7f8f9); }
+.tsd td.num { text-align:right; font-variant-numeric: tabular-nums; }
+.tsd .ts { font-weight:600; color: var(--primary, #2490ef); white-space:nowrap; }
+.tsd .muted { color: var(--text-muted, #6c7680); font-size:11px; }
+.tsd .pill { display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius:10px; white-space:nowrap;
+  background: color-mix(in srgb, var(--c, #98a1a9) 14%, transparent); color: var(--c, #98a1a9); }
+.tsd .late { color: var(--red-600, #e03636); font-weight:600; }
+.tsd .soon { color: var(--orange-600, #e86c13); font-weight:600; }
+.tsd .empty { padding:18px 14px; color: var(--text-muted, #6c7680); font-size:12px; }
+
+/* force real table layout (workspace styles otherwise override it) */
+.tsd table { display:table !important; table-layout:auto; }
+.tsd thead { display:table-header-group !important; }
+.tsd tbody { display:table-row-group !important; }
+.tsd tr { display:table-row !important; }
+.tsd th, .tsd td { display:table-cell !important; float:none !important; width:auto !important; }
+
+@media (max-width: 900px) { .tsd-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .tsd-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

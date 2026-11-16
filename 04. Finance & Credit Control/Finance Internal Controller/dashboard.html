@@ -1,0 +1,212 @@
+<div class="fc" id="fc-root" dir="ltr">
+  <header class="fc-head">
+    <div class="fc-title">
+      <div class="fc-logo">DM</div>
+      <div>
+        <h1 data-i="title">Finance – Internal Controller Dashboard</h1>
+        <div class="fc-sub"><span data-i="subtitle">DM Group KSA</span> · <span id="fc-asof"></span></div>
+      </div>
+    </div>
+    <div class="fc-head-actions">
+      <button class="fc-btn fc-btn-ghost" id="fc-refresh" type="button"><span class="fc-ic">⟳</span> <span data-i="refresh">Refresh</span></button>
+      <div class="fc-seg" role="group" aria-label="Language">
+        <button type="button" data-lang="en" class="on">English</button>
+        <button type="button" data-lang="ar">العربية</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="fc-filters" aria-label="Filters">
+    <label class="fc-f"><span data-i="company">Company</span>
+      <select id="f-company"></select></label>
+    <label class="fc-f"><span data-i="period">Period</span>
+      <select id="f-preset">
+        <option value="today" data-i="p_today">Today</option>
+        <option value="week" data-i="p_week">This Week</option>
+        <option value="month" data-i="p_month">This Month</option>
+        <option value="year" data-i="p_year" selected>This Year</option>
+        <option value="all" data-i="p_all">All Time</option>
+        <option value="custom" data-i="p_custom">Custom</option>
+      </select></label>
+    <label class="fc-f"><span data-i="from">From Date</span><input type="date" id="f-from"></label>
+    <label class="fc-f"><span data-i="to">To Date</span><input type="date" id="f-to"></label>
+    <label class="fc-f"><span data-i="doctype">Document Type</span>
+      <select id="f-doctype"></select></label>
+    <label class="fc-f"><span data-i="wfstate">Workflow Status</span>
+      <select id="f-wf"></select></label>
+    <label class="fc-f"><span data-i="apstatus">Approval Status</span>
+      <select id="f-ap">
+        <option value="" data-i="all">All</option>
+        <option value="pending" data-i="s_pending">Pending</option>
+        <option value="approved" data-i="s_approved">Approved</option>
+        <option value="rejected" data-i="s_rejected">Rejected</option>
+        <option value="returned" data-i="s_returned">Returned</option>
+      </select></label>
+    <label class="fc-f fc-f-search"><span data-i="search">Search</span>
+      <input type="search" id="f-search" data-ph="search_ph" placeholder="Document no., party, reference…"></label>
+    <button class="fc-btn fc-btn-light" id="f-reset" type="button" data-i="reset">Reset</button>
+  </section>
+  <div class="fc-note" id="fc-scope-note"></div>
+  <div class="fc-err" id="fc-global-err" hidden></div>
+
+  <nav class="fc-tabs" id="fc-tabs" role="tablist">
+    <button type="button" data-tab="overview" class="on" data-i="t_overview">Overview</button>
+    <button type="button" data-tab="approvals" data-i="t_approvals">Approvals &amp; Workflow</button>
+    <button type="button" data-tab="payments" data-i="t_payments">Payment Control</button>
+    <button type="button" data-tab="journals" data-i="t_journals">Journal Entry Control</button>
+    <button type="button" data-tab="ap" data-i="t_ap">Accounts Payable</button>
+    <button type="button" data-tab="ar" data-i="t_ar">Accounts Receivable</button>
+    <button type="button" data-tab="expenses" data-i="t_expenses">Expense Claims</button>
+    <button type="button" data-tab="bank" data-i="t_bank">Bank &amp; Reconciliation</button>
+    <button type="button" data-tab="audit" data-i="t_audit">Audit &amp; Internal Controls</button>
+  </nav>
+
+  <main class="fc-main">
+    <!-- 1 OVERVIEW -->
+    <section class="fc-panel on" data-panel="overview">
+      <div class="fc-kpis" id="k-overview"></div>
+      <div class="fc-charts">
+        <div class="fc-card"><h3 data-i="ch_status">Approval Status Distribution</h3><div class="fc-chart" id="c-ov-status"></div></div>
+        <div class="fc-card"><h3 data-i="ch_trend">Monthly Payment Trend</h3><div class="fc-chart" id="c-ov-trend"></div></div>
+        <div class="fc-card"><h3 data-i="ch_pendtype">Pending Documents by Type</h3><div class="fc-chart" id="c-ov-pend"></div></div>
+        <div class="fc-card"><h3 data-i="ch_apprej">Approved vs Rejected Transactions</h3><div class="fc-chart" id="c-ov-apprej"></div></div>
+        <div class="fc-card fc-wide"><h3 data-i="ch_payrec">Outstanding Payables vs Receivables</h3><div class="fc-chart" id="c-ov-payrec"></div></div>
+      </div>
+      <div class="fc-card">
+        <h3 data-i="attention">Needs Immediate Attention</h3>
+        <div id="ov-attention" class="fc-attn"></div>
+      </div>
+    </section>
+
+    <!-- 2 APPROVALS -->
+    <section class="fc-panel" data-panel="approvals">
+      <div class="fc-kpis" id="k-approvals"></div>
+      <div class="fc-card"><h3 data-i="wf_summary">Workflow Summary (by document type and state)</h3><div id="ap-summary" class="fc-tablewrap"></div></div>
+      <div class="fc-toolbar">
+        <label class="fc-f"><span data-i="pendingdur">Pending Duration</span>
+          <select id="f-age">
+            <option value="0" data-i="any">Any</option>
+            <option value="3">&gt; 3</option>
+            <option value="7">&gt; 7</option>
+            <option value="14">&gt; 14</option>
+            <option value="30">&gt; 30</option>
+          </select></label>
+        <span class="fc-hint" data-i="age_hint">Pending days = today − posting date (ERPNext keeps no transition timestamp on the document; see approval trail in details).</span>
+      </div>
+      <div class="fc-card"><div id="t-approvals"></div></div>
+    </section>
+
+    <!-- 3 PAYMENTS -->
+    <section class="fc-panel" data-panel="payments">
+      <div class="fc-kpis" id="k-payments"></div>
+      <div class="fc-charts">
+        <div class="fc-card"><h3 data-i="ch_paytype">Payments by Type</h3><div class="fc-chart" id="c-pay-type"></div></div>
+        <div class="fc-card"><h3 data-i="ch_paymode">Payments by Mode of Payment</h3><div class="fc-chart" id="c-pay-mode"></div></div>
+        <div class="fc-card"><h3 data-i="ch_paystate">Payments by Approval State</h3><div class="fc-chart" id="c-pay-state"></div></div>
+      </div>
+      <div class="fc-card"><div id="t-payments"></div></div>
+    </section>
+
+    <!-- 4 JOURNALS -->
+    <section class="fc-panel" data-panel="journals">
+      <div class="fc-kpis" id="k-journals"></div>
+      <div class="fc-charts">
+        <div class="fc-card"><h3 data-i="ch_jestate">Journal Entries by Workflow State</h3><div class="fc-chart" id="c-je-state"></div></div>
+        <div class="fc-card"><h3 data-i="ch_jetype">Journal Entries by Voucher Type</h3><div class="fc-chart" id="c-je-type"></div></div>
+      </div>
+      <div class="fc-note" id="je-note"></div>
+      <div class="fc-card"><div id="t-journals"></div></div>
+    </section>
+
+    <!-- 5 AP -->
+    <section class="fc-panel" data-panel="ap">
+      <div class="fc-note" data-i="bal_note">Balances are live as of today (outstanding amounts converted to company currency at each invoice's exchange rate).</div>
+      <label class="fc-check"><input type="checkbox" id="ap-range"> <span data-i="apply_range">Apply the date range to invoice posting date</span></label>
+      <div class="fc-kpis" id="k-ap"></div>
+      <div class="fc-charts">
+        <div class="fc-card"><h3 data-i="ch_apage">Payables Ageing (days past due)</h3><div class="fc-chart" id="c-ap-age"></div></div>
+        <div class="fc-card"><h3 data-i="ch_topsup">Top Suppliers by Outstanding</h3><div class="fc-chart" id="c-ap-top"></div></div>
+      </div>
+      <div class="fc-seg fc-seg-inline" id="ap-view"><button type="button" data-v="inv" class="on" data-i="v_invoices">Invoices</button><button type="button" data-v="party" data-i="v_suppliers">Suppliers</button></div>
+      <div class="fc-card"><div id="t-ap"></div></div>
+    </section>
+
+    <!-- 6 AR -->
+    <section class="fc-panel" data-panel="ar">
+      <div class="fc-note" data-i="bal_note_ar">Balances are live as of today. Cancelled documents are excluded.</div>
+      <label class="fc-check"><input type="checkbox" id="ar-range"> <span data-i="apply_range">Apply the date range to invoice posting date</span></label>
+      <div class="fc-kpis" id="k-ar"></div>
+      <div class="fc-charts">
+        <div class="fc-card"><h3 data-i="ch_arage">Receivables Ageing (days past due)</h3><div class="fc-chart" id="c-ar-age"></div></div>
+        <div class="fc-card"><h3 data-i="ch_topcust">Top Overdue Customers</h3><div class="fc-chart" id="c-ar-top"></div></div>
+      </div>
+      <div class="fc-seg fc-seg-inline" id="ar-view"><button type="button" data-v="inv" class="on" data-i="v_invoices">Invoices</button><button type="button" data-v="party" data-i="v_customers">Customers</button></div>
+      <div class="fc-card"><div id="t-ar"></div></div>
+    </section>
+
+    <!-- 7 EXPENSES -->
+    <section class="fc-panel" data-panel="expenses">
+      <div class="fc-kpis" id="k-expenses"></div>
+      <div class="fc-charts">
+        <div class="fc-card"><h3 data-i="ch_ecstatus">Claims by Approval Status</h3><div class="fc-chart" id="c-ec-status"></div></div>
+        <div class="fc-card"><h3 data-i="ch_ecpay">Claims by Payment Status</h3><div class="fc-chart" id="c-ec-pay"></div></div>
+        <div class="fc-card"><h3 data-i="ch_ecemp">Top Employees by Claimed Amount</h3><div class="fc-chart" id="c-ec-emp"></div></div>
+      </div>
+      <div class="fc-card"><div id="t-expenses"></div></div>
+    </section>
+
+    <!-- 8 BANK -->
+    <section class="fc-panel" data-panel="bank">
+      <div class="fc-note" id="bank-note"></div>
+      <div class="fc-kpis" id="k-bank"></div>
+      <div class="fc-charts">
+        <div class="fc-card"><h3 data-i="ch_bankstatus">Bank Transactions by Status</h3><div class="fc-chart" id="c-bank-status"></div></div>
+        <div class="fc-card"><h3 data-i="ch_bankacc">Unreconciled Amount by Bank Account</h3><div class="fc-chart" id="c-bank-acc"></div></div>
+      </div>
+      <div class="fc-card"><h3 data-i="bank_wise">Bank-wise Summary</h3><div id="bank-wise" class="fc-tablewrap"></div></div>
+      <div class="fc-card"><h3 data-i="bank_tx">Bank Transactions</h3><div id="t-bank"></div></div>
+    </section>
+
+    <!-- 9 AUDIT -->
+    <section class="fc-panel" data-panel="audit">
+      <div class="fc-toolbar">
+        <label class="fc-f"><span data-i="ex_type">Exception Type</span><select id="f-extype"></select></label>
+        <label class="fc-f"><span data-i="ex_sev">Severity</span>
+          <select id="f-exsev">
+            <option value="" data-i="all">All</option>
+            <option value="high" data-i="sev_high">High</option>
+            <option value="medium" data-i="sev_medium">Medium</option>
+            <option value="low" data-i="sev_low">Low</option>
+          </select></label>
+      </div>
+      <div class="fc-kpis" id="k-audit"></div>
+      <div class="fc-card"><h3 data-i="ex_register">Exception Register</h3><div id="audit-list" class="fc-tablewrap"></div></div>
+      <div class="fc-note" data-i="audit_legend">Confirmed = proven by the stated server-side check on all matching records. Indicative = derived from a capped scan or a proxy field and must be verified in the record's approval trail.</div>
+    </section>
+  </main>
+
+  <!-- Drill-down drawer -->
+  <aside class="fc-drawer" id="fc-drawer" hidden>
+    <div class="fc-drawer-card">
+      <div class="fc-drawer-head">
+        <h2 id="dr-title"></h2>
+        <button type="button" class="fc-x" id="dr-close" aria-label="Close">✕</button>
+      </div>
+      <div id="dr-body"></div>
+    </div>
+  </aside>
+
+  <!-- Record detail modal -->
+  <div class="fc-modal" id="fc-modal" hidden>
+    <div class="fc-modal-card">
+      <div class="fc-drawer-head">
+        <h2 id="md-title"></h2>
+        <div class="fc-head-actions">
+          <a class="fc-btn fc-btn-light" id="md-open" target="_blank" rel="noopener" data-i="open_erp">Open in ERP</a>
+          <button type="button" class="fc-x" id="md-close" aria-label="Close">✕</button>
+        </div>
+      </div>
+      <div id="md-body"></div>
+    </div>
+  </div>
+</div>

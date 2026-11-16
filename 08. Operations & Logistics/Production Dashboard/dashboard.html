@@ -1,0 +1,448 @@
+
+<div class="pcc">
+  <!-- CSS-ONLY LANGUAGE SWITCH -->
+  <input class="pcc-toggle" type="radio" name="pcc-language" id="pcc-en" checked>
+  <input class="pcc-toggle" type="radio" name="pcc-language" id="pcc-ar">
+
+  <!-- CSS-ONLY TAB NAVIGATION -->
+  <input class="pcc-toggle" type="radio" name="pcc-tab" id="pcc-overview" checked>
+  <input class="pcc-toggle" type="radio" name="pcc-tab" id="pcc-output">
+  <input class="pcc-toggle" type="radio" name="pcc-tab" id="pcc-workorders">
+  <input class="pcc-toggle" type="radio" name="pcc-tab" id="pcc-jobs">
+  <input class="pcc-toggle" type="radio" name="pcc-tab" id="pcc-cost">
+  <input class="pcc-toggle" type="radio" name="pcc-tab" id="pcc-materials">
+  <input class="pcc-toggle" type="radio" name="pcc-tab" id="pcc-workforce">
+  <input class="pcc-toggle" type="radio" name="pcc-tab" id="pcc-planning">
+  <input class="pcc-toggle" type="radio" name="pcc-tab" id="pcc-quality">
+
+  <div class="pcc-shell">
+    <header class="pcc-header">
+      <div>
+        <div class="pcc-eyebrow">DM GROUP KSA / MANUFACTURING INTELLIGENCE</div>
+        <h2>
+          <span class="en">Production Command Center</span>
+          <span class="ar">مركز قيادة الإنتاج</span>
+        </h2>
+        <p>
+          <span class="en">Factory 28 &amp; Factory 34 · Manufacturing Operations</span>
+          <span class="ar">المصنع 28 والمصنع 34 · عمليات التصنيع</span>
+        </p>
+      </div>
+      <div class="pcc-head-actions">
+          
+<button type="button" class="pcc-refresh-live">
+  ↻ Refresh Live Data
+</button>
+
+        <span class="pcc-preview">ERP AUDIT PREVIEW</span>
+        <div class="pcc-language">
+          <label for="pcc-en">English</label>
+          <label for="pcc-ar">العربية</label>
+        </div>
+      </div>
+    </header>
+
+    <!-- FILTER BAR: STATIC PREVIEW -->
+    <div class="pcc-filterbar">
+      <label>
+        <span class="en">Factory</span><span class="ar">المصنع</span>
+        <select>
+          <option>All Factories / جميع المصانع</option>
+          <option>Factory 28 / المصنع 28</option>
+          <option>Factory 34 / المصنع 34</option>
+        </select>
+      </label>
+      <label>
+        <span class="en">Reporting Period</span><span class="ar">فترة التقرير</span>
+        <select>
+          <option>October 2026</option>
+          <option>Today / اليوم</option>
+          <option>This Week / هذا الأسبوع</option>
+          <option>This Year / هذه السنة</option>
+          <option>Custom / مخصص</option>
+        </select>
+      </label>
+      <label>
+        <span class="en">From Date</span><span class="ar">من تاريخ</span>
+        <input type="date" value="2026-10-01">
+      </label>
+      <label>
+        <span class="en">To Date</span><span class="ar">إلى تاريخ</span>
+        <input type="date" value="2026-10-31">
+      </label>
+      <div class="pcc-filter-info">
+        <span class="en">Static preview · Filters not connected</span>
+        <span class="ar">معاينة ثابتة · الفلاتر غير متصلة</span>
+      </div>
+    </div>
+
+    <!-- TABS -->
+    <nav class="pcc-nav">
+      <label for="pcc-overview"><span class="en">Overview</span><span class="ar">نظرة عامة</span></label>
+      <label for="pcc-output"><span class="en">Production Output</span><span class="ar">الإنتاج الفعلي</span></label>
+      <label for="pcc-workorders"><span class="en">Work Orders</span><span class="ar">أوامر التصنيع</span></label>
+      <label for="pcc-jobs"><span class="en">Factory Job Orders</span><span class="ar">أوامر عمل المصنع</span></label>
+      <label for="pcc-cost"><span class="en">Production Cost</span><span class="ar">تكلفة الإنتاج</span></label>
+      <label for="pcc-materials"><span class="en">Materials &amp; Wastage</span><span class="ar">المواد والهدر</span></label>
+      <label for="pcc-workforce"><span class="en">Employee Productivity</span><span class="ar">إنتاجية الموظفين</span></label>
+      <label for="pcc-planning"><span class="en">Production Planning</span><span class="ar">تخطيط الإنتاج</span></label>
+      <label for="pcc-quality"><span class="en">Quality &amp; Exceptions</span><span class="ar">الجودة والملاحظات</span></label>
+    </nav>
+
+    <main class="pcc-main">
+      <div class="pcc-notice">
+        <span class="en">Read-only design preview. Audit figures cover all audited dates and may span warehouses outside Factory 28/34. Click a card to expand details; use its ERP link to view actual records.</span>
+        <span class="ar">معاينة تصميم للقراءة فقط. أرقام التدقيق تشمل جميع التواريخ وقد تشمل مستودعات خارج المصنعين 28 و34. اضغط على البطاقة للتفاصيل أو افتح السجلات في النظام.</span>
+      </div>
+
+      <!-- TAB 1 OVERVIEW -->
+      <section class="pcc-page pcc-page-overview">
+        <div class="pcc-section-head">
+          <div>
+            <span class="pcc-kicker">EXECUTIVE SUMMARY</span>
+            <h3><span class="en">Manufacturing Overview</span><span class="ar">نظرة عامة على التصنيع</span></h3>
+            <p><span class="en">Key production sources and manufacturing activity</span><span class="ar">مصادر الإنتاج الرئيسية ونشاط التصنيع</span></p>
+          </div>
+          <span class="pcc-chip">ERP audit · 2026</span>
+        </div>
+
+        <div class="pcc-kpis">
+          <details class="pcc-kpi">
+            <summary>
+              <span class="pcc-kpi-label"><span class="en">Submitted Manufacture Entries</span><span class="ar">قيود التصنيع المعتمدة</span></span>
+              <strong>5,484</strong>
+              <small><span class="en">All audited factories / dates</span><span class="ar">جميع المصانع والتواريخ</span></small>
+              <span class="pcc-more"><span class="en">View details</span><span class="ar">عرض التفاصيل</span> +</span>
+            </summary>
+            <div class="pcc-detail">
+              <div><span class="en">Submitted</span><span class="ar">معتمد</span><b>5,484</b></div>
+              <div><span class="en">Cancelled</span><span class="ar">ملغي</span><b>346</b></div>
+              <div><span class="en">Draft</span><span class="ar">مسودة</span><b>2</b></div>
+              <a href="/app/stock-entry" target="_blank" rel="noopener"><span class="en">Open Stock Entries ↗</span><span class="ar">فتح قيود المخزون ↗</span></a>
+            </div>
+          </details>
+
+          <details class="pcc-kpi">
+            <summary>
+              <span class="pcc-kpi-label"><span class="en">Total Work Orders</span><span class="ar">إجمالي أوامر التصنيع</span></span>
+              <strong>5,732</strong>
+              <small><span class="en">Audited ERP records</span><span class="ar">السجلات التي تمت مراجعتها</span></small>
+              <span class="pcc-more"><span class="en">View details</span><span class="ar">عرض التفاصيل</span> +</span>
+            </summary>
+            <div class="pcc-detail">
+              <div><span class="en">Completed</span><span class="ar">مكتمل</span><b>5,355</b></div>
+              <div><span class="en">In Process</span><span class="ar">قيد التنفيذ</span><b>12</b></div>
+              <div><span class="en">Not Started</span><span class="ar">لم يبدأ</span><b>30</b></div>
+              <div><span class="en">Other statuses</span><span class="ar">حالات أخرى</span><b>335</b></div>
+              <a href="/app/work-order" target="_blank" rel="noopener"><span class="en">Open Work Orders ↗</span><span class="ar">فتح أوامر التصنيع ↗</span></a>
+            </div>
+          </details>
+
+          <details class="pcc-kpi">
+            <summary>
+              <span class="pcc-kpi-label"><span class="en">Factory Job Orders</span><span class="ar">أوامر عمل المصنع</span></span>
+              <strong>81</strong>
+              <small><span class="en">Factory job order records</span><span class="ar">سجلات أوامر عمل المصنع</span></small>
+              <span class="pcc-more"><span class="en">View details</span><span class="ar">عرض التفاصيل</span> +</span>
+            </summary>
+            <div class="pcc-detail">
+              <div><span class="en">28 Factory · Open drafts</span><span class="ar">المصنع 28 · مسودات مفتوحة</span><b>31</b></div>
+              <div><span class="en">28 Factory · Assigned drafts</span><span class="ar">المصنع 28 · مسودات مسندة</span><b>6</b></div>
+              <div><span class="en">34 Factory · Open drafts</span><span class="ar">المصنع 34 · مسودات مفتوحة</span><b>2</b></div>
+              <a href="/app/factory-job-order" target="_blank" rel="noopener"><span class="en">Open Factory Job Orders ↗</span><span class="ar">فتح أوامر عمل المصنع ↗</span></a>
+            </div>
+          </details>
+
+          <details class="pcc-kpi">
+            <summary>
+              <span class="pcc-kpi-label"><span class="en">Production Targets</span><span class="ar">أهداف الإنتاج</span></span>
+              <strong class="pcc-warning-value"><span class="en">Not Set</span><span class="ar">غير محدد</span></strong>
+              <small><span class="en">0 configured targets</span><span class="ar">لا توجد أهداف مسجلة</span></small>
+              <span class="pcc-more"><span class="en">View details</span><span class="ar">عرض التفاصيل</span> +</span>
+            </summary>
+            <div class="pcc-detail">
+              <p><span class="en">Target attainment cannot be calculated until valid factory targets are configured.</span><span class="ar">لا يمكن حساب نسبة تحقيق الهدف حتى يتم تسجيل أهداف صحيحة للمصنع.</span></p>
+              <a href="/app/manufacturing-production-target" target="_blank" rel="noopener"><span class="en">Open Target Records ↗</span><span class="ar">فتح سجلات الأهداف ↗</span></a>
+            </div>
+          </details>
+
+          <details class="pcc-kpi">
+            <summary>
+              <span class="pcc-kpi-label"><span class="en">Daily Production Documents</span><span class="ar">مستندات الإنتاج اليومي</span></span>
+              <strong>677</strong>
+              <small><span class="en">Audited records</span><span class="ar">السجلات التي تمت مراجعتها</span></small>
+              <span class="pcc-more"><span class="en">View details</span><span class="ar">عرض التفاصيل</span> +</span>
+            </summary>
+            <div class="pcc-detail">
+              <p><span class="en">Employee activities, output and working hours are held in child rows.</span><span class="ar">أنشطة الموظفين وكميات الإنتاج وساعات العمل موجودة في الجداول الفرعية.</span></p>
+              <a href="/app/factory-daily-production" target="_blank" rel="noopener"><span class="en">Open Daily Production ↗</span><span class="ar">فتح الإنتاج اليومي ↗</span></a>
+            </div>
+          </details>
+
+          <details class="pcc-kpi">
+            <summary>
+              <span class="pcc-kpi-label"><span class="en">Daily Production Cost Records</span><span class="ar">سجلات تكلفة الإنتاج</span></span>
+              <strong>468</strong>
+              <small><span class="en">Records, not SAR total</span><span class="ar">عدد السجلات وليس التكلفة</span></small>
+              <span class="pcc-more"><span class="en">View details</span><span class="ar">عرض التفاصيل</span> +</span>
+            </summary>
+            <div class="pcc-detail">
+              <div><span class="en">Approved documents</span><span class="ar">المستندات المعتمدة</span><b>100</b></div>
+              <a href="/app/daily-production-cost" target="_blank" rel="noopener"><span class="en">Open Daily Costs ↗</span><span class="ar">فتح تكاليف الإنتاج ↗</span></a>
+            </div>
+          </details>
+
+          <details class="pcc-kpi">
+            <summary>
+              <span class="pcc-kpi-label"><span class="en">Bill of Materials</span><span class="ar">قوائم المواد</span></span>
+              <strong>497</strong>
+              <small><span class="en">Audited BOM records</span><span class="ar">سجلات قوائم المواد</span></small>
+              <span class="pcc-more"><span class="en">View details</span><span class="ar">عرض التفاصيل</span> +</span>
+            </summary>
+            <div class="pcc-detail">
+              <p><span class="en">Material requirements and manufacturing components.</span><span class="ar">احتياجات المواد ومكونات التصنيع.</span></p>
+              <a href="/app/bom" target="_blank" rel="noopener"><span class="en">Open BOM ↗</span><span class="ar">فتح قائمة المواد ↗</span></a>
+            </div>
+          </details>
+
+          <details class="pcc-kpi">
+            <summary>
+              <span class="pcc-kpi-label"><span class="en">Manufacturing Production Cost</span><span class="ar">تكلفة الإنتاج التصنيعي</span></span>
+              <strong>—</strong>
+              <small><span class="en">Valuation not reconciled</span><span class="ar">لم تتم مطابقة التقييم</span></small>
+              <span class="pcc-more"><span class="en">View details</span><span class="ar">عرض التفاصيل</span> +</span>
+            </summary>
+            <div class="pcc-detail">
+              <p><span class="en">Stock Entry value difference needs verification before publishing financial totals.</span><span class="ar">يجب التحقق من فرق القيمة في قيود المخزون قبل عرض إجمالي التكاليف.</span></p>
+              <a href="/app/stock-entry" target="_blank" rel="noopener"><span class="en">Review Stock Entries ↗</span><span class="ar">مراجعة قيود المخزون ↗</span></a>
+            </div>
+          </details>
+        </div>
+
+        <div class="pcc-grid2">
+          <div class="pcc-panel">
+            <div class="pcc-panel-head"><h4><span class="en">Work Order Distribution</span><span class="ar">توزيع أوامر التصنيع</span></h4><span>ERP Audit</span></div>
+            <div class="pcc-donut-wrap">
+              <div class="pcc-donut"><div><strong>5,732</strong><small>Work Orders</small></div></div>
+              <div class="pcc-legend">
+                <div><i class="pcc-dot teal"></i><span class="en">Completed</span><span class="ar">مكتمل</span><b>5,355</b></div>
+                <div><i class="pcc-dot blue"></i><span class="en">In Process</span><span class="ar">قيد التنفيذ</span><b>12</b></div>
+                <div><i class="pcc-dot amber"></i><span class="en">Not Started</span><span class="ar">لم يبدأ</span><b>30</b></div>
+                <div><i class="pcc-dot gray"></i><span class="en">Other</span><span class="ar">أخرى</span><b>335</b></div>
+              </div>
+            </div>
+          </div>
+          <div class="pcc-panel">
+            <div class="pcc-panel-head"><h4><span class="en">Manufacture Receipt Rows by Warehouse</span><span class="ar">صفوف استلام التصنيع حسب المستودع</span></h4><span>Audited rows</span></div>
+            <div class="pcc-bars">
+              <div><span>28 DM Factory</span><em><i style="width:100%"></i></em><b>3,861</b></div>
+              <div><span>34 DM Store</span><em><i style="width:22.8%"></i></em><b>879</b></div>
+              <div><span>31 DM Store</span><em><i style="width:9.8%"></i></em><b>380</b></div>
+              <div><span>30 DM Store</span><em><i style="width:5.9%"></i></em><b>228</b></div>
+              <div><span>35 DM DMM</span><em><i style="width:4.5%"></i></em><b>174</b></div>
+              <div><span>01 NJD Showroom</span><em><i style="width:3.3%"></i></em><b>128</b></div>
+            </div>
+            <p class="pcc-note"><span class="en">Counts of transaction rows, not summed production quantities.</span><span class="ar">عدد صفوف الحركات وليس مجموع كميات الإنتاج.</span></p>
+          </div>
+        </div>
+
+        <div class="pcc-panel">
+          <div class="pcc-panel-head"><h4><span class="en">Production Source Register</span><span class="ar">سجل مصادر الإنتاج</span></h4><span>ERP record links</span></div>
+          <div class="pcc-tablewrap">
+            <table>
+              <thead><tr><th><span class="en">Source</span><span class="ar">المصدر</span></th><th><span class="en">Audit Count</span><span class="ar">عدد السجلات</span></th><th><span class="en">Purpose</span><span class="ar">الغرض</span></th><th><span class="en">Details</span><span class="ar">التفاصيل</span></th></tr></thead>
+              <tbody>
+                <tr><td>Stock Entry</td><td>13,719</td><td><span class="en">Manufacturing movements</span><span class="ar">حركات التصنيع</span></td><td><a href="/app/stock-entry" target="_blank">Open ↗</a></td></tr>
+                <tr><td>Work Order</td><td>5,732</td><td><span class="en">Manufacturing execution</span><span class="ar">تنفيذ التصنيع</span></td><td><a href="/app/work-order" target="_blank">Open ↗</a></td></tr>
+                <tr><td>Factory Job Order</td><td>81</td><td><span class="en">Factory task allocation</span><span class="ar">توزيع أعمال المصنع</span></td><td><a href="/app/factory-job-order" target="_blank">Open ↗</a></td></tr>
+                <tr><td>Factory Daily Production</td><td>677</td><td><span class="en">Employee productivity</span><span class="ar">إنتاجية الموظفين</span></td><td><a href="/app/factory-daily-production" target="_blank">Open ↗</a></td></tr>
+                <tr><td>Daily Production Cost</td><td>468</td><td><span class="en">Process costs</span><span class="ar">تكاليف العمليات</span></td><td><a href="/app/daily-production-cost" target="_blank">Open ↗</a></td></tr>
+                <tr><td>BOM</td><td>497</td><td><span class="en">Material requirements</span><span class="ar">متطلبات المواد</span></td><td><a href="/app/bom" target="_blank">Open ↗</a></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2 PRODUCTION OUTPUT -->
+      <section class="pcc-page pcc-page-output">
+        <div class="pcc-section-head">
+          <div><span class="pcc-kicker">FINISHED GOODS</span><h3><span class="en">Production Output</span><span class="ar">الإنتاج الفعلي</span></h3><p><span class="en">Finished item receipts and UOM-aware reporting</span><span class="ar">استلام المنتجات النهائية والتقارير حسب وحدة القياس</span></p></div>
+          <span class="pcc-chip">Stock Entry</span>
+        </div>
+        <div class="pcc-kpis">
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Factory 28 Receipt Rows</span><span class="ar">صفوف استلام المصنع 28</span></span><strong>3,861</strong><small>Audit · All dates</small><span class="pcc-more">View details +</span></summary><div class="pcc-detail"><p><span class="en">Warehouse: 28 DM FACTORY - DMG. Row count, not production quantity.</span><span class="ar">المستودع 28 DM FACTORY - DMG. العدد يمثل الصفوف وليس الكمية.</span></p><a href="/app/stock-entry" target="_blank">Stock Entries ↗</a></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Factory 34 Receipt Rows</span><span class="ar">صفوف استلام المصنع 34</span></span><strong>879</strong><small>Audit · All dates</small><span class="pcc-more">View details +</span></summary><div class="pcc-detail"><p>Warehouse: 34 DM STORE - DMG</p><a href="/app/stock-entry" target="_blank">Stock Entries ↗</a></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Finished Production Quantity</span><span class="ar">كمية الإنتاج النهائي</span></span><strong>—</strong><small><span class="en">Requires UOM aggregation</span><span class="ar">يتطلب التجميع حسب الوحدة</span></small><span class="pcc-more">View details +</span></summary><div class="pcc-detail"><p><span class="en">PCS, SET, ROLL, LM and TON must not be summed together.</span><span class="ar">لا يجوز جمع الكميات بوحدات قياس مختلفة.</span></p></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Finished Goods Valuation</span><span class="ar">قيمة المنتجات النهائية</span></span><strong>—</strong><small><span class="en">Pending reconciliation</span><span class="ar">بانتظار المطابقة</span></small><span class="pcc-more">View details +</span></summary><div class="pcc-detail"><a href="/app/stock-entry" target="_blank"><span class="en">Review manufacturing entries ↗</span><span class="ar">مراجعة قيود التصنيع ↗</span></a></div></details>
+        </div>
+        <div class="pcc-grid2">
+          <div class="pcc-panel">
+            <div class="pcc-panel-head"><h4><span class="en">Finished Item UOM Distribution</span><span class="ar">توزيع وحدات قياس المنتجات النهائية</span></h4><span>Row counts</span></div>
+            <div class="pcc-bars">
+              <div><span>PCS</span><em><i style="width:100%"></i></em><b>5,220</b></div>
+              <div><span>SET</span><em><i style="width:8.45%"></i></em><b>441</b></div>
+              <div><span>ROLL</span><em><i style="width:2.7%"></i></em><b>141</b></div>
+              <div><span>LM</span><em><i style="width:.44%"></i></em><b>23</b></div>
+              <div><span>TON</span><em><i style="width:.1%"></i></em><b>5</b></div>
+            </div>
+            <p class="pcc-note"><span class="en">These rows cover the audited warehouse set, not just the two main factories.</span><span class="ar">تشمل هذه الصفوف المستودعات التي تمت مراجعتها وليس المصنعين فقط.</span></p>
+          </div>
+          <div class="pcc-panel">
+            <div class="pcc-panel-head"><h4><span class="en">Production Trend</span><span class="ar">اتجاه الإنتاج</span></h4><span>Visual placeholder</span></div>
+            <div class="pcc-chart">
+              <div class="pcc-chart-bars"><i style="height:38%"></i><i style="height:61%"></i><i style="height:47%"></i><i style="height:75%"></i><i style="height:58%"></i><i style="height:84%"></i><i style="height:69%"></i><i style="height:92%"></i></div>
+              <div class="pcc-chart-labels"><span>W1</span><span>W2</span><span>W3</span><span>W4</span><span>W5</span><span>W6</span><span>W7</span><span>W8</span></div>
+            </div>
+            <p class="pcc-note"><span class="en">Illustrative chart only — bars are not ERP measurements.</span><span class="ar">رسم توضيحي فقط ولا يمثل قياسات فعلية من النظام.</span></p>
+          </div>
+        </div>
+        <div class="pcc-panel">
+          <div class="pcc-panel-head"><h4><span class="en">Finished Production Register</span><span class="ar">سجل الإنتاج النهائي</span></h4><a href="/app/stock-entry" target="_blank">Stock Entry ↗</a></div>
+          <div class="pcc-tablewrap"><table><thead><tr><th>Date / التاريخ</th><th>Factory / المصنع</th><th>Item Code / رمز الصنف</th><th>Item Group / مجموعة الصنف</th><th>Quantity / الكمية</th><th>UOM / الوحدة</th><th>Value / القيمة</th><th>Reference / المرجع</th></tr></thead><tbody><tr><td colspan="8" class="pcc-empty"><span class="en">Item-level transactions require the production aggregation API.</span><span class="ar">تتطلب حركات الأصناف واجهة تجميع بيانات الإنتاج.</span></td></tr></tbody></table></div>
+        </div>
+      </section>
+
+      <!-- TAB 3 WORK ORDERS -->
+      <section class="pcc-page pcc-page-workorders">
+        <div class="pcc-section-head"><div><span class="pcc-kicker">MANUFACTURING EXECUTION</span><h3><span class="en">Work Orders</span><span class="ar">أوامر التصنيع</span></h3><p><span class="en">Production execution and completion analysis</span><span class="ar">تحليل تنفيذ الإنتاج وحالة الإنجاز</span></p></div><a class="pcc-link" href="/app/work-order" target="_blank">ERP Work Orders ↗</a></div>
+        <div class="pcc-kpis">
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">All Work Orders</span><span class="ar">جميع أوامر التصنيع</span></span><strong>5,732</strong><small>ERP-wide audit</small><span class="pcc-more">View details +</span></summary><div class="pcc-detail"><a href="/app/work-order" target="_blank">Open Register ↗</a></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Completed</span><span class="ar">مكتمل</span></span><strong>5,355</strong><small>93.42% of audited records</small><span class="pcc-more">View details +</span></summary><div class="pcc-detail"><p><span class="en">Completed record count is not finished production quantity.</span><span class="ar">عدد السجلات المكتملة لا يمثل كمية الإنتاج النهائي.</span></p><a href="/app/work-order" target="_blank">Open Work Orders ↗</a></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">In Process</span><span class="ar">قيد التنفيذ</span></span><strong>12</strong><small>Audited status count</small><span class="pcc-more">View details +</span></summary><div class="pcc-detail"><a href="/app/work-order" target="_blank">Open Work Orders ↗</a></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Not Started</span><span class="ar">لم يبدأ</span></span><strong>30</strong><small>Audited status count</small><span class="pcc-more">View details +</span></summary><div class="pcc-detail"><a href="/app/work-order" target="_blank">Open Work Orders ↗</a></div></details>
+        </div>
+        <div class="pcc-grid2">
+          <div class="pcc-panel"><div class="pcc-panel-head"><h4><span class="en">Work Order Completion Rate</span><span class="ar">نسبة إكمال أوامر التصنيع</span></h4><span>Count basis</span></div><div class="pcc-progress-number">93.42%</div><div class="pcc-progress"><i style="width:93.42%"></i></div><p class="pcc-note">5,355 / 5,732 completed by record status.</p></div>
+          <div class="pcc-panel"><div class="pcc-panel-head"><h4><span class="en">Production Quantity Tracking</span><span class="ar">متابعة كميات الإنتاج</span></h4></div><div class="pcc-rows"><div><span class="en">Planned Qty</span><span class="ar">الكمية المخططة</span><b>—</b></div><div><span class="en">Produced Qty</span><span class="ar">الكمية المنتجة</span><b>—</b></div><div><span class="en">Balance Qty</span><span class="ar">الكمية المتبقية</span><b>—</b></div><div><span class="en">Delayed Work Orders</span><span class="ar">أوامر التصنيع المتأخرة</span><b>—</b></div></div></div>
+        </div>
+        <div class="pcc-panel"><div class="pcc-panel-head"><h4><span class="en">Work Order Details</span><span class="ar">تفاصيل أوامر التصنيع</span></h4><a href="/app/work-order" target="_blank">Open ERP ↗</a></div><div class="pcc-tablewrap"><table><thead><tr><th>Work Order</th><th>Production Item</th><th>FG Warehouse</th><th>Planned Qty</th><th>Produced Qty</th><th>UOM</th><th>Status</th></tr></thead><tbody><tr><td colspan="7" class="pcc-empty"><span class="en">Live Work Order list will require the verified ERP API.</span><span class="ar">تتطلب قائمة أوامر التصنيع المباشرة واجهة النظام المعتمدة.</span></td></tr></tbody></table></div></div>
+      </section>
+
+      <!-- TAB 4 FACTORY JOB ORDERS -->
+      <section class="pcc-page pcc-page-jobs">
+        <div class="pcc-section-head"><div><span class="pcc-kicker">FACTORY OPERATIONS</span><h3><span class="en">Factory Job Orders</span><span class="ar">أوامر عمل المصنع</span></h3><p><span class="en">Operational job tracking for Factory 28 and Factory 34</span><span class="ar">متابعة الأعمال التشغيلية للمصنعين 28 و34</span></p></div><a class="pcc-link" href="/app/factory-job-order" target="_blank">ERP Job Orders ↗</a></div>
+        <div class="pcc-kpis">
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Total Jobs</span><span class="ar">إجمالي الأعمال</span></span><strong>81</strong><small>ERP audit</small><span class="pcc-more">View details +</span></summary><div class="pcc-detail"><a href="/app/factory-job-order" target="_blank">Open Jobs ↗</a></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">28 Factory · Open Drafts</span><span class="ar">المصنع 28 · مسودات مفتوحة</span></span><strong>31</strong><small>JO status Open</small><span class="pcc-more">View details +</span></summary><div class="pcc-detail"><a href="/app/factory-job-order" target="_blank">Open Register ↗</a></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">28 Factory · Assigned Drafts</span><span class="ar">المصنع 28 · مسودات مسندة</span></span><strong>6</strong><small>JO status Assigned</small><span class="pcc-more">View details +</span></summary><div class="pcc-detail"><a href="/app/factory-job-order" target="_blank">Open Register ↗</a></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">34 Factory · Completed</span><span class="ar">المصنع 34 · مكتمل</span></span><strong>1</strong><small>JO status Completed</small><span class="pcc-more">View details +</span></summary><div class="pcc-detail"><a href="/app/factory-job-order" target="_blank">Open Register ↗</a></div></details>
+        </div>
+        <div class="pcc-panel">
+          <div class="pcc-panel-head"><h4><span class="en">Production Job Workflow</span><span class="ar">مراحل أوامر عمل الإنتاج</span></h4><span>Native JO statuses</span></div>
+          <div class="pcc-workflow"><div><b>01</b><strong>Open</strong><small>New job</small></div><div><b>02</b><strong>Assigned</strong><small>Allocation</small></div><div><b>03</b><strong>Inprogress</strong><small>Execution</small></div><div><b>04</b><strong>Completed</strong><small>Finished job</small></div></div>
+        </div>
+        <div class="pcc-panel">
+          <div class="pcc-panel-head"><h4><span class="en">Verified ERP Job Records</span><span class="ar">سجلات أوامر عمل تم التحقق منها</span></h4><span>Record sample</span></div>
+          <div class="pcc-tablewrap"><table><thead><tr><th>Job Order</th><th>Issue Date</th><th>Factory</th><th>Document State</th><th>Action</th></tr></thead><tbody>
+            <tr><td>DM-FUR-2026-00005</td><td>2026-10-21</td><td>28 Factory</td><td><span class="pcc-status warn">Draft</span></td><td><a href="/app/factory-job-order/DM-FUR-2026-00005" target="_blank">Open ↗</a></td></tr>
+            <tr><td>DM-FUR-2026-00004</td><td>2026-10-20</td><td>28 Factory</td><td><span class="pcc-status good">Submitted</span></td><td><a href="/app/factory-job-order/DM-FUR-2026-00004" target="_blank">Open ↗</a></td></tr>
+            <tr><td>DM-FUR-2026-00002</td><td>2026-10-18</td><td>28 Factory</td><td><span class="pcc-status good">Submitted</span></td><td><a href="/app/factory-job-order/DM-FUR-2026-00002" target="_blank">Open ↗</a></td></tr>
+            <tr><td>DM-FUR-2026-00003</td><td>2026-10-19</td><td>28 Factory</td><td><span class="pcc-status warn">Draft</span></td><td><a href="/app/factory-job-order/DM-FUR-2026-00003" target="_blank">Open ↗</a></td></tr>
+          </tbody></table></div>
+          <p class="pcc-note"><span class="en">Document submission is not the same as job completion. The JO Status is authoritative for operational completion.</span><span class="ar">اعتماد المستند لا يعني إكمال العمل. يتم تحديد اكتمال العمل من خلال حالة أمر المصنع.</span></p>
+        </div>
+      </section>
+
+      <!-- TAB 5 PRODUCTION COST -->
+      <section class="pcc-page pcc-page-cost">
+        <div class="pcc-section-head"><div><span class="pcc-kicker">PRODUCTION FINANCE</span><h3><span class="en">Production Cost</span><span class="ar">تكلفة الإنتاج</span></h3><p><span class="en">Cost valuation, material consumption and process expenses</span><span class="ar">تقييم التكلفة واستهلاك المواد ومصاريف العمليات</span></p></div><span class="pcc-chip">SAR / ر.س</span></div>
+        <div class="pcc-kpis">
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Manufacturing Cost</span><span class="ar">تكلفة التصنيع</span></span><strong>—</strong><small><span class="en">Awaiting reconciliation</span><span class="ar">بانتظار المطابقة</span></small><span class="pcc-more">Details +</span></summary><div class="pcc-detail"><p>Stock Entry value_difference must be verified.</p><a href="/app/stock-entry" target="_blank">Stock Entry ↗</a></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Material Consumption Value</span><span class="ar">قيمة استهلاك المواد</span></span><strong>—</strong><small><span class="en">Outgoing material valuation</span><span class="ar">تقييم المواد المصروفة</span></small><span class="pcc-more">Details +</span></summary><div class="pcc-detail"><a href="/app/stock-entry" target="_blank">Stock Entry ↗</a></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Labour / Process Cost</span><span class="ar">تكلفة العمالة والعمليات</span></span><strong>—</strong><small><span class="en">Process achieved amounts</span><span class="ar">قيمة الإنتاج المحقق</span></small><span class="pcc-more">Details +</span></summary><div class="pcc-detail"><a href="/app/factory-daily-production" target="_blank">Daily Production ↗</a></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Daily Cost Records</span><span class="ar">سجلات التكلفة اليومية</span></span><strong>468</strong><small>100 approved records</small><span class="pcc-more">Details +</span></summary><div class="pcc-detail"><a href="/app/daily-production-cost" target="_blank">Daily Costs ↗</a></div></details>
+        </div>
+        <div class="pcc-grid2">
+          <div class="pcc-panel"><div class="pcc-panel-head"><h4><span class="en">Cost Model Structure</span><span class="ar">هيكل نموذج التكلفة</span></h4><span>Illustrative</span></div><div class="pcc-costbar"><span>Materials</span><span>Manufacturing</span><span>Labour</span></div><p class="pcc-note"><span class="en">Segment widths are illustrative and not actual cost proportions.</span><span class="ar">الأحجام توضيحية ولا تمثل نسب التكلفة الفعلية.</span></p></div>
+          <div class="pcc-panel"><div class="pcc-panel-head"><h4><span class="en">Cost Reconciliation Status</span><span class="ar">حالة مطابقة التكاليف</span></h4></div><div class="pcc-rows"><div><span>Stock Entry valuation</span><span class="pcc-status warn">Verify</span></div><div><span>Factory Daily Production</span><span class="pcc-status warn">Verify</span></div><div><span>Daily Production Cost</span><span class="pcc-status warn">Verify</span></div><div><span>Production Target Cost</span><span class="pcc-status">Not Set</span></div></div></div>
+        </div>
+        <div class="pcc-panel"><div class="pcc-panel-head"><h4><span class="en">Cost Transaction Detail</span><span class="ar">تفاصيل حركات التكلفة</span></h4><a href="/app/daily-production-cost" target="_blank">ERP Costs ↗</a></div><div class="pcc-tablewrap"><table><thead><tr><th>Date</th><th>Factory</th><th>Item</th><th>Manufacturing Cost</th><th>Process Cost</th><th>Reference</th></tr></thead><tbody><tr><td colspan="6" class="pcc-empty"><span class="en">Cost detail will be available once valuations have been reconciled.</span><span class="ar">ستتوفر تفاصيل التكلفة بعد مطابقة التقييمات.</span></td></tr></tbody></table></div></div>
+      </section>
+
+      <!-- TAB 6 MATERIALS -->
+      <section class="pcc-page pcc-page-materials">
+        <div class="pcc-section-head"><div><span class="pcc-kicker">MATERIAL CONTROL</span><h3><span class="en">Materials &amp; Wastage</span><span class="ar">المواد والهدر</span></h3><p><span class="en">Consumption, scrap receipts and inventory shortages</span><span class="ar">استهلاك المواد واستلام الخردة ونقص المخزون</span></p></div><a class="pcc-link" href="/app/stock-entry" target="_blank">Stock Entries ↗</a></div>
+        <div class="pcc-kpis">
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Factory 28 Scrap Rows</span><span class="ar">صفوف خردة المصنع 28</span></span><strong>195</strong><small>Audited receipt rows</small><span class="pcc-more">Details +</span></summary><div class="pcc-detail"><p><span class="en">Count only; not scrap weight or quantity.</span><span class="ar">عدد الصفوف فقط وليس وزن الخردة أو الكمية.</span></p><a href="/app/stock-entry" target="_blank">Stock Entry ↗</a></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Factory 34 Scrap Rows</span><span class="ar">صفوف خردة المصنع 34</span></span><strong>78</strong><small>Audited receipt rows</small><span class="pcc-more">Details +</span></summary><div class="pcc-detail"><a href="/app/stock-entry" target="_blank">Stock Entry ↗</a></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Materials Consumed</span><span class="ar">المواد المستهلكة</span></span><strong>—</strong><small><span class="en">Pending item-line analysis</span><span class="ar">بانتظار تحليل الأصناف</span></small><span class="pcc-more">Details +</span></summary><div class="pcc-detail"><a href="/app/stock-entry" target="_blank">Stock Entry ↗</a></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Material Shortages</span><span class="ar">نقص المواد</span></span><strong>—</strong><small><span class="en">Stock availability not verified</span><span class="ar">لم يتم التحقق من توفر المخزون</span></small><span class="pcc-more">Details +</span></summary><div class="pcc-detail"><a href="/app/bom" target="_blank">BOM ↗</a></div></details>
+        </div>
+        <div class="pcc-grid2">
+          <div class="pcc-panel"><div class="pcc-panel-head"><h4><span class="en">Scrap Receipt Rows by Factory</span><span class="ar">صفوف استلام الخردة حسب المصنع</span></h4></div><div class="pcc-bars"><div><span>Factory 28</span><em><i style="width:100%"></i></em><b>195</b></div><div><span>Factory 34</span><em><i style="width:40%"></i></em><b>78</b></div></div></div>
+          <div class="pcc-panel"><div class="pcc-panel-head"><h4><span class="en">Material Controls</span><span class="ar">مراقبة المواد</span></h4></div><div class="pcc-rows"><div><span class="en">BOM vs Actual Consumption</span><span class="ar">المخطط مقابل الاستهلاك الفعلي</span><b>—</b></div><div><span class="en">Scrap Valuation</span><span class="ar">قيمة الخردة</span><b>—</b></div><div><span class="en">Shortages</span><span class="ar">النواقص</span><b>—</b></div><div><span class="en">Material Readiness</span><span class="ar">جاهزية المواد</span><b>—</b></div></div></div>
+        </div>
+        <div class="pcc-panel"><div class="pcc-panel-head"><h4><span class="en">Material Consumption Register</span><span class="ar">سجل استهلاك المواد</span></h4><a href="/app/stock-entry" target="_blank">ERP Stock Entry ↗</a></div><div class="pcc-tablewrap"><table><thead><tr><th>Date</th><th>Factory</th><th>Material Code</th><th>Item Group</th><th>Consumed Qty</th><th>UOM</th><th>Value</th><th>Stock Entry</th></tr></thead><tbody><tr><td colspan="8" class="pcc-empty"><span class="en">Requires Stock Entry Detail reconciliation and BOM comparison.</span><span class="ar">يتطلب مطابقة تفاصيل قيود المخزون ومقارنتها بقوائم المواد.</span></td></tr></tbody></table></div></div>
+      </section>
+
+      <!-- TAB 7 WORKFORCE -->
+      <section class="pcc-page pcc-page-workforce">
+        <div class="pcc-section-head"><div><span class="pcc-kicker">LABOUR &amp; OPERATIONS</span><h3><span class="en">Employee Productivity</span><span class="ar">إنتاجية الموظفين</span></h3><p><span class="en">Production activity, performance, duty hours and overtime</span><span class="ar">أنشطة الإنتاج والأداء وساعات العمل والعمل الإضافي</span></p></div><a class="pcc-link" href="/app/factory-daily-production" target="_blank">Daily Production ↗</a></div>
+        <div class="pcc-kpis">
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Daily Production Documents</span><span class="ar">مستندات الإنتاج اليومي</span></span><strong>677</strong><small>Audit · All dates</small><span class="pcc-more">Details +</span></summary><div class="pcc-detail"><a href="/app/factory-daily-production" target="_blank">Open ERP ↗</a></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Employees Recorded</span><span class="ar">الموظفون المسجلون</span></span><strong>—</strong><small><span class="en">Employee aggregation pending</span><span class="ar">بانتظار تجميع بيانات الموظفين</span></small><span class="pcc-more">Details +</span></summary><div class="pcc-detail"><p><span class="en">Employee record visibility must follow ERP permissions.</span><span class="ar">يجب الالتزام بصلاحيات الوصول إلى سجلات الموظفين.</span></p></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Achieved Process Amount</span><span class="ar">قيمة العمليات المنجزة</span></span><strong>—</strong><small>Child-row cost analysis</small><span class="pcc-more">Details +</span></summary><div class="pcc-detail"><a href="/app/factory-daily-production" target="_blank">Open ERP ↗</a></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Overtime Hours</span><span class="ar">ساعات العمل الإضافي</span></span><strong>—</strong><small>Child-row OT hours</small><span class="pcc-more">Details +</span></summary><div class="pcc-detail"><a href="/app/factory-daily-production" target="_blank">Open ERP ↗</a></div></details>
+        </div>
+        <div class="pcc-grid2">
+          <div class="pcc-panel"><div class="pcc-panel-head"><h4><span class="en">Production Activities</span><span class="ar">أنشطة الإنتاج</span></h4></div><div class="pcc-activity"><span>Cutting / القص</span><span>Bending / الثني</span><span>Punching / التخريم</span><span>Pressing / الكبس</span><span>Welding / اللحام</span><span>Painting / الدهان</span><span>Drilling / الحفر</span><span>Grinding / الجلخ</span><span>Packing / التغليف</span><span>Loading / التحميل</span><span>Maintenance / الصيانة</span></div></div>
+          <div class="pcc-panel"><div class="pcc-panel-head"><h4><span class="en">Performance Measures</span><span class="ar">مؤشرات الأداء</span></h4></div><div class="pcc-rows"><div><span class="en">Target vs Achieved</span><span class="ar">المستهدف مقابل المحقق</span><b>—</b></div><div><span class="en">Activity Productivity</span><span class="ar">إنتاجية الأنشطة</span><b>—</b></div><div><span class="en">Duty Hours</span><span class="ar">ساعات العمل</span><b>—</b></div><div><span class="en">Overtime Cost</span><span class="ar">تكلفة العمل الإضافي</span><b>—</b></div></div></div>
+        </div>
+        <div class="pcc-panel"><div class="pcc-panel-head"><h4><span class="en">Employee Performance Register</span><span class="ar">سجل أداء الموظفين</span></h4><a href="/app/factory-daily-production" target="_blank">Open ERP ↗</a></div><div class="pcc-tablewrap"><table><thead><tr><th>Date</th><th>Factory</th><th>Employee</th><th>Activity</th><th>Target</th><th>Actual</th><th>Productivity %</th><th>OT Hours</th></tr></thead><tbody><tr><td colspan="8" class="pcc-empty"><span class="en">Employee-level rows require permission-checked production APIs.</span><span class="ar">تتطلب بيانات الموظفين واجهات إنتاج تتحقق من صلاحيات الوصول.</span></td></tr></tbody></table></div></div>
+      </section>
+
+      <!-- TAB 8 PLANNING -->
+      <section class="pcc-page pcc-page-planning">
+        <div class="pcc-section-head"><div><span class="pcc-kicker">PRODUCTION SCHEDULING</span><h3><span class="en">Production Planning</span><span class="ar">تخطيط الإنتاج</span></h3><p><span class="en">Next-day production, material readiness and factory capacity</span><span class="ar">إنتاج اليوم التالي وجاهزية المواد والطاقة الإنتاجية</span></p></div><a class="pcc-link" href="/app/factory-job-order" target="_blank">Factory Jobs ↗</a></div>
+        <div class="pcc-kpis">
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Next-Day Planned Jobs</span><span class="ar">أعمال اليوم التالي المخططة</span></span><strong>—</strong><small>Manufacturing Daily Plan</small><span class="pcc-more">Details +</span></summary><div class="pcc-detail"><a href="/app/manufacturing-daily-plan" target="_blank">Open Daily Plan ↗</a></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Next 7 Days</span><span class="ar">الأيام السبعة القادمة</span></span><strong>—</strong><small>Scheduled job orders</small><span class="pcc-more">Details +</span></summary><div class="pcc-detail"><a href="/app/factory-job-order" target="_blank">Job Orders ↗</a></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Material Readiness</span><span class="ar">جاهزية المواد</span></span><strong>—</strong><small>Stock availability required</small><span class="pcc-more">Details +</span></summary><div class="pcc-detail"><a href="/app/bom" target="_blank">BOM ↗</a></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Factory Capacity</span><span class="ar">الطاقة الإنتاجية</span></span><strong>—</strong><small>Capacity settings not verified</small><span class="pcc-more">Details +</span></summary><div class="pcc-detail"><p><span class="en">Capacity must be validated before utilization percentage is shown.</span><span class="ar">يجب التحقق من الطاقة الإنتاجية قبل عرض نسبة الاستخدام.</span></p></div></details>
+        </div>
+        <div class="pcc-grid2">
+          <div class="pcc-panel">
+            <div class="pcc-panel-head"><h4><span class="en">Illustrative Shift Plan</span><span class="ar">مثال توضيحي لخطة الوردية</span></h4><span>Not ERP schedule</span></div>
+            <div class="pcc-timeline">
+              <div><span>07:30</span><i></i><section><b><span class="en">Shift Start</span><span class="ar">بداية الوردية</span></b><p><span class="en">Daily readiness check</span><span class="ar">فحص الجاهزية اليومية</span></p></section></div>
+              <div><span>Morning</span><i></i><section><b><span class="en">Production Operations</span><span class="ar">عمليات الإنتاج</span></b><p><span class="en">Job allocation and materials</span><span class="ar">توزيع الأعمال والمواد</span></p></section></div>
+              <div><span>Midday</span><i></i><section><b><span class="en">Progress Review</span><span class="ar">مراجعة التقدم</span></b><p><span class="en">Achieved vs pending work</span><span class="ar">المنجز مقابل المتبقي</span></p></section></div>
+              <div><span>17:00</span><i></i><section><b><span class="en">Shift Reporting</span><span class="ar">تقرير الوردية</span></b><p><span class="en">Completion and handover</span><span class="ar">الإنجاز وتسليم الأعمال</span></p></section></div>
+            </div>
+          </div>
+          <div class="pcc-panel"><div class="pcc-panel-head"><h4><span class="en">Planning Data Sources</span><span class="ar">مصادر بيانات التخطيط</span></h4></div><div class="pcc-rows"><div><span>Factory Job Order</span><a href="/app/factory-job-order" target="_blank">Open ↗</a></div><div><span>Manufacturing Daily Plan</span><a href="/app/manufacturing-daily-plan" target="_blank">Open ↗</a></div><div><span>Work Order</span><a href="/app/work-order" target="_blank">Open ↗</a></div><div><span>Bill of Materials</span><a href="/app/bom" target="_blank">Open ↗</a></div></div></div>
+        </div>
+        <div class="pcc-panel"><div class="pcc-panel-head"><h4><span class="en">Upcoming Production Jobs</span><span class="ar">أعمال الإنتاج القادمة</span></h4><span>Design view</span></div><div class="pcc-tablewrap"><table><thead><tr><th>Plan Date</th><th>Factory</th><th>Job Order</th><th>Item</th><th>Planned Qty</th><th>Material Status</th><th>Assigned Staff</th><th>Progress</th></tr></thead><tbody><tr><td colspan="8" class="pcc-empty"><span class="en">Upcoming schedule requires the validated planning API.</span><span class="ar">يتطلب جدول الأعمال القادم واجهة التخطيط المعتمدة.</span></td></tr></tbody></table></div></div>
+      </section>
+
+      <!-- TAB 9 QUALITY AND EXCEPTIONS -->
+      <section class="pcc-page pcc-page-quality">
+        <div class="pcc-section-head"><div><span class="pcc-kicker">PRODUCTION GOVERNANCE</span><h3><span class="en">Quality &amp; Exceptions</span><span class="ar">الجودة والملاحظات</span></h3><p><span class="en">Production controls, missing information and operational risks</span><span class="ar">ضوابط الإنتاج والبيانات الناقصة والمخاطر التشغيلية</span></p></div><span class="pcc-chip">Audit findings</span></div>
+        <div class="pcc-kpis">
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Missing Production Targets</span><span class="ar">أهداف الإنتاج غير المسجلة</span></span><strong class="pcc-warning-value">Not Set</strong><small>0 target records</small><span class="pcc-more">Details +</span></summary><div class="pcc-detail"><a href="/app/manufacturing-production-target" target="_blank">Open Targets ↗</a></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Cost Reconciliation</span><span class="ar">مطابقة التكلفة</span></span><strong class="pcc-warning-value">Pending</strong><small><span class="en">Valuation unverified</span><span class="ar">التقييم غير مؤكد</span></small><span class="pcc-more">Details +</span></summary><div class="pcc-detail"><a href="/app/stock-entry" target="_blank">Stock Entry ↗</a></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Quality Inspection Results</span><span class="ar">نتائج فحص الجودة</span></span><strong>—</strong><small><span class="en">Source not verified</span><span class="ar">لم يتم التحقق من المصدر</span></small><span class="pcc-more">Details +</span></summary><div class="pcc-detail"><p><span class="en">No defect or rejection rate is assumed.</span><span class="ar">لم يتم افتراض أي نسبة عيوب أو رفض.</span></p></div></details>
+          <details class="pcc-kpi"><summary><span class="pcc-kpi-label"><span class="en">Warehouse Scope</span><span class="ar">نطاق المستودعات</span></span><strong>Review</strong><small>14+ manufacturing destinations</small><span class="pcc-more">Details +</span></summary><div class="pcc-detail"><p><span class="en">Keep Factory 28 and Factory 34 separate from other warehouses.</span><span class="ar">يجب فصل بيانات المصنعين 28 و34 عن بقية المستودعات.</span></p></div></details>
+        </div>
+        <div class="pcc-panel">
+          <div class="pcc-panel-head"><h4><span class="en">Production Exception Register</span><span class="ar">سجل ملاحظات الإنتاج</span></h4><span>Audit findings</span></div>
+          <div class="pcc-tablewrap">
+            <table><thead><tr><th>Severity</th><th>Source</th><th>Finding / الملاحظة</th><th>ERP Reference</th></tr></thead><tbody>
+              <tr><td><span class="pcc-status warn">Review</span></td><td>Manufacturing Production Target</td><td><span class="en">No target records configured</span><span class="ar">لم يتم تسجيل أهداف الإنتاج</span></td><td><a href="/app/manufacturing-production-target" target="_blank">Open ↗</a></td></tr>
+              <tr><td><span class="pcc-status warn">Review</span></td><td>Factory Daily Production</td><td><span class="en">Inconsistent branch names; actual dates in child rows</span><span class="ar">أسماء فروع غير موحدة والتواريخ الفعلية في الجداول الفرعية</span></td><td><a href="/app/factory-daily-production" target="_blank">Open ↗</a></td></tr>
+              <tr><td><span class="pcc-status bad">Validation</span></td><td>Stock Entry</td><td><span class="en">Production cost sign and value direction not reconciled</span><span class="ar">لم تتم مطابقة اتجاه وإشارة قيمة تكلفة التصنيع</span></td><td><a href="/app/stock-entry" target="_blank">Open ↗</a></td></tr>
+              <tr><td><span class="pcc-status warn">Review</span></td><td>Factory Job Order</td><td><span class="en">Quantity fields are text; submitted status does not mean completed</span><span class="ar">حقول الكمية نصية واعتماد المستند لا يعني اكتمال العمل</span></td><td><a href="/app/factory-job-order" target="_blank">Open ↗</a></td></tr>
+              <tr><td><span class="pcc-status warn">Review</span></td><td>Stock Entry Detail</td><td><span class="en">Mixed UOMs must not be aggregated into one quantity</span><span class="ar">يجب عدم جمع كميات بوحدات قياس مختلفة</span></td><td><a href="/app/stock-entry" target="_blank">Open ↗</a></td></tr>
+              <tr><td><span class="pcc-status">Unavailable</span></td><td>Factory Production Summary Report</td><td><span class="en">Report did not load during the audit</span><span class="ar">تعذر تحميل التقرير أثناء التدقيق</span></td><td>—</td></tr>
+            </tbody></table>
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer class="pcc-footer">
+      <span>DM GROUP KSA · Production Command Center</span>
+      <span><span class="en">Static preview · ERP audit baseline · No records changed</span><span class="ar">معاينة ثابتة · بيانات التدقيق · لم يتم تعديل أي سجلات</span></span>
+    </footer>
+  </div>
+</div>

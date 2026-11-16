@@ -1,0 +1,1254 @@
+/* CEO agent: paste into the same Custom HTML Block's Style field. Generated; edit the template. */
+  :host {
+    display: block;
+  }
+  .durar-ai {
+    --bg: #fff;
+    --side: #f9f9f9;
+    --text: #0d0d0d;
+    --sub: #5d5d5d;
+    --muted: #767676;
+    --hover: #ececec;
+    --line: #e5e5e5;
+    --bubble: #f4f4f4;
+    --btn-bg: #0d0d0d;
+    --btn-fg: #fff;
+    --danger: #d92d20;
+    --ring: #8a8a8a;
+    --shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+    --code-h: #f4f4f4;
+    --code-b: #fafafa;
+    background: var(--bg);
+    color: var(--text);
+    font:
+      16px/1.6 "Segoe UI",
+      -apple-system,
+      BlinkMacSystemFont,
+      Inter,
+      system-ui,
+      Roboto,
+      Tahoma,
+      Arial,
+      sans-serif;
+    text-align: start;
+    overflow-wrap: anywhere;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* durar:accent:start */
+  .durar-ai {
+    --accent: #1e3a8a;
+    --accent-fg: #fff;
+  }
+  .durar-ai[data-theme="dark"] {
+    --accent: #93c5fd;
+    --accent-fg: #0d0d0d;
+  }
+  /* durar:accent:end */
+  .durar-ai[data-theme="dark"] {
+    --bg: #212121;
+    --side: #171717;
+    --text: #ececec;
+    --sub: #b4b4b4;
+    --muted: #9a9a9a;
+    --hover: #2f2f2f;
+    --line: #3a3a3a;
+    --bubble: #303030;
+    --btn-bg: #ececec;
+    --btn-fg: #0d0d0d;
+    --danger: #f2706a;
+    --ring: #8a8a8a;
+    --shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+    --code-h: #2a2a2a;
+    --code-b: #1a1a1a;
+  }
+  section.durar-ai {
+    display: flex;
+    position: relative;
+    height: calc(100vh - 140px);
+    min-height: 560px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+  }
+  .durar-ai *,
+  .durar-ai *::before,
+  .durar-ai *::after {
+    box-sizing: border-box;
+  }
+  .durar-ai [hidden] {
+    display: none !important;
+  }
+  .durar-ai button,
+  .durar-ai input,
+  .durar-ai select,
+  .durar-ai textarea {
+    font: inherit;
+    color: inherit;
+  }
+  .durar-ai button {
+    cursor: pointer;
+  }
+  .durar-ai button:disabled {
+    opacity: 0.5;
+    cursor: wait;
+  }
+  .durar-ai :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+  .durar-ai svg {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .durar-ai-icon {
+    display: inline-flex;
+    flex-shrink: 0;
+    padding: 6px;
+    border: 0;
+    border-radius: 8px;
+    background: none;
+    color: var(--sub);
+  }
+  .durar-ai-icon:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
+  .durar-ai-spacer {
+    flex: 1;
+  }
+
+  /* Sidebar */
+  .durar-ai-sidebar {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    width: 260px;
+    padding: 8px;
+    background: var(--side);
+    font-size: 14px;
+    transition: margin 0.2s;
+  }
+  .durar-ai-sidebar.collapsed {
+    margin-inline-start: -260px;
+    visibility: hidden;
+  }
+  .durar-ai-side-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 4px 8px 10px;
+  }
+  .durar-ai-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .durar-ai-brand::before {
+    content: "";
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .durar-ai-side-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 10px;
+    background: none;
+    text-align: start;
+  }
+  .durar-ai-side-item:hover {
+    background: var(--hover);
+  }
+  .durar-ai-side-item svg {
+    color: var(--sub);
+  }
+  .durar-ai-side-item input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: none;
+  }
+  .durar-ai-side-item input::placeholder {
+    color: var(--sub);
+  }
+  .durar-ai-sidebar nav {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    margin-top: 10px;
+    overflow: auto;
+    scrollbar-width: thin;
+  }
+  .durar-ai-group {
+    padding: 14px 10px 4px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .durar-ai-chat {
+    display: flex;
+    align-items: center;
+    min-height: 34px;
+    padding-inline-end: 4px;
+    border-radius: 10px;
+  }
+  .durar-ai-chat:hover,
+  .durar-ai-chat.active {
+    background: var(--hover);
+  }
+  .durar-ai-chat-open {
+    flex: 1;
+    min-width: 0;
+    padding: 7px 10px;
+    border: 0;
+    background: none;
+    overflow: hidden;
+    text-align: start;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .durar-ai-chat .durar-ai-icon {
+    display: none;
+    padding: 3px;
+  }
+  .durar-ai-chat .durar-ai-icon svg {
+    width: 15px;
+    height: 15px;
+  }
+  .durar-ai-chat:hover .durar-ai-icon,
+  .durar-ai-chat.active .durar-ai-icon,
+  .durar-ai-chat:focus-within .durar-ai-icon {
+    display: inline-flex;
+  }
+  .durar-ai-side-foot {
+    display: flex;
+    flex-direction: column;
+    margin-top: 6px;
+  }
+  .durar-ai-user-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    padding: 8px 10px;
+  }
+  .durar-ai-avatar {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--hover);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .durar-ai-user-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Main */
+  .durar-ai-main {
+    position: relative;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .durar-ai-topbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-height: 56px;
+    padding: 10px 12px;
+  }
+  .durar-ai-topbar h2 {
+    margin: 0;
+    overflow: hidden;
+    font-size: 17px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 40%;
+  }
+  .durar-ai-agent,
+  .durar-ai-mode {
+    color: var(--muted);
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  .durar-ai-agent {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 38ch;
+  }
+  .durar-ai-topbar select {
+    flex: 0 1 230px;
+    min-width: 150px;
+    max-width: 230px;
+    text-overflow: ellipsis;
+    padding: 4px 8px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--bg);
+    font-size: 13px;
+  }
+  .durar-ai-messages {
+    flex: 1;
+    min-height: 0;
+    padding: 8px 16px 32px;
+    overflow: auto;
+    scrollbar-width: thin;
+  }
+  .durar-ai-message {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 48rem;
+    margin: 0 auto 28px;
+  }
+  .durar-ai-user {
+    align-items: flex-end;
+  }
+  .durar-ai-user .durar-ai-text {
+    max-width: 75%;
+    padding: 8px 18px;
+    border-radius: 20px;
+    background: var(--bubble);
+    white-space: pre-wrap;
+  }
+  .durar-ai-running .durar-ai-text::after {
+    content: "";
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    margin: 0 6px;
+    border-radius: 50%;
+    background: var(--text);
+    vertical-align: middle;
+    animation: durar-ai-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes durar-ai-pulse {
+    50% {
+      opacity: 0.25;
+    }
+  }
+  @keyframes durar-ai-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  .durar-ai-more {
+    display: block;
+    margin: 0 auto 20px;
+  }
+  .durar-ai-empty {
+    max-width: 44rem;
+    margin: 0 auto;
+    padding-top: 18vh;
+    text-align: center;
+  }
+  .durar-ai-empty h1 {
+    margin: 0 0 22px;
+    color: inherit;
+    font-size: 28px;
+    font-weight: 600;
+  }
+  .durar-ai-suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+  }
+  .durar-ai-pill {
+    padding: 6px 14px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: none;
+    color: var(--sub);
+    font-size: 14px;
+  }
+  .durar-ai-pill:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
+
+  /* Rendered answers */
+  .durar-ai-text {
+    line-height: 1.7;
+  }
+  .durar-ai-text > :first-child {
+    margin-top: 0;
+  }
+  .durar-ai-text > :last-child {
+    margin-bottom: 0;
+  }
+  .durar-ai-text p {
+    margin: 0.7em 0;
+  }
+  .durar-ai-text h1,
+  .durar-ai-text h2,
+  .durar-ai-text h3 {
+    margin: 1.3em 0 0.5em;
+    color: inherit;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  .durar-ai-text h1 {
+    font-size: 1.4em;
+  }
+  .durar-ai-text h2 {
+    font-size: 1.2em;
+  }
+  .durar-ai-text h3 {
+    font-size: 1.05em;
+  }
+  .durar-ai-text ul,
+  .durar-ai-text ol {
+    margin: 0.6em 0;
+    padding-inline-start: 1.5em;
+  }
+  .durar-ai-text blockquote {
+    margin: 0.7em 0;
+    padding: 0 14px;
+    border-inline-start: 3px solid var(--line);
+    color: var(--sub);
+  }
+  .durar-ai-text :not(pre) > code {
+    padding: 1px 6px;
+    border-radius: 6px;
+    background: var(--bubble);
+    color: inherit;
+    font-size: 0.88em;
+  }
+  .durar-ai-text table {
+    display: block;
+    max-width: 100%;
+    margin: 0.8em 0;
+    overflow: auto;
+    border-collapse: collapse;
+    font-size: 0.94em;
+  }
+  .durar-ai-text th,
+  .durar-ai-text td {
+    padding: 8px 16px 8px 0;
+    border-bottom: 1px solid var(--line);
+    text-align: start;
+    white-space: nowrap;
+  }
+  .durar-ai-text th {
+    border-bottom-color: var(--ring);
+    font-weight: 600;
+  }
+  .durar-ai-text a {
+    color: inherit;
+    text-decoration: underline;
+  }
+  .durar-ai-text hr {
+    border: 0;
+    border-top: 1px solid var(--line);
+  }
+  .durar-ai-code {
+    margin: 0.9em 0;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--code-b);
+  }
+  .durar-ai-code-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 14px;
+    background: var(--code-h);
+    color: var(--sub);
+    font-size: 12px;
+  }
+  .durar-ai-code-head button {
+    border: 0;
+    background: none;
+  }
+  .durar-ai-code pre {
+    margin: 0;
+    padding: 12px 16px;
+    overflow: auto;
+    background: none;
+    color: inherit;
+  }
+  .durar-ai-code code {
+    background: none;
+    color: inherit;
+    font:
+      13px/1.6 ui-monospace,
+      SFMono-Regular,
+      Menlo,
+      Consolas,
+      monospace;
+  }
+
+  /* Tool steps, sources and message actions */
+  .durar-ai-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .durar-ai-step {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .durar-ai-step svg {
+    width: 14px;
+    height: 14px;
+  }
+  .durar-ai-step.running {
+    color: var(--sub);
+  }
+  .durar-ai-step.running svg {
+    animation: durar-ai-spin 1.2s linear infinite;
+  }
+  .durar-ai-step.failed,
+  .durar-ai-step.error {
+    color: var(--danger);
+  }
+  .durar-ai-files {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .durar-ai-user .durar-ai-files {
+    justify-content: flex-end;
+  }
+  .durar-ai-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: 24rem;
+    padding: 8px 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: none;
+    font-size: 14px;
+    text-align: start;
+  }
+  .durar-ai-card:hover {
+    background: var(--bubble);
+  }
+  .durar-ai-card svg {
+    color: var(--sub);
+  }
+  .durar-ai-actions {
+    display: flex;
+    gap: 2px;
+    margin-inline-start: -6px;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .durar-ai-message:hover .durar-ai-actions,
+  .durar-ai-message:last-child .durar-ai-actions,
+  .durar-ai-actions:focus-within {
+    opacity: 1;
+  }
+  .durar-ai-actions [aria-pressed="true"] {
+    color: var(--text);
+    background: var(--hover);
+  }
+
+  /* Proposals are displayed only: this relay cannot execute actions. */
+  .durar-ai-approval {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 36rem;
+    margin: 0 auto 28px;
+    padding: 16px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+  }
+  .durar-ai-approval h3 {
+    margin: 0;
+    color: inherit;
+    font-size: 16px;
+    font-weight: 600;
+  }
+  .durar-ai-approval p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .durar-ai-approval pre {
+    margin: 0;
+    padding: 10px 14px;
+    max-height: 240px;
+    overflow: auto;
+    border-radius: 12px;
+    background: var(--bubble);
+    color: inherit;
+    font-size: 13px;
+    white-space: pre-wrap;
+  }
+
+  /* PDF panel */
+  .durar-ai-pdf {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    width: min(520px, 45%);
+    border-inline-start: 1px solid var(--line);
+    background: var(--bg);
+  }
+  .durar-ai-pdf header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 10px 12px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .durar-ai-pdf header span {
+    flex: 1;
+    overflow: hidden;
+    padding-inline-start: 4px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .durar-ai-pdf iframe {
+    flex: 1;
+    width: 100%;
+    border: 0;
+    background: #fff;
+  }
+
+  /* Composer */
+  .durar-ai-composer-wrap {
+    position: relative;
+    padding: 0 16px 8px;
+  }
+  .durar-ai-notice {
+    max-width: 48rem;
+    margin: 0 auto 6px;
+    color: var(--sub);
+    font-size: 13px;
+  }
+  .durar-ai-blocked .durar-ai-composer,
+  .durar-ai-blocked .durar-ai-sidebar nav {
+    opacity: 0.45;
+  }
+  .durar-ai-blocked .durar-ai-notice {
+    color: var(--danger);
+    font-weight: 500;
+  }
+  .durar-ai-notice[data-kind="error"] {
+    color: var(--danger);
+    font-weight: 500;
+  }
+  .durar-ai-failed {
+    gap: 8px;
+    padding: 14px 16px;
+    border: 1px solid var(--danger);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--danger) 7%, var(--bg));
+  }
+  .durar-ai-stopped {
+    border-color: var(--line);
+    background: var(--bubble);
+  }
+  .durar-ai-failed-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--danger);
+  }
+  .durar-ai-stopped .durar-ai-failed-head {
+    color: var(--sub);
+  }
+  .durar-ai-failed p {
+    margin: 0;
+  }
+  .durar-ai-failed-detail,
+  .durar-ai-failed-ref {
+    color: var(--muted);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+  .durar-ai-failed-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .durar-ai-notice:empty {
+    display: none;
+  }
+  .durar-ai-composer {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-width: 48rem;
+    margin: 0 auto;
+    padding: 8px;
+    border-radius: 26px;
+    background: var(--bubble);
+  }
+  .durar-ai-composer-main {
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+  }
+  .durar-ai-composer-main .durar-ai-icon {
+    padding: 8px;
+    border-radius: 50%;
+  }
+  .durar-ai-composer textarea {
+    flex: 1;
+    min-width: 0;
+    max-height: 220px;
+    padding: 7px 4px;
+    border: 0;
+    outline: 0;
+    background: none;
+    line-height: 1.5;
+    resize: none;
+  }
+  .durar-ai-composer textarea::placeholder {
+    color: var(--muted);
+  }
+  .durar-ai-send {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 34px;
+    height: 34px;
+    border: 0;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--accent-fg);
+  }
+  .durar-ai-send:hover {
+    opacity: 0.8;
+  }
+  .durar-ai-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 4px 4px 0;
+  }
+  .durar-ai-attachments:empty {
+    display: none;
+  }
+  .durar-ai-attachment {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 250px;
+    padding: 4px 4px 4px 8px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--bg);
+    font-size: 13px;
+  }
+  .durar-ai-attachment span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .durar-ai-attachment .durar-ai-icon {
+    padding: 2px;
+  }
+  .durar-ai-disclaimer {
+    padding: 8px 0 2px;
+    color: var(--muted);
+    font-size: 12px;
+    text-align: center;
+  }
+  .durar-ai-jump {
+    position: absolute;
+    top: -46px;
+    left: 50%;
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    transform: translateX(-50%);
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    background: var(--bg);
+    box-shadow: var(--shadow);
+    color: var(--sub);
+  }
+  .durar-ai-drop {
+    position: absolute;
+    inset: 8px;
+    z-index: 40;
+    display: grid;
+    place-items: center;
+    border: 2px dashed var(--ring);
+    border-radius: 20px;
+    background: var(--bg);
+    font-size: 18px;
+    font-weight: 500;
+    opacity: 0.95;
+    pointer-events: none;
+  }
+
+  /* Memory dialog */
+  .durar-ai-memory {
+    width: min(560px, 90%);
+    padding: 24px;
+    border: 0;
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+  }
+  .durar-ai-memory::backdrop {
+    background: rgba(0, 0, 0, 0.4);
+  }
+  .durar-ai-memory-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .durar-ai-memory h2 {
+    margin: 0;
+    color: inherit;
+    font-size: 18px;
+    font-weight: 600;
+  }
+  .durar-ai-memory p {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 12px 0;
+  }
+  .durar-ai-memory textarea {
+    width: 100%;
+    min-height: 80px;
+    margin: 12px 0;
+    padding: 10px 14px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--bg);
+  }
+
+  @media (max-width: 900px) {
+    .durar-ai-pdf {
+      position: absolute;
+      inset: 0;
+      z-index: 30;
+      width: 100%;
+    }
+  }
+  @media (max-width: 700px) {
+    .durar-ai-sidebar {
+      position: absolute;
+      z-index: 20;
+      height: 100%;
+      box-shadow: var(--shadow);
+    }
+    .durar-ai-topbar h2 {
+      max-width: 100%;
+    }
+    .durar-ai-user .durar-ai-text {
+      max-width: 90%;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .durar-ai * {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+
+/* Motion */
+@keyframes durar-ai-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes durar-ai-shimmer {
+  50% {
+    opacity: 0.45;
+  }
+}
+@keyframes durar-ai-fade {
+  from {
+    opacity: 0;
+  }
+}
+.durar-ai-message,
+.durar-ai-approval,
+.durar-ai-empty {
+  animation: durar-ai-rise 0.22s ease-out;
+}
+.durar-ai-chat,
+.durar-ai-pill,
+.durar-ai-icon,
+.durar-ai-card,
+.durar-ai-side-item {
+  transition:
+    background-color 0.15s,
+    color 0.15s,
+    transform 0.1s;
+}
+.durar-ai-pill:active,
+.durar-ai-send:active {
+  transform: scale(0.96);
+}
+.durar-ai-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 48rem;
+  margin: 24px auto;
+}
+.durar-ai-skeleton div {
+  height: 14px;
+  border-radius: 7px;
+  background: var(--hover);
+  animation: durar-ai-shimmer 1.2s ease-in-out infinite;
+}
+.durar-ai-tagline {
+  margin: -12px 0 22px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.durar-ai-retry {
+  align-self: flex-start;
+}
+.durar-ai-pending {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--bubble);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Waiting for an employee's WhatsApp reply */
+.durar-ai-coordination {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bubble);
+  font-size: 14px;
+}
+.durar-ai-coordination.open {
+  border-color: var(--accent);
+}
+.durar-ai-coordination-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+.durar-ai-coordination.open .durar-ai-coordination-head::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: durar-ai-pulse 1.2s ease-in-out infinite;
+}
+.durar-ai-coordination-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+.durar-ai-coordination-name {
+  font-weight: 500;
+}
+.durar-ai-coordination-status {
+  color: var(--sub);
+}
+.durar-ai-coordination-status.completed {
+  color: #0f7b4a;
+}
+.durar-ai-coordination-status.needs_attention,
+.durar-ai-coordination-status.cancelled {
+  color: var(--danger);
+}
+.durar-ai-coordination-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+.durar-ai-coordination-said {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--sub);
+  white-space: pre-wrap;
+}
+
+/* Approval cards by kind: email (blue), ERP change (black), WhatsApp (green) */
+.durar-ai-logo {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-inline-start: 4px;
+}
+/* The marks carry their own colours; the shared icon rule must not recolour them. */
+.durar-ai .durar-ai-logo svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: none;
+}
+.durar-ai-approval.durar-ai-kind-mail {
+  border: 2px solid #0f6cbd;
+}
+.durar-ai-approval.durar-ai-kind-erp {
+  border: 2px solid var(--btn-bg);
+}
+.durar-ai-approval.durar-ai-kind-whatsapp,
+.durar-ai-approval.durar-ai-kind-chat {
+  border: 2px solid #25d366;
+}
+/* An answer the assistant posted by itself (a finished coordination task). */
+.durar-ai-auto-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #128c4a;
+}
+.durar-ai[data-theme="dark"] .durar-ai-auto-label {
+  color: #4ade80;
+}
+/* Top right while a coordination task is running in Durar Messenger. */
+.durar-ai-working {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--sub);
+  white-space: nowrap;
+}
+.durar-ai-working::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  border: 2px solid #25d366;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: durar-ai-spin 0.8s linear infinite;
+}
+@keyframes durar-ai-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .durar-ai-working::before {
+    animation-duration: 3s;
+  }
+}
+.durar-ai[data-theme="dark"] .durar-ai-approval.durar-ai-kind-mail {
+  border-color: #4da3ff;
+}
+.durar-ai-coordination.durar-ai-kind-whatsapp,
+.durar-ai-coordination.durar-ai-kind-whatsapp.open {
+  border: 2px solid #25d366;
+}
+.durar-ai-coordination.open.durar-ai-kind-whatsapp .durar-ai-coordination-head::before {
+  background: #25d366;
+}
+.durar-ai-coordination-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.durar-ai-coordination-sent {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+/* Approval cards and dialogs */
+.durar-ai-approval-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.durar-ai-approval-head h3 {
+  flex: 1;
+  min-width: 0;
+}
+.durar-ai-approval-head svg {
+  color: var(--sub);
+}
+.durar-ai-status {
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.durar-ai-approval.pending {
+  border-color: var(--ring);
+}
+.durar-ai-approval.executed .durar-ai-status,
+.durar-ai-approval.approved .durar-ai-status {
+  color: #0f7b4a;
+}
+.durar-ai-approval.rejected,
+.durar-ai-approval.expired,
+.durar-ai-approval.restricted {
+  opacity: 0.75;
+}
+.durar-ai-request-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.durar-ai-request-meta,
+.durar-ai-request-note {
+  margin: 0;
+  color: var(--sub);
+  font-size: 13px;
+  /* A coordination report has one line per person. */
+  white-space: pre-line;
+}
+.durar-ai[data-theme="dark"] .durar-ai-approval.executed .durar-ai-status,
+.durar-ai[data-theme="dark"] .durar-ai-approval.approved .durar-ai-status {
+  color: #4cc38a;
+}
+.durar-ai-approval.failed .durar-ai-status,
+.durar-ai-approval.needs_reconciliation .durar-ai-status {
+  color: var(--danger);
+}
+.durar-ai-table {
+  max-width: 100%;
+  overflow: auto;
+}
+.durar-ai-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.durar-ai-table th,
+.durar-ai-table td {
+  padding: 6px 10px 6px 0;
+  border-bottom: 1px solid var(--line);
+  text-align: start;
+}
+.durar-ai-table th {
+  color: var(--muted);
+  font-weight: 500;
+}
+.durar-ai-old {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.durar-ai-dialog {
+  width: min(520px, 90%);
+  padding: 24px;
+  border: 0;
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  animation: durar-ai-rise 0.18s ease-out;
+}
+.durar-ai-dialog::backdrop,
+.durar-ai-memory::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+  animation: durar-ai-fade 0.18s ease-out;
+}
+.durar-ai-memory {
+  animation: durar-ai-rise 0.18s ease-out;
+}
+.durar-ai-dialog h2 {
+  margin: 0 0 8px;
+  color: inherit;
+  font-size: 18px;
+  font-weight: 600;
+}
+.durar-ai-dialog p {
+  margin: 0 0 12px;
+  color: var(--sub);
+  font-size: 14px;
+}
+.durar-ai-dialog pre {
+  max-height: 240px;
+  margin: 0;
+  padding: 10px 14px;
+  overflow: auto;
+  border-radius: 12px;
+  background: var(--bubble);
+  color: inherit;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+.durar-ai-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+}
+.durar-ai-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.durar-ai-approval .durar-ai-dialog-actions {
+  justify-content: flex-start;
+  margin-top: 0;
+}
+.durar-ai .durar-ai-solid,
+.durar-ai .durar-ai-solid:hover {
+  border-color: var(--btn-bg);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+}
+.durar-ai .durar-ai-danger,
+.durar-ai .durar-ai-danger:hover {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #fff;
+}
+.durar-ai-toast {
+  position: absolute;
+  bottom: 110px;
+  left: 50%;
+  z-index: 60;
+  padding: 8px 16px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  font-size: 14px;
+  white-space: nowrap;
+  animation: durar-ai-fade 0.2s ease-out;
+  pointer-events: none;
+}
+.durar-ai-toast.success {
+  background: #0f7b4a;
+  color: #fff;
+}

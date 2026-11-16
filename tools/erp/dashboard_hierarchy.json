@@ -1,0 +1,81 @@
+{
+  "01. Leadership & Corporate": {
+    "CEO Command Center": "CEO Command Center",
+    "CEO Agent": "CEO Agent",
+    "DMCC Dashboard": "DMCC Dashboard"
+  },
+  "02. Sales & CRM": {
+    "My Leads": "My Leads Dashboard",
+    "Lead Management": "Lead Management Dashboard",
+    "DMS Sales Management": "DMS Sales Manager Dashboard",
+    "Customer Dashboard": null,
+    "Quotation & SO Tracker": "Sales CRM & Conversion Tracker Dashboard"
+  },
+  "03. Procurement & Supply Chain": {
+    "Pre-Procurement": "Pre-Procurement Command Center",
+    "DN & GRN Tracker": "DN & GRN Tracker Dashboard",
+    "Customs & Post-Processing": "Customs & Post-Procurement Dashboard",
+    "Inventory Dashboard": "Inventory Dashboard"
+  },
+  "04. Finance & Credit Control": {
+    "Accounts Payable": "Accounts Payable Dashboard",
+    "Treasury Dashboard": "Treasury Dashboard",
+    "Payroll Cost Center": "Payroll cost center dashboard",
+    "VAT & ZATCA Compliance": "VAT & ZATCA Command Center",
+    "Credit Controller Dashboard": "Credit Controller Dashboard",
+    "Blocked Customer Dashboard": [
+      "CP Blocked Customer",
+      "CSD Blocked Customer",
+      "EP Blocked Customer",
+      "MP Blocked Customer",
+      "SRD Blocked Customer",
+      "WP Blocked Customer"
+    ],
+    "SOA Request Dashboard": "SOA Request Dashboard",
+    "SOA Manager": "SOA Manager",
+    "Collector": "SOA Collector",
+    "Finance Manager Dashboard": "Finance Manager dashboard",
+    "Finance Internal Controller": "Finance internal  controller"
+  },
+  "05. HR & Administration": {
+    "Admin HR Dashboard": "Admin HR Dashboard",
+    "Admin & HR Platform": "Admin & HR Platforms Expiry Dashboard",
+    "Employee Dashboard": "Employee Dashboard Prototype",
+    "Employee Vacation": "Employee Vacation Tracker",
+    "Government Relations Dashboard": "Govt Relation Dashboard"
+  },
+  "06. Technical & Projects": {
+    "Technical Department": "DM Technical Department Command Center",
+    "DMS Technical Department": "DMS Technical Department Dashboard",
+    "My DMS Projects": "DMS My Projects Dashboard",
+    "DM Contracting Dashboard": "DM contracting Dept. Dashboard"
+  },
+  "07. IT & Digital Systems": {
+    "IT Asset Acquisition": "DM IT Asset Acquisition Dashboard",
+    "IT Platforms Expiry": "IT Platforms Expiry Dashboard",
+    "ERP User Access": "ERP User Access Dashboard",
+    "Digital Marketing Dashboard": "Digital Marketing Dashboard"
+  },
+  "08. Operations & Logistics": {
+    "Fleet Dashboard": "Fleet Dashboard",
+    "FM & Inventory Dashboard": "FM & Inventory Dashboard",
+    "Logistics Dashboard": "Logistics Dashboard",
+    "Operation Dashboard": "Operation Dashboard",
+    "Delivery & Forklift": "Delivery Forklift Dashboard",
+    "Scaffolding Rental": "Scaffolding rental - Employee Dashboard",
+    "Manufacturing Dashboard": "Manufacturing Dashboard",
+    "Production Dashboard": "Production Dashboard",
+    "Plant & Furniture Asset Dashboard": "Plant & Furniture Asset Dashboard"
+  },
+  "09. Legal & Documentation": {
+    "Legal Dashboard": "Taradhi/Legal Dashboard",
+    "Document Control": "DM Document Control Command Center"
+  },
+  "10. Communication & Productivity": {
+    "Durar Messenger": "Durar Messenger",
+    "Durar Sheets": "Durar Sheets"
+  },
+  "11. To Be Classified": {
+    "PN Dashboard": null
+  }
+}

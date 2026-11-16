@@ -1,0 +1,184 @@
+<div class="pcc" id="pcc" dir="ltr">
+
+  <!-- NEW NAVY TOP HEADER -->
+  <div class="pcc-navy-header">
+
+    <header class="pcc-head">
+      <div class="pcc-title">
+        <h2 data-i18n="title">Pre-Procurement Command Center</h2>
+        <p class="pcc-header-subtitle">
+          DM Group KSA | Procurement Planning &amp; RFQ Control Center
+        </p>
+      </div>
+
+      <div class="pcc-actions">
+        <button class="btn pcc-lang-btn"
+                id="pcc-lang"
+                type="button">العربية</button>
+
+        <button class="btn pcc-refresh-btn"
+                id="pcc-refresh"
+                type="button">
+          ⟳ <span data-i18n="refresh">Refresh</span>
+        </button>
+
+        <span class="pcc-updated-text">
+          <span data-i18n="updated">Last updated</span>:
+          <b id="pcc-updated">—</b>
+        </span>
+      </div>
+    </header>
+
+    <div class="pcc-header-line"></div>
+
+    <!-- EXISTING FILTER IDS PRESERVED -->
+    <section class="pcc-filters">
+
+      <label>
+        <span data-i18n="company">Company</span>
+        <select id="f-company">
+          <option value="">All</option>
+        </select>
+      </label>
+
+      <label>
+        <span data-i18n="from">From Date</span>
+        <input type="date" id="f-from">
+      </label>
+
+      <label>
+        <span data-i18n="to">To Date</span>
+        <input type="date" id="f-to">
+      </label>
+
+      <label id="wrap-status">
+        <span data-i18n="status">Status</span>
+        <select id="f-status">
+          <option value="">All</option>
+        </select>
+      </label>
+
+      <label class="grow">
+        <span data-i18n="search">Search</span>
+        <input type="search"
+               id="f-q"
+               data-i18n-ph="search_ph"
+               placeholder="Search...">
+      </label>
+
+      <button class="btn ghost pcc-reset-btn"
+              id="f-reset"
+              type="button"
+              data-i18n="reset">
+        Reset filters
+      </button>
+
+    </section>
+  </div>
+
+  <!-- TABS (RFQs, Supplier Quotations and Quote Comparison removed) -->
+  <nav class="pcc-tabs" id="pcc-tabs" role="tablist">
+    <button type="button"
+            data-tab="overview"
+            class="on"
+            data-i18n="tab_overview">
+      Overview
+    </button>
+
+    <button type="button"
+            data-tab="mr"
+            data-i18n="tab_mr">
+      Material Requests
+    </button>
+
+    <button type="button"
+            data-tab="po"
+            data-i18n="tab_po">
+      Purchase Orders
+    </button>
+
+    <button type="button"
+            data-tab="sup"
+            data-i18n="tab_sup">
+      Suppliers &amp; Delays
+    </button>
+  </nav>
+
+  <!-- EXISTING ERROR / LOADING -->
+  <div id="pcc-error" class="pcc-error" hidden></div>
+
+  <div id="pcc-loading" class="pcc-loading" hidden>
+    <span class="spin"></span>
+    <span data-i18n="loading">Loading live data…</span>
+  </div>
+
+  <!-- EXISTING KPI AND CHART AREAS -->
+  <section id="pcc-kpis" class="kpis"></section>
+  <section id="pcc-charts" class="charts"></section>
+
+  <!-- EXISTING RECORD TABLE -->
+  <section class="card">
+    <div class="card-head">
+      <h3 id="pcc-table-title"></h3>
+
+      <div class="card-tools">
+        <span id="pcc-count" class="muted"></span>
+
+        <span id="pcc-kpi-chip"
+              class="chip"
+              hidden></span>
+
+        <button class="btn sm"
+                id="pcc-list"
+                type="button"
+                data-i18n="open_list">
+          Open in ERPNext
+        </button>
+
+        <button class="btn sm"
+                id="pcc-csv"
+                type="button"
+                data-i18n="export">
+          Export CSV
+        </button>
+      </div>
+    </div>
+
+    <div class="tbl-wrap">
+      <table id="pcc-table"></table>
+    </div>
+
+    <!-- PAGINATION (replaces "Show more") -->
+    <div class="more" id="pcc-pager"></div>
+  </section>
+
+  <!-- EXISTING DRILL-DOWN DRAWER -->
+  <div id="pcc-overlay" class="overlay" hidden></div>
+
+  <aside id="pcc-drawer" class="drawer" hidden>
+    <div class="drawer-head">
+
+      <h3 id="pcc-drawer-title"></h3>
+
+      <div>
+        <button class="btn sm"
+                id="pcc-drawer-open"
+                type="button"
+                hidden
+                data-i18n="open_form">
+          Open form
+        </button>
+
+        <button class="btn sm ghost"
+                id="pcc-drawer-close"
+                type="button"
+                aria-label="Close">
+          ✕
+        </button>
+      </div>
+    </div>
+
+    <div id="pcc-drawer-body" class="drawer-body"></div>
+  </aside>
+
+</div>
