@@ -626,7 +626,139 @@ def request_changes(data):
     return {"status": doc.status}
 
 
+# ---------------------------------------------------------------- requests: designer side
+
+BOARD_COLUMNS = ["Submitted", "In progress", "Needs info", "Delivered"]
+OPEN_STATUSES = ["Submitted", "In progress", "Needs info"]
+
+
+def requests_board(data):
+    require_designer()
+    today = frappe.utils.nowdate()
+    week = str(frappe.utils.add_days(today, 7))
+    month_ago = str(frappe.utils.add_days(today, -30))
+    q = (data.get("q") or "").strip().lower()
+    filters = {"status": ["in", BOARD_COLUMNS]}
+    if data.get("brand"):
+        filters["brand"] = data.get("brand")
+    columns = {}
+    for c in BOARD_COLUMNS:
+        columns[c] = []
+    overdue_count = 0
+    due_week = 0
+    for r in frappe.get_all("Design Request", filters=filters, fields=REQUEST_FIELDS, order_by="creation asc"):
+        if q and q not in ((r.get("title") or "") + " " + (r.get("employee_name") or "")).lower():
+            continue
+        if r["status"] == "Delivered" and str(r.get("delivered_on") or "")[:10] < month_ago:
+            continue
+        needed = str(r.get("needed_by") or "")[:10]
+        is_open = r["status"] in OPEN_STATUSES
+        r["overdue"] = bool(is_open and needed and needed < today)
+        r["age_days"] = frappe.utils.date_diff(today, str(r.get("creation"))[:10])
+        if r["overdue"]:
+            overdue_count = overdue_count + 1
+        elif is_open and needed and needed <= week:
+            due_week = due_week + 1
+        doc = frappe.get_doc("Design Request", r["name"])
+        r["files"] = file_rows(doc)
+        columns[r["status"]].append(r)
+    for c in OPEN_STATUSES:
+        columns[c] = sorted(columns[c], key=lambda r: (str(r.get("needed_by") or "9999-12-31")[:10], str(r.get("creation"))))
+    counts = {}
+    for c in BOARD_COLUMNS:
+        counts[c] = len(columns[c])
+    closed = frappe.get_all("Design Request", filters={"status": ["in", ["Closed", "Cancelled"]]}, fields=REQUEST_FIELDS,
+                            order_by="modified desc", limit_page_length=20)
+    return {"columns": columns, "counts": counts, "overdue": overdue_count, "due_this_week": due_week, "closed_recent": closed}
+
+
+def request_update(data):
+    require_designer()
+    doc = request_doc(data.get("name"))
+    status = data.get("status")
+    if status not in ("In progress", "Needs info", "Closed", "Cancelled"):
+        fail("That status cannot be set here.")
+    note = (data.get("note") or "").strip()
+    if status == "Needs info" and not note:
+        fail("Write the question for the requester.")
+    doc.status = status
+    if note:
+        doc.designer_note = note[:2000]
+    doc.save(ignore_permissions=True)
+    if note:
+        doc.add_comment("Comment", note)
+    if status == "Needs info":
+        email = user_email(doc.requested_by)
+        if email:
+            try:
+                send_mail([email], "Question about your design request: " + doc.title,
+                          ["The designer needs more information about <b>" + esc(doc.title) + "</b>:", esc(note).replace("\n", "<br>"),
+                           "Reply from My requests in the Employee Dashboard."],
+                          ["يحتاج المصمم معلومات إضافية عن طلبك:", esc(note).replace("\n", "<br>")], doc.name)
+            except Exception:
+                frappe.log_error("Design Studio: needs-info email failed for " + doc.name)
+    return {"status": doc.status}
+
+
+def request_deliver(data):
+    require_designer()
+    doc = request_doc(data.get("name"))
+    deliveries = [f for f in (doc.get("files") or []) if f.kind == "Delivery"]
+    if not deliveries:
+        fail("Upload at least one finished file before delivering.")
+    note = (data.get("note") or "").strip()
+    doc.status = "Delivered"
+    doc.delivered_on = frappe.utils.now()
+    doc.designer_note = note[:2000] if note else doc.designer_note
+    doc.notified = 0
+    doc.notify_error = None
+    doc.save(ignore_permissions=True)
+    # The delivery is saved first; an email problem is recorded, never undone.
+    error = None
+    email = user_email(doc.requested_by)
+    if not email:
+        error = "Requester has no email address"
+    else:
+        links = ["<a href=\"" + esc(frappe.utils.get_url(f.file)) + "\">" + esc(f.note or f.file.split("/")[-1]) + "</a>" for f in deliveries]
+        english = ["Your design request <b>" + esc(doc.title) + "</b> is ready."] + links
+        if note:
+            english.append("Note from the designer: " + esc(note).replace("\n", "<br>"))
+        english.append("You can also find it in My requests in the Employee Dashboard.")
+        arabic = ["تصميمك جاهز: <b>" + esc(doc.title) + "</b>", "تجده أيضًا في طلباتي في لوحة الموظف."]
+        try:
+            send_mail([email], "Your design is ready: " + doc.title, english, arabic, doc.name)
+        except Exception as e:
+            error = str(e)[:300] or "Email could not be sent"
+    frappe.db.set_value("Design Request", doc.name, {"notified": 0 if error else 1, "notify_error": error})
+    return {"name": doc.name, "notified": 0 if error else 1, "notify_error": error}
+
+
+def request_save_to_library(data):
+    require_designer()
+    doc = request_doc(data.get("name"))
+    url = data.get("file_url")
+    if url not in [f.file for f in (doc.get("files") or []) if f.kind == "Delivery"]:
+        fail("Choose one of the finished files of this request.")
+    title = (data.get("title") or doc.title or "").strip()
+    asset_type = data.get("asset_type") or "Other"
+    if asset_type not in ASSET_TYPES:
+        fail("Choose an asset type.")
+    brands = check_brands(data.get("brands") or ([doc.brand] if doc.brand else []))
+    asset = frappe.get_doc({"doctype": "Design Asset", "title": title, "asset_type": asset_type, "status": "Draft", "version": 1,
+                            "brands": [{"brand": b} for b in brands], "description": "From design request " + doc.name})
+    asset.insert(ignore_permissions=True)
+    frappe.get_doc({"doctype": "File", "file_url": url, "file_name": url.split("/")[-1], "is_private": 1,
+                    "attached_to_doctype": "Design Asset", "attached_to_name": asset.name}).insert(ignore_permissions=True)
+    asset.file = url
+    asset.save(ignore_permissions=True)
+    return {"asset": asset.name}
+
+
 ACTIONS = {
+    "requests_board": requests_board,
+    "request_update": request_update,
+    "request_deliver": request_deliver,
+    "request_save_to_library": request_save_to_library,
     "request_submit": request_submit,
     "my_requests": my_requests,
     "request_get": request_get,
