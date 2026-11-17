@@ -133,10 +133,324 @@ def access_set(data):
     return access_get({}) if can_manage_access() else {"ok": True}
 
 
+# ---------------------------------------------------------------- brands
+
+ASSET_TYPES = ["Logo", "Background", "Print", "Social post", "Signage", "Vehicle branding", "Presentation", "Photo",
+               "Packaging", "Font", "Other"]
+BRAND_FIELDS = ["erp_company", "website", "phone", "fax", "address_en", "address_ar", "aramco_vid", "sabic_vid",
+                "logo_primary", "logo_dark", "logo_mono", "usage_notes"]
+
+
+def check_brands(names):
+    known = brand_names()
+    for b in names or []:
+        if b not in known:
+            fail("Unknown brand: " + str(b))
+    return [b for b in known if b in (names or [])]
+
+
+def published_asset(name):
+    if not name:
+        return None
+    row = frappe.db.get_value("Design Asset", name, ["name", "title", "file", "thumbnail", "status"], as_dict=True)
+    if not row or row.get("status") != "Published":
+        return None
+    return {"name": row.get("name"), "title": row.get("title"), "file": row.get("file"), "thumbnail": row.get("thumbnail")}
+
+
+def brands_list(data):
+    out = []
+    for name in brand_names():
+        b = frappe.get_doc("Design Brand", name)
+        fonts = []
+        for f in b.get("fonts") or []:
+            asset = published_asset(f.font_file)
+            fonts.append({"family": f.family, "weight": f.weight, "script": f.script, "file": asset.get("file") if asset else None,
+                          "licence": f.licence, "licence_expiry": f.licence_expiry})
+        out.append({"name": name, "website": b.website, "phone": b.phone, "fax": b.fax, "address_en": b.address_en,
+                    "address_ar": b.address_ar, "aramco_vid": b.aramco_vid, "sabic_vid": b.sabic_vid, "erp_company": b.erp_company,
+                    "logos": {"primary": published_asset(b.logo_primary), "dark": published_asset(b.logo_dark), "mono": published_asset(b.logo_mono)},
+                    "logo_names": {"primary": b.logo_primary, "dark": b.logo_dark, "mono": b.logo_mono} if is_designer(USER) else {},
+                    "colours": [{"colour_name": c.colour_name, "hex": c.hex, "rgb": c.rgb, "cmyk": c.cmyk, "role": c.role} for c in (b.get("colours") or [])],
+                    "fonts": fonts, "usage_notes": b.usage_notes})
+    return out
+
+
+def brand_save(data):
+    require_designer()
+    name = data.get("name")
+    if name not in brand_names():
+        fail("Unknown brand: " + str(name))
+    b = frappe.get_doc("Design Brand", name)
+    for field in BRAND_FIELDS:
+        if field in data:
+            value = data.get(field)
+            if field.startswith("logo_") and value and not frappe.db.exists("Design Asset", value):
+                fail("Unknown asset: " + str(value))
+            b.set(field, value)
+    if "colours" in data:
+        b.set("colours", [{"colour_name": c.get("colour_name"), "hex": c.get("hex"), "rgb": c.get("rgb"), "cmyk": c.get("cmyk"),
+                           "role": c.get("role")} for c in data.get("colours") or []])
+    if "fonts" in data:
+        b.set("fonts", [{"family": f.get("family"), "weight": f.get("weight"), "script": f.get("script"), "font_file": f.get("font_file"),
+                         "licence": f.get("licence"), "licence_expiry": f.get("licence_expiry")} for f in data.get("fonts") or []])
+    b.save(ignore_permissions=True)
+    return {"name": name}
+
+
+# ---------------------------------------------------------------- library
+
+ASSET_FIELDS = ["name", "title", "asset_type", "tags", "status", "version", "previous_version", "file", "source_link", "thumbnail",
+                "preview", "formats", "licence_expiry", "download_count", "description", "modified"]
+
+
+def asset_brand_map(names=None):
+    filters = {"parenttype": "Design Asset"}
+    if names is not None:
+        filters["parent"] = ["in", names or ["-"]]
+    out = {}
+    for r in frappe.get_all("Design Asset Brand", filters=filters, fields=["parent", "brand"], order_by="idx asc"):
+        out.setdefault(r["parent"], []).append(r["brand"])
+    return out
+
+
+def assets_list(data):
+    filters = {}
+    if is_designer(USER):
+        if data.get("status"):
+            filters["status"] = data.get("status")
+    else:
+        filters["status"] = "Published"
+    if data.get("asset_type"):
+        filters["asset_type"] = data.get("asset_type")
+    if data.get("tag"):
+        filters["tags"] = ["like", "%" + data.get("tag") + "%"]
+    rows = frappe.get_all("Design Asset", filters=filters, fields=ASSET_FIELDS, order_by="modified desc")
+    brands = asset_brand_map()
+    q = (data.get("q") or "").strip().lower()
+    out = []
+    for r in rows:
+        r["brands"] = brands.get(r["name"], [])
+        if data.get("brand") and data.get("brand") not in r["brands"]:
+            continue
+        if q and q not in ((r.get("title") or "") + " " + (r.get("tags") or "")).lower():
+            continue
+        out.append(r)
+    start = int(data.get("start") or 0)
+    limit = int(data.get("limit") or 48)
+    return {"rows": out[start:start + limit], "total": len(out)}
+
+
+def asset_files(asset, private):
+    # Saving the File (not db.set_value) makes Frappe move it between /private/files and /files;
+    # the asset keeps pointing at wherever the file now lives.
+    for field in ("file", "thumbnail", "preview"):
+        url = asset.get(field)
+        if not url:
+            continue
+        found = frappe.get_all("File", filters={"file_url": url, "attached_to_doctype": "Design Asset", "attached_to_name": asset.name},
+                               fields=["name"], limit_page_length=1)
+        if not found:
+            continue
+        f = frappe.get_doc("File", found[0]["name"])
+        if bool(f.is_private) != private:
+            f.is_private = 1 if private else 0
+            f.save(ignore_permissions=True)
+        asset.set(field, f.file_url)
+
+
+def asset_doc(name):
+    if not name or not frappe.db.exists("Design Asset", name):
+        fail("Asset not found.")
+    return frappe.get_doc("Design Asset", name)
+
+
+def asset_save(data):
+    require_designer()
+    title = (data.get("title") or "").strip()
+    if not title:
+        fail("Title is required.")
+    if data.get("asset_type") not in ASSET_TYPES:
+        fail("Choose an asset type.")
+    brands = check_brands(data.get("brands") or [])
+    doc = asset_doc(data.get("name")) if data.get("name") else frappe.get_doc({"doctype": "Design Asset", "status": "Draft", "version": 1})
+    doc.title = title
+    doc.asset_type = data.get("asset_type")
+    doc.set("brands", [{"brand": b} for b in brands])
+    for field in ("tags", "file", "source_link", "thumbnail", "preview", "formats", "licence_expiry", "description"):
+        if field in data:
+            doc.set(field, data.get(field))
+    if doc.name:
+        if doc.status == "Published":
+            asset_files(doc, False)
+        doc.save(ignore_permissions=True)
+    else:
+        doc.insert(ignore_permissions=True)
+    return {"name": doc.name}
+
+
+def archive(doc):
+    doc.status = "Archived"
+    asset_files(doc, True)
+    doc.save(ignore_permissions=True)
+
+
+def asset_publish(data):
+    require_designer()
+    doc = asset_doc(data.get("name"))
+    if not doc.file and not doc.source_link:
+        fail("Add a file or a source link before publishing.")
+    doc.status = "Published"
+    asset_files(doc, False)
+    doc.save(ignore_permissions=True)
+    previous = doc.previous_version
+    if previous and frappe.db.get_value("Design Asset", previous, "status") == "Published":
+        archive(asset_doc(previous))
+    return {"name": doc.name, "file": doc.file}
+
+
+def asset_archive(data):
+    require_designer()
+    doc = asset_doc(data.get("name"))
+    archive(doc)
+    return {"name": doc.name}
+
+
+def asset_new_version(data):
+    require_designer()
+    old = asset_doc(data.get("name"))
+    new = frappe.get_doc({"doctype": "Design Asset", "title": old.title, "asset_type": old.asset_type, "tags": old.tags,
+                          "source_link": old.source_link, "formats": old.formats, "description": old.description,
+                          "licence_expiry": old.licence_expiry, "status": "Draft", "version": (old.version or 1) + 1,
+                          "previous_version": old.name, "brands": [{"brand": r.brand} for r in (old.get("brands") or [])]})
+    new.insert(ignore_permissions=True)
+    return {"name": new.name}
+
+
+def asset_hit(data):
+    name = data.get("name")
+    require(bool(name) and frappe.db.get_value("Design Asset", name, "status") == "Published", "This asset is not published.")
+    count = frappe.db.get_value("Design Asset", name, "download_count") or 0
+    frappe.db.set_value("Design Asset", name, "download_count", count + 1)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- employees
+
+GAP_ORDER = ["no_user", "no_email", "no_mobile", "no_name_ar", "no_designation_ar"]
+
+
+def employee_brand_map():
+    out = {}
+    for r in frappe.get_all("Employee Allowed Brand", filters={"parenttype": "Employee"}, fields=["parent", "brand"], order_by="idx asc"):
+        out.setdefault(r["parent"], []).append(r["brand"])
+    return out
+
+
+def employees_list(data):
+    require_designer()
+    rows = frappe.get_all("Employee", filters={"status": "Active"},
+                          fields=["name", "employee_name", "designation", "department", "custom_job_location", "user_id", "company_email",
+                                  "cell_number", "custom_signature_brand", "custom_name_ar", "custom_name_ar_verified"],
+                          order_by="employee_name asc")
+    designations = {}
+    for d in frappe.get_all("Designation", fields=["name", "custom_designation_ar", "custom_designation_ar_verified"]):
+        designations[d["name"]] = d
+    brands = employee_brand_map()
+    order = brand_names()
+    q = (data.get("q") or "").strip().lower()
+    out = []
+    for r in rows:
+        des = designations.get(r.get("designation")) or {}
+        allowed = [b for b in order if b in brands.get(r["name"], [])]
+        gaps = []
+        if not r.get("user_id"):
+            gaps.append("no_user")
+        if not r.get("company_email"):
+            gaps.append("no_email")
+        if not r.get("cell_number"):
+            gaps.append("no_mobile")
+        if not (r.get("custom_name_ar") and r.get("custom_name_ar_verified")):
+            gaps.append("no_name_ar")
+        if not (des.get("custom_designation_ar") and des.get("custom_designation_ar_verified")):
+            gaps.append("no_designation_ar")
+        item = {"employee": r["name"], "employee_name": r.get("employee_name"), "designation": r.get("designation"),
+                "department": r.get("department"), "location": r.get("custom_job_location"), "user_id": r.get("user_id"),
+                "company_email": r.get("company_email"), "cell_number": r.get("cell_number"), "allowed_brands": allowed,
+                "signature_brand": r.get("custom_signature_brand"), "name_ar": r.get("custom_name_ar"),
+                "name_ar_verified": 1 if r.get("custom_name_ar_verified") else 0, "designation_ar": des.get("custom_designation_ar"),
+                "designation_ar_verified": 1 if des.get("custom_designation_ar_verified") else 0, "gaps": gaps}
+        text = " ".join([item["employee_name"] or "", item["designation"] or "", item["department"] or "", item["location"] or "", r["name"]]).lower()
+        if q and q not in text:
+            continue
+        if data.get("brand") and data.get("brand") not in allowed:
+            continue
+        if data.get("gap") and data.get("gap") not in gaps:
+            continue
+        out.append(item)
+    return out
+
+
+def employees_set_brands(data):
+    require_designer()
+    mode = data.get("mode")
+    if mode not in ("add", "replace", "remove"):
+        fail("mode must be add, replace or remove.")
+    chosen = check_brands(data.get("brands") or [])
+    order = brand_names()
+    updated = 0
+    failed = []
+    for emp in data.get("employees") or []:
+        try:
+            doc = frappe.get_doc("Employee", emp)
+            current = [r.brand for r in (doc.get("custom_design_brands") or [])]
+            if mode == "add":
+                new = current + [b for b in chosen if b not in current]
+            elif mode == "remove":
+                new = [b for b in current if b not in chosen]
+            else:
+                new = [b for b in order if b in chosen]
+            doc.set("custom_design_brands", [{"brand": b} for b in new])
+            if doc.custom_signature_brand and doc.custom_signature_brand not in new:
+                doc.custom_signature_brand = None
+            doc.save(ignore_permissions=True)
+            updated = updated + 1
+        except Exception as e:
+            failed.append({"employee": emp, "error": str(e)})
+    return {"updated": updated, "failed": failed}
+
+
+def arabic_save(data):
+    require_designer()
+    if data.get("employee"):
+        if not frappe.db.exists("Employee", data.get("employee")):
+            fail("Employee not found.")
+        name_ar = (data.get("name_ar") or "").strip()
+        frappe.db.set_value("Employee", data.get("employee"), {"custom_name_ar": name_ar or None, "custom_name_ar_verified": 1 if name_ar else 0})
+    if data.get("designation"):
+        if not frappe.db.exists("Designation", data.get("designation")):
+            fail("Designation not found.")
+        des_ar = (data.get("designation_ar") or "").strip()
+        frappe.db.set_value("Designation", data.get("designation"), {"custom_designation_ar": des_ar or None,
+                                                                       "custom_designation_ar_verified": 1 if des_ar else 0})
+    return {"ok": True}
+
+
 ACTIONS = {
     "bootstrap": bootstrap,
     "access_get": access_get,
     "access_set": access_set,
+    "brands_list": brands_list,
+    "brand_save": brand_save,
+    "assets_list": assets_list,
+    "asset_save": asset_save,
+    "asset_publish": asset_publish,
+    "asset_archive": asset_archive,
+    "asset_new_version": asset_new_version,
+    "asset_hit": asset_hit,
+    "employees_list": employees_list,
+    "employees_set_brands": employees_set_brands,
+    "arabic_save": arabic_save,
 }
 
 action = frappe.form_dict.get("action")

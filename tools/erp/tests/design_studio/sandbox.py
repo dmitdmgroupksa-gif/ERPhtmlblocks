@@ -166,6 +166,13 @@ class Doc:
     def save(self, ignore_permissions=False, **kw):
         site, dt, v = self.__dict__["site_"], self.__dict__["doctype_"], self.__dict__["values_"]
         site.check_write(dt, v, ignore_permissions)
+        if dt == "File":
+            # Frappe moves the physical file when is_private changes, and the URL follows it.
+            url = v.get("file_url") or ""
+            if not v.get("is_private") and url.startswith("/private/files/"):
+                v["file_url"] = url[len("/private"):]
+            if v.get("is_private") and url.startswith("/files/"):
+                v["file_url"] = "/private" + url
         v["modified"] = str(NOW)
         site.saves.append((dt, v.get("name")))
         return self
@@ -204,6 +211,15 @@ class FakeSite:
     def table(self, doctype):
         if doctype == SINGLE:
             return [dict(self.settings, name=SINGLE)]
+        children = []
+        for parent, tables in CHILD_TABLES.items():
+            for field, child in tables.items():
+                if child == doctype:
+                    for row in self.table(parent):
+                        for i, r in enumerate(row.get(field) or []):
+                            children.append(dict(r, parent=row.get("name"), parenttype=parent, parentfield=field, idx=i + 1))
+        if children:
+            return children
         return self.rows.get(doctype, [])
 
     def find(self, doctype, name):
