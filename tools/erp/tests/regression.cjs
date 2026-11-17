@@ -32,6 +32,7 @@ test('Unavailable reference fields never become a false zero',()=>assert.throws(
 const heading=functions('06. Technical & Projects/DM Contracting Dashboard/dashboard.js',['repairBlockHeading'],{}).repairBlockHeading;
 const ceoJs=code('01. Leadership & Corporate/CEO Command Center/dashboard.js'),ceoApi=code('01. Leadership & Corporate/CEO Command Center/server_scripts/ceo_command_center_api.py');
 test('CEO Command Centre calls only the single CEO API for dashboard data',()=>{const methods=[...ceoJs.matchAll(/ceo_command_center_[a-z_]+/g)].map(m=>m[0]);assert.deepEqual([...new Set(methods)],['ceo_command_center_api']);assert(!/frappe\.call\(|frappe\.client\.get_list|ar_asof/.test(ceoJs));});
+test('CEO approvals write only through native workflow and comment endpoints',()=>{const m=[...ceoJs.matchAll(/post\('([\w.]+)'/g)].map(x=>x[1]);assert.deepEqual([...new Set(m)].sort(),['frappe.desk.form.utils.add_comment','frappe.model.workflow.apply_workflow']);assert(/reject\/i\.test\(c\.action\) && !c\.comment/.test(ceoJs),'reject requires a reason');});
 test('CEO API is read-only (no insert/save/submit/delete/set_value/db.sql)',()=>assert(!/\.(insert|save|submit|delete_doc|set_value|db\.sql|db\.commit)\(/.test(ceoApi)));
 test('CEO API avoids min()/max() aggregates this ERP rejects in get_list fields',()=>assert(!/"(min|max)\(/.test(ceoApi)));
 test('CEO API avoids augmented assignment that safe_exec refuses',()=>assert(!/^[^#\n"]*[^=!<>]\+=|-=/m.test(ceoApi)));

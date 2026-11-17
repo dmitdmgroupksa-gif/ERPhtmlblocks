@@ -43,6 +43,24 @@ Status: built locally and verified against live data through read-only calls. **
 7. Rollback: paste `legacy/dashboard.v1.*` back into the block. The v1 APIs remain until retirement.
 8. Retirement (separate approval): disable the nine `ceo_command_center_*` v1 scripts and `ar_asof` after searching live Server Scripts and Custom HTML Blocks for other callers.
 
+## Approvals tab (added)
+
+How approvals are used today, from live read-only counts on 16 Nov 2026 for a user with CEO + Final Approver:
+
+| Queue | Waiting | Notes |
+| --- | --- | --- |
+| Credit Note Request (Pending Approval by CEO) | 100 | Median 108 days waiting, longest 314. 54 have a zero difference value; the card falls back to the invoice value. Commonest reasons: material rejected (55), other (35), invoicing error (17). |
+| Materials Service General Request (Final Approver) | 80 | 71 are vehicle requests; amounts are typed as text. |
+| Leave Application (Final Approver) | 75 | 69 ended long ago (oldest 749 days), so they are shown as Stale. |
+| Quotation (Review With CEO) / DM Letters / Loan Application | 4 / 4 / 2 | Very old: up to 1,379 days and 545 days. |
+
+Result: 4 urgent, 9 high, 179 normal, 73 stale, and 67 routine requests eligible for bulk approval.
+
+**Deployment:**
+- Update the existing `ceo_command_center_api` Server Script and the block's Script and Style fields. No new script or role is needed.
+- Before go-live, confirm which users hold **Final Approver** and **Executive Manager**: the inbox shows a user every step those roles can act on.
+- Test one real approval on a non-critical document with the CEO account, then check the document's history.
+
 ## Open business decisions
 
 - Policy thresholds (`POLICY` in the API): stalled 14 days; AR follow-up 60 days, escalation 120 days; AP escalation 90 days; expiry window 30 days.

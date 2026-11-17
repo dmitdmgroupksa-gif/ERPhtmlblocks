@@ -92,7 +92,7 @@ if not allowed:
 
 fd = frappe.form_dict
 action = fd.get("action") or "overview"
-if action not in ["bootstrap", "overview", "department", "actions", "drilldown", "source_health"]:
+if action not in ["bootstrap", "overview", "department", "actions", "drilldown", "source_health", "approvals", "approval_detail"]:
     frappe.throw("Unsupported action.")
 today = frappe.utils.today()
 now_s = str(frappe.utils.now())[:19]
@@ -426,21 +426,17 @@ def bundle_rows(rows, src, dt, dept, group, sev, title, reason, list_filters, ol
 WF_STATE = {"decision_states": 0, "pending_states": 0, "workflows": 0}
 
 
-def src_workflows():
+def workflow_pending():
+    """Active workflows with their pending-approval states and who may act on each (shared by overview and approvals)."""
     wfs = frappe.get_all("Workflow", filters={"is_active": 1}, fields=["name", "document_type", "workflow_state_field"], limit_page_length=200)
     WF_STATE["workflows"] = len(wfs)
-    problems = []
     all_tr = frappe.get_all("Workflow Transition", filters={"parenttype": "Workflow", "parent": ["in", [w.name for w in wfs] or ["-"]]},
                             fields=["parent", "state", "action", "next_state", "allowed", "allow_self_approval", "condition"], limit_page_length=5000)
     by_wf = {}
     for t in all_tr:
         by_wf.setdefault(t.parent, []).append(t)
+    out = []
     for wf in wfs:
-        dt = wf.document_type
-        dept = WF_DEPT.get(dt) or "people"
-        if not want(dept):
-            continue
-        sfield = wf.workflow_state_field or "workflow_state"
         transitions = by_wf.get(wf.name) or []
         pending = {}
         for t in transitions:
@@ -467,7 +463,17 @@ def src_workflows():
                     p["conditional"] = True
             else:
                 p["others"].append(t.allowed)
-        if not pending:
+        if pending:
+            out.append({"workflow": wf.name, "doctype": wf.document_type, "sfield": wf.workflow_state_field or "workflow_state", "pending": pending})
+    return out
+
+
+def src_workflows():
+    problems = []
+    for w in workflow_pending():
+        dt, sfield, pending = w["doctype"], w["sfield"], w["pending"]
+        dept = WF_DEPT.get(dt) or "people"
+        if not want(dept):
             continue
         mf = meta_fields(dt)
         if mf is None or sfield not in mf:
@@ -1454,6 +1460,279 @@ def src_dmcc():
     return {"partial": 0, "message": msg, "scope": "external"}
 
 
+# ----------------------------------------------------------------------------- approvals inbox
+# Everything awaiting a workflow decision by the current user, summarised per document type, auto-categorised and
+# prioritised by explicit rules (deadline, amount, waiting time, staleness). Actions themselves are taken in the browser
+# through Frappe's native frappe.model.workflow.apply_workflow, which re-checks roles, conditions and self-approval.
+APPROVAL_POLICY = {"urgent_amount": 50000, "high_amount": 10000, "routine_amount": 1000, "overdue_days": 30,
+                   "urgent_deadline_days": 3, "high_deadline_days": 14, "stale_quote_days": 180}
+CAT_LABEL = {"money": "Money & credit", "sales": "Sales & pricing", "people": "People & HR", "requests": "Requests & admin", "other": "Other approvals"}
+TIER_RANK = {"urgent": 0, "high": 1, "normal": 2, "stale": 3}
+# title/sub/requester: [field, kind]; kind Employee/User resolves display names. deadline: [field, label, kind].
+PROFILES = {
+    "Credit Note Request - Sales Return": {
+        "cat": "money", "label": "Credit note request", "title": ["customer_name", ""], "requester": ["owner", "User"], "date": "date",
+        "amount": "difference_value_inc_vat", "amount_label": "Credit difference (incl. VAT)", "amount_alt": ["invoice_value_before_correction_inc_vat", "Invoice value before correction"],
+        "facts": [["sales_invoice_no", "Invoice"], ["delivery_note_no", "Delivery note"], ["item_returning_warehouse", "Return to"]], "note": "remark_if_any",
+        "reasons": [["material_rejected", "Material rejected"], ["invoicing_error", "Invoicing error"], ["discounting_error", "Discount error"], ["store_counting_error", "Store counting error"],
+                    ["driver_counting_error", "Driver counting error"], ["system_calculation_error", "System calculation error"], ["typing_error", "Typing error"], ["salesman_error", "Salesman error"],
+                    ["quotation_revised", "Quotation revised"], ["repeated_order", "Repeated order"], ["po_cancelled", "PO cancelled"], ["others", "Other reason"]],
+        "currency_default": True},
+    "Loan Application": {"cat": "money", "label": "Loan application", "title": ["applicant_name", ""], "requester": ["applicant_name", ""], "date": "posting_date",
+                         "amount": "loan_amount", "amount_label": "Loan amount", "facts": [["loan_type", "Loan type"], ["repayment_periods", "Repayment periods"], ["repayment_amount", "Instalment"]],
+                         "note": "description"},
+    "Quotation": {"cat": "sales", "label": "Quotation", "title": ["customer_name", ""], "requester": ["sales_person", ""], "date": "transaction_date",
+                  "amount": "base_grand_total", "amount_label": "Quotation value", "facts": [["valid_till", "Valid till"], ["payment_term", "Payment term"]],
+                  "stale_date": ["valid_till", "Quotation validity ended on "]},
+    "Sales Order": {"cat": "sales", "label": "Sales order", "title": ["customer_name", ""], "requester": ["sales_persons", ""], "date": "transaction_date",
+                    "amount": "base_grand_total", "amount_label": "Order value", "deadline": ["delivery_date", "Delivery due", "start"]},
+    "Leave Application": {"cat": "people", "label": "Leave", "title": ["employee_name", ""], "requester": ["employee_name", ""], "date": "posting_date",
+                          "deadline": ["from_date", "Leave starts", "start"], "end": "to_date",
+                          "facts": [["leave_type", "Type"], ["total_leave_days", "Days"], ["from_date", "From"], ["to_date", "To"], ["custom_replacement_person", "Replacement"]], "note": "description"},
+    "Travel Request": {"cat": "people", "label": "Travel request", "title": ["employee_name", ""], "requester": ["employee_name", ""],
+                       "facts": [["travel_type", "Travel type"], ["purpose_of_travel", "Purpose"], ["travel_funding", "Funding"]], "note": "description"},
+    "Resignation Letter": {"cat": "people", "label": "Resignation", "title": ["employee", "Employee"], "requester": ["employee", "Employee"], "date": "resignation_date",
+                           "deadline": ["expected_date", "Last working day", "end"], "facts": [["designation", "Designation"], ["department", "Department"]], "note": "reason"},
+    "Qiwa contract renewal request": {"cat": "people", "label": "Contract renewal (Qiwa)", "title": ["emp_name", "Employee"], "requester": ["hr_manager", "Employee"],
+                                      "deadline": ["contract_end_date", "Contract ends", "end"],
+                                      "facts": [["designation", "Designation"], ["contract_type", "Contract type"], ["contract_duration", "Duration"]], "note": "additional_changes"},
+    "Training": {"cat": "people", "label": "Training", "title": ["trainee", "Employee"], "requester": ["trainer", "Employee"], "deadline": ["date", "Training date", "start"]},
+    "Materials Service General Request Form": {"cat": "requests", "label": "General request", "title": ["description_req", ""], "requester": ["employee", "Employee"], "date": "date",
+                                               "amount": "total_amount", "amount_text": True, "amount_label": "Requested amount (as entered)",
+                                               "facts": [["request_type", "Type"], ["department", "Department"], ["branch_req", "Branch"]], "note": "additional_desc"},
+    "DM Letters": {"cat": "requests", "label": "Letter", "title": ["subject", ""], "requester": ["request_by", "Employee"], "date": "date",
+                   "facts": [["company", "Company"]], "note": "reason"},
+    "DM Official Memo": {"cat": "requests", "label": "Official memo", "title": ["memo_subject", ""], "requester": ["issued_by", "Employee"], "date": "memo_date",
+                         "facts": [["memo_type", "Memo type"], ["to_whome", "Addressed to"]]},
+    "DMG Event Management Schedule": {"cat": "requests", "label": "Event", "title": ["event_name", ""], "requester": ["managed_by", "Employee"],
+                                      "deadline": ["event_date", "Event date", "start"], "stale_date": ["event_date", "Event date passed on "],
+                                      "facts": [["event_catogory", "Category"], ["venue", "Venue"], ["attendees", "Attendees"]]},
+}
+
+
+SYSTEM_CURRENCY = ""
+try:
+    SYSTEM_CURRENCY = frappe.db.get_default("currency") or ""
+except Exception:
+    SYSTEM_CURRENCY = ""
+
+
+def parse_amount(v):
+    if v is None or v == "":
+        return None
+    s = "".join([ch for ch in str(v) if ch in "0123456789.-"])
+    try:
+        return frappe.utils.flt(float(s)) if s not in ["", ".", "-"] else None
+    except Exception:
+        return None
+
+
+def resolve(kind, value):
+    if not value:
+        return ""
+    if kind == "Employee":
+        return employee_name(value)
+    if kind == "User":
+        return user_name(value)
+    return str(value)
+
+
+def build_approvals():
+    items = []
+    problems = []
+    for w in workflow_pending():
+        dt, sfield, pending = w["doctype"], w["sfield"], w["pending"]
+        mine = {}
+        for st in pending:
+            if pending[st]["mine"]:
+                mine[st] = pending[st]
+        if not mine:
+            continue
+        mf = meta_fields(dt)
+        if mf is None or sfield not in mf:
+            problems.append(dt)
+            continue
+        pr = PROFILES.get(dt) or {"cat": "other", "label": dt, "title": [WF_TITLE.get(dt) or "title", ""]}
+        want_f = [pr.get("title", ["", ""])[0], pr.get("requester", ["", ""])[0], pr.get("date"), pr.get("amount"), pr.get("note"),
+                  (pr.get("amount_alt") or ["", ""])[0], (pr.get("deadline") or ["", ""])[0], pr.get("end"), (pr.get("stale_date") or ["", ""])[0]]
+        want_f = want_f + [f[0] for f in pr.get("facts", [])] + [f[0] for f in pr.get("reasons", [])]
+        if not pr.get("amount") and WF_AMOUNT.get(dt):
+            pr = dict(pr)
+            pr["amount"] = WF_AMOUNT.get(dt)
+            want_f.append(pr["amount"])
+        fields = ["name", "owner", "creation", "modified", sfield + " as wf_state"]
+        for f in want_f:
+            if f and f in mf and mf[f] not in ["Table", "Table MultiSelect"] and f not in fields:
+                fields.append(f)
+        has_co = mf.get("company") == "Link"
+        if has_co and "company" not in fields:
+            fields.append("company")
+        filters = [[dt, sfield, "in", list(mine.keys())], [dt, "docstatus", "<", 2]]
+        if company and has_co:
+            filters.append([dt, "company", "=", company])
+        try:
+            rows, complete = fetch(dt, fields, filters, "modified asc", cap=1000)
+        except Exception as e:
+            problems.append(dt + " (" + classify(e)[0] + ")")
+            continue
+        ids = {"Employee": [], "User": []}
+        for r in rows:
+            for spec in [pr.get("title"), pr.get("requester")]:
+                if spec and spec[1] in ids:
+                    ids[spec[1]].append(r.get(spec[0]))
+            ids["User"].append(r.owner)
+        prime("Employee", ids["Employee"])
+        prime("User", ids["User"])
+        for r in rows:
+            p = mine.get(r.wf_state)
+            if not p or (r.owner == user and not p["self_ok"]):
+                continue
+            items.append(approval_item(dt, pr, r, p, mf))
+    items.sort(key=lambda a: (TIER_RANK[a["priority"]], a["days_to_deadline"] if a["days_to_deadline"] is not None else 9999,
+                              -(a["amount"] or 0), -(a["waiting_days"] or 0)))
+    return items, problems
+
+
+def approval_item(dt, pr, r, p, mf):
+    P = APPROVAL_POLICY
+    title = resolve((pr.get("title") or ["", ""])[1], r.get((pr.get("title") or ["", ""])[0])) or r.name
+    req_spec = pr.get("requester") or ["", ""]
+    requester = resolve(req_spec[1], r.get(req_spec[0])) or user_name(r.owner)
+    waiting = days_between(today, dstr(r.modified)) or 0
+    amount = None
+    amount_label = pr.get("amount_label") or "Amount"
+    if pr.get("amount") and pr["amount"] in mf:
+        amount = parse_amount(r.get(pr["amount"])) if pr.get("amount_text") else frappe.utils.flt(r.get(pr["amount"]))
+        if amount is not None:
+            amount = abs(amount)
+        if not amount and pr.get("amount_alt") and r.get(pr["amount_alt"][0]):
+            amount = None
+    currency = None
+    amount_basis = ""
+    if amount is not None and pr.get("amount_text"):
+        amount_basis = "As typed in a text field; currency not recorded"
+    elif amount is not None and r.get("company") and dt not in WF_AMOUNT_NO_CURRENCY:
+        currency = company_currency.get(r.get("company"))
+    elif SYSTEM_CURRENCY and (amount is not None or dt in WF_AMOUNT_NO_CURRENCY):
+        currency = SYSTEM_CURRENCY
+        amount_basis = "Field has no currency setting; shown in the system default currency"
+    facts = []
+    if amount is None and pr.get("amount_alt") and r.get(pr["amount_alt"][0]):
+        facts.append([pr["amount_alt"][1], frappe.utils.flt(r.get(pr["amount_alt"][0]))])
+    for f in pr.get("facts", []):
+        v = r.get(f[0])
+        if v not in [None, ""]:
+            if f[0] in ["custom_replacement_person", "employee", "trainer"]:
+                v = employee_name(v)
+            facts.append([f[1], str(v)[:120]])
+    tags = [x[1] for x in pr.get("reasons", []) if r.get(x[0])]
+    note = str(r.get(pr.get("note")) or "")[:400] if pr.get("note") else ""
+    deadline = None
+    deadline_label = ""
+    dtd = None
+    if pr.get("deadline") and r.get(pr["deadline"][0]):
+        deadline = dstr(r.get(pr["deadline"][0]))
+        deadline_label = pr["deadline"][1]
+        dtd = days_between(deadline, today)
+    tier = "normal"
+    why = []
+    end = dstr(r.get(pr["end"])) if pr.get("end") and r.get(pr["end"]) else ""
+    stale_date = dstr(r.get(pr["stale_date"][0])) if pr.get("stale_date") and r.get(pr["stale_date"][0]) else ""
+    if end and end < today:
+        tier = "stale"
+        why.append("Already ended on " + end + " — decision only regularises the record")
+    elif stale_date and stale_date < today:
+        tier = "stale"
+        why.append(pr["stale_date"][1] + stale_date)
+    elif dt == "Quotation" and waiting > P["stale_quote_days"]:
+        tier = "stale"
+        why.append("Unchanged for " + str(waiting) + " days")
+    elif end and deadline and deadline <= today <= end:
+        tier = "urgent"
+        why.append("In progress since " + deadline + " (until " + end + ")")
+    elif dtd is not None and dtd <= P["urgent_deadline_days"]:
+        tier = "urgent"
+        why.append(deadline_label + (" today" if dtd == 0 else (" in " + str(dtd) + " day" + ("" if dtd == 1 else "s") if dtd > 0 else " passed " + str(-dtd) + " days ago")))
+    elif amount and amount >= P["urgent_amount"]:
+        tier = "urgent"
+        why.append("High value")
+    else:
+        if dtd is not None and dtd <= P["high_deadline_days"]:
+            tier = "high"
+            why.append(deadline_label + " in " + str(dtd) + " days")
+        if amount and amount >= P["high_amount"]:
+            tier = "high"
+            why.append("Significant value")
+    if waiting >= P["overdue_days"]:
+        why.append("Waiting " + str(waiting) + " days")  # shown and used for sorting; never raises the tier on its own
+    acts = sorted(list(set(p["mine"])))
+    approve = [a for a in acts if a.lower() in ["approve", "final approval", "first approve", "accept"]]
+    routine = pr.get("cat") == "requests" and amount is not None and amount < P["routine_amount"] and tier in ["normal", "high"] and not p["conditional"]
+    return {
+        "key": dt + "::" + r.name, "doctype": dt, "name": r.name, "type_label": pr.get("label") or dt, "category": pr.get("cat") or "other",
+        "category_label": CAT_LABEL.get(pr.get("cat") or "other"), "title": str(title)[:140], "requester": requester, "state": r.wf_state,
+        "actions": acts, "approve_action": approve[0] if approve else "", "conditional": 1 if p["conditional"] else 0,
+        "amount": amount, "amount_label": amount_label, "currency": currency, "amount_basis": amount_basis,
+        "facts": facts, "tags": tags, "note": note, "date": dstr(r.get(pr.get("date"))) if pr.get("date") else dstr(r.creation),
+        "deadline": deadline, "deadline_label": deadline_label, "days_to_deadline": dtd, "waiting_days": waiting,
+        "priority": tier, "why": why, "routine": 1 if routine else 0,
+        "bulk": 1 if (approve and not p["conditional"] and tier in ["normal", "high"] and (amount is None or amount < P["high_amount"])) else 0,
+        "company": r.get("company") or "", "modified": str(r.modified)[:19],
+    }
+
+
+def approval_summary(items):
+    s = {"total": len(items), "tiers": {"urgent": 0, "high": 0, "normal": 0, "stale": 0}, "categories": {}, "types": {}, "value": {}, "oldest": 0, "routine": 0, "bulk": 0}
+    for a in items:
+        s["tiers"][a["priority"]] = s["tiers"][a["priority"]] + 1
+        s["categories"][a["category"]] = s["categories"].get(a["category"], 0) + 1
+        s["types"][a["type_label"]] = s["types"].get(a["type_label"], 0) + 1
+        if a["amount"] and a["currency"]:
+            s["value"][a["currency"]] = s["value"].get(a["currency"], 0) + a["amount"]
+        s["oldest"] = max(s["oldest"], a["waiting_days"] or 0)
+        s["routine"] = s["routine"] + a["routine"]
+        s["bulk"] = s["bulk"] + a["bulk"]
+    return s
+
+
+def approval_detail(dt, name):
+    mf = meta_fields(dt)
+    if mf is None:
+        frappe.throw("Unknown document type.")
+    if not gl(dt, ["name"], [[dt, "name", "=", name]], limit=1):
+        frappe.throw("Record not found or not readable.")
+    meta = frappe.get_meta(dt)
+    skip_types = ["Section Break", "Column Break", "Tab Break", "HTML", "Button", "Fold", "Heading", "Table", "Table MultiSelect", "Signature", "Password"]
+    plain = [f.fieldname for f in meta.fields if f.fieldtype not in skip_types and f.fieldname not in ["amended_from", "naming_series"]]
+    row = gl(dt, ["name", "owner", "creation", "modified", "modified_by", "docstatus"] + plain[:120], [[dt, "name", "=", name]], limit=1)[0]
+    fields = []
+    for f in meta.fields:
+        if f.fieldname in plain and row.get(f.fieldname) not in [None, "", 0] and not (f.fieldtype == "Check" and not row.get(f.fieldname)):
+            fields.append({"label": f.label or f.fieldname, "type": f.fieldtype, "value": str(row.get(f.fieldname))[:2000], "options": f.options or ""})
+    tables = []
+    for f in meta.fields:
+        if f.fieldtype != "Table" or not f.options:
+            continue
+        cm = frappe.get_meta(f.options)
+        cols = [c for c in cm.fields if c.in_list_view and c.fieldtype not in skip_types][:7]
+        if len(cols) < 3:
+            cols = [c for c in cm.fields if c.fieldtype not in skip_types][:6]
+        rows = frappe.get_all(f.options, filters={"parent": name, "parenttype": dt, "parentfield": f.fieldname},
+                              fields=[c.fieldname for c in cols], order_by="idx asc", limit_page_length=50)
+        if rows:
+            tables.append({"label": f.label or f.fieldname, "columns": [{"field": c.fieldname, "label": c.label or c.fieldname, "type": c.fieldtype} for c in cols],
+                           "rows": [{c.fieldname: (str(x.get(c.fieldname)) if x.get(c.fieldname) is not None else "") for c in cols} for x in rows]})
+    comments = []
+    try:
+        for c in gl("Comment", ["comment_type", "content", "owner", "creation"], [["reference_doctype", "=", dt], ["reference_name", "=", name],
+                                                                                 ["comment_type", "in", ["Comment", "Workflow"]]], order_by="creation desc", limit=8):
+            comments.append({"type": c.comment_type, "by": user_name(c.owner), "when": str(c.creation)[:16], "content": str(c.content or "")[:600]})
+    except Exception:
+        comments = []
+    return {"doctype": dt, "name": name, "fields": fields, "tables": tables, "comments": comments,
+            "created_by": user_name(row.owner), "created": str(row.creation)[:16], "modified": str(row.modified)[:16], "modified_by": user_name(row.modified_by)}
+
+
 # ----------------------------------------------------------------------------- registry + execution
 REGISTRY = [
     ["workflow", None, "Workflow approvals", ["Workflow", "Workflow Transition"], {}, src_workflows],
@@ -1593,6 +1872,12 @@ if action == "bootstrap":
         "departments": [{"key": d[0], "label": d[1], "dashboards": [{"label": x[0], "route": "/app/" + x[1]} for x in DASHBOARDS.get(d[0], [])]} for d in DEPTS],
         "groups": GROUPS, "roles": [r for r in user_roles if r in VIEW_ROLES or r in ["CEO", "Final Approver", "Executive Manager"]],
     })
+elif action == "approvals":
+    appr, problems = build_approvals()
+    respond({"items": appr, "summary": approval_summary(appr), "policy_approvals": APPROVAL_POLICY, "categories": CAT_LABEL,
+             "problems": problems, "user_roles": [r for r in user_roles if r in ["CEO", "Final Approver", "Executive Manager"]]})
+elif action == "approval_detail":
+    respond(approval_detail(fd.get("doctype") or "", fd.get("name") or ""))
 elif action == "drilldown":
     dt = fd.get("doctype") or ""
     name = fd.get("name") or ""

@@ -34,7 +34,7 @@
   };
   const ICONS = {
     refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/>', open: '<path d="M14 4h6v6M20 4l-9 9M19 14v5H5V5h5"/>', left: '<path d="m15 6-6 6 6 6"/>', right: '<path d="m9 6 6 6-6 6"/>',
-    globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>'
+    check: '<path d="m5 12 5 5L20 7"/>', globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>'
   };
   const icon = k => '<svg viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[k] || '') + '</svg>';
 
@@ -64,7 +64,28 @@
     'Ordered by priority, then overdue days and due date. Click a row for evidence and the original record.': 'مرتبة حسب الأولوية ثم أيام التأخير وتاريخ الاستحقاق. انقر الصف لعرض الأدلة والسجل الأصلي.',
     'Counts of distinct actions per department. Click a department to open its tab with the same filters.': 'عدد الإجراءات المميزة لكل إدارة. انقر الإدارة لفتح تبويبها بنفس عوامل التصفية.',
     'A few verified signals. Each company is shown in its own currency; nothing is converted or summed across currencies.': 'مؤشرات موثقة قليلة. تظهر كل شركة بعملتها دون تحويل أو جمع بين العملات.',
-    'Nothing in this view needs attention for the selected scope.': 'لا شيء في هذا العرض يحتاج انتباهًا ضمن النطاق المحدد.', 'Showing': 'عرض', 'of': 'من', 'Has owner': 'له مسؤول', 'All': 'الكل', 'Not loaded': 'لم يتم التحميل', 'sources': 'مصادر', 'need attention': 'تحتاج انتباه', 'Loaded': 'تم التحميل'
+    'Nothing in this view needs attention for the selected scope.': 'لا شيء في هذا العرض يحتاج انتباهًا ضمن النطاق المحدد.', 'Showing': 'عرض', 'of': 'من', 'Has owner': 'له مسؤول', 'All': 'الكل', 'Not loaded': 'لم يتم التحميل', 'sources': 'مصادر', 'need attention': 'تحتاج انتباه', 'Loaded': 'تم التحميل',
+    'Approvals': 'الموافقات', 'Waiting for your decision': 'بانتظار قرارك', 'documents': 'مستندات', 'document': 'مستند', 'Value awaiting': 'القيمة المعلقة', 'Oldest waiting': 'أقدم انتظار',
+    'Urgent': 'عاجل', 'High priority': 'أولوية عالية', 'Routine': 'روتيني', 'Stale': 'متقادم', 'Normal': 'عادي', 'High': 'عالي',
+    'Deadline within 3 days, in progress or high value': 'موعد خلال 3 أيام أو قيد التنفيذ أو قيمة عالية', 'Deadline within 14 days or significant value': 'موعد خلال 14 يومًا أو قيمة كبيرة',
+    'Small requests — safe to approve in bulk': 'طلبات صغيرة — يمكن اعتمادها دفعة واحدة', 'Dates already passed — tidy up': 'تواريخ انقضت — للتنظيف',
+    'Urgent — decide today': 'عاجل — قرر اليوم', 'Stale — overtaken by events': 'متقادم — تجاوزته الأحداث', 'Sort': 'الترتيب', 'Priority': 'الأولوية', 'Nearest deadline': 'أقرب موعد',
+    'Longest waiting': 'الأطول انتظارًا', 'Highest value': 'الأعلى قيمة', 'Document type': 'نوع المستند', 'Filtered view': 'عرض مصفّى', 'Show everything': 'عرض الكل',
+    'Some approval sources could not be read:': 'تعذرت قراءة بعض مصادر الموافقات:', 'Nothing is waiting for your decision': 'لا يوجد ما ينتظر قرارك', 'No matching approvals': 'لا توجد موافقات مطابقة',
+    'Select routine in this group': 'تحديد الروتيني في هذه المجموعة', 'selected': 'محدد', 'Approve selected': 'اعتماد المحدد', 'Select for bulk approval': 'تحديد للاعتماد الجماعي',
+    'Waiting': 'الانتظار', 'Approve': 'اعتماد', 'Reject': 'رفض', 'Hold': 'تعليق', 'Resume': 'استئناف', 'Final APPROVAL': 'الاعتماد النهائي', 'Details': 'التفاصيل',
+    'A rule in the ERP decides the final check.': 'قاعدة في النظام تحدد التحقق النهائي.', 'Open attachment': 'فتح المرفق', 'Recent comments': 'آخر التعليقات', 'Open full form': 'فتح النموذج كاملًا',
+    'and': 'و', 'more': 'أخرى', 'completed': 'مكتمل', 'failed': 'فشل', 'Reason for rejection (required, added as a comment)': 'سبب الرفض (مطلوب، يُضاف كتعليق)',
+    'Comment (optional, added to the document)': 'تعليق (اختياري، يُضاف إلى المستند)', 'Working…': 'جارٍ التنفيذ…', 'Done': 'تم', 'Cancel': 'إلغاء',
+    'Applied through the ERP workflow with your own permissions, exactly like the button on the form. It is recorded in each document\'s history.': 'يُطبَّق عبر سير العمل في النظام بصلاحياتك، تمامًا مثل الزر في النموذج، ويُسجَّل في سجل كل مستند.',
+    'Please give a reason for rejecting.': 'يرجى ذكر سبب الرفض.', 'decision applied': 'قرار طُبق', 'Decision applied, but the comment could not be saved:': 'طُبق القرار لكن تعذر حفظ التعليق:', 'Search approvals': 'بحث في الموافقات', 'Name, customer, employee or document number': 'الاسم أو العميل أو الموظف أو رقم المستند',
+    'Decisions apply through the ERP workflow': 'القرارات تُطبق عبر سير العمل في النظام', 'Only documents at a step your role can act on': 'فقط المستندات في خطوة يمكن لدورك اتخاذ إجراء فيها', 'decisions applied': 'قرارات طُبقت',
+    'Credit note request': 'طلب إشعار دائن', 'Loan application': 'طلب قرض', 'Quotation': 'عرض سعر', 'Sales order': 'أمر بيع', 'Leave': 'إجازة', 'Travel request': 'طلب سفر', 'Resignation': 'استقالة',
+    'Contract renewal (Qiwa)': 'تجديد عقد (قوى)', 'Training': 'تدريب', 'General request': 'طلب عام', 'Letter': 'خطاب', 'Official memo': 'مذكرة رسمية', 'Event': 'فعالية',
+    'Money & credit': 'المال والائتمان', 'Sales & pricing': 'المبيعات والتسعير', 'People & HR': 'الموظفون والموارد البشرية', 'Requests & admin': 'الطلبات والإدارة', 'Other approvals': 'موافقات أخرى',
+    'Material rejected': 'رفض المواد', 'Invoicing error': 'خطأ في الفوترة', 'Discount error': 'خطأ في الخصم', 'Other reason': 'سبب آخر', 'Salesman error': 'خطأ المندوب',
+    'Leave starts': 'تبدأ الإجازة', 'Last working day': 'آخر يوم عمل', 'Contract ends': 'ينتهي العقد', 'Training date': 'تاريخ التدريب', 'Event date': 'تاريخ الفعالية', 'Delivery due': 'موعد التسليم',
+    'Decisions are applied through the ERP workflow with your own permissions, exactly like the button on each form, and are recorded in the document history. Priority rules: urgent = deadline within 3 days, in progress or value ≥ 50,000; high = deadline within 14 days or value ≥ 10,000; routine = requests under 1,000; stale = dates already passed.': 'تُطبَّق القرارات عبر سير العمل في النظام بصلاحياتك، مثل زر كل نموذج، وتُسجَّل في سجل المستند. قواعد الأولوية: عاجل = موعد خلال 3 أيام أو قيد التنفيذ أو قيمة ≥ 50,000؛ عالي = موعد خلال 14 يومًا أو قيمة ≥ 10,000؛ روتيني = طلبات أقل من 1,000؛ متقادم = تواريخ انقضت.'
   };
   const S = {
     lang: 'en', tab: 'overview', sub: 'actions', company: '', window: 7, from: '', to: '', q: '', group: '', severity: '', owner: '', page: 0, queueAll: false,
@@ -120,7 +141,7 @@
     S.busy = true; render();
     try {
       S.boot = await call('bootstrap');
-      const valid = ['overview'].concat(S.boot.departments.map(d => d.key));
+      const valid = ['overview', 'approvals'].concat(S.boot.departments.map(d => d.key));
       if (!valid.includes(S.tab)) { S.notices.push('Your remembered tab is no longer available, so Overview is shown.'); S.tab = 'overview'; }
       if (S.company && !S.boot.companies.some(c => c.name === S.company)) { S.notices.push('Your remembered company is not accessible any more; showing all permitted companies.'); S.company = ''; }
       if (![7, 14, 30].includes(Number(S.window))) S.window = 7;
@@ -131,6 +152,7 @@
     const my = ++gen; S.busy = true; S.error = ''; render();
     try {
       if (S.tab === 'overview') { if (force || !S.overview || S.overview._key !== key()) { const d = await call('overview'); d._key = key(); if (my !== gen) return; S.overview = d; } }
+      else if (S.tab === 'approvals') { if (force || !S.appr || S.appr._key !== key()) { const d = await call('approvals'); d._key = key(); d.sources = []; if (my !== gen) return; S.appr = d; AP.sel.clear(); AP.detail = {}; } }
       else if (force || !S.dept[S.tab] || S.dept[S.tab]._key !== key()) { const d = await call('department', { department: S.tab }); d._key = key(); if (my !== gen) return; S.dept[S.tab] = d; }
     } catch (e) { if (my !== gen || disposed) return; S.error = e.message || String(e); }
     if (my !== gen || disposed) return;
@@ -175,7 +197,7 @@
   function remember(a) { ROWS.set(a.key, a); return a.key; }
 
   function header() {
-    const d = S.tab === 'overview' ? S.overview : S.dept[S.tab];
+    const d = S.tab === 'overview' ? S.overview : S.tab === 'approvals' ? S.appr : S.dept[S.tab];
     const bad = d ? d.sources.filter(s => !['complete', 'configured'].includes(s.state) && s.scope !== 'external').length : 0;
     const status = S.busy ? t('Loading…') : d ? t('Loaded') + ' ' + esc(String(d.retrieved).slice(11, 16)) + ' · ' + d.sources.length + ' ' + t('sources') + (bad ? ' · <b>' + bad + ' ' + t('need attention') + '</b>' : '') : t('Not loaded');
     return '<header class="cc-header"><div><div class="cc-eyebrow">' + t('DM Group · Executive desk') + '</div><h2>' + t('CEO Command Centre') + '</h2><p role="status">' + status + '</p></div>'
@@ -184,16 +206,21 @@
   }
   function tabs() {
     const m = S.overview?.matrix || {};
-    const items = [['overview', t('Overview')]].concat((S.boot?.departments || []).map(d => [d.key, t(d.label)]));
+    const items = [['overview', t('Overview')], ['approvals', t('Approvals')]].concat((S.boot?.departments || []).map(d => [d.key, t(d.label)]));
     return '<div class="cc-tabbar"><button class="cc-tab-arrow" data-scroll="-1" aria-label="' + t('Previous') + '">' + icon('left') + '</button><nav class="cc-tabs" role="tablist" aria-label="Departments">'
       + items.map(([k, l]) => {
         const c = m[k]; const hot = c ? (c.critical || 0) + (c.overdue || 0) : 0;
-        const badge = k === 'overview' ? (S.overview ? '<span class="cc-badge" title="' + esc(t('My decisions')) + '">' + n0(S.overview.counts_by_group.decision) + '</span>' : '') : (c && hot ? '<span class="cc-badge bad" title="Critical + overdue actions">' + n0(hot) + '</span>' : '');
+        const badge = k === 'approvals' ? ((S.appr || S.overview) ? '<span class="cc-badge' + (S.appr && apSummary(apItems()).tiers.urgent ? ' bad' : '') + '" title="' + esc(t('Waiting for your decision')) + '">' + n0(S.appr ? apItems().length : S.overview.counts_by_group.decision) + '</span>' : '') : k === 'overview' ? (S.overview ? '<span class="cc-badge" title="' + esc(t('My decisions')) + '">' + n0(S.overview.counts_by_group.decision) + '</span>' : '') : (c && hot ? '<span class="cc-badge bad" title="Critical + overdue actions">' + n0(hot) + '</span>' : '');
         return '<button role="tab" data-tab="' + k + '" aria-selected="' + (S.tab === k) + '" tabindex="' + (S.tab === k ? 0 : -1) + '">' + esc(l) + badge + '</button>';
       }).join('') + '</nav><button class="cc-tab-arrow" data-scroll="1" aria-label="' + t('Next') + '">' + icon('right') + '</button></div>';
   }
   function filters() {
     const cos = S.boot?.companies || [];
+    if (S.tab === 'approvals') return '<form class="cc-filters ap-filters" data-form="filters" aria-label="Filters">'
+      + '<label>' + t('Company') + '<select data-f="company"><option value="">' + t('All permitted companies') + '</option>' + cos.map(c => '<option value="' + esc(c.name) + '"' + (S.company === c.name ? ' selected' : '') + '>' + esc(c.name) + '</option>').join('') + '</select></label>'
+      + '<input type="hidden" data-f="from" value="' + esc(S.from) + '"><input type="hidden" data-f="to" value="' + esc(S.to) + '"><input type="hidden" data-f="window" value="' + esc(S.window) + '">'
+      + '<button class="cc-btn primary" type="submit" ' + (S.busy ? 'disabled' : '') + '>' + t('Apply') + '</button>'
+      + '<label class="cc-search">' + t('Search approvals') + '<input type="search" data-search placeholder="' + esc(t('Name, customer, employee or document number')) + '" value="' + esc(S.q) + '"></label></form>';
     return '<form class="cc-filters" data-form="filters" aria-label="Filters">'
       + '<label>' + t('Company') + '<select data-f="company"><option value="">' + t('All permitted companies') + '</option>' + cos.map(c => '<option value="' + esc(c.name) + '"' + (S.company === c.name ? ' selected' : '') + '>' + esc(c.name) + ' (' + esc(c.currency) + ')</option>').join('') + '</select></label>'
       + '<label>' + t('Performance from') + '<input type="date" data-f="from" value="' + esc(S.from) + '" max="' + esc(S.to || today()) + '"></label>'
@@ -203,6 +230,7 @@
       + '<label class="cc-search">' + t('Search actions') + '<input type="search" data-search placeholder="' + esc(t('Title, owner, record or reason')) + '" value="' + esc(S.q) + '"></label></form>';
   }
   function scope() {
+    if (S.tab === 'approvals') return '<div class="cc-scope">' + pill('Decisions apply through the ERP workflow', 'decision') + '<span>' + esc(S.company || t('All permitted companies')) + '</span><span class="sep">|</span><span>' + t('Only documents at a step your role can act on') + '</span></div>';
     const d = S.tab === 'overview' ? S.overview : S.dept[S.tab];
     const co = S.company ? S.company + (d?.currency ? ' · ' + d.currency : '') : t('All permitted companies');
     return '<div class="cc-scope">' + pill('Read-only', 'muted') + '<span>' + esc(co) + '</span><span class="sep">|</span><span>' + t('Actions: all open work, any date') + '</span><span class="sep">|</span><span>' + t('Performance:') + ' <bdi class="ltr">' + esc(S.from) + ' → ' + esc(S.to) + '</bdi></span><span class="sep">|</span><span>' + t('Balances: as of today') + '</span><span class="sep">|</span><span>' + t('Due window:') + ' ' + esc(S.window) + ' ' + t('days') + '</span></div>';
@@ -403,6 +431,158 @@
     frappe.route_options = opts; frappe.set_route('List', spec.doctype);
   }
 
+  /* ───────── Approvals inbox ─────────
+     Everything waiting for the viewer's workflow decision, auto-categorised and prioritised by the API (explicit rules, shown
+     as reasons on each card). Decisions go through Frappe's native frappe.model.workflow.apply_workflow — the same call as the
+     form's action button — so roles, transition conditions and self-approval rules are enforced by the ERP itself. */
+  const AP = { cat: '', tier: '', sort: 'priority', sel: new Set(), open: null, detail: {}, confirm: null, toast: '' };
+  const TIERS = [['urgent', 'Urgent — decide today'], ['high', 'High priority'], ['normal', 'Normal'], ['stale', 'Stale — overtaken by events']];
+  const TIER_SHORT = { urgent: 'Urgent', high: 'High', normal: 'Normal', stale: 'Stale' };
+  async function post(method, params) {
+    const res = await fetch('/api/method/' + method, { method: 'POST', body: new URLSearchParams(params), credentials: 'same-origin', signal: controller.signal,
+      headers: { 'X-Frappe-CSRF-Token': frappe.csrf_token, Accept: 'application/json' } });
+    let data = null; try { data = await res.json(); } catch (e) { /* non-JSON */ }
+    if (!res.ok || (data && data.exc)) {
+      let msg = 'HTTP ' + res.status;
+      try { const sm = JSON.parse((data && data._server_messages) || '[]'); if (sm.length) msg = JSON.parse(sm[sm.length - 1]).message || msg; } catch (e) { /* keep */ }
+      throw new Error(String(msg).replace(/<[^>]+>/g, ''));
+    }
+    return data ? data.message : null;
+  }
+  const apItems = () => (S.appr?.items || []);
+  function apVisible() {
+    let xs = apItems().filter(a => (!AP.cat || a.category === AP.cat) && (!AP.tier || (AP.tier === 'routine' ? a.routine : a.priority === AP.tier))
+      && (!S.q || (a.title + ' ' + a.requester + ' ' + a.name + ' ' + a.type_label + ' ' + (a.note || '') + ' ' + a.tags.join(' ')).toLowerCase().includes(S.q.toLowerCase())));
+    const by = { oldest: (a, b) => b.waiting_days - a.waiting_days, value: (a, b) => (b.amount || 0) - (a.amount || 0),
+      deadline: (a, b) => (a.days_to_deadline ?? 9e9) - (b.days_to_deadline ?? 9e9), type: (a, b) => a.type_label.localeCompare(b.type_label) || b.waiting_days - a.waiting_days };
+    if (by[AP.sort]) xs = xs.slice().sort(by[AP.sort]);
+    return xs;
+  }
+  function apSummary(items) {
+    const s = { total: items.length, tiers: { urgent: 0, high: 0, normal: 0, stale: 0 }, categories: {}, value: {}, oldest: 0, routine: 0 };
+    items.forEach(a => { s.tiers[a.priority]++; s.categories[a.category] = (s.categories[a.category] || 0) + 1; if (a.amount && a.currency) s.value[a.currency] = (s.value[a.currency] || 0) + a.amount; s.oldest = Math.max(s.oldest, a.waiting_days || 0); s.routine += a.routine ? 1 : 0; });
+    return s;
+  }
+  function approvals() {
+    const d = S.appr; if (!d) return '';
+    const s = apSummary(apItems()), cats = d.categories || {};
+    const tile = (k, label, v, sub, on) => '<button class="cc-att ' + k + '" data-aptier="' + k + '" aria-pressed="' + !!on + '"><span>' + esc(t(label)) + '</span><strong>' + n0(v) + '</strong><small>' + esc(t(sub)) + '</small></button>';
+    const value = Object.keys(s.value).map(c => money(s.value[c], c)).join(' · ') || '—';
+    let h = '<div class="ap-hero"><div><h3>' + t('Waiting for your decision') + '</h3><p>' + n0(s.total) + ' ' + t('documents') + ' · ' + t('Value awaiting') + ' ' + value + ' · ' + t('Oldest waiting') + ' ' + n0(s.oldest) + ' ' + t('days') + '</p></div>'
+      + '<div class="ap-roles">' + (d.user_roles || []).map(r => pill(r, 'decision')).join(' ') + '</div></div>';
+    h += '<div class="cc-attention ap-tiles">' + tile('urgent', 'Urgent', s.tiers.urgent, 'Deadline within 3 days, in progress or high value', AP.tier === 'urgent')
+      + tile('high', 'High priority', s.tiers.high, 'Deadline within 14 days or significant value', AP.tier === 'high')
+      + tile('routine', 'Routine', s.routine, 'Small requests — safe to approve in bulk', AP.tier === 'routine')
+      + tile('stale', 'Stale', s.tiers.stale, 'Dates already passed — tidy up', AP.tier === 'stale') + '</div>';
+    h += '<div class="ap-toolbar"><div class="cc-chips" role="group" aria-label="Categories"><button data-apcat="" aria-pressed="' + !AP.cat + '">' + t('All') + ' <b>' + n0(s.total) + '</b></button>'
+      + Object.keys(cats).filter(k => s.categories[k]).map(k => '<button data-apcat="' + k + '" aria-pressed="' + (AP.cat === k) + '">' + esc(t(cats[k])) + ' <b>' + n0(s.categories[k]) + '</b></button>').join('') + '</div>'
+      + '<label>' + t('Sort') + ' <select data-apsort>' + [['priority', 'Priority'], ['deadline', 'Nearest deadline'], ['oldest', 'Longest waiting'], ['value', 'Highest value'], ['type', 'Document type']].map(([k, l]) => '<option value="' + k + '"' + (AP.sort === k ? ' selected' : '') + '>' + t(l) + '</option>').join('') + '</select></label></div>';
+    if (AP.tier || AP.cat || S.q) h += '<div class="cc-note">' + t('Filtered view') + ' <button class="cc-link" data-apclear="1">' + t('Show everything') + '</button></div>';
+    if (d.problems && d.problems.length) h += '<div class="cc-note warn">' + t('Some approval sources could not be read:') + ' ' + esc(d.problems.join(', ')) + '</div>';
+    const xs = apVisible();
+    if (!apItems().length) return h + stateBox('', 'Nothing is waiting for your decision', 'New requests appear here as soon as they reach a step your role approves.');
+    if (!xs.length) return h + stateBox('', 'No matching approvals', 'Change the filters or search.');
+    if (AP.sort === 'priority') TIERS.forEach(([k, l]) => { const g = xs.filter(a => a.priority === k); if (g.length) h += '<section class="ap-group ' + k + '"><header><h4>' + esc(t(l)) + '</h4><span>' + n0(g.length) + '</span>' + (g.some(a => a.bulk) ? '<button class="cc-link" data-apselall="' + k + '">' + t('Select routine in this group') + '</button>' : '') + '</header>' + g.map(apCard).join('') + '</section>'; });
+    else h += '<section class="ap-group">' + xs.map(apCard).join('') + '</section>';
+    const sel = apItems().filter(a => AP.sel.has(a.key));
+    if (sel.length) { const v = apSummary(sel).value; h += '<div class="ap-bulkbar" role="region" aria-label="Bulk approval"><span><b>' + n0(sel.length) + '</b> ' + t('selected') + (Object.keys(v).length ? ' · ' + Object.keys(v).map(c => money(v[c], c)).join(' · ') : '') + '</span><span><button class="cc-btn" data-apclearsel="1">' + t('Clear') + '</button> <button class="cc-btn ap-approve" data-apbulk="1">' + icon('check') + t('Approve selected') + ' (' + n0(sel.length) + ')</button></span></div>'; }
+    return h;
+  }
+  function apCard(a) {
+    const deadline = a.deadline ? '<span class="ap-meta-i">' + esc(t(a.deadline_label)) + ' ' + fmtDate(a.deadline) + '</span>' : '';
+    const acts = a.actions.map(x => { const k = x.toLowerCase(); const cls = /approv|accept/.test(k) ? 'ap-approve' : /reject/.test(k) ? 'ap-reject' : /hold/.test(k) ? 'ap-hold' : ''; return '<button class="cc-btn sm ' + cls + '" data-apact="' + esc(a.key) + '" data-apaction="' + esc(x) + '">' + esc(t(x)) + '</button>'; }).join('');
+    return '<article class="ap-card ' + a.priority + (AP.sel.has(a.key) ? ' selected' : '') + '" data-apkey="' + esc(a.key) + '">'
+      + '<div class="ap-check">' + (a.bulk ? '<input type="checkbox" data-apsel="' + esc(a.key) + '" aria-label="' + esc(t('Select for bulk approval')) + '"' + (AP.sel.has(a.key) ? ' checked' : '') + '>' : '') + '</div>'
+      + '<div class="ap-main"><div class="ap-top">' + pill(TIER_SHORT[a.priority], a.priority === 'urgent' ? 'critical' : a.priority === 'high' ? 'due_soon' : a.priority === 'stale' ? 'muted' : 'pending') + ' <span class="ap-type">' + esc(t(a.type_label)) + '</span>' + (a.routine ? ' ' + pill('Routine', 'good') : '') + ' <span class="ap-state">' + esc(a.state) + '</span></div>'
+      + '<h4 class="ap-title">' + esc(a.title) + '</h4>'
+      + '<div class="ap-meta">' + (a.requester && a.requester !== a.title ? '<span class="ap-meta-i">' + esc(a.requester) + '</span>' : '') + '<span class="ap-meta-i">' + fmtDate(a.date) + '</span><span class="ap-meta-i' + (a.waiting_days >= 30 ? ' warn-text' : '') + '">' + t('Waiting') + ' ' + n0(a.waiting_days) + ' ' + t('days') + '</span>' + deadline + (a.company ? '<span class="ap-meta-i">' + esc(a.company) + '</span>' : '') + '<bdi class="ap-meta-i muted">' + esc(a.name) + '</bdi></div>'
+      + (a.why.length ? '<div class="ap-why">' + a.why.map(w => '<span class="ap-reason ' + a.priority + '">' + esc(w) + '</span>').join('') + '</div>' : '')
+      + (a.tags.length ? '<div class="ap-tags">' + a.tags.map(x => '<span>' + esc(t(x)) + '</span>').join('') + '</div>' : '')
+      + (a.facts.length ? '<dl class="ap-facts">' + a.facts.slice(0, 5).map(f => '<div><dt>' + esc(t(f[0])) + '</dt><dd>' + (typeof f[1] === 'number' ? money(f[1], a.currency) : esc(f[1])) + '</dd></div>').join('') + '</dl>' : '')
+      + (a.note ? '<p class="ap-note">' + esc(String(a.note).replace(/<[^>]+>/g, ' ')) + '</p>' : '') + '</div>'
+      + '<div class="ap-side">' + (a.amount != null ? '<div class="ap-amount"><small>' + esc(t(a.amount_label)) + '</small><strong>' + money(a.amount, a.currency) + '</strong>' + (a.amount_basis && a.currency ? '<small class="muted">' + esc(a.amount_basis) + '</small>' : '') + '</div>' : '')
+      + '<div class="ap-actions">' + acts + '<button class="cc-btn sm ghost" data-apopen="' + esc(a.key) + '">' + t('Details') + '</button></div>' + (a.conditional ? '<small class="muted">' + t('A rule in the ERP decides the final check.') + '</small>' : '') + '</div></article>';
+  }
+  function apDrawer() {
+    const a = AP.open && apItems().find(x => x.key === AP.open); if (!a) return '';
+    const dd = AP.detail[a.key];
+    const txt = v => { try { return new DOMParser().parseFromString(String(v), 'text/html').body.textContent || ''; } catch (e) { return String(v); } };
+    let body = '<div class="ap-why">' + a.why.map(w => '<span class="ap-reason ' + a.priority + '">' + esc(w) + '</span>').join('') + '</div>';
+    if (a.amount != null) body += '<div class="ap-amount big"><small>' + esc(t(a.amount_label)) + '</small><strong>' + money(a.amount, a.currency) + '</strong></div>';
+    if (!dd) body += stateBox('', 'Loading…');
+    else if (dd.error) body += stateBox('restricted', 'Details unavailable', dd.error);
+    else {
+      body += '<dl>' + dd.fields.filter(f => !/^(Workflow State|Amended From)$/.test(f.label)).map(f => '<dt>' + esc(f.label) + '</dt><dd>' + (/Attach/.test(f.type) ? '<a href="' + esc(f.value) + '" target="_blank" rel="noopener">' + t('Open attachment') + '</a>' : f.type === 'Check' ? '✓' : esc(txt(f.value)).slice(0, 1500)) + '</dd>').join('') + '</dl>';
+      dd.tables.forEach(tb => { body += '<h4 class="ap-sub">' + esc(tb.label) + ' · ' + tb.rows.length + '</h4><div class="cc-table-wrap"><table><thead><tr>' + tb.columns.map(c => '<th>' + esc(c.label) + '</th>').join('') + '</tr></thead><tbody>' + tb.rows.map(r => '<tr>' + tb.columns.map(c => '<td' + (/Currency|Float|Int/.test(c.type) ? ' class="num"' : '') + '>' + esc(r[c.field]) + '</td>').join('') + '</tr>').join('') + '</tbody></table></div>'; });
+      if (dd.comments.length) body += '<h4 class="ap-sub">' + t('Recent comments') + '</h4><ul class="ap-comments">' + dd.comments.map(c => '<li><b>' + esc(c.by) + '</b> <small>' + esc(c.when) + '</small><p>' + esc(txt(c.content)) + '</p></li>').join('') + '</ul>';
+      body += '<p class="cc-basis">' + t('Created by') + ' ' + esc(dd.created_by) + ' · ' + esc(dd.created) + ' · ' + t('Last change') + ' ' + esc(dd.modified_by) + ' · ' + esc(dd.modified) + '</p>';
+    }
+    const acts = a.actions.map(x => { const k = x.toLowerCase(); const cls = /approv|accept/.test(k) ? 'ap-approve' : /reject/.test(k) ? 'ap-reject' : /hold/.test(k) ? 'ap-hold' : ''; return '<button class="cc-btn ' + cls + '" data-apact="' + esc(a.key) + '" data-apaction="' + esc(x) + '">' + esc(t(x)) + '</button>'; }).join('');
+    return '<div class="cc-backdrop" data-apclose="1"></div><aside class="cc-drawer ap-drawer" role="dialog" aria-modal="true" aria-labelledby="ap-dt"><header><div><p class="muted">' + esc(t(a.type_label)) + ' · <bdi>' + esc(a.name) + '</bdi></p><h3 id="ap-dt">' + esc(a.title) + '</h3><p class="muted">' + esc(a.requester) + ' · ' + esc(a.state) + '</p></div><button class="cc-close" data-apclose="1" aria-label="' + t('Close') + '">×</button></header>'
+      + '<div class="cc-drawer-body">' + body + '</div><footer>' + acts + '<button class="cc-btn ghost" data-apform="' + esc(a.key) + '">' + icon('open') + t('Open full form') + '</button></footer></aside>';
+  }
+  function apModal() {
+    const c = AP.confirm; if (!c) return '';
+    const n = c.items.length, reject = /reject/i.test(c.action), done = c.done.length + c.failed.length;
+    const list = c.items.slice(0, 8).map(a => '<li><b>' + esc(a.title) + '</b> <small class="muted">' + esc(t(a.type_label)) + ' · <bdi>' + esc(a.name) + '</bdi></small>' + (a.amount != null ? ' <span class="num">' + money(a.amount, a.currency) + '</span>' : '') + '</li>').join('') + (n > 8 ? '<li class="muted">… ' + t('and') + ' ' + n0(n - 8) + ' ' + t('more') + '</li>' : '');
+    let body;
+    if (c.finished) body = '<p><b>' + n0(c.done.length) + '</b> ' + t('completed') + (c.failed.length ? ', <b class="bad-text">' + n0(c.failed.length) + '</b> ' + t('failed') : '') + '.</p>' + (c.failed.length ? '<ul class="ap-fail">' + c.failed.map(f => '<li><b>' + esc(f.item.name) + '</b>: ' + esc(f.error) + '</li>').join('') + '</ul>' : '');
+    else body = '<ul class="ap-confirm-list">' + list + '</ul><label class="ap-reason-box">' + (reject ? t('Reason for rejection (required, added as a comment)') : t('Comment (optional, added to the document)')) + '<textarea data-apcomment rows="3"' + (c.running ? ' disabled' : '') + '>' + esc(c.comment || '') + '</textarea></label>'
+      + (c.running ? '<p role="status">' + t('Working…') + ' ' + n0(done) + ' / ' + n0(n) + '</p><div class="cc-bar"><i style="width:' + Math.round(100 * done / n) + '%"></i></div>' : '')
+      + '<p class="cc-basis">' + t('Applied through the ERP workflow with your own permissions, exactly like the button on the form. It is recorded in each document\'s history.') + '</p>';
+    const btn = c.finished ? '<button class="cc-btn primary" data-apdone="1">' + t('Done') + '</button>'
+      : '<button class="cc-btn" data-apcancel="1"' + (c.running ? ' disabled' : '') + '>' + t('Cancel') + '</button><button class="cc-btn ' + (reject ? 'ap-reject solid' : /hold/i.test(c.action) ? 'ap-hold solid' : 'ap-approve') + '" data-apgo="1"' + (c.running ? ' disabled' : '') + '>' + esc(t(c.action)) + (n > 1 ? ' ' + n0(n) : '') + '</button>';
+    return '<div class="cc-backdrop ap-modal-bg"></div><div class="ap-modal" role="alertdialog" aria-modal="true" aria-labelledby="ap-mt"><h3 id="ap-mt">' + esc(t(c.action)) + ' · ' + n0(n) + ' ' + (n === 1 ? t('document') : t('documents')) + '</h3>' + body + '<footer>' + btn + '</footer></div>';
+  }
+  async function apRun() {
+    const c = AP.confirm; if (!c || c.running) return;
+    c.comment = (host.querySelector('[data-apcomment]')?.value || '').trim();
+    if (/reject/i.test(c.action) && !c.comment) { frappe.show_alert ? frappe.show_alert({ message: t('Please give a reason for rejecting.'), indicator: 'red' }) : alert(t('Please give a reason for rejecting.')); host.querySelector('[data-apcomment]')?.focus(); return; }
+    c.running = true; render();
+    for (const a of c.items) {
+      const action = c.bulk ? a.approve_action : c.action;
+      const who = (frappe.session && frappe.session.user) || '', whoName = (frappe.session && (frappe.session.user_fullname || frappe.session.user)) || '';
+      const comment = () => post('frappe.desk.form.utils.add_comment', { reference_doctype: a.doctype, reference_name: a.name, content: esc(action + ' — CEO Command Centre: ' + c.comment), comment_email: who, comment_by: whoName });
+      try {
+        // A rejection reason is saved first: if it cannot be recorded, the rejection is not applied.
+        if (c.comment && /reject/i.test(action)) await comment();
+        await post('frappe.model.workflow.apply_workflow', { doc: JSON.stringify({ doctype: a.doctype, name: a.name }), action });
+        if (c.comment && !/reject/i.test(action)) { try { await comment(); } catch (e) { c.failed.push({ item: a, error: t('Decision applied, but the comment could not be saved:') + ' ' + (e.message || e) }); } }
+        c.done.push(a);
+      } catch (e) { c.failed.push({ item: a, error: e.message || String(e) }); }
+      if (disposed) return;
+      render();
+    }
+    const doneKeys = new Set(c.done.map(a => a.key));
+    S.appr.items = S.appr.items.filter(a => !doneKeys.has(a.key)); doneKeys.forEach(k => AP.sel.delete(k));
+    if (AP.open && doneKeys.has(AP.open)) AP.open = null;
+    S.overview = null; S.dept = {};
+    c.running = false; c.finished = true; render();
+  }
+  function apStart(items, action, bulk) { AP.confirm = { items, action, bulk: !!bulk, done: [], failed: [], comment: '' }; render(); setTimeout(() => host.querySelector('.ap-modal textarea, .ap-modal [data-apgo]')?.focus(), 0); }
+  async function apOpen(key) {
+    AP.open = key; render(); host.querySelector('.ap-drawer .cc-close')?.focus();
+    const a = apItems().find(x => x.key === key); if (!a || AP.detail[key]) return;
+    try { AP.detail[key] = await call('approval_detail', { doctype: a.doctype, name: a.name }); } catch (e) { AP.detail[key] = { error: e.message }; }
+    if (AP.open === key) render();
+  }
+  function apClick(el, d) {
+    if (d.apcat !== undefined) { AP.cat = d.apcat; render(); return true; }
+    if (d.aptier) { AP.tier = AP.tier === d.aptier ? '' : d.aptier; render(); return true; }
+    if (d.apclear) { AP.cat = ''; AP.tier = ''; S.q = ''; render(); return true; }
+    if (d.apselall) { apItems().filter(a => a.priority === d.apselall && a.bulk).forEach(a => AP.sel.add(a.key)); render(); return true; }
+    if (d.apclearsel) { AP.sel.clear(); render(); return true; }
+    if (d.apbulk) { const xs = apItems().filter(a => AP.sel.has(a.key) && a.bulk); if (xs.length) apStart(xs, 'Approve', true); return true; }
+    if (d.apact) { const a = apItems().find(x => x.key === d.apact); if (a) apStart([a], d.apaction, false); return true; }
+    if (d.apopen) { apOpen(d.apopen); return true; }
+    if (d.apclose) { AP.open = null; render(); return true; }
+    if (d.apform) { const a = apItems().find(x => x.key === d.apform); if (a) frappe.set_route('Form', a.doctype, a.name); return true; }
+    if (d.apcancel) { AP.confirm = null; render(); return true; }
+    if (d.apgo) { apRun(); return true; }
+    if (d.apdone) { const c = AP.confirm; AP.confirm = null; AP.toast = c ? n0(c.done.length) + ' ' + t(c.done.length === 1 ? 'decision applied' : 'decisions applied') + (c.failed.length ? ' · ' + n0(c.failed.length) + ' ' + t('failed') : '') : ''; render(); setTimeout(() => { AP.toast = ''; if (!disposed) render(); }, 4000); return true; }
+    return false;
+  }
+
   /* ───────── Render ───────── */
   function render() {
     if (disposed) return;
@@ -410,11 +590,12 @@
     const keepFocus = host.querySelector(':focus')?.matches?.('[data-search]');
     let h = header() + tabs() + '<div class="cc-workspace">' + filters() + scope();
     h += S.notices.map(n => '<div class="cc-note warn">' + esc(n) + ' <button class="cc-link" data-action="dismiss">OK</button></div><br>').join('');
-    const d = S.tab === 'overview' ? S.overview : S.dept[S.tab];
+    const d = S.tab === 'overview' ? S.overview : S.tab === 'approvals' ? S.appr : S.dept[S.tab];
     if (S.error) h += stateBox(/permission|access/i.test(S.error) ? 'restricted' : 'error', /permission|access/i.test(S.error) ? 'Permission restricted' : 'Source unavailable', S.error) + '<p style="text-align:center;margin-top:10px"><button class="cc-btn" data-action="refresh">' + t('Retry') + '</button></p>';
     else if (S.busy && !d) h += '<div class="cc-skel" role="status" aria-label="' + t('Loading…') + '"><i></i><i></i><i></i></div>';
-    else if (d) h += '<main class="cc-view" aria-busy="' + S.busy + '">' + (S.tab === 'overview' ? overview() : department()) + '</main>';
-    h += '<p class="cc-footnote">Read-only. Actions include all open work regardless of the performance period. Unavailable, restricted or unconfigured sources are labelled, never shown as zero. Policy ' + esc(S.boot?.policy?.version || '') + ': stalled = ' + esc(S.boot?.policy?.stale_days || 14) + ' days without change; receivables follow-up after ' + esc(S.boot?.policy?.ar_followup_days || 60) + ' days overdue.</p></div>' + drawer();
+    else if (d) h += '<main class="cc-view" aria-busy="' + S.busy + '">' + (S.tab === 'overview' ? overview() : S.tab === 'approvals' ? approvals() : department()) + '</main>';
+    h += S.tab === 'approvals' ? '<p class="cc-footnote">' + t('Decisions are applied through the ERP workflow with your own permissions, exactly like the button on each form, and are recorded in the document history. Priority rules: urgent = deadline within 3 days, in progress or value ≥ 50,000; high = deadline within 14 days or value ≥ 10,000; routine = requests under 1,000; stale = dates already passed.') + '</p></div>' + apDrawer() + apModal() + (AP.toast ? '<div class="ap-toast" role="status">' + esc(AP.toast) + '</div>' : '') : '';
+    if (S.tab !== 'approvals') h += '<p class="cc-footnote">Read-only. Actions include all open work regardless of the performance period. Unavailable, restricted or unconfigured sources are labelled, never shown as zero. Policy ' + esc(S.boot?.policy?.version || '') + ': stalled = ' + esc(S.boot?.policy?.stale_days || 14) + ' days without change; receivables follow-up after ' + esc(S.boot?.policy?.ar_followup_days || 60) + ' days overdue.</p></div>' + drawer();
     host.innerHTML = h;
     host.setAttribute('dir', S.lang === 'ar' ? 'rtl' : 'ltr'); host.setAttribute('lang', S.lang); host.classList.toggle('cc-rtl', S.lang === 'ar');
     const bar = host.querySelector('.cc-tabs'); if (bar) { bar.parentElement.classList.toggle('overflow', bar.scrollWidth > bar.clientWidth + 4); bar.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); }
@@ -426,16 +607,19 @@
   /* ───────── Events ───────── */
   function switchTab(k) { if (k === S.tab) return; S.tab = k; S.page = 0; S.queueAll = false; S.allRows = null; if (k !== 'overview' && !['actions', 'performance', 'upcoming', 'checks'].includes(S.sub)) S.sub = 'actions'; persist(); load(); }
   host.addEventListener('click', ev => {
+    if (ev.target.matches('[data-apsel]')) return;
+    if (!ev.target.closest('button, a, input, select, textarea, label')) { const card = ev.target.closest('.ap-card'); if (card && host.contains(card)) { apOpen(card.dataset.apkey); return; } }
     const el = ev.target.closest('button, a, tr[data-key], tr[data-dept]'); if (!el || !host.contains(el)) return;
     const d = el.dataset;
     if (el.tagName === 'A') return;
+    if (apClick(el, d)) return;
     if (d.tab) return switchTab(d.tab);
     if (d.scroll) { host.querySelector('.cc-tabs').scrollBy({ left: Number(d.scroll) * 240 * (S.lang === 'ar' ? -1 : 1), behavior: 'smooth' }); return; }
     if (d.dept && el.tagName === 'TR') return switchTab(d.dept);
     if (d.open) { ev.stopPropagation(); const a = ROWS.get(d.open); if (a) { if (a.bundle || !a.name || a.type === 'data_check' || a.type === 'source_state') openDrawer(a); else frappe.set_route('Form', a.doctype, a.name); } return; }
     if (d.list) { ev.stopPropagation(); openList(ROWS.get(d.list)?.list); return; }
     if (d.key && el.tagName === 'TR') { const a = ROWS.get(d.key); if (a) openDrawer(a); return; }
-    if (d.att) { const k = d.att; if (k === 'decision') { S.group = 'decision'; S.severity = ''; } else { S.severity = S.severity === k ? '' : k; S.group = k === 'critical' ? 'escalation' : (k === 'overdue' ? S.group || 'escalation' : S.group || 'followup'); } S.queueAll = false; S.page = 0; render(); return; }
+    if (d.att) { const k = d.att; if (k === 'decision') { switchTab('approvals'); return; } else { S.severity = S.severity === k ? '' : k; S.group = k === 'critical' ? 'escalation' : (k === 'overdue' ? S.group || 'escalation' : S.group || 'followup'); } S.queueAll = false; S.page = 0; render(); return; }
     if (d.group !== undefined) { S.group = d.group; S.page = 0; if (S.queueAll) loadAll(); else render(); return; }
     if (d.sub) { S.sub = d.sub; S.page = 0; persist(); render(); return; }
     if (d.page) { S.page = Math.max(0, S.page + Number(d.page)); if (S.tab === 'overview' && S.queueAll) loadAll(); else render(); return; }
@@ -445,7 +629,7 @@
     if (d.routeList) { openList(S.drawer.list); return; }
     if (d.related) { const [dt, nm] = d.related.split('|'); frappe.set_route('Form', dt, nm); return; }
     switch (d.action) {
-      case 'refresh': S.dept = {}; S.overview = S.tab === 'overview' ? S.overview : null; S.drill = {}; load(true); break;
+      case 'refresh': S.dept = {}; S.overview = S.tab === 'overview' ? S.overview : null; if (S.tab !== 'approvals') S.appr = null; S.drill = {}; load(true); break;
       case 'lang': S.lang = S.lang === 'ar' ? 'en' : 'ar'; persist(); render(); break;
       case 'close': S.drawer = null; render(); break;
       case 'view-all': S.queueAll = true; S.page = 0; if (!S.group) S.group = S.overview.counts_by_group.decision ? 'decision' : 'escalation'; loadAll(); break;
@@ -454,7 +638,12 @@
       case 'dismiss': S.notices = []; render(); break;
     }
   }, { signal: controller.signal });
-  document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && S.drawer) { S.drawer = null; render(); } }, { signal: controller.signal });
+  document.addEventListener('keydown', ev => {
+    if (ev.key !== 'Escape') return;
+    if (AP.confirm && !AP.confirm.running) { AP.confirm = null; render(); }
+    else if (AP.open) { AP.open = null; render(); }
+    else if (S.drawer) { S.drawer = null; render(); }
+  }, { signal: controller.signal });
   host.addEventListener('submit', ev => {
     ev.preventDefault();
     const f = ev.target, from = f.querySelector('[data-f="from"]').value, to = f.querySelector('[data-f="to"]').value;
@@ -465,7 +654,9 @@
   }, { signal: controller.signal });
   host.addEventListener('change', ev => {
     const el = ev.target;
-    if (el.matches('[data-sev]')) { S.severity = el.value; S.page = 0; render(); }
+    if (el.matches('[data-apsort]')) { AP.sort = el.value; render(); }
+    else if (el.matches('[data-apsel]')) { el.checked ? AP.sel.add(el.dataset.apsel) : AP.sel.delete(el.dataset.apsel); render(); }
+    else if (el.matches('[data-sev]')) { S.severity = el.value; S.page = 0; render(); }
     else if (el.matches('[data-owner]')) { S.owner = el.value; S.page = 0; render(); }
   }, { signal: controller.signal });
   host.addEventListener('input', ev => {
