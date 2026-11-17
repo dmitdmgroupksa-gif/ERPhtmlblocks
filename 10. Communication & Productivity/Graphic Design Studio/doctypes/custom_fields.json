@@ -1,0 +1,53 @@
+[
+ {
+  "dt": "Employee",
+  "fieldname": "custom_design_section",
+  "fieldtype": "Section Break",
+  "label": "Design",
+  "insert_after": "company_email"
+ },
+ {
+  "dt": "Employee",
+  "fieldname": "custom_name_ar",
+  "fieldtype": "Data",
+  "label": "Name (Arabic)",
+  "insert_after": "custom_design_section"
+ },
+ {
+  "dt": "Employee",
+  "fieldname": "custom_name_ar_verified",
+  "fieldtype": "Check",
+  "label": "Arabic name verified",
+  "insert_after": "custom_name_ar"
+ },
+ {
+  "dt": "Employee",
+  "fieldname": "custom_design_brands",
+  "fieldtype": "Table MultiSelect",
+  "label": "Design brands",
+  "insert_after": "custom_name_ar_verified",
+  "options": "Employee Allowed Brand"
+ },
+ {
+  "dt": "Employee",
+  "fieldname": "custom_signature_brand",
+  "fieldtype": "Link",
+  "label": "Email signature brand",
+  "insert_after": "custom_design_brands",
+  "options": "Design Brand"
+ },
+ {
+  "dt": "Designation",
+  "fieldname": "custom_designation_ar",
+  "fieldtype": "Data",
+  "label": "Designation (Arabic)",
+  "insert_after": "designation_name"
+ },
+ {
+  "dt": "Designation",
+  "fieldname": "custom_designation_ar_verified",
+  "fieldtype": "Check",
+  "label": "Arabic designation verified",
+  "insert_after": "custom_designation_ar"
+ }
+]

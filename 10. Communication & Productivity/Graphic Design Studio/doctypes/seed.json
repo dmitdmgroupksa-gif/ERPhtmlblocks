@@ -1,0 +1,46 @@
+{
+ "roles": [
+  "Design Manager"
+ ],
+ "brands": [
+  {
+   "brand_name": "DM Group",
+   "sort_order": 1,
+   "erp_company": "Durar Masagh Trading Company",
+   "website": "www.dmgroupksa.com",
+   "phone": "+966 11 - 241 4446",
+   "fax": "+966 11 - 241 0523",
+   "address_en": "3314 Al-Madina Al-Munawwara Road - Al Farooq Dist - Riyadh 12864-6375",
+   "address_ar": "٣٣١٤ – طريق المدينة المنورة حي الفاروق الرياض ١٢٨٦٤ – ٦٣٧٥",
+   "aramco_vid": "10064669",
+   "sabic_vid": "11047016"
+  },
+  {
+   "brand_name": "Najd",
+   "sort_order": 2,
+   "erp_company": "Najd Scaffolding Trading Company"
+  },
+  {
+   "brand_name": "Qimsco",
+   "sort_order": 3
+  },
+  {
+   "brand_name": "FCrystal",
+   "sort_order": 4
+  },
+  {
+   "brand_name": "DMCC",
+   "sort_order": 5,
+   "erp_company": "Durar Masagh Contracting Co."
+  },
+  {
+   "brand_name": "Asas",
+   "sort_order": 6,
+   "erp_company": "Asas Al Daam Rental Equipment Co."
+  }
+ ],
+ "settings": {
+  "default_brand": "DM Group",
+  "notify_designer_on_new": 1
+ }
+}
