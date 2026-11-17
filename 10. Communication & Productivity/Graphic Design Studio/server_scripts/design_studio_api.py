@@ -436,7 +436,204 @@ def arabic_save(data):
     return {"ok": True}
 
 
+# ---------------------------------------------------------------- requests: shared
+
+REQUEST_TYPES = ["Flyer", "Banner", "Social post", "Signage", "Presentation", "Printed business cards", "Other"]
+PRIORITIES = ["Low", "Normal", "High", "Urgent"]
+REQUEST_FIELDS = ["name", "title", "request_type", "brand", "needed_by", "priority", "status", "designer_note", "delivered_on",
+                  "modified", "creation", "requested_by", "employee", "employee_name", "notified", "notify_error", "change_note"]
+
+
+def esc(value):
+    return frappe.utils.escape_html(value or "")
+
+
+def user_email(user):
+    return frappe.db.get_value("User", user, "email") if user else None
+
+
+def send_mail(recipients, subject, english, arabic, name):
+    # english / arabic are lists of already-escaped HTML paragraphs. Raises if ERP cannot queue the email.
+    link = frappe.utils.get_url_to_form("Design Request", name)
+    body = "<div>" + "".join(["<p>" + p + "</p>" for p in english]) + "</div>"
+    body = body + "<div dir=\"rtl\" lang=\"ar\">" + "".join(["<p>" + p + "</p>" for p in arabic]) + "</div>"
+    body = body + "<p><a href=\"" + esc(link) + "\">" + esc(name) + "</a></p>"
+    frappe.sendmail(recipients=recipients, subject=subject, message=body, reference_doctype="Design Request", reference_name=name)
+
+
+def notify_designer(subject, english, arabic, name):
+    # Best effort: a request must never fail because the designer could not be emailed.
+    email = user_email(settings_value("designer"))
+    if not email:
+        return
+    try:
+        send_mail([email], subject, english, arabic, name)
+    except Exception:
+        frappe.log_error("Design Studio: designer email failed for " + name)
+
+
+def request_doc(name):
+    if not name or not frappe.db.exists("Design Request", name):
+        fail("Request not found.")
+    return frappe.get_doc("Design Request", name)
+
+
+def require_requester(doc):
+    require(doc.requested_by == USER, "This is not your request.")
+
+
+def require_requester_or_designer(doc):
+    require(doc.requested_by == USER or is_designer(USER), "This is not your request.")
+
+
+def file_rows(doc):
+    return [{"kind": f.kind, "file": f.file, "note": f.note, "added_on": f.added_on} for f in (doc.get("files") or [])]
+
+
+def request_row(doc_or_row, files):
+    out = {}
+    for field in REQUEST_FIELDS:
+        out[field] = doc_or_row.get(field)
+    out["files"] = files
+    return out
+
+
+def timeline(name):
+    rows = frappe.get_all("Comment", filters={"reference_doctype": "Design Request", "reference_name": name, "comment_type": "Comment"},
+                          fields=["owner", "creation", "content"], order_by="creation asc")
+    return [{"by": frappe.get_fullname(r["owner"]), "at": r["creation"], "text": r["content"]} for r in rows]
+
+
+def clean_text(value, label, low, high):
+    text = (value or "").strip()
+    if len(text) < low or len(text) > high:
+        fail(label + " must be " + str(low) + " to " + str(high) + " characters.")
+    return text
+
+
+# ---------------------------------------------------------------- requests: requester side
+
+def request_submit(data):
+    employee = employee_of(USER)
+    if not employee:
+        fail("Design requests need an ERP user linked to your employee record. Ask HR.")
+    allowed = allowed_brands(USER, employee)
+    brand = data.get("brand") or (allowed[0] if len(allowed) == 1 else None)
+    if brand not in allowed:
+        fail("Choose one of your brands.")
+    title = clean_text(data.get("title"), "Title", 3, 140)
+    brief = clean_text(data.get("brief"), "The brief", 10, 4000)
+    if data.get("request_type") not in REQUEST_TYPES:
+        fail("Choose a request type.")
+    priority = data.get("priority") or "Normal"
+    if priority not in PRIORITIES:
+        fail("Choose a priority.")
+    needed_by = data.get("needed_by") or None
+    if needed_by and str(frappe.utils.getdate(needed_by)) < frappe.utils.nowdate():
+        fail("The needed-by date cannot be in the past.")
+    doc = frappe.get_doc({"doctype": "Design Request", "title": title, "request_type": data.get("request_type"), "brand": brand,
+                          "needed_by": needed_by, "priority": priority, "brief": brief, "requested_by": USER,
+                          "employee": employee["name"], "employee_name": employee["employee_name"], "status": "Submitted"})
+    doc.insert(ignore_permissions=True)
+    if settings_value("notify_designer_on_new"):
+        notify_designer("New design request " + doc.name + ": " + title,
+                        [esc(employee["employee_name"]) + " asked for a " + esc(data.get("request_type")).lower() + " (" + esc(brand) + ", " + esc(priority) + ").",
+                         "<b>" + esc(title) + "</b>", esc(brief).replace("\n", "<br>"), "Needed by: " + esc(needed_by or "not set")],
+                        ["طلب تصميم جديد من " + esc(employee["employee_name"]) + ".", "<b>" + esc(title) + "</b>"], doc.name)
+    return {"name": doc.name}
+
+
+def my_requests(data):
+    filters = {"requested_by": USER}
+    if data.get("status"):
+        filters["status"] = data.get("status")
+    out = []
+    for r in frappe.get_all("Design Request", filters=filters, fields=["name"], order_by="creation desc"):
+        doc = frappe.get_doc("Design Request", r["name"])
+        out.append(request_row(doc, file_rows(doc)))
+    return out
+
+
+def request_get(data):
+    doc = request_doc(data.get("name"))
+    require_requester_or_designer(doc)
+    row = request_row(doc, file_rows(doc))
+    row["brief"] = doc.brief
+    row["timeline"] = timeline(doc.name)
+    return row
+
+
+def request_attach(data):
+    doc = request_doc(data.get("name"))
+    kind = data.get("kind")
+    if kind not in ("Reference", "Delivery"):
+        fail("Choose Reference or Delivery.")
+    if is_designer(USER):
+        pass
+    else:
+        require_requester(doc)
+        require(kind == "Reference", "Only the designer can add finished files.")
+        if doc.status not in ("Submitted", "Needs info", "In progress"):
+            fail("Files can only be added before the design is delivered.")
+    url = data.get("file_url")
+    if not url or not frappe.db.exists("File", {"file_url": url, "attached_to_doctype": "Design Request", "attached_to_name": doc.name}):
+        fail("That file is not attached to this request.")
+    doc.append("files", {"kind": kind, "file": url, "note": (data.get("note") or "").strip()[:140], "added_by": USER,
+                         "added_on": frappe.utils.now()})
+    doc.save(ignore_permissions=True)
+    return {"files": file_rows(doc)}
+
+
+def request_cancel(data):
+    doc = request_doc(data.get("name"))
+    require_requester(doc)
+    if doc.status != "Submitted":
+        fail("Only a Submitted request can be cancelled.")
+    doc.status = "Cancelled"
+    doc.save(ignore_permissions=True)
+    return {"status": doc.status}
+
+
+def request_reply(data):
+    doc = request_doc(data.get("name"))
+    require_requester(doc)
+    if doc.status != "Needs info":
+        fail("You can reply only when the designer marked the request Needs info.")
+    text = clean_text(data.get("text"), "Your reply", 1, 2000)
+    doc.status = "Submitted"
+    doc.save(ignore_permissions=True)
+    doc.add_comment("Comment", text)
+    notify_designer("Reply on " + doc.name + ": " + doc.title, [esc(doc.employee_name) + " replied:", esc(text).replace("\n", "<br>")],
+                    ["رد من " + esc(doc.employee_name) + "."], doc.name)
+    return {"status": doc.status}
+
+
+def request_changes(data):
+    doc = request_doc(data.get("name"))
+    require_requester(doc)
+    if doc.status != "Delivered":
+        fail("Changes can be requested only after the design is delivered.")
+    note = (data.get("note") or "").strip()
+    if not note:
+        fail("Add a note saying what should change.")
+    doc.status = "Submitted"
+    doc.change_note = note[:2000]
+    doc.save(ignore_permissions=True)
+    doc.add_comment("Comment", "Changes requested: " + note)
+    notify_designer("Changes requested on " + doc.name + ": " + doc.title,
+                    [esc(doc.employee_name) + " asked for changes:", esc(note).replace("\n", "<br>")],
+                    ["طلب تعديل من " + esc(doc.employee_name) + "."], doc.name)
+    return {"status": doc.status}
+
+
 ACTIONS = {
+    "request_submit": request_submit,
+    "my_requests": my_requests,
+    "request_get": request_get,
+    "request_attach": request_attach,
+    "request_cancel": request_cancel,
+    "request_reply": request_reply,
+    "request_changes": request_changes,
     "bootstrap": bootstrap,
     "access_get": access_get,
     "access_set": access_set,
