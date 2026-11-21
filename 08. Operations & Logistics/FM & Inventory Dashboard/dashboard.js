@@ -1,1833 +1,1369 @@
-/* =====================================================================
-   FM · Inventory · Finance Dashboard — Frappe Custom HTML Block (JS field)
-   `root_element` is provided by Frappe (the block's shadow root).
-
-   Sources (exact doctypes / fieldnames verified on your ERPNext):
-   FM         : DM Facilities Management (facility_detail, facility_name, facility_type,
-                facility_contract_status, agreement_type, date_frm, rentdate_to, lease_start,
-                lease_end, rent_amount, amount_intallments, installment_1..4_dues_on, paid1..4_not,
-                com_lic_exp, cr_date_to, cd_date_to, national_adress_expiry, fire_expiry,
-                cleanig_exp_date, camera_expiry, industrial_expiry, …) · Asset · Asset Repair
-   Inventory  : Bin · Warehouse · Item · Stock Ledger Entry (last movement)
-   Finance    : Sales Invoice · Purchase Invoice · Account · GL Entry · Payment Entry
-   ===================================================================== */
+/* ===== DM Group KSA — FM, Inventory & Finance — SCRIPT field · v6 =====
+   Aligns the v5 redesign (17 Nov 2026) with the DM dashboard standard. v5's data layer, rules, thresholds, speed work and
+   per-user cache are kept; the shell, tables and drawer move onto the shared kit, and one currency per view is added.
+   Read-only. Sources (frappe.client.get_list, the user's own permissions):
+   FM        : DM Facilities Management · Asset · Asset Repair
+   Inventory : Bin · Warehouse · Item · Stock Ledger Entry (last movement in 30 / 90 / 180 / 365-day windows; the site rejects max())
+   Finance   : Sales Invoice · Purchase Invoice · Account · GL Entry (grouped) · Payment Entry (grouped) · Company
+   The shared runtime between the "DMS kit" markers is generated from tools/erp/kit/dms-kit.js (edit the kit, not the copy). */
 (function () {
   'use strict';
+  var APP = {
+    key: '__dmsFmInv',
+    period: 'ytd',
+    tabs: [
+      { id: 'overview', en: 'Overview', ar: 'نظرة عامة' }, { id: 'fm', en: 'Facilities', ar: 'المرافق' }, { id: 'inventory', en: 'Inventory', ar: 'المخزون' },
+      { id: 'finance', en: 'Finance', ar: 'المالية' }, { id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }
+    ],
+    filters: [
+      { k: 'company', en: 'Company', ar: 'الشركة', none: ['All system-currency companies', 'كل شركات عملة النظام'], options: function () { return (REF.co || []).map(function (c) { return { v: c.name, l: c.name + (c.default_currency && c.default_currency !== CUR ? ' (' + c.default_currency + ')' : '') }; }); } },
+      { k: 'q', en: 'Search', ar: 'بحث', type: 'text', ph: ['Facility, item, party or document', 'المرفق أو الصنف أو الطرف أو المستند'] }
+    ],
+    sources: ['fm', 'inv', 'fin'],
+    dtLabels: { 'DM Facilities Management': ['Facility', 'مرفق'], 'Item': ['Item', 'صنف'], 'Sales Invoice': ['Sales invoice', 'فاتورة مبيعات'], 'Purchase Invoice': ['Purchase invoice', 'فاتورة شراء'], 'Account': ['Account', 'حساب'] },
+    title: function () { return tr('FM, Inventory & Finance', 'المرافق والمخزون والمالية'); },
+    stamp: function () { return tr('Facilities, stock and money across DM Group', 'المرافق والمخزون والأموال عبر مجموعة DM'); },
+    periodNote: function () { return tr('The period applies to revenue, expenses and payments (the last 12 months are loaded). Balances, stock and contracts are as of today.', 'الفترة تطبق على الإيرادات والمصروفات والمدفوعات (تحمّل آخر 12 شهرًا). الأرصدة والمخزون والعقود حتى اليوم.'); },
+    filterNote: function () { return tr('Search matches facility, item, party and document names.', 'البحث يطابق أسماء المرافق والأصناف والأطراف والمستندات.'); },
+    boot: function () { return boot(); },
+    load: function () { loadAll(); },
+    afterLoad: function (k) { afterLoad(k); },
+    onRefresh: function () { FORCE = true; },
+    onPeriod: function () { renderSoft(); },
+    actions: function () { return actModel(actSpecs(), 'act', actClient()); },
+    banner: function () { return banner(); },
+    content: function (t, AM) { return ({ overview: tabOverview, fm: tabFm, inventory: tabInv, finance: tabFin, actions: tabActions })[t](AM); },
+    drill: function (id) { return drill(id); },
+    onAct: function (a, v, n, id) { return onAct(a, v, n, id); }
+  };
 
-  var root = root_element;
-  var $ = function (s, el) { return (el || root).querySelector(s); };
-  var $$ = function (s, el) { return Array.prototype.slice.call((el || root).querySelectorAll(s)); };
+  /* ==== DMS kit v1 · generated from tools/erp/kit/dms-kit.js by build_kit.py — edit the kit, not this copy ==== */
+  /* Shared runtime for DM dashboards on the standard (toolbar, period, filters, tabs, tables, drill-downs, charts,
+     actions pending). Copied into each dashboard.js by tools/erp/kit/build_kit.py; the dashboard defines `APP` before
+     this block. Read-only helpers: frappe.client.get_list / frappe.desk.query_report.run under the viewer's permissions. */
+  var G = window;
+  var ROOT = (typeof root_element !== 'undefined' && root_element) ? root_element : document;
+  var HOST = ROOT.querySelector('[data-dms-root]');
+  if (!HOST) { return; }
+  if (G[APP.key] && typeof G[APP.key].destroy === 'function') { try { G[APP.key].destroy(); } catch (e) { /* ignore */ } }
+  var abort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  var SIG = abort ? { signal: abort.signal } : false;
+  var timers = [], destroyed = false, GEN = 0, BOOTED = false, LOADED = '';
+  G[APP.key] = { destroy: function () { destroyed = true; GEN++; if (abort) { abort.abort(); } timers.forEach(clearTimeout); timers = []; } };
+  var CFG = Object.assign({ conc: 6, pageSize: 25, modalPage: 15, weekStart: 0 }, APP.cfg || {});
+  var CUR = 'SAR';
+  try { CUR = (frappe.boot.sysdefaults && frappe.boot.sysdefaults.currency) || 'SAR'; } catch (e) { /* default */ }
+  var LANG = 'en';
+  try { var sv = G.localStorage.getItem('dms_lang'); if (sv === 'ar' || sv === 'en') { LANG = sv; } } catch (e) { /* storage unavailable */ }
+  function tr(en, ar) { return LANG === 'ar' ? ar : en; }
 
-  /* ------------------------------------------------------------------
-     1. SETTINGS  (safe to edit)
-     ------------------------------------------------------------------ */
-  var THEME_MODE = 'light';          // 'light' = always white UI · 'auto' = follow ERPNext desk theme
-  var CURRENCY = (window.frappe && frappe.boot && frappe.boot.sysdefaults && frappe.boot.sysdefaults.currency) || 'SAR';
-  var EXPIRY_SOON_DAYS = 90;         // contracts ending within this many days are "expiring"
-  var DOC_SOON_DAYS = 60;            // licences / permits expiring within this many days are flagged
-  var RENT_DUE_DAYS = 30;            // upcoming rent instalments window
-  var DEAD_STOCK_DAYS = 180;         // no stock movement for this long = dead stock
-  var PAYABLE_SOON_DAYS = 7;         // payables due within this many days are "due soon"
+  /* ---------- helpers ---------- */
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function clean(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+  function plain(s, n) { return clean(String(s || '').replace(/<[^>]*>/g, ' ')).slice(0, n || 90); }
+  function $(sel) { return HOST.querySelector(sel); }
+  function later(fn, ms) { var id = setTimeout(function () { if (!destroyed) { fn(); } }, ms); timers.push(id); return id; }
+  function bdi(s) { return '<bdi>' + esc(s) + '</bdi>'; }
+  function num(n) { return (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString('en-US'); }
+  function money(v) {
+    if (v == null || isNaN(v)) { return '—'; }
+    var a = Math.abs(v), s = v < 0 ? '-' : '';
+    if (a >= 1e9) { return s + (a / 1e9).toFixed(2) + 'B'; }
+    if (a >= 1e6) { return s + (a / 1e6).toFixed(2) + 'M'; }
+    if (a >= 1e4) { return s + (a / 1e3).toFixed(1) + 'K'; }
+    return s + Math.round(a).toLocaleString('en-US');
+  }
+  function amt(v) { return (v == null || isNaN(v)) ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function moneyS(v, cur) { return (cur || CUR) + ' ' + money(v); }
+  function moneyB(v, cur) { return '<bdi>' + esc(moneyS(v, cur)) + '</bdi>'; }
+  function moneyFull(v, cur) { return (v == null || isNaN(v)) ? '' : (cur || CUR) + ' ' + amt(v); }
+  function cur$(v, cur) { return '<bdi>' + esc(money(v)) + '<small>' + esc(cur || CUR) + '</small></bdi>'; }
+  function pct(n, d, dp) { return (d > 0 && n != null) ? (n / d * 100).toFixed(dp == null ? 1 : dp) + '%' : tr('N/A', 'غير متاح'); }
+  function sum(arr, f) { var t = 0; for (var i = 0; i < arr.length; i++) { t += (f ? f(arr[i]) : arr[i]) || 0; } return t; }
+  function vals(o) { return Object.keys(o).map(function (k) { return o[k]; }); }
+  function uniq(a) { var m = {}; a.forEach(function (x) { if (x) { m[x] = 1; } }); return Object.keys(m).sort(function (x, y) { return x.localeCompare(y); }); }
+  function rep(s, n) { var o = ''; for (var i = 0; i < n; i++) { o += s; } return o; }
+  function one(r) { return (r && r[0]) || {}; }
+  function groupBy(rows, f) { var m = {}; rows.forEach(function (r) { var k = f(r); (m[k] || (m[k] = [])).push(r); }); return m; }
+  var NAtxt = function () { return tr('Not assigned', 'غير مُعيَّن'); };
 
-  var DOC_DEFS = [                   // licence / compliance expiry fields on DM Facilities Management
-    ['com_lic_exp', 'Commercial licence'],
-    ['cr_date_to', 'Commercial registration (CR)'],
-    ['cd_date_to', 'Civil defence (CD)'],
-    ['national_adress_expiry', 'National address'],
-    ['fire_expiry', 'Fire maintenance contract'],
-    ['cleanig_exp_date', 'Cleaning contract'],
-    ['camera_expiry', 'Camera maintenance contract'],
-    ['industrial_expiry', 'Industrial licence'],
-    ['construction_environmental_permit_expiry', 'Construction environmental permit'],
-    ['operational_environmental_permit_expiry', 'Operational environmental permit']
-  ];
+  /* ---------- dates (ERP site time zone, calendar arithmetic) ---------- */
+  function siteTz() {
+    try {
+      if (G.frappe && frappe.boot) {
+        if (frappe.boot.time_zone && frappe.boot.time_zone.system) { return frappe.boot.time_zone.system; }
+        if (frappe.boot.sysdefaults && frappe.boot.sysdefaults.time_zone) { return frappe.boot.sysdefaults.time_zone; }
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+  function siteParts() {
+    var tz = siteTz(), o = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }, p;
+    if (tz) { o.timeZone = tz; }
+    try { p = new Intl.DateTimeFormat('en-CA', o).formatToParts(new Date()); } catch (e) { delete o.timeZone; p = new Intl.DateTimeFormat('en-CA', o).formatToParts(new Date()); }
+    var m = {}; p.forEach(function (x) { m[x.type] = x.value; }); if (m.hour === '24') { m.hour = '00'; } return m;
+  }
+  function parseISO(s) {
+    if (!s || typeof s !== 'string') { return null; }
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s); if (!m) { return null; }
+    var y = +m[1], mo = +m[2], d = +m[3], ms = Date.UTC(y, mo - 1, d), dt = new Date(ms);
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) { return null; }
+    return ms;
+  }
+  function isoOf(ms) { var d = new Date(ms); return d.getUTCFullYear() + '-' + ('0' + (d.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + d.getUTCDate()).slice(-2); }
+  function addDays(iso, n) { return isoOf(parseISO(iso) + n * 86400000); }
+  function diffDays(a, b) { return Math.round((parseISO(b) - parseISO(a)) / 86400000); }
+  var TODAY = '', STAMP = '';
+  function setToday() { var p = siteParts(); TODAY = p.year + '-' + p.month + '-' + p.day; STAMP = p.hour + ':' + p.minute; }
+  function monthStart(iso) { return iso.slice(0, 8) + '01'; }
+  function monthEnd(iso) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7); return isoOf(Date.UTC(y, m, 0)); }
+  function addMonths(iso, n) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n; return isoOf(Date.UTC(y, m, 1)); }
+  function weekStartOf(iso) { var dow = new Date(parseISO(iso)).getUTCDay(); return addDays(iso, -((dow - CFG.weekStart + 7) % 7)); }
+  function quarterStart(iso) { var m = +iso.slice(5, 7); return iso.slice(0, 5) + ('0' + (Math.floor((m - 1) / 3) * 3 + 1)).slice(-2) + '-01'; }
+  function shiftMonths(iso, n) {
+    var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n, d = +iso.slice(8, 10), last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    return isoOf(Date.UTC(y, m, Math.min(d, last)));
+  }
+  function periodRange(key, cf, ct) {
+    var t = TODAY, y = t.slice(0, 4), ws = weekStartOf(t), qs = quarterStart(t), lm = addMonths(monthStart(t), -1);
+    switch (key) {
+      case 'today': return [t, t];
+      case 'yesterday': return [addDays(t, -1), addDays(t, -1)];
+      case 'week': return [ws, addDays(ws, 6)];
+      case 'lastWeek': return [addDays(ws, -7), addDays(ws, -1)];
+      case 'month': return [monthStart(t), monthEnd(t)];
+      case 'lastMonth': return [lm, monthEnd(lm)];
+      case 'quarter': return [qs, monthEnd(addMonths(qs, 2))];
+      case 'year': return [y + '-01-01', y + '-12-31'];
+      case 'prevYear': return [(y - 1) + '-01-01', (y - 1) + '-12-31'];
+      case 'custom': return [cf, ct];
+      default: return [y + '-01-01', t];   // ytd
+    }
+  }
+  /* Comparison window: the same span one preset unit earlier; custom ranges compare with the equally long range before. */
+  function prevRange(key, from, to) {
+    switch (key) {
+      case 'today': case 'yesterday': return [addDays(from, -1), addDays(to, -1)];
+      case 'week': case 'lastWeek': return [addDays(from, -7), addDays(to, -7)];
+      case 'month': case 'lastMonth': return [shiftMonths(from, -1), shiftMonths(to, -1)];
+      case 'quarter': return [shiftMonths(from, -3), shiftMonths(to, -3)];
+      case 'ytd': case 'year': case 'prevYear': return [shiftMonths(from, -12), shiftMonths(to, -12)];
+      default: var n = diffDays(from, to) + 1; return [addDays(from, -n), addDays(from, -1)];
+    }
+  }
+  /* In-progress periods stop at today, so this month to date compares with the same days of last month. */
+  function clip(r) { return [r[0], r[1] > TODAY && r[0] <= TODAY ? TODAY : r[1]]; }
+  function cmpRanges() { var c = clip(PERIOD); return { cur: c, prev: prevRange(F.period, c[0], c[1]) }; }
+  function monthList(from, to) { var out = [], cur = monthStart(from); for (var i = 0; i < 72 && cur <= to; i++) { out.push(cur.slice(0, 7)); cur = addMonths(cur, 1); } return out; }
+  function locale() { return LANG === 'ar' ? 'ar-SA-u-nu-latn-ca-gregory' : 'en-GB'; }
+  function fmtDate(iso, yr) {
+    try { var o = { day: 'numeric', month: 'short', timeZone: 'UTC' }; if (yr) { o.year = 'numeric'; } return new Intl.DateTimeFormat(locale(), o).format(new Date(parseISO(String(iso).slice(0, 10)))); } catch (e) { return iso; }
+  }
+  function rangeLabel(r) {
+    if (!r || !r[0] || !r[1]) { return ''; }
+    return r[0] === r[1] ? fmtDate(r[0], true) : fmtDate(r[0], r[0].slice(0, 4) !== r[1].slice(0, 4)) + ' – ' + fmtDate(r[1], true);
+  }
+  var PLR = null;
+  function daysTxt(n) {
+    if (LANG !== 'ar') { return num(n) + (n === 1 ? ' day' : ' days'); }
+    var c = 'other'; try { c = (PLR || (PLR = new Intl.PluralRules('ar'))).select(n); } catch (e) { /* generic form */ }
+    return c === 'one' ? 'يوم واحد' : c === 'two' ? 'يومان' : c === 'few' ? n + ' أيام' : c === 'many' ? n + ' يومًا' : n + ' يوم';
+  }
+  function ageOf(iso) { var d = iso ? diffDays(String(iso).slice(0, 10), TODAY) : 0; return isNaN(d) ? 0 : Math.max(0, d); }
+  function lateTxt(iso) {
+    var d = diffDays(String(iso).slice(0, 10), TODAY); if (isNaN(d)) { return ''; }
+    return d > 0 ? tr(daysTxt(d) + ' overdue', 'متأخر ' + daysTxt(d)) : d === 0 ? tr('Due today', 'مستحق اليوم') : tr('Due in ' + daysTxt(-d), 'مستحق خلال ' + daysTxt(-d));
+  }
+  function agoTxt(iso, en, ar) { var a = ageOf(iso); return a ? tr((en || 'Waiting') + ' ' + daysTxt(a), (ar || 'منذ') + ' ' + daysTxt(a)) : tr('Today', 'اليوم'); }
 
-  var FM_FIELDS = ['name', 'docstatus', 'modified', 'company', 'facility_detail', 'facility_name', 'facility_catogory', 'facility_contract_status',
-    'facility_type', 'location', 'area_in_sqm', 'agreement_type', 'contract_number', 'auto_renewal', 'date_frm', 'rentdate_to', 'lease_start', 'lease_end',
-    'rent_amount', 'rental_amount', 'rent_installments', 'amount_intallments', 'rent_mode', 'owner_name', 'owner_number', 'additional_notes',
-    'installment_1_dues_on', 'installment_2_dues_on', 'installment_3_dues_on', 'installment_4_dues_on', 'paid1_not', 'paid2_not', 'paid3_not', 'paid4_not',
-    'com_lic_exp', 'cr_date_to', 'cd_date_to', 'national_adress_expiry', 'fire_expiry', 'cleanig_exp_date', 'camera_expiry', 'industrial_expiry',
-    'construction_environmental_permit_expiry', 'operational_environmental_permit_expiry',
-    'fire_contractor', 'cleaning_cont', 'camera_contractor', 'fire_layout', 'sign_board', 'medical_kit'];
+  /* ---------- ERP read-only API layer (bounded concurrency, one retry, cancellation) ---------- */
+  var REQ_TIMEOUT = 90000;
+  function callP(method, args) {
+    return new Promise(function (resolve, reject) {
+      var done = false, ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var timer = setTimeout(function () { if (done) { return; } done = true; if (ctl) { try { ctl.abort(); } catch (x) { /* ignore */ } } var te = new Error('Request timed out'); te.timeout = true; reject(te); }, REQ_TIMEOUT);
+      var body = new URLSearchParams();
+      Object.keys(args || {}).forEach(function (k) { var v = args[k]; if (v === undefined || v === null) { return; } body.append(k, (typeof v === 'object') ? JSON.stringify(v) : String(v)); });
+      fetch('/api/method/' + method, { method: 'POST', credentials: 'same-origin', signal: ctl ? ctl.signal : undefined,
+        headers: { 'X-Frappe-CSRF-Token': (G.frappe && frappe.csrf_token) || '', 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' }, body: body.toString() })
+        .then(function (r) { return r.text().then(function (txt) { return { r: r, txt: txt }; }); })
+        .then(function (o) {
+          if (done) { return; } done = true; clearTimeout(timer);
+          var j = null; try { j = JSON.parse(o.txt); } catch (x) { /* ignore */ }
+          if (o.r.ok && j && !j.exc) { resolve(j.message === undefined ? null : j.message); return; }
+          var ex = String((j && (j.exception || j.exc_type)) || '');
+          var perm = o.r.status === 401 || o.r.status === 403 || /permission/i.test(ex);
+          var e = new Error((perm ? 'No access to ' + ((args && (args.doctype || args.report_name)) || method) : (ex.split(':').slice(-1)[0].trim() || ('HTTP ' + o.r.status))));
+          e.status = perm ? 403 : o.r.status; reject(e);
+        })
+        .catch(function (err) { if (done) { return; } done = true; clearTimeout(timer); reject(err || new Error('request failed')); });
+    });
+  }
+  var active = 0, queue = [];
+  function pump() {
+    while (active < CFG.conc && queue.length) {
+      var j = queue.shift(); active++;
+      j.fn().then(j.res, j.rej).then(function () { active--; pump(); });
+    }
+  }
+  function limited(fn) { return new Promise(function (res, rej) { queue.push({ fn: fn, res: res, rej: rej }); pump(); }); }
+  function guarded(chk, method, args) {
+    return limited(function () {
+      if (destroyed || (chk && !chk())) { return Promise.resolve(null); }
+      return callP(method, args).catch(function (e) { if (e && (e.status === 403 || e.timeout || e.status === 417)) { throw e; } return new Promise(function (r) { setTimeout(r, 400); }).then(function () { return callP(method, args); }); });
+    });
+  }
+  function errKind(e) {
+    var txt = ''; try { txt = (e && (e.responseText || e.statusText || e.message)) || ''; } catch (x) { /* ignore */ }
+    return (/PermissionError|not permitted|No access|403/i.test(String(txt)) || (e && e.status === 403)) ? 'perm' : 'tech';
+  }
+  function getList(args, chk) { return guarded(chk, 'frappe.client.get_list', args); }
+  function getCount(dt, filters, chk) { return getList({ doctype: dt, fields: ['count(name) as n'], filters: filters || [], limit_page_length: 1 }, chk).then(function (r) { return +one(r).n || 0; }); }
+  /* All rows of a bounded list (paged); rejects with e.tooLarge when the source exceeds `cap`. */
+  function fetchAll(args, chk, cap) {
+    cap = cap || 20000;
+    return getCount(args.doctype, args.filters, chk).then(function (n) {
+      if (n > cap) { var e = new Error('too large'); e.tooLarge = n; throw e; }
+      var jobs = []; for (var i = 0; i < Math.ceil(n / 500); i++) { jobs.push(getList(Object.assign({}, args, { order_by: args.order_by || 'name asc', limit_start: i * 500, limit_page_length: 500 }), chk)); }
+      return Promise.all(jobs).then(function (res) { var out = []; res.forEach(function (r) { if (r) { out = out.concat(r); } }); return out; });
+    });
+  }
+  function docUrl(dt, name) {
+    try { if (G.frappe && frappe.utils && frappe.utils.get_form_link) { return frappe.utils.get_form_link(dt, name); } } catch (e) { /* fall through */ }
+    return '/app/' + dt.toLowerCase().replace(/ /g, '-') + '/' + encodeURIComponent(name);
+  }
+  function docLink(dt, name, label) { return '<a class="dms-link" href="' + esc(docUrl(dt, name)) + '" target="_blank" rel="noopener noreferrer"><bdi>' + esc(label || name) + '</bdi> ↗</a>'; }
+
+  /* ---------- data store: each source loads and renders independently; stale generations are dropped ---------- */
+  var D = {};
+  var softT = null;
+  function soon() { if (softT) { return; } softT = later(function () { softT = null; renderSoft(); }, 40); }
+  function run(key, fn) {
+    var g = GEN, chk = function () { return g === GEN && !destroyed; }, tok = {};
+    D[key] = null; D[key + 'Err'] = null; D[key + 'Tok'] = tok;
+    var mine = function () { return chk() && D[key + 'Tok'] === tok; };
+    fn(mine).then(function (v) { if (!mine()) { return; } D[key] = v; if (APP.afterLoad) { APP.afterLoad(key); } soon(); },
+      function (e) { if (!mine()) { return; } D[key + 'Err'] = e && e.tooLarge ? 'large:' + e.tooLarge : errKind(e); if (G.console && e && !e.status && !e.tooLarge) { console.error(APP.key, key, e); } soon(); });
+  }
+  function busy() { return !BOOTED || (APP.sources || []).some(function (k) { return D[k] == null && D[k + 'Err'] == null; }); }
+  function errText(kind) { return /^large:/.test(String(kind)) ? tr('too many records (' + num(+String(kind).slice(6)) + ') — narrow the filters or period', 'عدد كبير من السجلات (' + num(+String(kind).slice(6)) + ') — ضيّق المرشحات أو الفترة') : kind === 'perm' ? tr('permission denied for your user', 'لا تملك صلاحية القراءة') : tr('technical error while reading', 'خطأ تقني أثناء القراءة'); }
+
+  /* ---------- UI primitives ---------- */
+  var ICO = {
+    refresh: '<path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/>', filter: '<path d="M4 5h16l-6.2 7.6V19l-3.6 1.6v-8z"/>',
+    cal: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/>', down: '<path d="m6 9 6 6 6-6"/>',
+    prev: '<path d="m15 6-6 6 6 6"/>', next: '<path d="m9 6 6 6-6 6"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
+    up: '<path d="M12 19V6M6.5 11.5 12 6l5.5 5.5"/>', dn: '<path d="M12 5v13M6.5 12.5 12 18l5.5-5.5"/>', dl: '<path d="M12 4v11M7 10.5 12 15.5l5-5M5 20h14"/>'
+  };
+  function ico(n, cls) { return '<svg class="dms-ico' + (cls ? ' ' + cls : '') + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + ICO[n] + '</svg>'; }
+  function kpi(o) {
+    var inner = '<span class="dms-kpi-h"><span class="dms-kpi-l">' + (o.dot ? '<i class="dms-dot" style="--dms-c:' + o.dot + '"></i>' : '') + esc(o.label) + '</span>' + (o.top || '') + '</span>' +
+      '<span class="dms-kpi-n">' + o.val + '</span>' + (o.sub ? '<span class="dms-kpi-s">' + o.sub + '</span>' : '') + (o.foot != null ? '<span class="dms-kpi-f">' + o.foot + '</span>' : '');
+    var t = o.tip ? ' title="' + esc(o.tip) + '"' : '';
+    return o.act ? '<button type="button" class="dms-kpi" data-act="kpi" data-v="' + esc(o.act) + '"' + t + '>' + inner + '</button>' : '<div class="dms-kpi"' + t + '>' + inner + '</div>';
+  }
+  function kpis(list, ov) { return '<div class="dms-grid dms-kpis' + (ov ? ' dms-ov-kpis' : '') + '">' + list.join('') + '</div>'; }
+  function tagc(txt) { return '<span class="dms-tag">' + txt + '</span>'; }
+  function stat(k, txt) { return '<span class="dms-stat dms-stat-' + k + '">' + esc(txt) + '</span>'; }
+  function ctx(html) { return '<span class="dms-kpi-ctx">' + html + '</span>'; }
+  function badge(txt, color) { return '<span class="dms-badge" style="--dms-c:' + color + '">' + esc(txt) + '</span>'; }
+  function wait() { return '<span class="dms-sm">' + esc(tr('Calculating…', 'جارٍ الحساب…')) + '</span>'; }
+  function asOf() { return tagc(esc(tr('As of today', 'حتى اليوم'))); }
+  /* Value of a source-backed KPI: '…' while loading, '—' when the source failed (never a false zero). */
+  function kv(key, f) { return D[key + 'Err'] ? '—' : D[key] == null ? '…' : f(D[key]); }
+  function ks(key, f) { return D[key + 'Err'] ? esc(tr('Unavailable', 'غير متاح')) : D[key] == null ? wait() : f(D[key]); }
+  function spark(vs) {
+    var n = vs.length, real = vs.filter(function (v) { return v != null; }), pts = [];
+    if (n < 3 || real.length < 3 || !real.some(function (v) { return v > 0; })) { return ''; }
+    var max = Math.max.apply(null, real), min = Math.min(0, Math.min.apply(null, real)), rng = (max - min) || 1;
+    vs.forEach(function (v, i) { if (v != null) { pts.push([(i / (n - 1) * 100).toFixed(2), (26 - (v - min) / rng * 23).toFixed(2)]); } });
+    var line = pts.map(function (p) { return p.join(','); }).join(' L');
+    return '<svg class="dms-spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path class="dms-spark-a" d="M' + pts[0][0] + ',28 L' + line + ' L' + pts[pts.length - 1][0] + ',28 Z"/><path class="dms-spark-l" d="M' + line + '"/></svg>';
+  }
+  /* Change vs the comparison window. fmt formats values; small count bases show "was N" instead of a percentage. */
+  function deltaChip(cur, prev, R, fmt, isCount, lowerIsBetter) {
+    if (cur == null || prev == null || !R) { return ''; }
+    fmt = fmt || moneyS;
+    var tip = tr('This period', 'هذه الفترة') + ' (' + rangeLabel(R[0]) + '): ' + fmt(cur) + '\n' + tr('Previous', 'السابقة') + ' (' + rangeLabel(R[1]) + '): ' + fmt(prev);
+    var sr = '<span class="dms-sr"> ' + esc(tr('vs previous period', 'مقارنة بالفترة السابقة')) + '</span>';
+    if (prev === 0 || (isCount && prev < 5)) { return '<span class="dms-delta dms-flat" data-tip="' + esc(tip) + '">' + esc(tr('was', 'كان')) + ' <bdi>' + esc(fmt(prev)) + '</bdi>' + sr + '</span>'; }
+    var p = (cur - prev) / prev * 100, a = Math.abs(p), k = a < 0.05 ? 'flat' : p > 0 ? 'up' : 'down', tone = k === 'flat' ? 'flat' : ((k === 'up') !== !!lowerIsBetter ? 'up' : 'down');
+    var txt = a > 999 ? '10×+' : (a < 10 ? a.toFixed(1) : Math.round(a)) + '%';
+    return '<span class="dms-delta dms-' + tone + '" data-tip="' + esc(tip) + '">' + (k === 'flat' ? '' : ico(k === 'up' ? 'up' : 'dn')) + '<bdi>' + (k === 'down' ? '−' : '') + txt + '</bdi>' + sr + '</span>';
+  }
+  function panel(title, body, extra, meta) {
+    return '<section class="dms-panelbox ' + (extra || '') + '"><div class="dms-ph"><h3 class="dms-h3">' + esc(title) + '</h3>' + (meta ? '<span class="dms-ph-meta">' + meta + '</span>' : '') + '</div>' + body + '</section>';
+  }
+  function note(txt) { return '<p class="dms-note">' + txt + '</p>'; }
+  function alertBox(kind, html) { return '<div class="dms-alert dms-alert-' + kind + '" role="' + (kind === 'err' ? 'alert' : 'status') + '">' + html + '</div>'; }
+  function empty(txt) { return '<div class="dms-empty">' + esc(txt || tr('No data for the current filters.', 'لا توجد بيانات للمرشحات الحالية.')) + '</div>'; }
+  function srcErr(kind, what) { return alertBox('err', '<b>' + esc(tr('Source unavailable', 'المصدر غير متاح')) + ':</b> ' + esc(what) + ' — ' + esc(errText(kind))); }
+  function skel(n, cls) { return rep('<div class="dms-skel ' + (cls || '') + '"></div>', n); }
+  /* Body for a panel backed by source `key`: skeleton while loading, named error on failure, else f(data). */
+  function src(key, what, f) { return D[key + 'Err'] ? srcErr(D[key + 'Err'], what) : D[key] == null ? skel(1, 'dms-skel-panel') : f(D[key]); }
+
+  /* ---------- charts (HTML/CSS; hover details via the shared tooltip, data-tip) ---------- */
+  function niceMax(v) { if (!(v > 0)) { return 1; } var p = Math.pow(10, Math.floor(Math.log(v) / Math.LN10)), f = v / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
+  function axisFmt(v) { var a = Math.abs(v); return a >= 1e9 ? +(v / 1e9).toFixed(1) + 'B' : a >= 1e6 ? +(v / 1e6).toFixed(1) + 'M' : a >= 1e3 ? +(v / 1e3).toFixed(1) + 'K' : String(a < 10 ? +v.toFixed(2) : Math.round(v)); }
+  function bucketLabel(k, g, short) {
+    if (g === 'cat') { return String(k); }
+    if (g === 'week' && !short) { return tr('Week of ', 'أسبوع ') + fmtDate(k, true); }
+    if (g !== 'month') { return fmtDate(k, !short); }
+    try { return new Intl.DateTimeFormat(locale(), { month: 'short', year: '2-digit', timeZone: 'UTC' }).format(new Date(parseISO(k + '-01'))); } catch (e) { return k; }
+  }
+  /* Count charts get whole-number ticks (top is a multiple of 4), so small counts never show 0, 1, 1, 2, 2. */
+  function countTop(max, fmt) { var t = niceMax(max); return fmt === num ? Math.max(4, Math.ceil(t / 4) * 4) : t; }
+  function granName(g) { return g === 'day' ? tr('by day', 'يوميًا') : g === 'week' ? tr('by week', 'أسبوعيًا') : tr('by month', 'شهريًا'); }
+  /* Time buckets for a range: daily up to 45 days, weekly up to 120 days, monthly beyond; stops at today. */
+  function buckets(range) {
+    var from = range[0], to = clip(range)[1], span = diffDays(from, to) + 1, g = span <= 45 ? 'day' : span <= 120 ? 'week' : 'month', keys = [], cur, i;
+    function keyOf(iso) { iso = String(iso).slice(0, 10); return g === 'day' ? iso : g === 'week' ? weekStartOf(iso) : iso.slice(0, 7); }
+    if (to < from) { return { keys: [], gran: g, keyOf: keyOf }; }
+    if (g === 'month') { keys = monthList(from, to); } else { cur = keyOf(from); for (i = 0; i < 200 && cur <= to; i++) { keys.push(cur); cur = addDays(cur, g === 'day' ? 1 : 7); } }
+    return { keys: keys, gran: g, keyOf: keyOf };
+  }
+  /* Grouped rows (one per date) folded into buckets: rows[dateField], rows[valField]. */
+  function series(range, rows, dateF, valF) {
+    var B = buckets(range), d = {}; B.keys.forEach(function (k) { d[k] = { v: 0, n: 0 }; });
+    (rows || []).forEach(function (r) { var k = B.keyOf(r[dateF]); if (d[k]) { d[k].v += valF ? (+r[valF] || 0) : 1; d[k].n += +r.n || (valF ? 0 : 1); } });
+    B.d = d; return B;
+  }
+  function legend(series) { return '<div class="dms-legend">' + series.map(function (s) { return '<span><i style="--dms-c:' + s.color + '"></i>' + esc(s.label) + '</span>'; }).join('') + '</div>'; }
+  /* Column chart. ser = [{label, color, val: function (key) {}}]; fmt formats values (default money). */
+  function barChart(keys, gran, ser, fmt, extraTip, emptyTxt) {
+    if (!Array.isArray(ser)) { ser = [ser]; }
+    fmt = fmt || moneyFull; var max = 0;
+    keys.forEach(function (k) { ser.forEach(function (s) { max = Math.max(max, s.val(k) || 0); }); });
+    if (!keys.length || !max) { return empty(emptyTxt || tr('Nothing in this range.', 'لا شيء في هذا النطاق.')); }
+    var top = countTop(max, fmt), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, gran) + ser.map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k) || 0); }).join('') + (extraTip ? extraTip(k) : '');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '">' + ser.map(function (s) { var v = s.val(k) || 0; return '<i class="dms-bar' + (v ? '' : ' dms-bar-0') + '" style="height:' + (v / top * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i>'; }).join('') + '</div>';
+    }).join('');
+    var aria = ser.map(function (s) { return s.label + ': ' + keys.map(function (k) { return bucketLabel(k, gran, true) + ' ' + fmt(s.val(k) || 0); }).join(', '); }).join('; ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + (ser.length > 1 ? legend(ser) : '');
+  }
+  /* Line chart for balances (may go negative). ser = [{label, color, val(key), dash?}]; the first series is the main line. */
+  function lineChart(keys, gran, ser, fmt) {
+    fmt = fmt || moneyFull; var all = [];
+    keys.forEach(function (k) { ser.forEach(function (s) { var v = s.val(k); if (v != null) { all.push(v); } }); });
+    if (!keys.length || !all.length) { return empty(); }
+    var mx = Math.max.apply(null, all), mn = Math.min.apply(null, all), hi = mx > 0 ? niceMax(mx) : 0, lo = mn < 0 ? -niceMax(-mn) : 0;
+    if (hi === lo) { hi = lo + 1; }
+    var y = function (v) { return (100 - (v - lo) / (hi - lo) * 100).toFixed(2); }, x = function (i) { return (keys.length < 2 ? 50 : i / (keys.length - 1) * 100).toFixed(2); };
+    var ticks = [0, 0.25, 0.5, 0.75, 1].map(function (t) { return lo + (hi - lo) * t; });
+    var paths = ser.map(function (s) { var pts = keys.map(function (k, i) { var v = s.val(k); return v == null ? null : x(i) + ',' + y(v); }).filter(Boolean); return '<polyline class="dms-line' + (s.dash ? ' dms-line-ref' : '') + '" style="--dms-c:' + s.color + '" points="' + pts.join(' ') + '"/>'; }).join('');
+    var zero = lo < 0 ? '<i class="dms-gl dms-gl-0" style="bottom:' + ((0 - lo) / (hi - lo) * 100).toFixed(2) + '%"></i>' : '';
+    var hits = keys.map(function (k) { return '<div class="dms-col dms-col-hit" data-tip="' + esc(bucketLabel(k, gran) + ser.map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k)); }).join('')) + '"></div>'; }).join('');
+    var aria = ser[0].label + ': ' + keys.map(function (k) { return bucketLabel(k, gran, true) + ' ' + fmt(ser[0].val(k)); }).join(', ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (v, i) { return '<span style="bottom:' + i * 25 + '%">' + axisFmt(v) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + [0, 25, 50, 75, 100].map(function (b) { return '<i class="dms-gl" style="bottom:' + b + '%"></i>'; }).join('') + zero + '<svg class="dms-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">' + paths + '</svg><div class="dms-cols">' + hits + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + (ser.length > 1 ? legend(ser) : '');
+  }
+  /* Stacked columns (one bar per key, segments per series). */
+  function stackChart(keys, gran, ser, fmt) {
+    fmt = fmt || num; var tot = {}, max = 0;
+    keys.forEach(function (k) { tot[k] = sum(ser, function (s) { return s.val(k) || 0; }); max = Math.max(max, tot[k]); });
+    if (!keys.length || !max) { return empty(); }
+    var top = countTop(max, fmt), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, gran) + ser.filter(function (s) { return s.val(k); }).map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k)); }).join('');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '"><span class="dms-stackbar" style="height:' + (tot[k] / top * 100).toFixed(2) + '%">' + ser.map(function (s) { var v = s.val(k) || 0; return v ? '<i style="flex:' + v + ' 0 0;background:' + s.color + '"></i>' : ''; }).join('') + '</span></div>';
+    }).join('');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(ser.map(function (s) { return s.label; }).join(', ')) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + legend(ser);
+  }
+  function fitChartLabels() {
+    HOST.querySelectorAll('.dms-xaxis').forEach(function (axis) {
+      var labels = axis.querySelectorAll('span'), widest = 0;
+      labels.forEach(function (label) { var range = document.createRange(); range.selectNodeContents(label); widest = Math.max(widest, range.getBoundingClientRect().width); });
+      var slots = Math.max(1, Math.min(8, Math.floor(axis.clientWidth / (widest + 16)))), step = Math.max(1, Math.ceil(labels.length / slots));
+      labels.forEach(function (label, i) { label.style.visibility = i % step ? 'hidden' : 'visible'; });
+    });
+  }
+  /* Share rows: label · bar · value · %. items = [{label, value, color, act?, tip?}]; ordered=true keeps the given order. */
+  function shareList(items, head, fmt, ordered) {
+    fmt = fmt || num; var tot = sum(items, function (s) { return s.value; }), rows = items.filter(function (s) { return s.value; });
+    if (!ordered) { rows = rows.slice().sort(function (a, b) { return b.value - a.value; }); }
+    if (!tot) { return empty(); }
+    return (head ? '<div class="dms-share-t">' + head + '</div>' : '') + rows.map(function (s) {
+      var tip = s.tip || (s.label + ': ' + fmt(s.value) + ' (' + pct(s.value, tot) + ')');
+      var inner = '<span class="dms-share-l"><i class="dms-dot" style="--dms-c:' + s.color + '"></i>' + bdi(s.label) + '</span><span class="dms-share-b"><i style="width:' + (s.value / tot * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i></span>' +
+        '<span class="dms-num">' + esc(fmt(s.value)) + '</span><span class="dms-share-p dms-num">' + pct(s.value, tot, 0) + '</span>';
+      return s.act ? '<button type="button" class="dms-share dms-share-btn" data-act="kpi" data-v="' + esc(s.act) + '" data-tip="' + esc(tip) + '">' + inner + '</button>' : '<div class="dms-share" data-tip="' + esc(tip) + '">' + inner + '</div>';
+    }).join('');
+  }
+  /* Ranked horizontal bars: items = [{label, value, color?, act?}]. */
+  function hbars(items, fmt, color) {
+    if (!items.length) { return empty(); }
+    var max = Math.max.apply(null, items.map(function (i) { return Math.abs(i.value); }).concat([1])); fmt = fmt || num;
+    return items.map(function (i) {
+      var inner = '<span class="dms-split-l">' + bdi(i.label) + '</span><span class="dms-split"><i style="width:' + (Math.abs(i.value) / max * 100).toFixed(2) + '%;background:' + (i.color || color || 'var(--dms-royal)') + '"></i></span><span class="dms-num dms-split-v">' + esc(fmt(i.value)) + '</span>';
+      var tip = ' data-tip="' + esc(i.label + ': ' + fmt(i.value)) + '"';
+      return i.act ? '<button type="button" class="dms-stack-row dms-split-row" data-act="kpi" data-v="' + esc(i.act) + '"' + tip + '>' + inner + '</button>' : '<div class="dms-stack-row dms-split-row"' + tip + '>' + inner + '</div>';
+    }).join('');
+  }
+  /* Two-part bars ranked by total: items = [{label, total, part, act?}]; parts = [{label, color}] for part and remainder. */
+  function splitBars(items, parts, fmt) {
+    if (!items.length) { return empty(); }
+    fmt = fmt || money; var max = Math.max.apply(null, items.map(function (i) { return i.total; }).concat([1]));
+    return items.map(function (i) {
+      var tip = i.label + '\n' + parts[0].label + ': ' + fmt(i.part) + '\n' + parts[1].label + ': ' + fmt(i.total - i.part);
+      var bar = '<span class="dms-split"><i style="width:' + (i.part / max * 100).toFixed(2) + '%;background:' + parts[0].color + '"></i><i style="width:' + (Math.max(0, i.total - i.part) / max * 100).toFixed(2) + '%;background:' + parts[1].color + '"></i></span>';
+      var inner = '<span class="dms-split-l">' + bdi(i.label) + '</span>' + bar + '<span class="dms-num dms-split-v">' + esc(fmt(i.total)) + '</span>';
+      return i.act ? '<button type="button" class="dms-stack-row dms-split-row" data-act="kpi" data-v="' + esc(i.act) + '" data-tip="' + esc(tip) + '">' + inner + '</button>' : '<div class="dms-stack-row dms-split-row" data-tip="' + esc(tip) + '">' + inner + '</div>';
+    }).join('') + legend(parts);
+  }
+  function mixBar(segs) {
+    var tot = sum(segs, function (s) { return s.value; }); if (!tot) { return ''; }
+    return '<span class="dms-mix"><span class="dms-mix-b">' + segs.map(function (s) { return s.value ? '<i style="width:' + (s.value / tot * 100).toFixed(2) + '%;background:' + s.color + '" data-tip="' + esc(s.label + ': ' + (s.fmt || num)(s.value)) + '"></i>' : ''; }).join('') + '</span></span>';
+  }
+  var PAL = ['var(--dms-royal)', '#6b8be0', '#1f8a5b', '#d97a1e', '#8a97a8', '#a3b4ef', '#c2412d', '#d6a419', '#4b5a6e', '#b6bfca'];
+
+  /* ---------- tables: client-side (search / sort / pagination / CSV) and server-side (paginated, sortable, CSV) ---------- */
+  var TBL = {}, TS = {}, SS = {}, focusId = null;
+  function regTable(spec) { TBL[spec.id] = spec; return '<div class="dms-tbl" data-tbl="' + esc(spec.id) + '"></div>'; }
+  function fillTables(scope) { var els = (scope || HOST).querySelectorAll('[data-tbl]'); for (var i = 0; i < els.length; i++) { fillTable(els[i].getAttribute('data-tbl'), els[i]); } }
+  function clientRows(sp, st) {
+    var rows = sp.rows, q = st.q.trim().toLowerCase();
+    if (q) { rows = rows.filter(function (r) { return sp.text(r).toLowerCase().indexOf(q) >= 0; }); }
+    if (st.sk) { var col = sp.cols.filter(function (c) { return c.k === st.sk; })[0]; if (col && col.s) { rows = rows.slice().sort(function (a, b) { var x = col.s(a), y = col.s(b); return (x < y ? -1 : x > y ? 1 : 0) * st.dir; }); } }
+    return rows;
+  }
+  function thead(sp, sk, dir, act, id) {
+    return '<thead><tr>' + sp.cols.map(function (c) {
+      var key = act === 'ssort' ? c.sf : c.k, can = act === 'ssort' ? !!c.sf : !!c.s, on = can && sk === key;
+      return '<th class="' + (can ? 'dms-th-s' : '') + (c.num ? ' dms-th-n' : '') + '"' + (can ? ' data-act="' + act + '" data-id="' + esc(id) + '" data-v="' + esc(key) + '" tabindex="0" aria-sort="' + (on ? (dir > 0 ? 'ascending' : 'descending') : 'none') + '"' : '') + '>' + esc(c.h) + (on ? (dir > 0 ? ' ▲' : ' ▼') : '') + '</th>';
+    }).join('') + '</tr></thead>';
+  }
+  function tcells(sp, r) { return '<tr>' + sp.cols.map(function (c) { return '<td' + (c.num ? ' class="dms-td-n"' : '') + '>' + c.r(r) + '</td>'; }).join('') + '</tr>'; }
+  function fillTable(id, el) {
+    var sp = TBL[id]; el = el || HOST.querySelector('[data-tbl="' + id + '"]'); if (!sp || !el) { return; }
+    if (sp.server) { return fillServer(id, el); }
+    var st = TS[id] || (TS[id] = { q: '', page: 1, sk: sp.sk || '', dir: sp.dir || 1 }), rows = clientRows(sp, st);
+    var ps = sp.pageSize || CFG.pageSize, pages = Math.max(1, Math.ceil(rows.length / ps)); if (st.page > pages) { st.page = pages; }
+    var slice = rows.slice((st.page - 1) * ps, st.page * ps);
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(tr('Search this table…', 'ابحث في الجدول…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search this table', 'ابحث في الجدول')) + '"><span class="dms-tb-r"><span class="dms-sm">' + num(rows.length) + ' ' + esc(rows.length === 1 ? tr('row', 'سجل') : tr('rows', 'سجل')) + (st.q ? ' / ' + num(sp.rows.length) : '') + '</span>' +
+      (rows.length ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csv" data-id="' + esc(id) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    if (sp.notice) { h += sp.notice; }
+    if (!rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
+    h += '<div class="dms-tablewrap"><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'tsort', id) + '<tbody>' + slice.map(function (r) { return tcells(sp, r); }).join('') + '</tbody>' + (sp.foot ? '<tfoot>' + sp.foot(rows) + '</tfoot>' : '') + '</table></div>';
+    h += pager(id, 'tpage', st.page, pages, rows.length, ps);
+    el.innerHTML = h; restoreFocus(el, id);
+  }
+  function pager(id, act, pg, pages, total, ps) {
+    if (total <= ps) { return ''; }
+    return '<div class="dms-pager"><span>' + esc(tr('Showing', 'عرض')) + ' ' + num((pg - 1) * ps + 1) + '–' + num(Math.min(pg * ps, total)) + ' / ' + num(total) + '</span><span><button type="button" class="dms-btn" data-act="' + act + '" data-id="' + esc(id) + '" data-v="-1"' + (pg <= 1 ? ' disabled' : '') + '>‹ ' + esc(tr('Previous', 'السابق')) + '</button> ' +
+      esc(tr('Page', 'صفحة')) + ' ' + pg + ' ' + esc(tr('of', 'من')) + ' ' + pages + ' <button type="button" class="dms-btn" data-act="' + act + '" data-id="' + esc(id) + '" data-v="1"' + (pg >= pages ? ' disabled' : '') + '>' + esc(tr('Next', 'التالي')) + ' ›</button></span></div>';
+  }
+  function restoreFocus(el, id) { if (focusId === id) { var i = el.querySelector('[data-tq]'); if (i) { i.focus(); try { i.setSelectionRange(i.value.length, i.value.length); } catch (e) { /* ignore */ } } } }
+  function srvArgs(sp, st) {
+    var q = st.q.trim(), base = { doctype: sp.dt, filters: sp.filters };
+    if (sp.parent) { base.parent = sp.parent; }
+    if (q && sp.search) { base.or_filters = sp.search.map(function (f) { return [sp.dt, f, 'like', '%' + q + '%']; }); }
+    return base;
+  }
+  function srvOrder(sp, st) { return st.sk ? st.sk + (st.dir > 0 ? ' asc' : ' desc') : sp.order; }
+  function fillServer(id, el) {
+    var sp = TBL[id], st = SS[id] || (SS[id] = { q: '', page: 1, total: null, rows: null, loading: false, err: null, req: 0, sk: '', dir: 1 });
+    if (!st.dirty && st.rows && st.key === JSON.stringify(sp.filters)) { return paintServer(id, el); }
+    st.dirty = false; st.key = JSON.stringify(sp.filters);
+    var req = ++st.req; st.loading = true; st.err = null;
+    var ps = sp.pageSize || CFG.modalPage, base = srvArgs(sp, st);
+    paintServer(id, el);
+    var chk = function () { return !destroyed && SS[id] && SS[id].req === req; };
+    if (sp.loader) { sp.loader(st.page - 1, ps, st.q.trim(), srvOrder(sp, st)).then(function (res) { if (!chk()) { return; } st.total = res.total; st.rows = res.rows || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); }, function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } }); return; }
+    var cnt = getList(Object.assign({}, base, { fields: ['count(name) as n'], limit_page_length: 1 }), chk).then(function (r) { return r ? +one(r).n || 0 : null; });
+    var rows = getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: (st.page - 1) * ps, limit_page_length: ps }), chk);
+    Promise.all([cnt, rows]).then(function (res) {
+      if (!chk()) { return; } st.total = res[0]; st.rows = res[1] || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]'));
+    }).catch(function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } });
+  }
+  function paintServer(id, el) {
+    if (!el) { return; } var sp = TBL[id], st = SS[id], ps = sp.pageSize || CFG.modalPage;
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(sp.searchHint || tr('Search…', 'بحث…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search', 'بحث')) + '"><span class="dms-tb-r"><span class="dms-sm">' + (st.total == null ? '' : num(st.total) + ' ' + esc(st.total === 1 ? tr('record', 'سجل') : tr('records', 'سجل'))) + '</span>' +
+      (st.total ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csvall" data-id="' + esc(id) + '" title="' + esc(tr('Export up to 5,000 rows', 'تصدير حتى 5,000 سجل')) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    if (st.err) { el.innerHTML = h + alertBox('err', esc(st.err === 'perm' ? tr('Permission denied for your user.', 'لا تملك صلاحية القراءة.') : tr('Technical error while reading this list.', 'خطأ تقني أثناء قراءة القائمة.')) + ' <button type="button" class="dms-linkbtn" data-act="sretry" data-id="' + esc(id) + '">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>'); return restoreFocus(el, id); }
+    if (st.loading && !st.rows) { el.innerHTML = h + '<div class="dms-skel"></div>'; return restoreFocus(el, id); }
+    if (!st.rows || !st.rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
+    var pages = Math.max(1, Math.ceil((st.total || 0) / ps));
+    h += '<div class="dms-tablewrap" style="opacity:' + (st.loading ? .55 : 1) + '"' + (st.loading ? ' aria-busy="true"' : '') + '><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'ssort', id) + '<tbody>' + st.rows.map(function (r) { return tcells(sp, r); }).join('') + '</tbody></table></div>' + pager(id, 'spage', st.page, pages, st.total || 0, ps);
+    el.innerHTML = h; restoreFocus(el, id);
+  }
+  function csvCell(v) { v = v == null ? '' : String(v); if (/^[=+\-@\t\r]/.test(v) && !/^-?[\d.,]+$/.test(v)) { v = "'" + v; } return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  function download(name, sp, rows) {
+    var cols = sp.cols.filter(function (c) { return c.c; }), lines = [cols.map(function (c) { return csvCell(c.h); }).join(',')].concat(rows.map(function (r) { return cols.map(function (c) { return csvCell(c.c(r)); }).join(','); }));
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+    a.download = String(name).replace(/[^\w-]+/g, '_') + '_' + TODAY + '.csv'; HOST.appendChild(a); a.click(); later(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+  function exportServer(id) {
+    var sp = TBL[id], st = SS[id], out = [], step = 500, base = srvArgs(sp, st), g = GEN;
+    if (sp.loader) { toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…')); var acc = [], pg = function (p) { return sp.loader(p, 500, st.q.trim(), srvOrder(sp, st)).then(function (res) { acc = acc.concat(res.rows || []); return (res.rows || []).length === 500 && acc.length < 5000 ? pg(p + 1) : acc; }); }; pg(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); }); return; }
+    function next(s) {
+      return getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: s, limit_page_length: step }), function () { return g === GEN; }).then(function (r) {
+        out = out.concat(r || []); return (r && r.length === step && out.length < 5000) ? next(s + step) : out;
+      });
+    }
+    toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…'));
+    next(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); });
+  }
+  function toast(msg, bad) { var e = document.createElement('div'); e.className = 'dms-toast' + (bad ? ' dms-toast-err' : ''); e.setAttribute('role', 'status'); e.textContent = msg; HOST.appendChild(e); later(function () { e.remove(); }, 3500); }
+  /* common cells */
+  function dtc(v) { return v ? '<span class="dms-num">' + esc(String(v).slice(0, 10)) + '</span>' : '<span class="dms-sm">—</span>'; }
+  function who(v) { return v ? bdi(v) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>'; }
+  function txt(v) { return v ? bdi(v) : '<span class="dms-sm">—</span>'; }
+  function amc(v) { return v == null || v === '' ? '<span class="dms-sm">—</span>' : '<span class="dms-num">' + esc(amt(v)) + '</span>'; }
+  function overdueTag(due) { var d = diffDays(String(due || TODAY).slice(0, 10), TODAY); return d > 0 ? '<span class="dms-days ' + (d > 90 ? 'dms-days-bad' : 'dms-days-warn') + '">' + num(d) + '</span>' : '<span class="dms-sm">—</span>'; }
+  function col(h, f, o) { o = o || {}; return Object.assign({ h: h, sf: o.sort === false ? undefined : f, r: function (x) { return o.fmt ? o.fmt(x[f], x) : txt(x[f]); }, c: function (x) { return x[f]; } }, o); }
+  function linkCol(h, dt, f, labelF) { return { h: h, sf: f, r: function (x) { return docLink(typeof dt === 'function' ? dt(x) : dt, x[f], labelF ? x[labelF] || x[f] : x[f]); }, c: function (x) { return x[f]; } }; }
+
+  /* ---------- actions pending ---------- */
+  var PRIO = { high: ['High', 'عالية'], med: ['Medium', 'متوسطة'], low: ['Low', 'منخفضة'] };
+  function score(p, amount, age) { return { high: 300, med: 200, low: 100 }[p] + Math.min(40, Math.log(1 + Math.abs(amount || 0)) / Math.LN10 * 6) + Math.min(20, (age || 0) / 10); }
+  /* Server specs ({id, server:true, dt, filters, fields, order, it(row) → item}) load count + 6 most urgent rows each. */
+  function loadActions(specs, key) {
+    run(key || 'act', function (chk) {
+      return Promise.all(specs.filter(function (s) { return s.server; }).map(function (s) {
+        var c = getList({ doctype: s.dt, fields: ['count(name) as n'], filters: s.filters, limit_page_length: 1 }, chk).then(function (r) { return +one(r).n || 0; }, function (e) { return 'ERR:' + errKind(e); });
+        var l = (s.rank ? fetchAll({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order }, chk, 2000) : getList({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order, limit_page_length: 6 }, chk)).then(function (r) { return r || []; }, function (e) { return 'ERR:' + errKind(e); });
+        return Promise.all([c, l]).then(function (x) { return { id: s.id, count: typeof x[1] === 'string' ? x[1] : x[0], rows: Array.isArray(x[1]) ? x[1] : [] }; });
+      })).then(function (res) { var o = {}; res.forEach(function (x) { o[x.id] = x; }); return o; });
+    });
+  }
+  /* client: {id: {rows, item}} for client specs, null while their sources load, or 'ERR:kind'. */
+  function actModel(specs, key, client) {
+    var counts = {}, items = [], A = D[key || 'act'], AE = D[(key || 'act') + 'Err'];
+    specs.forEach(function (s) {
+      if (s.client) {
+        var c = client == null ? null : typeof client === 'string' ? client : client[s.id];
+        if (typeof c === 'string') { counts[s.id] = c; }
+        else if (c) { counts[s.id] = c.count != null ? c.count : c.rows.length; c.rows.slice(0, 6).forEach(function (r) { items.push(c.item(r)); }); }
+        return;
+      }
+      if (AE) { counts[s.id] = 'ERR:' + AE; return; }
+      var x = A && A[s.id]; if (!x) { return; }
+      counts[s.id] = x.count;
+      x.rows.forEach(function (r) { var it = s.it(r); it.dt = it.dt || s.dt; it.name = it.name || r.name; items.push(it); });
+    });
+    items.sort(function (a, b) { return b.score - a.score; });
+    var seen = {}; items = items.filter(function (it) { var k = it.dt + '|' + it.name; if (seen[k]) { return false; } seen[k] = 1; return true; });   /* one row per record, under its most urgent category */
+    return { specs: specs, counts: counts, items: items, ready: specs.every(function (s) { return counts[s.id] !== undefined; }) };
+  }
+  function pendingTotal(AM) {
+    if (!AM) { return null; }
+    var t = 0, any = false; Object.keys(AM.counts).forEach(function (k) { var c = AM.counts[k]; if (typeof c === 'number') { t += c; any = true; } });
+    return any ? t : null;
+  }
+  function dtLabel(dt) { var L = APP.dtLabels && APP.dtLabels[dt]; return L ? tr(L[0], L[1]) : dt; }
+  function arow(it) {
+    return '<a class="dms-arow" href="' + esc(it.href || docUrl(it.dt, it.name)) + '" target="_blank" rel="noopener noreferrer">' +
+      '<span class="dms-prio dms-prio-' + it.p + '">' + esc(tr(PRIO[it.p][0], PRIO[it.p][1])) + '</span>' +
+      '<span class="dms-arow-main"><span class="dms-arow-t"><bdi>' + esc(it.title || it.name) + '</bdi><span class="dms-arow-dt">' + esc(dtLabel(it.dt)) + '</span></span><span class="dms-arow-d">' + bdi(it.desc || '') + '</span></span>' +
+      '<span class="dms-arow-who">' + (it.who ? bdi(it.who) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>') + '</span>' +
+      '<span class="dms-arow-due dms-tone-' + (it.tone || 'n') + '">' + esc(it.due || '') + '</span><span class="dms-sr"> (' + esc(tr('opens in a new tab', 'يفتح في علامة تبويب جديدة')) + ')</span></a>';
+  }
+  function drillId(s) { return s.drill || ((s.client ? 'cli:' : 'srv:') + s.id); }
+  function catBtn(s, c) {
+    var err = typeof c === 'string', inner = '<span class="dms-acat-t">' + esc(s.short) + '</span><b class="dms-num">' + (err || c == null ? '—' : num(c)) + '</b>';
+    return (!err && c) ? '<button type="button" class="dms-acat" data-act="kpi" data-v="' + esc(drillId(s)) + '" title="' + esc(s.title + ' — ' + tr('view all', 'عرض الكل')) + '">' + inner + '</button>'
+      : '<div class="dms-acat dms-acat-off" title="' + esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.title) + '">' + inner + '</div>';
+  }
+  function actionsPanel(AM) {
+    var tot = pendingTotal(AM);
+    var h = '<section class="dms-panelbox dms-actpanel" id="dms-pending" tabindex="-1" aria-labelledby="dms-pending-h"><div class="dms-ph"><h3 class="dms-h3" id="dms-pending-h">' + esc(tr('Actions pending', 'الإجراءات المعلقة')) +
+      (tot != null ? ' <span class="dms-h3-n dms-num">' + num(tot) + '</span>' : '') + '</h3><span class="dms-ph-meta">' + esc(tr('As of today · most urgent first', 'حتى اليوم · الأكثر إلحاحًا أولًا')) + '</span>' +
+      (tab !== 'actions' && APP.tabs.some(function (x) { return x.id === 'actions'; }) ? '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="goto:actions">' + esc(tr('View all', 'عرض الكل')) + '</button>' : '') + '</div>';
+    if (!AM) { return h + '<div class="dms-arows" aria-busy="true">' + skel(6, 'dms-skel-row') + '</div></section>'; }
+    var known = AM.specs.filter(function (s) { return AM.counts[s.id] !== undefined; });
+    if (!known.length) { return h + '<div class="dms-arows" aria-busy="true">' + skel(6, 'dms-skel-row') + '</div></section>'; }
+    var errs = known.filter(function (s) { return typeof AM.counts[s.id] === 'string'; });
+    if (AM.ready && errs.length === AM.specs.length) { return h + alertBox('err', esc(tr('Pending actions could not be loaded.', 'تعذر تحميل الإجراءات المعلقة.')) + ' <button type="button" class="dms-linkbtn" data-act="refresh">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>') + '</section>'; }
+    var items = AM.items.slice(0, CFG.actRows || 7);
+    h += items.length ? '<div class="dms-arows">' + items.map(arow).join('') + '</div>' : (AM.ready ? '<div class="dms-empty dms-empty-sm">' + esc(tr('Nothing pending for this selection.', 'لا توجد إجراءات معلقة لهذا الاختيار.')) + '</div>' : '<div class="dms-arows" aria-busy="true">' + skel(4, 'dms-skel-row') + '</div>');
+    h += '<div class="dms-acats">' + AM.specs.map(function (s) { return catBtn(s, AM.counts[s.id]); }).join('') + '</div>';
+    if (errs.length) { h += note(esc(tr('Could not load: ', 'تعذر التحميل: ') + errs.map(function (s) { return s.short; }).join(', '))); }
+    return h + '</section>';
+  }
+  function actionsTab(AM, info) {
+    var h = alertBox('info', esc(info || tr('Action lists are as of today and not filtered by the period. They follow the filters where the source supports them.', 'قوائم الإجراءات حتى اليوم وغير مرتبطة بالفترة، وتتبع المرشحات حيثما يدعمها المصدر.')));
+    h += kpis((AM ? AM.specs : []).map(function (s) {
+      var c = AM.counts[s.id], err = typeof c === 'string';
+      return kpi({ label: s.title, val: c === undefined ? '…' : err ? '—' : num(c), sub: esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.why), act: (!err && c) ? drillId(s) : null });
+    }));
+    return h + actionsPanel(AM);
+  }
+
+  /* ---------- drill-downs (overlay) ---------- */
+  var OVL = null;
+  function openDrill(id) {
+    if (id.indexOf('goto:') === 0) { goTab(id.slice(5)); return; }
+    var r = null;
+    if (id.indexOf('srv:') === 0 && APP.actSpecs) {
+      var s = APP.actSpecs().filter(function (x) { return x.id === id.slice(4); })[0];
+      if (s && s.table) { delete SS.drill; r = { title: s.title, sub: s.why, spec: Object.assign({ id: 'drill', server: true, dt: s.dt, filters: s.filters, order: s.order, file: s.id }, s.table()) }; }
+    }
+    if (!r && APP.drill) { r = APP.drill(id); }
+    if (!r || (!r.spec && r.body == null)) { return; }
+    if (r.spec) { r.spec.id = 'drill'; if (!r.spec.server && !r.spec.pageSize) { r.spec.pageSize = CFG.modalPage; } }
+    delete SS.drill; delete TS.drill;
+    var opener = OVL ? OVL.opener : activeEl();
+    OVL = Object.assign(r, { id: id, prev: OVL && r.stack !== false ? OVL : null, opener: opener, openerKey: OVL ? OVL.openerKey : opener && opener.getAttribute && opener.getAttribute('data-v') }); renderOverlay();
+  }
+  function overlayHTML() {
+    if (!OVL) { return ''; }
+    var link = OVL.link ? ' ' + docLink(OVL.link[0], OVL.link[1], OVL.link[2]) : '';
+    return '<div class="dms-overlay" data-act="ovbg"><div class="dms-modal" role="dialog" aria-modal="true" aria-labelledby="dms-dialog-title"><div class="dms-dhead"><div>' + (OVL.prev ? '<button type="button" class="dms-linkbtn" data-act="ovback">‹ ' + esc(tr('Back', 'رجوع')) + '</button>' : '') + '<h3 id="dms-dialog-title">' + esc(OVL.title) + '</h3>' + (OVL.sub || link ? '<p class="dms-sm">' + esc(OVL.sub || '') + link + '</p>' : '') + '</div><button type="button" class="dms-x" data-act="closeov" aria-label="' + esc(tr('Close', 'إغلاق')) + '">×</button></div>' + (OVL.body || '') + (OVL.spec ? regTable(OVL.spec) : '') + '</div></div>';
+  }
+  function renderOverlay() { var el = $('[data-ref="overlay"]'); if (!el) { return; } var app = $('.dms-app'); if (app) { app.inert = !!OVL; } if (!OVL) { Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { delete TBL[k]; } }); } else { delete TBL.drill; } el.innerHTML = overlayHTML(); fillTables(el); var x = el.querySelector('.dms-x'); if (x) { x.focus(); } }
+  function closeOverlay() {
+    var previous = OVL; OVL = null; renderOverlay(); delete SS.drill; delete TS.drill;
+    if (!previous) { return; }
+    var opener = previous.opener;
+    if (!opener || !opener.isConnected) { opener = Array.prototype.find.call(HOST.querySelectorAll('[data-act="kpi"]'), function (el) { return el.getAttribute('data-v') === previous.openerKey; }); }
+    if (opener) { opener.focus({ preventScroll: true }); }
+  }
+
+  /* ---------- filters, period, toolbar, tabs ---------- */
+  var F = { period: APP.period || 'month', from: '', to: '' }, PERIOD = [];
+  (APP.filters || []).forEach(function (f) { F[f.k] = ''; });
+  var tab = APP.tabs[0].id, POP = null, FD = null, FS = {}, CAL = null, ANIM = false, built = false, AMC = null;
+  var PERIODS = [['today', 'Today', 'اليوم'], ['yesterday', 'Yesterday', 'أمس'], ['week', 'This week', 'هذا الأسبوع'], ['lastWeek', 'Last week', 'الأسبوع الماضي'],
+    ['month', 'This month', 'هذا الشهر'], ['lastMonth', 'Last month', 'الشهر الماضي'], ['quarter', 'This quarter', 'هذا الربع'], ['ytd', 'Year to date', 'السنة حتى اليوم'],
+    ['year', 'This year', 'هذه السنة'], ['prevYear', 'Previous year', 'السنة الماضية'], ['custom', 'Custom range', 'نطاق مخصص']];
+  var PGROUPS = [['today', 'yesterday'], ['week', 'lastWeek'], ['month', 'lastMonth'], ['quarter', 'ytd', 'year', 'prevYear'], ['custom']];
+  function curPeriod() { return periodRange(F.period, F.from, F.to); }
+  function periodName(k) { var p = PERIODS.filter(function (x) { return x[0] === k; })[0]; return p ? tr(p[1], p[2]) : k; }
+  function filterCount() { return (APP.filters || []).filter(function (f) { return F[f.k]; }).length; }
+  function optList(f, draft) { var l = f.options ? f.options(draft || F) : []; return (l || []).map(function (x) { return typeof x === 'string' ? { v: x, l: x } : x; }); }
+  function optLabel(f, v) { var o = optList(f).filter(function (x) { return x.v === v; })[0]; return o ? o.l : (f.label ? f.label(v) : v); }
+  function pendingBtnHTML() {
+    var n = pendingTotal(AMC), lbl = n == null ? (AMC && AMC.ready ? '—' : '…') : num(n);
+    return '<button type="button" class="dms-pend' + (n ? ' dms-pend-on' : '') + '" data-act="pending" data-fk="pending" title="' + esc(tr('Pending actions as of today — show the list', 'الإجراءات المعلقة حتى اليوم — عرض القائمة')) + '">' +
+      '<i class="dms-pend-dot" aria-hidden="true"></i><b class="dms-num">' + lbl + '</b><span class="dms-pend-l">' + esc(tr('pending', 'معلّقة')) + '</span></button>';
+  }
+  function opt(v, label, cur) { return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(label) + '</option>'; }
+  function ffield(f) {
+    if (f.type === 'text' || f.type === 'date') { return '<div class="dms-ff"><label for="dms-fd-' + f.k + '">' + esc(tr(f.en, f.ar)) + '</label><input type="' + (f.type === 'date' ? 'date' : 'search') + '" id="dms-fd-' + f.k + '" class="dms-input" data-fd="' + f.k + '" data-fk="fd:' + f.k + '" value="' + esc(FD[f.k] || '') + '" placeholder="' + esc(f.ph ? tr(f.ph[0], f.ph[1]) : '') + '" autocomplete="off"></div>'; }
+    var list = optList(f, FD), label = tr(f.en, f.ar), k = f.k;
+    var q = clean(FS[k]).toLowerCase(), cur = FD[k], shown = list.filter(function (x) { return !q || String(x.l).toLowerCase().indexOf(q) >= 0 || String(x.v).toLowerCase().indexOf(q) >= 0; }), more = shown.length > 200;
+    shown = shown.slice(0, 200);
+    if (cur && !shown.some(function (x) { return x.v === cur; })) { shown.unshift({ v: cur, l: optLabel(f, cur) }); }
+    var h = '<div class="dms-ff"><label for="dms-fd-' + k + '">' + esc(label) + '</label>';
+    if (list.length > 8) { h += '<input type="search" class="dms-input" data-fs="' + k + '" data-fk="fs:' + k + '" value="' + esc(FS[k] || '') + '" placeholder="' + esc(tr('Search ' + num(list.length) + ' options', 'ابحث في ' + num(list.length) + ' خيار')) + '" aria-label="' + esc(tr('Search', 'بحث') + ' — ' + label) + '" autocomplete="off">'; }
+    h += '<select id="dms-fd-' + k + '" class="dms-input" data-fd="' + k + '" data-fk="fd:' + k + '">' + opt('', f.none ? tr(f.none[0], f.none[1]) : tr('All', 'الكل'), cur) + shown.map(function (x) { return opt(x.v, x.l, cur); }).join('') + '</select>';
+    if (q && !shown.length) { h += '<span class="dms-ff-hint">' + esc(tr('No matches', 'لا نتائج')) + '</span>'; }
+    else if (more) { h += '<span class="dms-ff-hint">' + esc(tr('First 200 matches — type to narrow', 'أول 200 نتيجة — اكتب للتضييق')) + '</span>'; }
+    return h + '</div>';
+  }
+  function filtersPopHTML() {
+    var n = APP.filterNote ? APP.filterNote() : '';
+    return '<div class="dms-pop dms-pop-filters" role="dialog" aria-label="' + esc(tr('Filters', 'المرشحات')) + '"><div class="dms-pop-b">' + APP.filters.map(ffield).join('') + '</div>' +
+      (n ? '<p class="dms-pop-note">' + esc(n) + '</p>' : '') +
+      '<div class="dms-pop-f"><button type="button" class="dms-btn" data-act="fclear" data-fk="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button><button type="button" class="dms-btn dms-btn-primary" data-act="fapply" data-fk="fapply">' + esc(tr('Apply', 'تطبيق')) + '</button></div></div>';
+  }
+  function calendarHTML() {
+    var v = CAL.view, first = weekStartOf(v), mon = v.slice(0, 7), fdy = CAL.focus && CAL.focus.slice(0, 7) === mon ? CAL.focus : (CAL.from && CAL.from.slice(0, 7) === mon ? CAL.from : v), wd = '', rows = '', r, c, d;
+    for (c = 0; c < 7; c++) { try { wd += '<span role="columnheader">' + esc(new Intl.DateTimeFormat(locale(), { weekday: 'narrow', timeZone: 'UTC' }).format(new Date(parseISO(addDays(first, c))))) + '</span>'; } catch (e) { wd += '<span></span>'; } }
+    for (r = 0; r < 6; r++) {
+      rows += '<div role="row" class="dms-cal-row">';
+      for (c = 0; c < 7; c++) {
+        d = addDays(first, r * 7 + c);
+        var end = d === CAL.from || d === CAL.to, inR = CAL.from && CAL.to && d > CAL.from && d < CAL.to;
+        rows += '<button type="button" role="gridcell" class="dms-day' + (d.slice(0, 7) !== mon ? ' dms-out' : '') + (d === TODAY ? ' dms-today' : '') + (inR ? ' dms-in' : '') + (end ? ' dms-end' : '') +
+          (CAL.from && CAL.to && d === CAL.from && d !== CAL.to ? ' dms-s' : '') + (CAL.from && CAL.to && d === CAL.to && d !== CAL.from ? ' dms-e' : '') + '" data-act="calday" data-v="' + d + '" data-fk="day:' + d + '" tabindex="' + (d === fdy ? 0 : -1) +
+          '" aria-pressed="' + end + '" aria-label="' + esc(fmtDate(d, true)) + '"><bdi>' + (+d.slice(8, 10)) + '</bdi></button>';
+      }
+      rows += '</div>';
+    }
+    var ok = CAL.from && CAL.to, msg = ok ? '<bdi>' + esc(rangeLabel([CAL.from, CAL.to])) + '</bdi> · ' + esc(daysTxt(diffDays(CAL.from, CAL.to) + 1)) : esc(CAL.from ? tr('Select an end date', 'اختر تاريخ النهاية') : tr('Select a start date', 'اختر تاريخ البداية'));
+    var title = v; try { title = new Intl.DateTimeFormat(locale(), { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(parseISO(v))); } catch (e) { /* ISO fallback */ }
+    return '<div class="dms-cal"><div class="dms-cal-h"><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="-1" data-fk="calprev" aria-label="' + esc(tr('Previous month', 'الشهر السابق')) + '">' + ico('prev', 'dms-flip') + '</button>' +
+      '<b aria-live="polite">' + esc(title) + '</b><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="1" data-fk="calnext" aria-label="' + esc(tr('Next month', 'الشهر التالي')) + '">' + ico('next', 'dms-flip') + '</button></div>' +
+      '<div class="dms-cal-g" role="grid" aria-label="' + esc(title) + '"><div class="dms-cal-wd" role="row">' + wd + '</div>' + rows + '</div>' +
+      '<div class="dms-cal-f"><span class="dms-cal-msg" aria-live="polite">' + msg + '</span><span class="dms-cal-btns"><button type="button" class="dms-btn" data-act="popclose" data-fk="calcancel">' + esc(tr('Cancel', 'إلغاء')) + '</button>' +
+      '<button type="button" class="dms-btn dms-btn-primary" data-act="calapply" data-fk="calapply"' + (ok ? '' : ' disabled') + '>' + esc(tr('Apply', 'تطبيق')) + '</button></span></div></div>';
+  }
+  function periodPopHTML() {
+    var n = APP.periodNote ? APP.periodNote() : '';
+    return '<div class="dms-pop dms-pop-period' + (CAL ? ' dms-has-cal' : '') + '" role="dialog" aria-label="' + esc(tr('Select period', 'اختر الفترة')) + '"><div class="dms-presets">' +
+      PGROUPS.map(function (g) {
+        return '<div class="dms-pgroup">' + g.map(function (k) {
+          var on = CAL ? k === 'custom' : F.period === k;
+          return '<button type="button" class="dms-preset' + (on ? ' dms-on' : '') + '" aria-pressed="' + on + '" data-act="preset" data-v="' + k + '" data-fk="preset:' + k + '"><span>' + esc(periodName(k)) + '</span>' +
+            (k !== 'custom' ? '<small><bdi>' + esc(rangeLabel(periodRange(k))) + '</bdi></small>' : '') + '</button>';
+        }).join('') + '</div>';
+      }).join('') + '</div>' + (CAL ? calendarHTML() : '') + (n ? '<p class="dms-pop-note dms-pop-note-p">' + esc(n) + '</p>' : '') + '</div>';
+  }
+  function toolbarHTML() {
+    var ac = filterCount(), R = PERIOD, hasF = APP.filters && APP.filters.length;
+    return '<div class="dms-topbar"><div class="dms-tb-title"><h2 class="dms-title">' + esc(APP.title()) + '</h2><p class="dms-sub" data-ref="stamp"></p></div>' +
+      '<div class="dms-tb-ctrls"><div class="dms-pendwrap" data-ref="pendwrap">' + pendingBtnHTML() + '</div>' +
+      (APP.period === false ? '' : '<div class="dms-anchor"><button type="button" class="dms-btn dms-period" data-act="pop" data-v="period" data-fk="pop:period" aria-haspopup="dialog" aria-expanded="' + (POP === 'period') + '" aria-label="' + esc(tr('Period', 'الفترة') + ': ' + periodName(F.period) + ' ' + rangeLabel(R)) + '">' + ico('cal') +
+        '<span class="dms-period-t"><b>' + esc(periodName(F.period)) + '</b><span class="dms-period-r"><bdi>' + esc(rangeLabel(R)) + '</bdi></span></span>' + ico('down', 'dms-chev') + '</button>' + (POP === 'period' ? periodPopHTML() : '') + '</div>') +
+      (hasF ? '<div class="dms-anchor"><button type="button" class="dms-btn' + (ac ? ' dms-btn-on' : '') + '" data-act="pop" data-v="filters" data-fk="pop:filters" aria-haspopup="dialog" aria-expanded="' + (POP === 'filters') + '">' + ico('filter') +
+        '<span class="dms-btn-t">' + esc(tr('Filters', 'المرشحات')) + '</span>' + (ac ? '<span class="dms-count" aria-label="' + esc(ac + ' ' + tr('active', 'نشط')) + '">' + ac + '</span>' : '') + '</button>' + (POP === 'filters' ? filtersPopHTML() : '') + '</div>' : '') +
+      '<button type="button" class="dms-btn dms-icobtn" data-act="refresh" data-ref="refresh" data-fk="refresh" aria-label="' + esc(tr('Refresh data', 'تحديث البيانات')) + '" title="' + esc(tr('Refresh data (keeps filters)', 'تحديث البيانات (مع الإبقاء على المرشحات)')) + '">' + ico('refresh') + '</button></div>' +
+      '<div class="dms-lang" role="group" aria-label="Language / اللغة"><button type="button" data-act="lang" data-v="en" data-fk="lang:en" lang="en" aria-pressed="' + (LANG === 'en') + '"' + (LANG === 'en' ? ' class="dms-on"' : '') + '>English</button>' +
+        '<button type="button" data-act="lang" data-v="ar" data-fk="lang:ar" lang="ar" aria-pressed="' + (LANG === 'ar') + '"' + (LANG === 'ar' ? ' class="dms-on"' : '') + '>العربية</button></div></div>';
+  }
+  function chipsHTML() {
+    var a = (APP.filters || []).filter(function (f) { return F[f.k]; }); if (!a.length) { return ''; }
+    return '<div class="dms-chips">' + a.map(function (f) {
+      var v = optLabel(f, F[f.k]), lab = tr(f.en, f.ar);
+      return '<span class="dms-chip"><span class="dms-chip-k">' + esc(lab) + '</span><bdi>' + esc(v) + '</bdi><button type="button" class="dms-chip-x" data-act="rmf" data-v="' + f.k + '" data-fk="rmf:' + f.k + '" aria-label="' + esc(tr('Remove filter', 'إزالة المرشح') + ' ' + lab + ': ' + v) + '">' + ico('x') + '</button></span>';
+    }).join('') + (a.length > 1 ? '<button type="button" class="dms-linkbtn" data-act="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button>' : '') + '</div>';
+  }
+  function tabsHTML() {
+    var pend = pendingTotal(AMC);
+    return '<div class="dms-tabs" role="tablist" aria-label="' + esc(tr('Sections', 'الأقسام')) + '">' + APP.tabs.map(function (x) {
+      var on = x.id === tab, lbl = tr(x.en, x.ar), b = x.id === 'actions' && pend ? '<span class="dms-tab-n dms-num" title="' + esc(tr('Pending actions as of today', 'الإجراءات المعلقة حتى اليوم')) + '">' + num(pend) + '</span>' : '';
+      return '<button class="dms-tab' + (on ? ' dms-on' : '') + '" role="tab" id="dms-tab-' + x.id + '" aria-selected="' + on + '" aria-controls="dms-panel" tabindex="' + (on ? 0 : -1) + '" data-act="tab" data-v="' + x.id + '" data-fk="tab:' + x.id + '" title="' + esc(lbl) + '" type="button"><span>' + esc(lbl) + '</span>' + b + '</button>';
+    }).join('') + '</div>';
+  }
+
+  /* ---------- rendering: a fixed skeleton whose regions repaint independently (focus kept via data-fk) ---------- */
+  function activeEl() { try { return ROOT.activeElement || null; } catch (e) { return null; } }
+  function paint(el, html) {
+    if (!el) { return; }
+    var a = activeEl(), fk = a && el.contains(a) && a.getAttribute ? a.getAttribute('data-fk') : null, ss = null;
+    if (fk && typeof a.selectionStart === 'number') { try { ss = [a.selectionStart, a.selectionEnd]; } catch (e) { /* not a text input */ } }
+    el.innerHTML = html;
+    if (fk) { focusFk(fk); if (ss) { var n = activeEl(); try { n.setSelectionRange(ss[0], ss[1]); } catch (e) { /* ignore */ } } }
+  }
+  function focusFk(k) { var n = HOST.querySelector('[data-fk="' + k + '"]'); if (n) { try { n.focus({ preventScroll: true }); } catch (e) { n.focus(); } } }
+  function skeleton() {
+    HOST.innerHTML = '<div class="dms-app"><div data-ref="tb"></div><div data-ref="chips"></div><div data-ref="tabs"></div><div class="dms-sheet" role="tabpanel" id="dms-panel" data-ref="sheet"><div data-ref="banner"></div><div class="dms-content" data-ref="content"></div></div>' +
+      '<div class="dms-tip" data-ref="tip" role="tooltip" hidden></div></div><div data-ref="overlay"></div>';
+    built = true;
+  }
+  function renderHeaderState() {
+    var b = $('[data-ref="refresh"]'), s = $('[data-ref="stamp"]'), bz = busy();
+    if (b) { b.classList.toggle('dms-busy', bz); b.setAttribute('aria-busy', String(bz)); }
+    if (s) { s.textContent = (APP.stamp ? APP.stamp() : tr('Read-only', 'للقراءة فقط')) + (LOADED ? ' · ' + tr('Updated ', 'آخر تحديث ') + LOADED : '') + (bz ? ' · ' + tr('loading…', 'جارٍ التحميل…') : ''); }
+    paint($('[data-ref="pendwrap"]'), pendingBtnHTML());
+    paint($('[data-ref="tabs"]'), tabsHTML());
+  }
+  function renderToolbar() { paint($('[data-ref="tb"]'), toolbarHTML()); paint($('[data-ref="chips"]'), chipsHTML()); renderHeaderState(); }
+  function contentHTML() {
+    if (!BOOTED) {
+      return '<div class="dms-grid dms-kpis dms-ov-kpis" aria-busy="true">' + skel(CFG.kpiCount || 6, 'dms-skel-kpi') + '</div><div class="dms-main2"><div class="dms-skel dms-skel-panel"></div><div class="dms-skel dms-skel-panel"></div></div>' +
+        note(esc(tr('Loading from ERPNext…', 'جارٍ التحميل من ERPNext…')));
+    }
+    if (APP.period !== false && (!PERIOD[0] || PERIOD[0] > PERIOD[1])) { return alertBox('err', esc(tr('Choose a valid date range.', 'اختر نطاق تاريخ صحيحًا.'))); }
+    return APP.content(tab, AMC);
+  }
+  function renderSoft() {
+    PERIOD = curPeriod(); AMC = APP.actions ? APP.actions() : null;
+    var keep = {}; Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { keep[k] = TBL[k]; } }); TBL = keep;
+    var b = $('[data-ref="banner"]'), c = $('[data-ref="content"]'), sh = $('[data-ref="sheet"]');
+    if (b) { b.innerHTML = BOOTED && APP.banner ? APP.banner() : ''; }
+    if (c) { paint(c, contentHTML()); c.classList.remove('dms-enter'); if (ANIM) { void c.offsetWidth; c.classList.add('dms-enter'); } ANIM = false; fillTables(c); fitChartLabels(); if (APP.afterRender) { APP.afterRender(c); } }
+    if (sh) { sh.setAttribute('aria-labelledby', 'dms-tab-' + tab); }
+    renderHeaderState();
+  }
+  function renderAll() {
+    HOST.setAttribute('dir', LANG === 'ar' ? 'rtl' : 'ltr'); HOST.setAttribute('lang', LANG);
+    if (!built) { skeleton(); }
+    PERIOD = curPeriod(); renderToolbar(); renderSoft();
+  }
+  /* Full reload (filters, refresh): new generation, empty store, tables back to page 1. */
+  function reload() {
+    setToday(); PERIOD = curPeriod(); GEN++; D = {}; LOADED = STAMP;
+    Object.keys(SS).forEach(function (k) { SS[k].dirty = true; SS[k].page = 1; }); Object.keys(TS).forEach(function (k) { TS[k].page = 1; });
+    APP.load(); ANIM = true; renderAll();
+  }
+
+  /* ---------- navigation and popovers ---------- */
+  function goTab(id, focusTab, force) {
+    if (tab !== id || force) { tab = id; ANIM = true; if (APP.onTab) { APP.onTab(id); } renderAll(); }
+    var t = $('#dms-tab-' + id); if (!t) { return; }
+    try { t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) { /* ignore */ }
+    if (focusTab) { t.focus(); }
+  }
+  function openPop(w) {
+    POP = w; CAL = null;
+    if (w === 'filters') { FD = {}; APP.filters.forEach(function (f) { FD[f.k] = F[f.k]; }); FS = {}; }
+    else if (F.period === 'custom' && F.from && F.to) { CAL = { from: F.from, to: F.to, view: monthStart(F.from), focus: F.from }; }
+    renderToolbar(); focusFk(w === 'filters' ? 'fd:' + APP.filters[0].k : CAL ? 'day:' + CAL.focus : 'preset:' + F.period);
+  }
+  function closePop(restore) { var w = POP; if (!w) { return; } POP = null; CAL = null; renderToolbar(); if (restore) { focusFk('pop:' + w); } }
+  function applyFilters(next) {
+    var prev = {}; APP.filters.forEach(function (f) { prev[f.k] = F[f.k]; F[f.k] = (next && next[f.k]) || ''; }); POP = null;
+    if (APP.onFilters) { APP.onFilters(prev); }
+    reload();
+  }
+  function applyPeriod(key, from, to) {
+    F.period = key; if (key === 'custom') { F.from = from; F.to = to; }
+    POP = null; CAL = null; setToday(); PERIOD = curPeriod();
+    Object.keys(SS).forEach(function (k) { if (TBL[k] && TBL[k].period) { SS[k].dirty = true; SS[k].page = 1; } });
+    if (APP.onPeriod) { APP.onPeriod(); } else { reload(); return; }
+    ANIM = true; renderAll(); focusFk('pop:period');
+  }
+  function calPick(d) {
+    if (!CAL.from || CAL.to) { CAL.from = d; CAL.to = null; } else if (d < CAL.from) { CAL.to = CAL.from; CAL.from = d; } else { CAL.to = d; }
+    CAL.focus = d;
+  }
+  function calMove(d) { CAL.focus = d; if (d.slice(0, 7) !== CAL.view.slice(0, 7)) { CAL.view = monthStart(d); } renderToolbar(); focusFk('day:' + d); }
+
+  /* ---------- tooltip (one shared element; positioned against the dashboard, clamped to its width) ---------- */
+  function showTip(n) {
+    var tip = $('[data-ref="tip"]'), app = $('.dms-app'); if (!tip || !app) { return; }
+    tip.textContent = n.getAttribute('data-tip'); tip.hidden = false;
+    var a = app.getBoundingClientRect(), r = n.getBoundingClientRect(), w = tip.offsetWidth, hgt = tip.offsetHeight;
+    var x = Math.max(4, Math.min(r.left - a.left + r.width / 2 - w / 2, a.width - w - 4)), y = r.top - a.top - hgt - 8;
+    if (y < 0) { y = r.bottom - a.top + 8; }
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  }
+  function hideTip() { var tip = $('[data-ref="tip"]'); if (tip) { tip.hidden = true; } }
+  function onOver(ev) { var n = ev.target.closest ? ev.target.closest('[data-tip]') : null; if (n && HOST.contains(n)) { showTip(n); } else { hideTip(); } }
+
+  /* ---------- events (single delegated set, removed on destroy) ---------- */
+  function onClick(ev) {
+    var n = ev.target.closest ? ev.target.closest('[data-act]') : null;
+    if (POP && !(ev.target.closest && ev.target.closest('.dms-anchor'))) { closePop(false); }
+    if (!n || !HOST.contains(n)) { return; }
+    var a = n.getAttribute('data-act'), v = n.getAttribute('data-v'), id = n.getAttribute('data-id');
+    if (APP.onAct && APP.onAct(a, v, n, id) === true) { return; }
+    if (a === 'ovbg') { if (ev.target === n) { closeOverlay(); } return; }
+    if (a === 'closeov') { closeOverlay(); return; }
+    if (a === 'ovback' && OVL && OVL.prev) { var pv = OVL.prev; delete SS.drill; delete TS.drill; OVL = pv; if (OVL.spec) { regTable(OVL.spec); } renderOverlay(); return; }
+    if (a === 'tab') { goTab(v); return; }
+    if (a === 'lang') { if (LANG !== v) { LANG = v; try { G.localStorage.setItem('dms_lang', LANG); } catch (e) { /* ignore */ } POP = null; CAL = null; renderAll(); if (OVL) { var o = OVL; OVL = null; renderOverlay(); openDrill(o.id); } focusFk('lang:' + v); } return; }
+    if (a === 'refresh') { if (APP.onRefresh) { APP.onRefresh(); } reload(); return; }
+    if (a === 'pop') { if (POP === v) { closePop(true); } else { openPop(v); } return; }
+    if (a === 'popclose') { closePop(true); return; }
+    if (a === 'preset') {
+      if (v !== 'custom') { applyPeriod(v); return; }
+      var r0 = PERIOD[0] || TODAY, r1 = PERIOD[1] || TODAY; CAL = { from: r0, to: r1, view: monthStart(r1 > TODAY ? TODAY : r1), focus: r1 > TODAY ? TODAY : r1 };
+      renderToolbar(); focusFk('day:' + CAL.focus); return;
+    }
+    if (a === 'calnav' && CAL) { CAL.view = addMonths(CAL.view, +v); CAL.focus = CAL.view; renderToolbar(); return; }
+    if (a === 'calday' && CAL) { calPick(v); renderToolbar(); focusFk('day:' + v); return; }
+    if (a === 'calapply' && CAL && CAL.from && CAL.to) { applyPeriod('custom', CAL.from, CAL.to); return; }
+    if (a === 'fapply') { applyFilters(FD); focusFk('pop:filters'); return; }
+    if (a === 'fclear') { applyFilters(null); focusFk('pop:filters'); return; }
+    if (a === 'rmf') { var nf = {}; APP.filters.forEach(function (f) { nf[f.k] = F[f.k]; }); nf[v] = ''; applyFilters(nf); focusFk('pop:filters'); return; }
+    if (a === 'pending') {
+      goTab(APP.tabs[0].id); var p = $('#dms-pending');
+      if (p) { var still = G.matchMedia && G.matchMedia('(prefers-reduced-motion: reduce)').matches; try { p.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' }); } catch (e) { p.scrollIntoView(); } p.focus({ preventScroll: true }); }
+      return;
+    }
+    if (a === 'kpi') { openDrill(v); return; }
+    if (a === 'tpage') { TS[id].page = Math.max(1, TS[id].page + (+v)); fillTable(id); return; }
+    if (a === 'tsort') { var st = TS[id]; if (st.sk === v) { st.dir = -st.dir; } else { st.sk = v; st.dir = 1; } st.page = 1; fillTable(id); focusHead(id, v); return; }
+    if (a === 'spage') { var ss = SS[id]; ss.page = Math.max(1, ss.page + (+v)); ss.dirty = true; fillTable(id); return; }
+    if (a === 'ssort') { var s2 = SS[id]; if (s2.sk === v) { s2.dir = -s2.dir; } else { s2.sk = v; s2.dir = 1; } s2.page = 1; s2.dirty = true; fillTable(id); focusHead(id, v); return; }
+    if (a === 'sretry') { SS[id].dirty = true; fillTable(id); return; }
+    if (a === 'csv') { var sp = TBL[id]; download(sp.file || id, sp, clientRows(sp, TS[id])); return; }
+    if (a === 'csvall') { exportServer(id); return; }
+  }
+  function focusHead(id, v) { var th = HOST.querySelector('[data-tbl="' + id + '"] th[data-v="' + v + '"]'); if (th) { th.focus(); } }
+  function onInput(ev) {
+    var n = ev.target; if (!n || !n.getAttribute || !HOST.contains(n)) { return; }
+    var fs = n.getAttribute('data-fs'), fd = n.getAttribute('data-fd'), tq = n.getAttribute('data-tq');
+    if (APP.onInput && APP.onInput(n, ev) === true) { return; }
+    if (fs) { if (FS[fs] === n.value) { return; } FS[fs] = n.value; renderToolbar(); return; }
+    if (fd) { if (!FD || FD[fd] === n.value) { return; } FD[fd] = n.value; if (n.type === 'search') { return; } if (APP.filters.some(function (f) { return f.dependsOn === fd; })) { APP.filters.forEach(function (f) { if (f.dependsOn === fd && FD[f.k] && !optList(f, FD).some(function (x) { return x.v === FD[f.k]; })) { FD[f.k] = ''; } }); renderToolbar(); } return; }
+    if (tq) {
+      focusId = tq; var spx = TBL[tq]; if (!spx) { return; }
+      if (spx.server) { var s2 = SS[tq]; if (s2.q === n.value) { return; } s2.q = n.value; s2.page = 1; clearTimeout(onInput.t); onInput.t = later(function () { s2.dirty = true; fillTable(tq); }, 350); }
+      else { var s1 = TS[tq] || (TS[tq] = { q: '', page: 1, sk: spx.sk || '', dir: spx.dir || 1 }); if (s1.q === n.value) { return; } s1.q = n.value; s1.page = 1; fillTable(tq); }
+    }
+  }
+  function onKey(ev) {
+    var t = ev.target, act = t && t.getAttribute ? t.getAttribute('data-act') : null, rtl = LANG === 'ar', k = ev.key;
+    if (k === 'Escape') {
+      if (POP) { ev.preventDefault(); closePop(true); return; }
+      if (OVL) { closeOverlay(); }
+      return;
+    }
+    if ((k === 'Enter' || k === ' ') && (act === 'tsort' || act === 'ssort')) { ev.preventDefault(); t.click(); return; }
+    if (k === 'Tab' && OVL) {
+      var modal = $('.dms-modal'), controls = Array.prototype.filter.call(modal.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), [tabindex="0"]'), function (el) { return el.getClientRects().length; });
+      var first = controls[0], last = controls[controls.length - 1];
+      if (ev.shiftKey && t === first) { ev.preventDefault(); last.focus(); }
+      else if (!ev.shiftKey && t === last) { ev.preventDefault(); first.focus(); }
+    }
+    if (act === 'tab' && /^(ArrowLeft|ArrowRight|Home|End)$/.test(k)) {
+      var ids = APP.tabs.map(function (x) { return x.id; }), i = ids.indexOf(t.getAttribute('data-v')), L = ids.length;
+      var d = k === 'Home' ? -i : k === 'End' ? L - 1 - i : ((k === 'ArrowRight') !== rtl ? 1 : -1);
+      ev.preventDefault(); goTab(ids[(i + d + L) % L], true); return;
+    }
+    if (act === 'calday' && CAL) {
+      var cur = t.getAttribute('data-v'), step = { ArrowRight: rtl ? -1 : 1, ArrowLeft: rtl ? 1 : -1, ArrowUp: -7, ArrowDown: 7 }[k];
+      if (step) { ev.preventDefault(); calMove(addDays(cur, step)); return; }
+      if (k === 'PageUp' || k === 'PageDown') { ev.preventDefault(); calMove(shiftMonths(cur, k === 'PageUp' ? -1 : 1)); return; }
+      if (k === 'Home' || k === 'End') { ev.preventDefault(); calMove(k === 'Home' ? weekStartOf(cur) : addDays(weekStartOf(cur), 6)); }
+    }
+  }
+  /* Start: wire events, render the skeleton, run APP.boot (reference lists), then the first load. */
+  function start() {
+    HOST.addEventListener('click', onClick, SIG);
+    HOST.addEventListener('input', onInput, SIG);
+    HOST.addEventListener('change', onInput, SIG);
+    HOST.addEventListener('keydown', onKey, SIG);
+    HOST.addEventListener('pointerover', onOver, SIG);
+    HOST.addEventListener('pointerleave', hideTip, SIG);
+    HOST.addEventListener('focusin', function (ev) { var n = ev.target.closest && ev.target.closest('[data-tip]'); if (n) { showTip(n); } }, SIG);
+    HOST.addEventListener('focusout', hideTip, SIG);
+    document.addEventListener('pointerdown', function (ev) {
+      if (!POP) { return; } var p = ev.composedPath ? ev.composedPath() : [];
+      for (var i = 0; i < p.length; i++) { if (p[i] === HOST) { return; } }
+      closePop(false);
+    }, SIG);
+    if (!G.frappe || !frappe.call) { HOST.innerHTML = '<div class="dms-empty">Frappe client API not available.</div>'; return; }
+    setToday(); PERIOD = curPeriod();
+    var chartResize = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fitChartLabels) : null;
+    if (chartResize) { chartResize.observe(HOST); if (abort) { abort.signal.addEventListener('abort', function () { chartResize.disconnect(); }); } }
+    if (document.fonts) { document.fonts.ready.then(function () { if (!destroyed) { fitChartLabels(); } }); }
+    renderAll();
+    var g = GEN, chk = function () { return g === GEN && !destroyed; };
+    Promise.resolve(APP.boot ? APP.boot(chk) : null).catch(function (e) { if (G.console) { console.error(APP.key, 'boot', e); } }).then(function () { if (destroyed) { return; } BOOTED = true; reload(); });
+  }
+  /* ==== end DMS kit ==== */
+
+  /* ============================================================ 1. settings (v5) */
+  var EXPIRY_SOON_DAYS = 90, DOC_SOON_DAYS = 60, RENT_DUE_DAYS = 30, DEAD_STOCK_DAYS = 180, PAYABLE_SOON_DAYS = 7;
+  var DOC_DEFS = [['com_lic_exp', 'Commercial licence', 'الرخصة التجارية'], ['cr_date_to', 'Commercial registration (CR)', 'السجل التجاري'], ['cd_date_to', 'Civil defence (CD)', 'الدفاع المدني'], ['national_adress_expiry', 'National address', 'العنوان الوطني'],
+    ['fire_expiry', 'Fire maintenance contract', 'عقد صيانة الحريق'], ['cleanig_exp_date', 'Cleaning contract', 'عقد النظافة'], ['camera_expiry', 'Camera maintenance contract', 'عقد صيانة الكاميرات'], ['industrial_expiry', 'Industrial licence', 'الرخصة الصناعية'],
+    ['construction_environmental_permit_expiry', 'Construction environmental permit', 'تصريح بيئي إنشائي'], ['operational_environmental_permit_expiry', 'Operational environmental permit', 'تصريح بيئي تشغيلي']];
+  var FM_FIELDS = ['name', 'docstatus', 'modified', 'company', 'facility_detail', 'facility_name', 'facility_catogory', 'facility_contract_status', 'facility_type', 'location', 'area_in_sqm', 'agreement_type', 'contract_number', 'auto_renewal', 'date_frm', 'rentdate_to', 'lease_start', 'lease_end',
+    'rent_amount', 'rental_amount', 'rent_installments', 'amount_intallments', 'rent_mode', 'owner_name', 'owner_number', 'additional_notes', 'installment_1_dues_on', 'installment_2_dues_on', 'installment_3_dues_on', 'installment_4_dues_on', 'paid1_not', 'paid2_not', 'paid3_not', 'paid4_not',
+    'com_lic_exp', 'cr_date_to', 'cd_date_to', 'national_adress_expiry', 'fire_expiry', 'cleanig_exp_date', 'camera_expiry', 'industrial_expiry', 'construction_environmental_permit_expiry', 'operational_environmental_permit_expiry', 'fire_contractor', 'cleaning_cont', 'camera_contractor', 'fire_layout', 'sign_board', 'medical_kit'];
   var ASSET_FIELDS = ['name', 'asset_name', 'company', 'asset_category', 'location', 'status', 'gross_purchase_amount', 'value_after_depreciation', 'insurance_end_date', 'maintenance_required'];
   var BIN_FIELDS = ['name', 'item_code', 'warehouse', 'actual_qty', 'projected_qty', 'reserved_qty', 'ordered_qty', 'stock_value', 'stock_uom'];
   var WH_FIELDS = ['name', 'warehouse_name', 'company', 'is_group', 'disabled', 'warehouse_type'];
   var ITEM_FIELDS = ['name', 'item_name', 'item_group', 'stock_uom', 'custom_reorder_level_qty', 'safety_stock'];
   var SI_FIELDS = ['name', 'customer', 'customer_name', 'company', 'posting_date', 'due_date', 'base_grand_total', 'outstanding_amount', 'conversion_rate', 'status'];
   var PI_FIELDS = ['name', 'supplier', 'supplier_name', 'company', 'posting_date', 'due_date', 'base_grand_total', 'outstanding_amount', 'conversion_rate', 'status', 'bill_no'];
+  var BUCKETS = [['current', 'Not yet due', 'غير مستحق', 'var(--dms-age0)'], ['d30', '1–30 days', '1–30 يومًا', 'var(--dms-age1)'], ['d60', '31–60 days', '31–60 يومًا', 'var(--dms-age2)'], ['d90', '61–90 days', '61–90 يومًا', 'var(--dms-age3)'], ['d180', '91–180 days', '91–180 يومًا', 'var(--dms-age4)'], ['d180p', '> 180 days', 'أكثر من 180 يومًا', 'var(--dms-age5)']];
+  var AGE_WINDOWS = [30, 90, 180, 365];
 
-  var BUCKETS = [
-    { k: 'current', label: 'Not yet due', color: 'var(--c-ok)' },
-    { k: 'd30',     label: '1–30 days',   color: 'var(--c-lime)' },
-    { k: 'd60',     label: '31–60 days',  color: 'var(--c-warn)' },
-    { k: 'd90',     label: '61–90 days',  color: 'var(--c-orange)' },
-    { k: 'd180',    label: '91–180 days', color: 'var(--c-bad)' },
-    { k: 'd180p',   label: '> 180 days',  color: 'var(--c-deep)' }
-  ];
-  var TAB_LABELS = { overview: ['grid', 'Overview'], fm: ['building', 'Facilities'], inventory: ['box', 'Inventory'], finance: ['wallet', 'Finance'] };
-  var RAIL_LINKS = {
-    overview: [['list', 'DM Facilities Management', 'Facilities list'], ['report', 'Warehouse Wise Stock Balance', 'Stock balance'], ['report', 'Accounts Receivable', 'Receivable'], ['report', 'Profit and Loss Statement', 'P&L']],
-    fm: [['list', 'DM Facilities Management', 'Facilities list'], ['list', 'Asset', 'Assets list'], ['list', 'Asset Repair', 'Repairs']],
-    inventory: [['report', 'Warehouse Wise Stock Balance', 'Stock balance'], ['report', 'Stock Ageing', 'Stock ageing'], ['report', 'Stock Projected Qty', 'Projected qty']],
-    finance: [['report', 'Accounts Receivable', 'Receivable'], ['report', 'Accounts Payable', 'Payable'], ['report', 'Profit and Loss Statement', 'P&L'], ['report', 'Balance Sheet', 'Balance sheet'], ['report', 'Cash Flow', 'Cash flow']]
-  };
-
-  /* ------------------------------------------------------------------
-     2. HELPERS
-     ------------------------------------------------------------------ */
-  var ICONS = {
-    grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
-    file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
-    wallet: '<path d="M3 7a2 2 0 0 1 2-2h13v4"/><path d="M3 7v11a2 2 0 0 0 2 2h14a1 1 0 0 0 1-1v-3"/><path d="M21 9h-5a2 2 0 0 0 0 4h5z"/>',
-    check: '<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/>',
-    alert: '<path d="M12 3l10 18H2z"/><path d="M12 10v4M12 17.5v.01"/>',
-    bank: '<path d="M3 10l9-6 9 6M5 10v8M9 10v8M15 10v8M19 10v8M3 21h18"/>',
-    calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
-    refresh: '<path d="M20 11a8 8 0 0 0-14-4L4 9M4 4v5h5M4 13a8 8 0 0 0 14 4l2-2M20 20v-5h-5"/>',
-    search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
-    close: '<path d="M6 6l12 12M18 6L6 18"/>',
-    download: '<path d="M12 3v12M7 11l5 5 5-5M4 21h16"/>',
-    external: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
-    list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
-    plus: '<path d="M12 5v14M5 12h14"/>',
-    pin: '<path d="M12 21s7-6.2 7-12a7 7 0 1 0-14 0c0 5.8 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
-    chev: '<path d="M6 9l6 6 6-6"/>',
-    copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>',
-    lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
-    reset: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5"/>',
-    users: '<circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.5 3-6 7-6s7 2.5 7 6M17 5a3.5 3.5 0 0 1 0 7M22 20c0-2.5-1.5-4.5-4-5.5"/>',
-    trend: '<path d="M3 17l6-6 4 4 8-8M15 7h6v6"/>',
-    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-    percent: '<path d="M19 5L5 19"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/>'
-  };
-  function icon(n, small) {
-    return '<svg class="ico' + (small ? ' ico-sm' : '') + '" viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[n] || '') + '</svg>';
-  }
-  function esc(v) {
-    return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-    });
-  }
-  function num(v) {
-    if (v == null || v === '') return 0;
-    var n = parseFloat(String(v).replace(/[^0-9.\-]/g, ''));
-    return isNaN(n) ? 0 : n;
-  }
-  function money(n) { return (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
-  function money2(n) { return (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-  function compact(n) {
-    n = Number(n) || 0;
-    var a = Math.abs(n);
-    if (a >= 1e9) return (n / 1e9).toFixed(2).replace(/\.?0+$/, '') + 'B';
-    if (a >= 1e6) return (n / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M';
-    if (a >= 1e4) return (n / 1e3).toFixed(1).replace(/\.?0+$/, '') + 'K';
-    return money(n);
-  }
-  var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  function pad(n) { return (n < 10 ? '0' : '') + n; }
-  function ds(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
-  function todayStr() { return ds(new Date()); }
-  function addDays(n) { var d = new Date(); d.setDate(d.getDate() + n); return ds(d); }
-  function parseDate(s) {
-    if (!s || !/^\d{4}-\d{2}-\d{2}/.test(s)) return null;
-    return new Date(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10));
-  }
-  function fmtDate(s) { var d = parseDate(s); return d ? d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear() : '—'; }
-  function daysBetween(a, b) {
-    var A = parseDate(a), B = parseDate(b);
-    return (A && B) ? Math.round((B - A) / 86400000) : null;
-  }
-  function fmtTime(t) { return t ? String(t).slice(0, 5) : ''; }
-  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many || one + 's'); }
-  function docLabel(d) { return d === 1 ? 'Submitted' : d === 2 ? 'Cancelled' : 'Draft'; }
-  function docCls(d) { return d === 1 ? 'b-ok' : d === 2 ? 'b-bad' : 'b-slate'; }
-  function badge(text, map) {
-    var m = (map && map[text]) || { cls: 'b-slate' };
-    return '<span class="badge ' + m.cls + '">' + esc(text) + '</span>';
-  }
-  function sum(arr, key) { return arr.reduce(function (s, r) { return s + (r[key] || 0); }, 0); }
-  function emptyState(title, text) { return '<div class="empty"><b>' + esc(title) + '</b>' + esc(text || '') + '</div>'; }
-  function locTag(loc) { return '<span class="loc-tag">' + icon('pin') + esc(loc || 'Unassigned') + '</span>'; }
-  function niceMax(v) {
-    if (v <= 0) return 1;
-    var p = Math.pow(10, Math.floor(Math.log(v) / Math.LN10)), f = v / p;
-    return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
-  }
-
-
-  ICONS.building = '<path d="M4 21V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v16M15 9h4a1 1 0 0 1 1 1v11M3 21h18M8 8h3M8 12h3M8 16h3"/>';
-  ICONS.box = '<path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>';
-  ICONS.shield = '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>';
-  ICONS.truck = '<path d="M3 6h11v10H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>';
-
-  var TODAY = todayStr();
-  var DEFAULT_FILTERS = { q: '', company: 'all', period: 'year' };
-  var state = {
-    tab: 'overview', loaded: {}, loading: {}, errors: {},
-    raw: { fm: [], assets: [], repairs: [], bins: [], whs: [], items: [], lastMove: {}, lastApprox: {}, ageFrom: '', noAgeWhy: '', noAgeDetail: '', plFail: null, noAge: false, si: [], pi: [], cash: [], pl: {}, glMonths: {}, pe: [] },
-    view: {}, filters: Object.assign({}, DEFAULT_FILTERS), tables: {}, alertTab: { fm: 'contracts', inv: 'low', fin: 'ar' },
-    companies: {}
-  };
-  var C = function (v) { return v == null ? '' : v; };
-
-  /* ------------------------------------------------------------------
-     2. DATA ACCESS
-     ------------------------------------------------------------------ */
-  var REQ_TIMEOUT = 90000;
-  /* Direct, silent API call: no Frappe popups, always settles (timeout). Errors carry .status, .perm and .detail
-     so the dashboard can say WHY a query failed (permission vs. HTTP 417 "Field not permitted in query" vs. timeout). */
-  function fetchList(doctype, fields, filters, opts) {
-    opts = opts || {};
-    return new Promise(function (resolve, reject) {
-      var args = { doctype: doctype, fields: fields, filters: filters || [], limit_page_length: opts.limit || 100000 };
-      if (opts.order) args.order_by = opts.order;
-      if (opts.group) args.group_by = opts.group;
-      if (opts.start) args.limit_start = opts.start;
-      var done = false, ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-      var timer = setTimeout(function () { if (done) return; done = true; if (ctl) { try { ctl.abort(); } catch (x) { /* ignore */ } } var te = new Error('Request timed out'); te.detail = 'timed out'; reject(te); }, REQ_TIMEOUT);
-      var body = new URLSearchParams();
-      Object.keys(args).forEach(function (k) { var v = args[k]; if (v === undefined || v === null) return; body.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v)); });
-      fetch('/api/method/frappe.client.get_list', { method: 'POST', credentials: 'same-origin', signal: ctl ? ctl.signal : undefined,
-        headers: { 'X-Frappe-CSRF-Token': (window.frappe && frappe.csrf_token) || '', 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' }, body: body.toString() })
-        .then(function (r) { return r.text().then(function (txt) { return { r: r, txt: txt }; }); })
-        .then(function (o) {
-          if (done) return; done = true; clearTimeout(timer);
-          var j = null; try { j = JSON.parse(o.txt); } catch (x) { /* ignore */ }
-          if (o.r.ok && j && !j.exc) { resolve(j.message || []); return; }
-          var ex = String((j && (j.exception || j.exc_type)) || ''), msg = ex.split(':').slice(1).join(':').trim() || ex;
-          var e = new Error(msg || ('HTTP ' + o.r.status));
-          e.status = o.r.status; e.perm = o.r.status === 401 || o.r.status === 403 || /PermissionError/i.test(ex);
-          e.detail = e.perm ? 'no access' : ('HTTP ' + o.r.status + (msg ? ': ' + msg.slice(0, 120) : ''));
-          reject(e);
-        })
-        .catch(function (err) { if (done) return; done = true; clearTimeout(timer); if (!err.detail) err.detail = (err && err.message) || 'network error'; reject(err); });
-    });
-  }
-  /* label for the banner: "Stock Ledger Entry — HTTP 417: Field not permitted in query ..." */
-  function why(label, e) { return e && e.perm ? 'No access to ' + label : label + (e && e.detail ? ' — ' + e.detail : ''); }
-  function safe(tab, label, p, fallback) {
-    return p.catch(function (e) { state.errors[tab] = (state.errors[tab] || []).concat(why(label, e)); return fallback; });
-  }
-  function monthKey(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1); }
-  function last12() {
-    var now = new Date(), out = [];
-    for (var i = 11; i >= 0; i--) {
-      var d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      out.push({ key: monthKey(d), label: MONTHS[d.getMonth()], yr: d.getFullYear(), from: ds(d), to: ds(new Date(d.getFullYear(), d.getMonth() + 1, 0)) });
-    }
-    return out;
-  }
-  function noteCompany(c) { if (c) state.companies[c] = 1; }
-  function fillCompanyOptions() {
-    var sel = $('#fCompany'), cur = state.filters.company;
-    var list = Object.keys(state.companies).sort();
-    sel.innerHTML = '<option value="all">All companies</option>' + list.map(function (v) { return '<option value="' + esc(v) + '">' + esc(v) + '</option>'; }).join('');
-    if (cur !== 'all' && list.indexOf(cur) === -1) { cur = 'all'; state.filters.company = 'all'; }
-    sel.value = cur;
-  }
-  function inCo(r) { return state.filters.company === 'all' || r._company === state.filters.company; }
-  function matchQ(parts) {
-    var q = state.filters.q;
-    return !q || parts.join(' ').toLowerCase().indexOf(q.toLowerCase()) > -1;
-  }
+  /* ============================================================ 2. helpers */
+  function num0(v) { if (v == null || v === '') { return 0; } var n = parseFloat(String(v).replace(/[^0-9.\-]/g, '')); return isNaN(n) ? 0 : n; }
+  function sumK(arr, key) { return arr.reduce(function (s, r) { return s + (r[key] || 0); }, 0); }
+  function daysTo(d) { return d ? diffDays(TODAY, String(d).slice(0, 10)) : null; }
+  function plural(n, one, many) { return num(n) + ' ' + (n === 1 ? one : many || one + 's'); }
+  function groupSum(arr, kf, vf) { var m = {}; arr.forEach(function (r) { var k = kf(r) || '—', g = m[k] || (m[k] = { key: k, v: 0, n: 0 }); g.v += vf(r); g.n++; }); return Object.keys(m).map(function (k) { return m[k]; }).sort(function (a, b) { return b.v - a.v; }); }
   function shortWh(n) { return String(n || '').replace(/\s+-\s+[A-Z0-9]{2,8}$/, ''); }
+  function last12() { var out = []; for (var i = 11; i >= 0; i--) { var k = addMonths(TODAY.slice(0, 7) + '-01', -i).slice(0, 7); out.push({ key: k, from: k + '-01', to: addDays(addMonths(k + '-01', 1), -1) }); } return out; }
 
-  /* ---------------- Facilities ---------------- */
+  /* ============================================================ 3. scope and state */
+  var REF = { co: null };
+  function coCur(c) { var x = (REF.co || []).filter(function (y) { return y.name === c; })[0]; return (x && x.default_currency) || CUR; }
+  function scopeCos() { var cs = REF.co || []; if (F.company) { return [F.company]; } return cs.filter(function (c) { return (c.default_currency || CUR) === CUR; }).map(function (c) { return c.name; }); }
+  function scopeCur() { return F.company ? coCur(F.company) : CUR; }
+  function otherCos() { return F.company ? [] : (REF.co || []).filter(function (c) { return (c.default_currency || CUR) !== CUR; }).map(function (c) { return c.name + ' (' + c.default_currency + ')'; }); }
+  function inCo(r) { var s = scopeCos(); return F.company ? r._company === F.company : (s.indexOf(r._company) > -1 || r._company === 'Unassigned' || !REF.co || !REF.co.length); }
+  function matchQ(parts) { var q = String(F.q || '').trim().toLowerCase(); return !q || parts.join(' ').toLowerCase().indexOf(q) > -1; }
+  var RAW = { fm: [], assets: [], repairs: [], bins: [], whs: [], items: {}, lastMove: {}, noAge: true, noAgeWhy: 'pending', si: [], pi: [], cash: [], pl: {}, pe: [], fin12: [], plFail: null };
+  var HAVE = { fm: false, inv: false, fin: false }, ERR = { fm: [], inv: [], fin: [] }, CACHED_AT = 0;
+
+  /* ============================================================ 4. data access (v5 loaders on the kit request layer) */
+  function fetchList(doctype, fields, filters, opts) {
+    opts = opts || {}; var a = { doctype: doctype, fields: fields, filters: filters || [], limit_page_length: opts.limit || 100000 };
+    if (opts.order) { a.order_by = opts.order; } if (opts.group) { a.group_by = opts.group; } if (opts.start) { a.limit_start = opts.start; }
+    return getList(a, null).then(function (r) { return r || []; });
+  }
+  function why(label, e) { var k = errKind(e); return k === 'perm' ? tr('No access to ', 'لا صلاحية على ') + label : label + ' — ' + ((e && e.message) || tr('request failed', 'فشل الطلب')); }
+  function safe(tab, label, p, fallback) { return p.catch(function (e) { ERR[tab].push(why(label, e)); return fallback; }); }
   function enrichFM(r) {
     r._company = r.company || 'Unassigned';
     var lease = r.agreement_type === 'Lease Agreement' && r.lease_start;
     r._start = (lease ? r.lease_start : r.date_frm) || r.date_frm || r.lease_start || '';
     r._end = (lease && r.lease_end) ? r.lease_end : (r.rentdate_to || r.lease_end || '');
     r._active = r.facility_contract_status !== 'Closed';
-    r._days = r._end ? daysBetween(TODAY, r._end) : null;
-    r._exp = r._days == null ? 'none' : r._days < 0 ? 'expired' : r._days <= 30 ? 'd30' : r._days <= 60 ? 'd60' : r._days <= 90 ? 'd90' : 'ok';
-    r._total = num(r.rent_amount) || num(r.rental_amount);
-    var yrs = (r._start && r._end) ? daysBetween(r._start, r._end) / 365.25 : 0;
+    r._days = r._end ? daysTo(r._end) : null;
+    r._total = num0(r.rent_amount) || num0(r.rental_amount);
+    var yrs = (r._start && r._end) ? diffDays(String(r._start).slice(0, 10), String(r._end).slice(0, 10)) / 365.25 : 0;
     r._annual = yrs > 1.05 ? r._total / yrs : r._total;
     r._area = parseFloat(String(r.area_in_sqm || '').replace(/[^0-9.]/g, '')) || 0;
     r._psqm = r._area ? r._annual / r._area : 0;
-    r._type = r.facility_detail || '—';
-    r._loc = String(r.location || '').trim() || 'Unspecified';
-    r._name = String(r.facility_name || '').trim() || r.name;
-    var n = parseInt(r.rent_installments, 10) || 0, inst = [], k;
-    for (k = 1; k <= 4; k++) {
-      if (n && k > n) break;
-      var due = r['installment_' + k + '_dues_on'];
-      if (!due) continue;
-      inst.push({ k: k, due: due, paid: !!r['paid' + k + '_not'], amt: num(r.amount_intallments) || (n ? r._total / n : r._total) });
-    }
+    r._type = r.facility_detail || '—'; r._loc = String(r.location || '').trim() || tr('Unspecified', 'غير محدد'); r._name = String(r.facility_name || '').trim() || r.name;
+    var n = parseInt(r.rent_installments, 10) || 0, inst = [];
+    for (var k = 1; k <= 4; k++) { if (n && k > n) { break; } var due = r['installment_' + k + '_dues_on']; if (!due) { continue; } inst.push({ k: k, due: due, paid: !!r['paid' + k + '_not'], amt: num0(r.amount_intallments) || (n ? r._total / n : r._total) }); }
     r._inst = inst;
     r._instOver = r._active ? inst.filter(function (i) { return !i.paid && i.due < TODAY && (!r._start || i.due >= r._start); }) : [];
-    r._instSoon = r._active ? inst.filter(function (i) { return !i.paid && i.due >= TODAY && i.due <= addDays(RENT_DUE_DAYS); }) : [];
-    r._docs = DOC_DEFS.map(function (d) { var dt = r[d[0]]; return dt ? { key: d[0], label: d[1], date: dt, days: daysBetween(TODAY, dt) } : null; }).filter(Boolean);
+    r._instSoon = r._active ? inst.filter(function (i) { return !i.paid && i.due >= TODAY && i.due <= addDays(TODAY, RENT_DUE_DAYS); }) : [];
+    r._docs = DOC_DEFS.map(function (d) { var dt = r[d[0]]; return dt ? { key: d[0], label: tr(d[1], d[2]), date: dt, days: daysTo(dt) } : null; }).filter(Boolean);
     r._docBad = r._active ? r._docs.filter(function (d) { return d.days <= DOC_SOON_DAYS; }) : [];
-    r._nbad = r._docBad.length;
     r._attn = r._active && ((r._days != null && r._days <= EXPIRY_SOON_DAYS) || r._docBad.length > 0 || r._instOver.length > 0);
     return r;
   }
-  function enrichAsset(r) { r._company = r.company || 'Unassigned'; r._gross = num(r.gross_purchase_amount); r._nbv = num(r.value_after_depreciation); return r; }
-
   function loadFM() {
-    var F = [['docstatus', '<', 2]];
+    ERR.fm = [];
     return Promise.all([
-      safe('fm', 'DM Facilities Management', fetchList('DM Facilities Management', FM_FIELDS, F, { order: 'modified desc' }), []),
+      fetchList('DM Facilities Management', FM_FIELDS, [['docstatus', '<', 2]], { order: 'modified desc' }),
       safe('fm', 'Asset', fetchList('Asset', ASSET_FIELDS, [['docstatus', '=', 1], ['status', 'not in', ['Sold', 'Scrapped']]]), []),
       safe('fm', 'Asset Repair', fetchList('Asset Repair', ['name', 'asset', 'company', 'repair_status', 'failure_date', 'total_repair_cost'], [['docstatus', '<', 2], ['repair_status', '=', 'Pending']]), [])
     ]).then(function (res) {
-      state.raw.fm = res[0].map(enrichFM);
-      state.raw.assets = res[1].map(enrichAsset);
-      state.raw.repairs = res[2].map(function (r) { r._company = r.company || 'Unassigned'; return r; });
-      state.raw.fm.concat(state.raw.assets).forEach(function (r) { noteCompany(r._company); });
+      RAW.fm = res[0].map(enrichFM); RAW.assets = res[1].map(function (r) { r._company = r.company || 'Unassigned'; r._gross = num0(r.gross_purchase_amount); r._nbv = num0(r.value_after_depreciation); return r; });
+      RAW.repairs = res[2].map(function (r) { r._company = r.company || 'Unassigned'; return r; }); HAVE.fm = true; return true;
     });
   }
-
-  /* ---------------- Inventory ---------------- */
+  function fetchItems(codes) { var ch = []; for (var i = 0; i < codes.length; i += 400) { ch.push(codes.slice(i, i + 400)); } return Promise.all(ch.map(function (c) { return fetchList('Item', ITEM_FIELDS, [['name', 'in', c]]); })).then(function (p) { return [].concat.apply([], p); }); }
   function loadInv() {
-    return Promise.all([
-      safe('inv', 'Bin', fetchList('Bin', BIN_FIELDS, [['actual_qty', '!=', 0]]), []),
-      safe('inv', 'Bin (shortages)', fetchList('Bin', BIN_FIELDS, [['actual_qty', '=', 0], ['projected_qty', '<', 0]]), []),
-      safe('inv', 'Warehouse', fetchList('Warehouse', WH_FIELDS, []), []),
-      safe('inv', 'Item', fetchList('Item', ITEM_FIELDS, [['is_stock_item', '=', 1], ['disabled', '=', 0]]), [])
-    ]).then(function (res) {
-      var whMap = {};
-      res[2].forEach(function (w) { whMap[w.name] = w; });
-      state.raw.whs = res[2];
-      var seen = {}, bins = [];
-      res[0].concat(res[1]).forEach(function (b) { if (!seen[b.name]) { seen[b.name] = 1; bins.push(b); } });
-      bins.forEach(function (b) {
-        var w = whMap[b.warehouse];
-        b._company = (w && w.company) || 'Unassigned';
-        b._wh = shortWh(b.warehouse);
-        b._qty = num(b.actual_qty); b._val = num(b.stock_value);
-        b._res = num(b.reserved_qty); b._proj = num(b.projected_qty); b._ord = num(b.ordered_qty);
-        noteCompany(b._company);
-      });
-      state.raw.bins = bins;
-      var im = {};
-      res[3].forEach(function (i) { im[i.name] = i; });
-      state.raw.items = im;
-      return loadLastMovement(bins).then(function (r) {
-        state.raw.noAge = false; state.raw.noAgeWhy = ''; state.raw.lastMove = r.lm; state.raw.lastApprox = r.approx; state.raw.ageFrom = r.boundary;
-      }, function (e) {
-        state.raw.noAge = true; state.raw.noAgeWhy = e && e.perm ? 'perm' : 'tech'; state.raw.noAgeDetail = (e && e.detail) || '';
-        state.errors.inv = (state.errors.inv || []).concat(why('Stock Ledger Entry', e));
-      });
+    ERR.inv = [];
+    return Promise.all([fetchList('Bin', BIN_FIELDS, [['actual_qty', '!=', 0]]), safe('inv', tr('Bin (shortages)', 'Bin (النقص)'), fetchList('Bin', BIN_FIELDS, [['actual_qty', '=', 0], ['projected_qty', '<', 0]]), []), safe('inv', 'Warehouse', fetchList('Warehouse', WH_FIELDS, []), [])]).then(function (r0) {
+      var codes = {}; r0[0].concat(r0[1]).forEach(function (b) { if (b.item_code) { codes[b.item_code] = 1; } });
+      return safe('inv', 'Item', fetchItems(Object.keys(codes)), []).then(function (items) { return r0.concat([items]); });
+    }).then(function (res) {
+      var wm = {}; res[2].forEach(function (w) { wm[w.name] = w; }); RAW.whs = res[2];
+      var seen = {}, bins = []; res[0].concat(res[1]).forEach(function (b) { if (!seen[b.name]) { seen[b.name] = 1; bins.push(b); } });
+      bins.forEach(function (b) { var w = wm[b.warehouse]; b._company = (w && w.company) || 'Unassigned'; b._wh = shortWh(b.warehouse); b._qty = num0(b.actual_qty); b._val = num0(b.stock_value); b._res = num0(b.reserved_qty); b._proj = num0(b.projected_qty); b._ord = num0(b.ordered_qty); });
+      RAW.bins = bins; var im = {}; res[3].forEach(function (i) { im[i.name] = i; }); RAW.items = im; HAVE.inv = true; return true;
     });
   }
-
-  /* Last movement date per item WITHOUT an aggregate query (max(posting_date) is rejected by this site: HTTP 417
-     "Field not permitted in query"). Reads plain Stock Ledger Entry rows newest-first and stops as soon as every
-     stocked item has been seen. Bounded: AGE_PAGES x AGE_PAGE rows. Items not seen inside the window are given the
-     window's oldest date, flagged as "before <date>" (their real last movement is at least that old). */
-  var AGE_PAGE = 5000, AGE_PAGES = 16, AGE_PAR = 4;
-  function loadLastMovement(bins) {
-    var need = {}, left = 0;
-    bins.forEach(function (b) { if (b.item_code && !need[b.item_code]) { need[b.item_code] = 1; left++; } });
-    var lm = {}, approx = {}, boundary = '', page = 0, exhausted = false;
-    function pageReq(p) {
-      return fetchList('Stock Ledger Entry', ['item_code', 'posting_date'], [['is_cancelled', '=', 0]], { order: 'posting_date desc, creation desc', limit: AGE_PAGE, start: p * AGE_PAGE });
-    }
-    function step() {
-      if (left <= 0 || exhausted || page >= AGE_PAGES) return Promise.resolve();
-      var batch = [], from = page;
-      var n = from === 0 ? 1 : AGE_PAR; /* first page alone: most sites finish in one request */
-      for (var k = 0; k < n && from + k < AGE_PAGES; k++) batch.push(pageReq(from + k));
-      page += batch.length;
-      return Promise.all(batch).then(function (res) {
-        res.forEach(function (rows) {
-          rows.forEach(function (r) {
-            if (need[r.item_code] === 1) { need[r.item_code] = 2; lm[r.item_code] = String(r.posting_date).slice(0, 10); left--; }
-          });
-          if (rows.length) boundary = String(rows[rows.length - 1].posting_date).slice(0, 10);
-          if (rows.length < AGE_PAGE) exhausted = true;
-        });
-        return step();
-      });
-    }
-    return step().then(function () {
-      if (!exhausted && left > 0 && boundary) { Object.keys(need).forEach(function (k) { if (need[k] === 1) { lm[k] = boundary; approx[k] = true; } }); }
-      return { lm: lm, approx: approx, boundary: (!exhausted && left > 0) ? boundary : '' };
-    });
+  /* v5: stock age by movement window (count() is permitted, max() is not); lm[item] = smallest window the item moved in */
+  function loadLastMovement() {
+    return Promise.all(AGE_WINDOWS.map(function (d) { return fetchList('Stock Ledger Entry', ['item_code', 'count(name) as n'], [['is_cancelled', '=', 0], ['posting_date', '>=', addDays(TODAY, -d)]], { group: 'item_code' }); }))
+      .then(function (res) { var lm = {}; res.forEach(function (rows, i) { rows.forEach(function (r) { if (r.item_code && lm[r.item_code] == null) { lm[r.item_code] = AGE_WINDOWS[i]; } }); }); RAW.lastMove = lm; RAW.noAge = false; RAW.noAgeWhy = ''; return true; },
+        function (e) { RAW.noAge = true; RAW.noAgeWhy = errKind(e) === 'perm' ? 'perm' : 'tech'; ERR.inv.push(why('Stock Ledger Entry', e)); throw e; });
   }
-
-  /* ---------------- Finance ---------------- */
-  function enrichInv(r, kind) {
-    r._kind = kind;
-    r._party = (kind === 'AR' ? (r.customer_name || r.customer) : (r.supplier_name || r.supplier)) || '—';
-    r._company = r.company || 'Unassigned';
-    r._out = num(r.outstanding_amount) * (num(r.conversion_rate) || 1);
-    r._total = num(r.base_grand_total);
-    r._due = r.due_date || r.posting_date;
-    r._overdue = !!(r._due && r._due < TODAY);
-    r._days = r._overdue ? daysBetween(r._due, TODAY) : 0;
+  function enrichInvoice(r, kind) {
+    r._kind = kind; r._party = (kind === 'AR' ? (r.customer_name || r.customer) : (r.supplier_name || r.supplier)) || '—'; r._company = r.company || 'Unassigned';
+    r._out = num0(r.outstanding_amount) * (num0(r.conversion_rate) || 1); r._total = num0(r.base_grand_total); r._due = r.due_date || r.posting_date;
+    r._overdue = !!(r._due && r._due < TODAY); r._days = r._overdue ? diffDays(r._due, TODAY) : 0;
     r._bucket = !r._overdue ? 'current' : r._days <= 30 ? 'd30' : r._days <= 60 ? 'd60' : r._days <= 90 ? 'd90' : r._days <= 180 ? 'd180' : 'd180p';
-    r._label = kind === 'AR' ? 'Receivable' : 'Payable';
     return r;
   }
   function loadFin() {
-    var months = last12(), start = months[0].from;
-    var glP = months.map(function (m) {
-      return fetchList('GL Entry', ['account', 'sum(debit) as debit', 'sum(credit) as credit'],
-        [['posting_date', 'between', [m.from, m.to]], ['is_cancelled', '=', 0], ['voucher_type', '!=', 'Period Closing Voucher']], { group: 'account' })
-        .catch(function (e) { state.raw.plFail = state.raw.plFail || { n: 0, months: [], why: '' }; state.raw.plFail.n++; state.raw.plFail.months.push(m.key); state.raw.plFail.why = (e && e.perm) ? 'No access to GL Entry' : ((e && e.detail) || 'request failed'); return null; });
-    });
-    state.raw.plFail = null;
+    ERR.fin = []; var months = last12(); RAW.plFail = null;
+    var glP = months.map(function (m) { return fetchList('GL Entry', ['account', 'sum(debit) as debit', 'sum(credit) as credit'], [['posting_date', 'between', [m.from, m.to]], ['is_cancelled', '=', 0], ['voucher_type', '!=', 'Period Closing Voucher']], { group: 'account' }).catch(function (e) { RAW.plFail = RAW.plFail || { n: 0, months: [], why: '' }; RAW.plFail.n++; RAW.plFail.months.push(m.key); RAW.plFail.why = errKind(e) === 'perm' ? tr('No access to GL Entry', 'لا صلاحية على قيود الأستاذ') : (e.message || ''); return null; }); });
     return Promise.all([
-      safe('fin', 'Sales Invoice', fetchList('Sales Invoice', SI_FIELDS, [['docstatus', '=', 1], ['outstanding_amount', '>', 0]]), []),
+      fetchList('Sales Invoice', SI_FIELDS, [['docstatus', '=', 1], ['outstanding_amount', '>', 0]]),
       safe('fin', 'Purchase Invoice', fetchList('Purchase Invoice', PI_FIELDS, [['docstatus', '=', 1], ['outstanding_amount', '>', 0]]), []),
-      safe('fin', 'Account (bank / cash)', fetchList('Account', ['name', 'account_name', 'company', 'account_type'], [['account_type', 'in', ['Bank', 'Cash']], ['is_group', '=', 0], ['disabled', '=', 0]]), []),
-      safe('fin', 'Account (profit & loss)', fetchList('Account', ['name', 'company', 'root_type'], [['report_type', '=', 'Profit and Loss'], ['is_group', '=', 0]]), []),
-      safe('fin', 'Payment Entry', fetchList('Payment Entry', ['posting_date', 'payment_type', 'company', 'base_paid_amount', 'base_received_amount'],
-        [['docstatus', '=', 1], ['posting_date', '>=', start], ['payment_type', 'in', ['Receive', 'Pay']]]), []),
+      safe('fin', tr('Account (bank / cash)', 'الحساب (بنك / نقد)'), fetchList('Account', ['name', 'account_name', 'company', 'account_type'], [['account_type', 'in', ['Bank', 'Cash']], ['is_group', '=', 0], ['disabled', '=', 0]]), []),
+      safe('fin', tr('Account (profit & loss)', 'الحساب (الأرباح والخسائر)'), fetchList('Account', ['name', 'company', 'root_type'], [['report_type', '=', 'Profit and Loss'], ['is_group', '=', 0]]), []),
+      safe('fin', 'Payment Entry', Promise.all(months.map(function (m) { return fetchList('Payment Entry', ['company', 'payment_type', 'sum(base_paid_amount) as base_paid_amount', 'sum(base_received_amount) as base_received_amount'], [['docstatus', '=', 1], ['posting_date', 'between', [m.from, m.to]], ['payment_type', 'in', ['Receive', 'Pay']]], { group: 'company, payment_type' }).then(function (rows) { rows.forEach(function (r) { r._m = m.key; }); return rows; }); })).then(function (p) { return [].concat.apply([], p); }), []),
       Promise.all(glP)
     ]).then(function (res) {
-      state.raw.si = res[0].map(function (r) { return enrichInv(r, 'AR'); });
-      state.raw.pi = res[1].map(function (r) { return enrichInv(r, 'AP'); });
-      var cash = res[2];
-      state.raw.cash = cash.map(function (a) { a._company = a.company || 'Unassigned'; a._bal = 0; return a; });
-      state.raw.pe = res[4].map(function (p) { p._company = p.company || 'Unassigned'; p._m = String(p.posting_date).slice(0, 7); return p; });
-      var accMap = {};
-      res[3].forEach(function (a) { accMap[a.name] = a; });
-      // monthly P&L by company
-      var pl = {};
-      months.forEach(function (m, i) {
-        pl[m.key] = {};
-        (res[5][i] || []).forEach(function (row) {
-          var a = accMap[row.account];
-          if (!a) return;
-          var co = a.company || 'Unassigned';
-          var cell = pl[m.key][co] || (pl[m.key][co] = { rev: 0, exp: 0 });
-          if (a.root_type === 'Income') cell.rev += num(row.credit) - num(row.debit);
-          else if (a.root_type === 'Expense') cell.exp += num(row.debit) - num(row.credit);
-        });
-      });
-      state.raw.pl = pl;
-      state.raw.fin12 = months;
-      if (state.raw.plFail) { state.errors.fin = (state.errors.fin || []).concat('GL Entry — ' + state.raw.plFail.n + ' of 12 months failed (' + state.raw.plFail.why + ')'); }
-      if (!accMap || !Object.keys(accMap).length) { state.raw.plFail = state.raw.plFail || { n: 12, months: [], why: 'no income / expense accounts could be read' }; }
-      [].concat(state.raw.si, state.raw.pi, state.raw.cash, state.raw.pe).forEach(function (r) { noteCompany(r._company); });
-      Object.keys(pl).forEach(function (k) { Object.keys(pl[k]).forEach(noteCompany); });
-      // bank / cash balances (second round trip: needs account names)
-      if (!cash.length) return;
-      return fetchList('GL Entry', ['account', 'sum(debit) as debit', 'sum(credit) as credit'],
-        [['account', 'in', cash.map(function (a) { return a.name; })], ['is_cancelled', '=', 0]], { group: 'account' })
-        .then(function (rows) {
-          var bm = {};
-          rows.forEach(function (r) { bm[r.account] = num(r.debit) - num(r.credit); });
-          state.raw.cash.forEach(function (a) { a._bal = bm[a.name] || 0; });
-        })
-        .catch(function () { state.errors.fin = (state.errors.fin || []).concat('GL Entry (cash balances)'); });
+      RAW.si = res[0].map(function (r) { return enrichInvoice(r, 'AR'); }); RAW.pi = res[1].map(function (r) { return enrichInvoice(r, 'AP'); });
+      RAW.cash = res[2].map(function (a) { a._company = a.company || 'Unassigned'; a._bal = 0; return a; }); RAW.pe = res[4].map(function (p) { p._company = p.company || 'Unassigned'; return p; });
+      var acc = {}; res[3].forEach(function (a) { acc[a.name] = a; }); var pl = {};
+      months.forEach(function (m, i) { pl[m.key] = {}; (res[5][i] || []).forEach(function (row) { var a = acc[row.account]; if (!a) { return; } var co = a.company || 'Unassigned', c = pl[m.key][co] || (pl[m.key][co] = { rev: 0, exp: 0 }); if (a.root_type === 'Income') { c.rev += num0(row.credit) - num0(row.debit); } else if (a.root_type === 'Expense') { c.exp += num0(row.debit) - num0(row.credit); } }); });
+      RAW.pl = pl; RAW.fin12 = months;
+      if (RAW.plFail) { ERR.fin.push('GL Entry — ' + RAW.plFail.n + tr(' of 12 months failed (', ' من 12 شهرًا فشلت (') + RAW.plFail.why + ')'); }
+      if (!res[3].length) { RAW.plFail = RAW.plFail || { n: 12, months: [], why: tr('no income / expense accounts could be read', 'تعذرت قراءة حسابات الإيرادات والمصروفات') }; }
+      if (!RAW.cash.length) { HAVE.fin = true; return true; }
+      return fetchList('GL Entry', ['account', 'sum(debit) as debit', 'sum(credit) as credit'], [['account', 'in', RAW.cash.map(function (a) { return a.name; })], ['is_cancelled', '=', 0]], { group: 'account' })
+        .then(function (rows) { var bm = {}; rows.forEach(function (r) { bm[r.account] = num0(r.debit) - num0(r.credit); }); RAW.cash.forEach(function (a) { a._bal = bm[a.name] || 0; }); }, function () { ERR.fin.push(tr('GL Entry (cash balances)', 'قيود الأستاذ (أرصدة النقد)')); RAW.cashErr = true; })
+        .then(function () { HAVE.fin = true; return true; });
     });
   }
-
+  /* v5 per-viewer cache (this browser only, same day, 12 h): saved data shows at once while fresh data loads */
+  var CACHE_KEY = 'fif-cache-v2:' + ((G.frappe && frappe.session && frappe.session.user) || 'user'), CACHE_MAX = 12 * 3600 * 1000;
+  function saveCache() { if (!HAVE.fm || !HAVE.inv || !HAVE.fin) { return; } try { G.localStorage.setItem(CACHE_KEY, JSON.stringify({ t: Date.now(), today: TODAY, raw: RAW })); } catch (e) { try { G.localStorage.removeItem(CACHE_KEY); } catch (x) { /* storage unavailable */ } } }
+  function loadCache() { try { var c = JSON.parse(G.localStorage.getItem(CACHE_KEY) || 'null'); if (!c || !c.raw || Date.now() - c.t > CACHE_MAX || c.today !== TODAY) { return; } Object.keys(c.raw).forEach(function (k) { RAW[k] = c.raw[k]; }); HAVE.fm = HAVE.inv = HAVE.fin = true; CACHED_AT = c.t; } catch (e) { /* ignore */ } }
+  function boot() { loadCache(); return getList({ doctype: 'Company', fields: ['name', 'default_currency'], limit_page_length: 0, order_by: 'name asc' }, null).then(function (r) { REF.co = r || []; }, function () { REF.co = []; }); }
+  /* Filters are applied client-side (v5): data is fetched on the first load and on Refresh only. */
+  var FORCE = false, FRESH = false;
   function loadAll() {
-    return Promise.all(['fm', 'inventory', 'finance'].filter(function (t) { return !state.loaded[t]; }).map(function (t) {
-      return LOADERS[t]().then(function () { state.loaded[t] = true; });
-    }));
+    if (FRESH && !FORCE) { ['fm', 'inv', 'age', 'fin'].forEach(function (k) { run(k, function () { return Promise.resolve(true); }); }); return; }
+    FORCE = false;
+    run('fm', function () { return loadFM(); });
+    run('inv', function () { return loadInv(); });
+    run('age', function () { return loadLastMovement(); });
+    run('fin', function () { return loadFin(); });
   }
-  var LOADERS = { fm: loadFM, inventory: loadInv, finance: loadFin, overview: loadAll };
-  var ERRKEY = { overview: 'ov', fm: 'fm', inventory: 'inv', finance: 'fin' };
+  function afterLoad() { if (D.fm && D.inv && D.fin && !FRESH) { FRESH = true; CACHED_AT = 0; saveCache(); } else if (D.fm && D.inv && D.fin && D.age) { saveCache(); } }
 
-  function loadTab(tab, force) {
-    if (state.loading[tab]) return;
-    if (state.loaded[tab] && !force) return;
-    state.loading[tab] = true;
-    state.errors[ERRKEY[tab]] = [];
-    if (tab === 'overview') { state.errors.fm = []; state.errors.inv = []; state.errors.fin = []; }
-    setLoading(true);
-    LOADERS[tab]().then(function () { state.loaded[tab] = true; if (tab === 'overview') state.loaded.overview = true; }).catch(function (e) {
-      state.errors[ERRKEY[tab]] = (state.errors[ERRKEY[tab]] || []).concat('unexpected error');
-      if (window.console) console.error(e);
-    }).then(function () {
-      state.loading[tab] = false;
-      setLoading(false);
-      fillCompanyOptions();
-      showBanner();
-      applyFilters();
-      $('#lastUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    });
-  }
-  function showBanner() {
-    var errs = state.tab === 'overview' ? [].concat(state.errors.fm || [], state.errors.inv || [], state.errors.fin || []) : (state.errors[ERRKEY[state.tab]] || []), b = $('#banner');
-    if (errs.length) { b.hidden = false; b.innerHTML = '<b>Some data could not be loaded:</b> ' + esc(errs.join(' · ')) + (errs.some(function (x) { return /^No access/.test(x); }) ? '. You may not have read permission for these DocTypes.' : '.'); }
-    else b.hidden = true;
-  }
-  function setLoading(on) {
-    var b = $('#btnRefresh');
-    b.classList.toggle('spin', on);
-    b.disabled = on;
-  }
-
-  /* ------------------------------------------------------------------
-     3. FILTERS
-     ------------------------------------------------------------------ */
-  function activeFilterCount() {
-    var f = state.filters;
-    return (f.q ? 1 : 0) + (f.company !== 'all' ? 1 : 0) + ((state.tab === 'finance' || state.tab === 'overview') && f.period !== 'year' ? 1 : 0);
-  }
-  function updateFilterUI() {
-    var f = state.filters;
-    $('#fCompany').value = f.company; $('#fPeriod').value = f.period;
-    $('#fPeriodWrap').hidden = state.tab !== 'finance' && state.tab !== 'overview';
-    var n = activeFilterCount(), rb = $('#btnReset');
-    rb.hidden = n === 0;
-    rb.innerHTML = icon('reset', true) + '<span>Reset</span><span class="n">' + n + '</span>';
-  }
-  function applyFilters() {
-    updateFilterUI();
-    if (state.loaded.fm) renderFM();
-    if (state.loaded.inventory) renderInv();
-    if (state.loaded.finance) renderFin();
-    if (state.loaded.overview) renderOverview();
-  }
-
-  /* ------------------------------------------------------------------
-     4. CHART PRIMITIVES
-     ------------------------------------------------------------------ */
-  function plotHtml(cols, labels, max, h) {
-    var gl = [0, 0.25, 0.5, 0.75, 1].map(function (t) {
-      return '<i class="gl' + (t === 0 ? ' zero' : '') + '" style="bottom:' + (t * 100) + '%"></i><span class="yl" style="bottom:' + (t * 100) + '%">' + (t === 0 ? '0' : compact(max * t)) + '</span>';
-    }).join('');
-    var tpl = 'grid-template-columns:repeat(' + cols.length + ',minmax(0,1fr))';
-    return '<div class="plot" style="height:' + h + 'px"><div class="pa">' + gl + '<div class="bars" style="' + tpl + '">' + cols.join('') + '</div></div>' +
-      '<div class="xl" style="' + tpl + '">' + labels.join('') + '</div></div>';
-  }
-  function hbars(items, opts) {
-    opts = opts || {};
-    if (!items.length) return emptyState('No data', opts.empty || 'Nothing to show for the current filters.');
-    var max = Math.max.apply(null, items.map(function (i) { return Math.abs(i.value); })) || 1;
-    return '<div class="hbars">' + items.map(function (i) {
-      var w = Math.max((Math.abs(i.value) / max) * 100, 2);
-      var cls = i.cls || opts.cls || 'p-bad';
-      return '<div class="hbar-row"><div class="top"><span class="nm" title="' + esc(i.label) + '">' + esc(i.label) + '</span>' +
-        '<span class="vl">' + money(i.value) + (i.note ? ' <small>' + esc(i.note) + '</small>' : '') + '</span></div>' +
-        '<div class="progress thin"><i class="' + cls + '" style="width:' + w + '%"></i></div></div>';
-    }).join('') + '</div>';
-  }
-  function groupSum(arr, keyFn, valFn) {
-    var m = {};
-    arr.forEach(function (r) {
-      var k = keyFn(r) || '—';
-      var g = m[k] || (m[k] = { key: k, v: 0, n: 0 });
-      g.v += valFn(r); g.n++;
-    });
-    return Object.keys(m).map(function (k) { return m[k]; }).sort(function (a, b) { return b.v - a.v; });
-  }
-  function dualPlot(months, a, b, h) {   // grouped columns: a (blue) vs b (amber)
-    var mx = 0;
-    a.concat(b).forEach(function (v) { if (v > mx) mx = v; });
-    if (!mx) return null;
-    var max = niceMax(mx);
-    var cols = months.map(function (m, i) {
-      var ha = Math.max(a[i], 0) / max * 100, hb = Math.max(b[i], 0) / max * 100;
-      return '<div class="bcol dual" title="' + esc(m.title) + '"><div class="bar s-a" style="height:' + ha + '%"></div><div class="bar s-b" style="height:' + hb + '%"></div></div>';
-    });
-    var labels = months.map(function (m) { return '<span' + (m.now ? ' class="now"' : '') + '>' + esc(m.label) + '</span>'; });
-    return plotHtml(cols, labels, max, h);
-  }
-  function stackRow(label, parts, text) {
-    var tot = parts.reduce(function (t, p) { return t + p.n; }, 0) || 1;
-    return '<div class="stack-row"><span class="nm" title="' + esc(label) + '">' + esc(label) + '</span><div class="stack">' +
-      parts.filter(function (p) { return p.n; }).map(function (p) { return '<i style="flex:' + p.n + ';background:' + p.color + '" title="' + esc(p.name) + ': ' + p.n + '"></i>'; }).join('') +
-      '</div><span class="ct">' + text + '</span></div>';
-  }
-  function metricBtn(x) {
-    var at = x.extra ? ' data-extra="' + x.extra + '"' : (x.goto ? ' data-goto="' + x.goto + '"' : '');
-    return '<button class="metric"' + at + ' style="--mc:' + x.color + '"><div class="ml">' + icon(x.icon) + esc(x.label) + '</div><div class="mv">' + x.value + (x.unit ? '<small>' + x.unit + '</small>' : '') + '</div><div class="ms">' + esc(x.sub || '') + '</div></button>';
-  }
-  function renderBand(sel, groups) {
-    $(sel).style.setProperty('--bcols', groups.map(function (g) { return 'minmax(0,' + (g.items.length + 0.15) + 'fr)'; }).join(' '));
-    $(sel).innerHTML = groups.map(function (g) {
-      return '<div class="band-grp"><div class="band-title">' + esc(g.title) + '</div><div class="metrics" style="--n:' + g.items.length + '">' + g.items.map(metricBtn).join('') + '</div></div>';
-    }).join('');
-  }
-  function renderIns(sel, list) {
-    if (!list.length) list = [{ lvl: 'ok', icon: 'check', title: 'Everything looks on track', text: 'Nothing needs attention for the current filters.' }];
-    $(sel).innerHTML = list.slice(0, 4).map(function (i) {
-      var at = i.extra ? ' data-extra="' + i.extra + '"' : i.goto ? ' data-goto="' + i.goto + '"' : '';
-      return '<button class="ins ' + i.lvl + '"' + at + '><span class="ii">' + icon(i.icon) + '</span><span><span class="it">' + esc(i.title) + '</span><span class="id">' + esc(i.text || '') + '</span></span></button>';
-    }).join('');
-  }
-  function renderSeg(sel, key, defs) {
-    $(sel).innerHTML = defs.map(function (d) {
-      return '<button role="tab" data-alert="' + key + '|' + d.k + '" class="' + (state.alertTab[key] === d.k ? 'active' : '') + '">' + d.label +
-        '<span class="n' + (d.hot && d.n ? ' hot' : '') + '">' + d.n + '</span></button>';
-    }).join('');
-  }
-  function alertItem(open, name, title, sub, amt, pillHtml) {
-    return '<button class="alert-item" data-open="' + open + '" data-name="' + esc(name) + '"><div class="l"><div class="t">' + esc(title) + '</div><div class="s">' + sub + '</div></div>' +
-      '<div class="r">' + (amt ? '<div class="amt">' + amt + '</div>' : '') + (pillHtml || '') + '</div></button>';
-  }
-  function dayPill(days) {
-    if (days < 0) return '<span class="pill bad">' + plural(-days, 'day') + ' ago</span>';
-    if (days === 0) return '<span class="pill bad">Today</span>';
-    return '<span class="pill ' + (days <= 30 ? 'warn' : 'info') + '">in ' + plural(days, 'day') + '</span>';
-  }
-
-  /* ------------------------------------------------------------------
-     5. FACILITIES TAB
-     ------------------------------------------------------------------ */
-  var EXTRA = {
-    fm_exp90:    { tab: 'fm', table: 'fm', label: 'Ending within ' + EXPIRY_SOON_DAYS + ' days', fn: function (r) { return r._active && r._days != null && r._days >= 0 && r._days <= EXPIRY_SOON_DAYS; } },
-    fm_expired:  { tab: 'fm', table: 'fm', label: 'Past contract end (still active)', fn: function (r) { return r._active && r._days != null && r._days < 0; } },
-    fm_inst:     { tab: 'fm', table: 'fm', label: 'Unpaid instalments past due', fn: function (r) { return r._instOver.length > 0; } },
-    fm_docs:     { tab: 'fm', table: 'fm', label: 'Licence / permit expired or expiring', fn: function (r) { return r._docBad.length > 0; } },
-    fm_nodate:   { tab: 'fm', table: 'fm', label: 'No contract end date', fn: function (r) { return r._active && r._days == null; } },
-    inv_low:     { tab: 'inventory', table: 'inventory', label: 'Low stock', fn: function (r) { return r.health === 'low'; } },
-    inv_short:   { tab: 'inventory', table: 'inventory', label: 'Shortage', fn: function (r) { return r.health === 'short'; } },
-    inv_neg:     { tab: 'inventory', table: 'inventory', label: 'Negative stock', fn: function (r) { return r.health === 'neg'; } },
-    inv_dead:    { tab: 'inventory', table: 'inventory', label: 'Dead stock (> ' + DEAD_STOCK_DAYS + ' days)', fn: function (r) { return r.health === 'dead'; } },
-    fin_ar:      { tab: 'finance', table: 'finance', label: 'Receivables', fn: function (r) { return r._kind === 'AR'; } },
-    fin_ap:      { tab: 'finance', table: 'finance', label: 'Payables', fn: function (r) { return r._kind === 'AP'; } },
-    fin_arover:  { tab: 'finance', table: 'finance', label: 'Overdue receivables', fn: function (r) { return r._kind === 'AR' && r._overdue; } },
-    fin_apover:  { tab: 'finance', table: 'finance', label: 'Overdue payables', fn: function (r) { return r._kind === 'AP' && r._overdue; } },
-    fin_ar90:    { tab: 'finance', table: 'finance', label: 'Receivables overdue > 90 days', fn: function (r) { return r._kind === 'AR' && r._days > 90; } },
-    fin_apsoon:  { tab: 'finance', table: 'finance', label: 'Payables due in ' + PAYABLE_SOON_DAYS + ' days', fn: function (r) { return r._kind === 'AP' && r._due >= TODAY && r._due <= addDays(PAYABLE_SOON_DAYS); } }
-  };
-
-  function fmRows() {
-    return state.raw.fm.filter(function (r) { return inCo(r) && matchQ([r._name, r.name, r._loc, r.owner_name, r._company, r._type, r.contract_number]); });
-  }
-  function fmStats(F) {
-    var A = F.filter(function (r) { return r._active; });
-    var s = { F: F, A: A };
-    s.annual = sum(A, '_annual'); s.area = sum(A, '_area');
-    var areaWithRent = A.filter(function (r) { return r._area > 0 && r._annual > 0; });
-    s.psqm = sum(areaWithRent, '_area') ? sum(areaWithRent, '_annual') / sum(areaWithRent, '_area') : 0;
-    s.exp90 = A.filter(EXTRA.fm_exp90.fn); s.expired = A.filter(EXTRA.fm_expired.fn);
-    s.nodate = A.filter(EXTRA.fm_nodate.fn);
-    s.instOver = []; s.instSoon = [];
-    A.forEach(function (r) {
-      r._instOver.forEach(function (i) { s.instOver.push({ r: r, i: i }); });
-      r._instSoon.forEach(function (i) { s.instSoon.push({ r: r, i: i }); });
-    });
-    s.instOverAmt = s.instOver.reduce(function (t, x) { return t + x.i.amt; }, 0);
-    s.instSoonAmt = s.instSoon.reduce(function (t, x) { return t + x.i.amt; }, 0);
-    s.docs = [];
-    A.forEach(function (r) { r._docBad.forEach(function (d) { s.docs.push({ r: r, d: d }); }); });
-    s.docsExpired = s.docs.filter(function (x) { return x.d.days < 0; }).length;
-    s.docsSoon = s.docs.length - s.docsExpired;
+  /* ============================================================ 5. derived views (v5 rules) */
+  function fmRows() { return RAW.fm.filter(function (r) { return inCo(r) && matchQ([r._name, r.name, r._loc, r.owner_name, r._company, r._type, r.contract_number]); }); }
+  function fmStats() {
+    var Fr = fmRows(), A = Fr.filter(function (r) { return r._active; }), s = { F: Fr, A: A };
+    s.annual = sumK(A, '_annual'); s.area = sumK(A, '_area');
+    var aw = A.filter(function (r) { return r._area > 0 && r._annual > 0; }); s.psqm = sumK(aw, '_area') ? sumK(aw, '_annual') / sumK(aw, '_area') : 0;
+    s.exp90 = A.filter(function (r) { return r._days != null && r._days >= 0 && r._days <= EXPIRY_SOON_DAYS; }); s.expired = A.filter(function (r) { return r._days != null && r._days < 0; }); s.nodate = A.filter(function (r) { return r._days == null; });
+    s.instOver = []; s.instSoon = []; A.forEach(function (r) { r._instOver.forEach(function (i) { s.instOver.push({ r: r, i: i }); }); r._instSoon.forEach(function (i) { s.instSoon.push({ r: r, i: i }); }); });
+    s.instOverAmt = s.instOver.reduce(function (t, x) { return t + x.i.amt; }, 0); s.instSoonAmt = s.instSoon.reduce(function (t, x) { return t + x.i.amt; }, 0);
+    s.docs = []; A.forEach(function (r) { r._docBad.forEach(function (d) { s.docs.push({ r: r, d: d }); }); });
+    s.docsExpired = s.docs.filter(function (x) { return x.d.days < 0; }).length; s.docsSoon = s.docs.length - s.docsExpired;
     return s;
   }
-
-  function renderFM() {
-    var F = fmRows(), s = fmStats(F);
-    state.view.fm = F; state.fmStats = s;
-
-    renderBand('#fmBand', [
-      { title: 'Facilities · Portfolio', items: [
-        { goto: 'fm', icon: 'building', color: 'var(--c-info)', label: 'Active facilities', value: s.A.length, sub: (F.length - s.A.length) + ' closed · ' + compact(s.area) + ' sqm' },
-        { goto: 'fm', icon: 'wallet', color: 'var(--c-warn)', label: 'Annualised rent', value: compact(s.annual), unit: CURRENCY, sub: 'Active contracts' },
-        { goto: 'fm', icon: 'percent', color: 'var(--c-slate)', label: 'Avg rent / sqm', value: money(s.psqm), unit: CURRENCY, sub: 'Per year' },
-        { extra: 'fm_exp90', icon: 'calendar', color: 'var(--c-orange)', label: 'Ending in ' + EXPIRY_SOON_DAYS + ' days', value: s.exp90.length, sub: compact(sum(s.exp90, '_annual')) + ' ' + CURRENCY + ' annual rent' }
-      ] },
-      { title: 'Compliance & rent', items: [
-        { extra: 'fm_expired', icon: 'alert', color: 'var(--c-bad)', label: 'Past contract end', value: s.expired.length, sub: 'Still marked active' },
-        { extra: 'fm_inst', icon: 'clock', color: 'var(--c-bad)', label: 'Instalments overdue', value: compact(s.instOverAmt), unit: CURRENCY, sub: plural(s.instOver.length, 'instalment') + ' unpaid' },
-        { extra: 'fm_docs', icon: 'shield', color: 'var(--c-orange)', label: 'Licences / permits', value: s.docsExpired + ' / ' + s.docsSoon, sub: 'expired / expiring ≤ ' + DOC_SOON_DAYS + 'd' }
-      ] }
-    ]);
-
-    var ins = [];
-    if (s.expired.length) ins.push({ lvl: 'bad', icon: 'alert', extra: 'fm_expired', title: plural(s.expired.length, 'contract') + ' past the end date but still active', text: 'Renew the agreement or mark the facility Closed' });
-    var noRenew = s.A.filter(function (r) { return r._days != null && r._days >= 0 && r._days <= 30 && r.auto_renewal !== 'Yes'; });
-    if (noRenew.length) ins.push({ lvl: 'warn', icon: 'calendar', extra: 'fm_exp90', title: plural(noRenew.length, 'contract') + ' end within 30 days without auto-renewal', text: noRenew.slice(0, 2).map(function (r) { return r._name; }).join(' · ') });
-    if (s.docsExpired) ins.push({ lvl: 'bad', icon: 'shield', extra: 'fm_docs', title: plural(s.docsExpired, 'licence / permit') + ' expired', text: 'Commercial licence, CR, civil defence, contracts … see Needs attention' });
-    if (s.instOver.length) ins.push({ lvl: 'warn', icon: 'clock', extra: 'fm_inst', title: compact(s.instOverAmt) + ' ' + CURRENCY + ' of rent instalments not marked paid', text: 'Based on the Paid tick-boxes on each facility' });
-    if (s.instSoon.length) ins.push({ lvl: 'info', icon: 'wallet', extra: 'fm_inst', title: compact(s.instSoonAmt) + ' ' + CURRENCY + ' rent falls due in the next ' + RENT_DUE_DAYS + ' days', text: plural(s.instSoon.length, 'instalment') });
-    if (s.nodate.length) ins.push({ lvl: 'warn', icon: 'clock', extra: 'fm_nodate', title: plural(s.nodate.length, 'active facility', 'active facilities') + ' without a contract end date', text: 'Aging cannot be tracked for these' });
-    renderIns('#fmInsights', ins);
-
-    renderFmTimeline(s); renderFmAlerts(s);
-    var A = s.A;
-    $('#fmByType').innerHTML = hbars(groupSum(A, function (r) { return r._type; }, function (r) { return r._annual; }).map(function (g) { return { label: g.key, value: g.v, note: plural(g.n, 'facility', 'facilities') }; }), { empty: 'No active contracts.', cls: 'p-bad' });
-    $('#fmByLocation').innerHTML = hbars(groupSum(A, function (r) { return r._loc; }, function (r) { return r._annual; }).slice(0, 7).map(function (g) { return { label: g.key, value: g.v, note: plural(g.n, 'facility', 'facilities') }; }), { empty: 'No active contracts.' });
-    $('#fmByCompany').innerHTML = hbars(groupSum(A, function (r) { return r._company; }, function (r) { return r._annual; }).map(function (g) { return { label: g.key, value: g.v, note: plural(g.n, 'facility', 'facilities') }; }), { empty: 'No active contracts.', cls: 'p-ok' });
-    renderFmDocs(A); renderFmAssets();
-    state.tables.fm.setRows(F);
-    $$('.tab').forEach(function (t) { if (t.dataset.tab === 'fm') $('.count', t).textContent = s.A.length; });
-    $('#fmFoot').innerHTML = '<span>Showing ' + F.length + ' of ' + state.raw.fm.length + ' facility records · annualised rent = total rent ÷ contract years</span><span>Confidential · ' + esc(CURRENCY) + ' · as of ' + fmtDate(TODAY) + '</span>';
-  }
-
-  function renderFmTimeline(s) {
-    var now = new Date(), keys = [{ k: 'expired', label: 'Expired' }];
-    for (var i = 0; i < 12; i++) { var d = new Date(now.getFullYear(), now.getMonth() + i, 1); keys.push({ k: monthKey(d), label: MONTHS[d.getMonth()] + (d.getMonth() === 0 ? ' ' + String(d.getFullYear()).slice(2) : ''), now: i === 0 }); }
-    var agg = {}; keys.forEach(function (x) { agg[x.k] = { v: 0, n: 0 }; });
-    s.A.forEach(function (r) {
-      if (r._days == null) return;
-      var k = r._days < 0 ? 'expired' : String(r._end).slice(0, 7);
-      if (agg[k]) { agg[k].v += r._annual; agg[k].n++; }
-    });
-    var mx = Math.max.apply(null, keys.map(function (x) { return agg[x.k].v; })) || 0;
-    if (!mx) { $('#fmTimeline').innerHTML = emptyState('No contract end dates', 'No active contract ends in the next 12 months.'); return; }
-    var max = niceMax(mx);
-    var cols = keys.map(function (x) {
-      var a = agg[x.k], h = a.v / max * 100;
-      return '<button class="bcol" data-fmend="' + x.k + '" style="--bc:' + (x.k === 'expired' ? 'var(--c-bad)' : 'var(--c-info)') + '" title="' + esc(x.label) + ' — ' + plural(a.n, 'contract') + ' · ' + money(a.v) + ' ' + CURRENCY + '">' +
-        (a.v ? '<span class="bv" style="bottom:calc(' + h + '% + 4px)">' + compact(a.v) + '</span>' : '') + '<div class="bar" style="height:' + h + '%"></div></button>';
-    });
-    var labels = keys.map(function (x) { return '<span' + (x.now ? ' class="now"' : '') + '>' + esc(x.label) + '<small>' + plural(agg[x.k].n, 'contract') + '</small></span>'; });
-    $('#fmTimeline').innerHTML = plotHtml(cols, labels, max, 290);
-  }
-
-  function renderFmAlerts(s) {
-    var contracts = s.A.filter(function (r) { return r._days != null && r._days <= EXPIRY_SOON_DAYS; }).sort(function (a, b) { return a._days - b._days; });
-    var docs = s.docs.slice().sort(function (a, b) { return a.d.days - b.d.days; });
-    var rent = s.instOver.map(function (x) { return { r: x.r, i: x.i, over: true }; }).concat(s.instSoon.map(function (x) { return { r: x.r, i: x.i, over: false }; }));
-    rent.sort(function (a, b) { return a.i.due < b.i.due ? -1 : 1; });
-    var checks = [];
-    state.view.fm.forEach(function (r) {
-      if (!r._active) return;
-      if (!r._total) checks.push({ r: r, msg: 'No rent amount recorded' });
-      else if (!r._end) checks.push({ r: r, msg: 'No contract end date' });
-      else if (!r._area) checks.push({ r: r, msg: 'Area (sqm) missing — rent per sqm not available' });
-      else if (!r.company) checks.push({ r: r, msg: 'Company not set' });
-    });
-    state.fmAlerts = { contracts: contracts, docs: docs, rent: rent, checks: checks };
-    renderSeg('#fmAlertSeg', 'fm', [
-      { k: 'contracts', label: 'Contracts', n: contracts.length, hot: contracts.some(function (r) { return r._days < 0; }) },
-      { k: 'docs', label: 'Licences', n: docs.length, hot: s.docsExpired > 0 },
-      { k: 'rent', label: 'Rent', n: rent.length, hot: s.instOver.length > 0 },
-      { k: 'checks', label: 'Data checks', n: checks.length }
-    ]);
-    var tab = state.alertTab.fm, html = '';
-    if (tab === 'contracts') html = contracts.slice(0, 30).map(function (r) { return alertItem('fm', r.name, r._name, esc(r._type) + ' · ' + esc(r._loc) + ' · ends ' + fmtDate(r._end), compact(r._annual), dayPill(r._days)); }).join('') || emptyState('All clear', 'No contract ends within ' + EXPIRY_SOON_DAYS + ' days.');
-    else if (tab === 'docs') html = docs.slice(0, 40).map(function (x) { return alertItem('fm', x.r.name, x.r._name, esc(x.d.label) + ' · ' + fmtDate(x.d.date), '', dayPill(x.d.days)); }).join('') || emptyState('All clear', 'No licence or permit is expired or expiring.');
-    else if (tab === 'rent') html = rent.slice(0, 40).map(function (x) { return alertItem('fm', x.r.name, x.r._name, 'Instalment ' + x.i.k + ' · due ' + fmtDate(x.i.due), money(x.i.amt), x.over ? '<span class="pill bad">Not paid</span>' : dayPill(daysBetween(TODAY, x.i.due))); }).join('') || emptyState('Nothing due', 'No unpaid instalments past due or due in the next ' + RENT_DUE_DAYS + ' days.');
-    else html = checks.slice(0, 40).map(function (c) { return alertItem('fm', c.r.name, c.r._name, esc(c.msg), '', ''); }).join('') || emptyState('Looks clean', 'No data gaps found.');
-    $('#fmAlertList').innerHTML = html;
-  }
-
-  function renderFmDocs(A) {
-    var rows = DOC_DEFS.map(function (d) {
-      var list = A.filter(function (r) { return r[d[0]]; });
-      if (!list.length) return '';
-      var ex = 0, so = 0, ok = 0;
-      list.forEach(function (r) { var dy = daysBetween(TODAY, r[d[0]]); if (dy < 0) ex++; else if (dy <= DOC_SOON_DAYS) so++; else ok++; });
-      return stackRow(d[1], [{ name: 'Valid', n: ok, color: 'var(--c-ok)' }, { name: 'Expiring', n: so, color: 'var(--c-warn)' }, { name: 'Expired', n: ex, color: 'var(--c-bad)' }],
-        ok + ' valid · ' + so + ' soon · ' + '<b style="color:' + (ex ? 'var(--bad)' : 'inherit') + '">' + ex + ' expired</b>');
-    }).join('');
-    $('#fmDocs').innerHTML = rows || emptyState('No expiry dates', 'No licence or permit expiry is recorded on the active facilities.');
-  }
-
-  function renderFmAssets() {
-    var A = state.raw.assets.filter(function (r) { return inCo(r); });
-    if (!A.length) { $('#fmAssets').innerHTML = emptyState('No assets', 'No submitted assets for the selected company.'); return; }
-    var ins = A.filter(function (r) { return r.insurance_end_date && r.insurance_end_date <= addDays(DOC_SOON_DAYS); }).length;
-    var rep = state.raw.repairs.filter(inCo).length;
-    var cats = groupSum(A, function (r) { return r.asset_category; }, function (r) { return r._gross; }).slice(0, 5);
-    $('#fmAssets').innerHTML = '<div class="mini-kpis" style="padding:0 18px">' +
-      '<div class="mini"><div class="l">Assets</div><div class="v">' + A.length + '</div></div>' +
-      '<div class="mini"><div class="l">Gross cost</div><div class="v">' + compact(sum(A, '_gross')) + '<small>' + CURRENCY + '</small></div></div>' +
-      '<div class="mini"><div class="l">Net book value</div><div class="v">' + compact(sum(A, '_nbv')) + '<small>' + CURRENCY + '</small></div></div>' +
-      '<div class="mini"><div class="l">Repairs pending</div><div class="v" style="color:' + (rep ? 'var(--warn)' : 'inherit') + '">' + rep + '</div></div></div>' +
-      '<div class="card-body-pad">' + hbars(cats.map(function (g) { return { label: g.key, value: g.v, note: plural(g.n, 'asset') }; }), { cls: 'p-bad' }) +
-      (ins ? '<p class="card-sub" style="padding:10px 0 0">' + plural(ins, 'asset') + ' with insurance expired or expiring in ' + DOC_SOON_DAYS + ' days.</p>' : '') + '</div>';
-  }
-
-  /* ------------------------------------------------------------------
-     6. INVENTORY TAB
-     ------------------------------------------------------------------ */
-  var HEALTH = {
-    neg:   { label: 'Negative stock', cls: 'b-bad',   color: 'var(--c-deep)' },
-    short: { label: 'Shortage',       cls: 'b-bad',   color: 'var(--c-bad)' },
-    low:   { label: 'Low stock',      cls: 'b-warn',  color: 'var(--c-warn)' },
-    dead:  { label: 'Dead stock',     cls: 'b-slate', color: 'var(--c-slate)' },
-    ok:    { label: 'Healthy',        cls: 'b-ok',    color: 'var(--c-ok)' }
-  };
-  var AGE_B = [
-    { k: 'a30',   label: '0–30 days',    color: 'var(--c-ok)',     test: function (d) { return d <= 30; } },
-    { k: 'a90',   label: '31–90 days',   color: 'var(--c-lime)',   test: function (d) { return d > 30 && d <= 90; } },
-    { k: 'a180',  label: '91–180 days',  color: 'var(--c-warn)',   test: function (d) { return d > 90 && d <= 180; } },
-    { k: 'a365',  label: '181–365 days', color: 'var(--c-orange)', test: function (d) { return d > 180 && d <= 365; } },
-    { k: 'a365p', label: '> 1 year',     color: 'var(--c-deep)',   test: function (d) { return d > 365; } }
-  ];
-
-  function buildInvItems() {
-    var bins = state.raw.bins.filter(inCo), im = state.raw.items, lm = state.raw.lastMove, m = {};
-    bins.forEach(function (b) {
-      var it = im[b.item_code] || {};
-      var g = m[b.item_code] || (m[b.item_code] = {
-        name: b.item_code, _title: it.item_name || b.item_code, group: it.item_group || '—', uom: b.stock_uom || it.stock_uom || '',
-        qty: 0, value: 0, reserved: 0, ordered: 0, projected: 0, reorder: num(it.custom_reorder_level_qty) || num(it.safety_stock) || 0, whs: []
-      });
-      g.qty += b._qty; g.value += b._val; g.reserved += b._res; g.ordered += b._ord; g.projected += b._proj; g.whs.push(b);
-    });
-    var out = Object.keys(m).map(function (k) {
-      var g = m[k];
-      g.last = lm[k] || ''; g.days = g.last ? daysBetween(g.last, TODAY) : null; g.approx = !!(state.raw.lastApprox && state.raw.lastApprox[k]);
-      g.nwh = g.whs.length;
+  var HEALTH = { neg: ['Negative stock', 'مخزون سالب', 'bad', 'var(--dms-age5)'], short: ['Shortage', 'نقص', 'bad', 'var(--dms-bad)'], low: ['Low stock', 'مخزون منخفض', 'warn', 'var(--dms-age3)'], dead: ['Dead stock', 'مخزون راكد', 'n', '#8a97a8'], ok: ['Healthy', 'سليم', 'ok', 'var(--dms-ok)'] };
+  var AGE_B = [['a30', '0–30 days', '0–30 يومًا', 'var(--dms-age0)', 30], ['a90', '31–90 days', '31–90 يومًا', 'var(--dms-age2)', 90], ['a180', '91–180 days', '91–180 يومًا', 'var(--dms-age3)', 180], ['a365', '181–365 days', '181–365 يومًا', 'var(--dms-age4)', 365], ['a365p', '> 1 year', 'أكثر من سنة', 'var(--dms-age5)', 400]];
+  function ageLabel(w) { return w === 30 ? tr('Within 30 days', 'خلال 30 يومًا') : w === 90 ? tr('31–90 days ago', 'قبل 31–90 يومًا') : w === 180 ? tr('91–180 days ago', 'قبل 91–180 يومًا') : w === 365 ? tr('181–365 days ago', 'قبل 181–365 يومًا') : tr('Over 1 year ago', 'قبل أكثر من سنة'); }
+  function invItems() {
+    var bins = RAW.bins.filter(inCo), im = RAW.items, lm = RAW.lastMove, m = {};
+    bins.forEach(function (b) { var it = im[b.item_code] || {}, g = m[b.item_code] || (m[b.item_code] = { name: b.item_code, _title: it.item_name || b.item_code, group: it.item_group || '—', uom: b.stock_uom || it.stock_uom || '', qty: 0, value: 0, reserved: 0, ordered: 0, projected: 0, reorder: num0(it.custom_reorder_level_qty) || num0(it.safety_stock) || 0, whs: [] }); g.qty += b._qty; g.value += b._val; g.reserved += b._res; g.ordered += b._ord; g.projected += b._proj; g.whs.push(b); });
+    return Object.keys(m).map(function (k) {
+      var g = m[k], win = lm[k]; g.days = RAW.noAge ? null : (win || 400); g.ageLabel = RAW.noAge ? '' : ageLabel(win); g.nwh = g.whs.length;
       var neg = g.whs.some(function (b) { return b._qty < 0; });
-      g.health = neg ? 'neg' : g.projected < 0 ? 'short' : (g.reorder > 0 && g.qty <= g.reorder) ? 'low' :
-        (!state.raw.noAge && g.qty > 0 && g.value > 0 && g.days != null && g.days > DEAD_STOCK_DAYS) ? 'dead' : 'ok';
-      g._age = (g.qty > 0 && g.value > 0) ? (g.days == null ? 'unk' : (AGE_B.filter(function (b) { return b.test(g.days); })[0] || {}).k || 'unk') : '';
-      g._company = state.filters.company === 'all' ? (g.whs.length === 1 ? g.whs[0]._company : 'Multiple') : state.filters.company;
+      g.health = neg ? 'neg' : g.projected < 0 ? 'short' : (g.reorder > 0 && g.qty <= g.reorder) ? 'low' : (!RAW.noAge && g.qty > 0 && g.value > 0 && g.days > DEAD_STOCK_DAYS) ? 'dead' : 'ok';
+      g._age = (g.qty > 0 && g.value > 0 && g.days != null) ? AGE_B.filter(function (b) { return g.days <= b[4]; })[0][0] : '';
       return g;
-    });
-    return out.filter(function (g) { return matchQ([g.name, g._title, g.group, g.whs.map(function (b) { return b._wh; }).join(' ')]); });
+    }).filter(function (g) { return matchQ([g.name, g._title, g.group, g.whs.map(function (b) { return b._wh; }).join(' ')]); });
   }
-  function invStats(I) {
-    var s = { I: I };
-    var pos = I.filter(function (g) { return g.qty > 0; });
-    s.value = sum(I, 'value');
-    s.itemsInStock = pos.length;
-    var whs = {}; state.raw.bins.filter(inCo).forEach(function (b) { if (b._qty > 0) whs[b.warehouse] = 1; });
-    s.whCount = Object.keys(whs).length;
-    var sorted = pos.slice().sort(function (a, b) { return b.value - a.value; });
-    s.top10 = sorted.slice(0, 10); s.top10Val = sum(s.top10, 'value');
-    ['low', 'short', 'neg', 'dead'].forEach(function (h) { s[h] = I.filter(function (g) { return g.health === h; }); s[h + 'Val'] = sum(s[h], 'value'); });
+  function invStats() {
+    var I = invItems(), s = { I: I }, pos = I.filter(function (g) { return g.qty > 0; }), whs = {};
+    s.value = sumK(I, 'value'); s.itemsInStock = pos.length; RAW.bins.filter(inCo).forEach(function (b) { if (b._qty > 0) { whs[b.warehouse] = 1; } }); s.whCount = Object.keys(whs).length;
+    s.top10 = pos.slice().sort(function (a, b) { return b.value - a.value; }).slice(0, 10); s.top10Val = sumK(s.top10, 'value');
+    ['low', 'short', 'neg', 'dead'].forEach(function (h) { s[h] = I.filter(function (g) { return g.health === h; }); s[h + 'Val'] = sumK(s[h], 'value'); });
+    return s;
+  }
+  function periodKeys() { var a = PERIOD[0].slice(0, 7), b = PERIOD[1].slice(0, 7); return (RAW.fin12 || []).map(function (x) { return x.key; }).filter(function (k) { return k >= a && k <= b; }); }
+  function plSum(keys) { var out = { rev: 0, exp: 0, byCo: {} }; keys.forEach(function (k) { var cell = RAW.pl[k] || {}; Object.keys(cell).forEach(function (co) { if (!inCo({ _company: co })) { return; } out.rev += cell[co].rev; out.exp += cell[co].exp; var g = out.byCo[co] || (out.byCo[co] = { rev: 0, exp: 0 }); g.rev += cell[co].rev; g.exp += cell[co].exp; }); }); return out; }
+  function finStats() {
+    var f = function (r) { return inCo(r) && matchQ([r._party, r.name, r.bill_no || '', r._company]); }, AR = RAW.si.filter(f), AP = RAW.pi.filter(f), cash = RAW.cash.filter(inCo), keys = periodKeys(), pl = plSum(keys);
+    var s = { AR: AR, AP: AP, cash: cash, keys: keys, pl: pl, net: pl.rev - pl.exp, cashTot: sumK(cash, '_bal'), arTot: sumK(AR, '_out'), apTot: sumK(AP, '_out') };
+    s.arOver = AR.filter(function (r) { return r._overdue; }); s.apOver = AP.filter(function (r) { return r._overdue; }); s.arOverAmt = sumK(s.arOver, '_out'); s.apOverAmt = sumK(s.apOver, '_out');
+    s.apSoon = AP.filter(function (r) { return r._due >= TODAY && r._due <= addDays(TODAY, PAYABLE_SOON_DAYS); });
     return s;
   }
 
-  function renderInv() {
-    var I = buildInvItems(), s = invStats(I);
-    state.view.inv = I; state.invStats = s;
-    var topPct = s.value > 0 ? Math.round(s.top10Val / s.value * 100) : 0;
-    renderBand('#invBand', [
-      { title: 'Inventory · Stock position', items: [
-        { goto: 'inventory', icon: 'box', color: 'var(--c-info)', label: 'Stock value', value: compact(s.value), unit: CURRENCY, sub: plural(s.itemsInStock, 'item') + ' in stock' },
-        { goto: 'inventory', icon: 'building', color: 'var(--c-slate)', label: 'Warehouses with stock', value: s.whCount, sub: 'Active, non-empty' },
-        { goto: 'inventory', icon: 'percent', color: 'var(--c-warn)', label: 'Top-10 concentration', value: topPct + '%', sub: 'of total stock value' },
-        { extra: 'inv_dead', icon: 'clock', color: 'var(--c-deep)', label: 'Dead stock', value: state.raw.noAge ? 'n/a' : compact(s.deadVal), unit: state.raw.noAge ? '' : CURRENCY, sub: state.raw.noAge ? 'Movement data unavailable' : plural(s.dead.length, 'item') + ' idle > ' + DEAD_STOCK_DAYS + 'd' }
-      ] },
-      { title: 'Stock risks', items: [
-        { extra: 'inv_low', icon: 'alert', color: 'var(--c-warn)', label: 'Low stock', value: s.low.length, sub: 'At / below reorder level' },
-        { extra: 'inv_short', icon: 'alert', color: 'var(--c-bad)', label: 'Shortage', value: s.short.length, sub: 'Projected qty below zero' },
-        { extra: 'inv_neg', icon: 'alert', color: 'var(--c-deep)', label: 'Negative stock', value: s.neg.length, sub: 'Needs a stock correction' }
-      ] }
-    ]);
-
-    var ins = [];
-    if (s.neg.length) ins.push({ lvl: 'bad', icon: 'alert', extra: 'inv_neg', title: plural(s.neg.length, 'item') + ' with negative stock in a warehouse', text: 'Post the missing receipt or correct with a stock reconciliation' });
-    if (s.short.length) ins.push({ lvl: 'bad', icon: 'alert', extra: 'inv_short', title: plural(s.short.length, 'item') + ' will run short (projected qty < 0)', text: 'Reserved / demanded quantity exceeds stock + incoming orders' });
-    if (s.low.length) ins.push({ lvl: 'warn', icon: 'box', extra: 'inv_low', title: plural(s.low.length, 'item') + ' at or below reorder level', text: 'Raise purchase requests' });
-    if (!state.raw.noAge && s.dead.length) ins.push({ lvl: 'warn', icon: 'clock', extra: 'inv_dead', title: compact(s.deadVal) + ' ' + CURRENCY + ' tied up in dead stock', text: plural(s.dead.length, 'item') + ' without movement for over ' + DEAD_STOCK_DAYS + ' days' });
-    if (topPct >= 50) ins.push({ lvl: 'info', icon: 'percent', goto: 'inventory', title: 'Top 10 items hold ' + topPct + '% of stock value', text: 'Largest: ' + (s.top10[0] ? s.top10[0]._title : '') });
-    renderIns('#invInsights', ins);
-
-    renderInvByWh(); renderInvHealth(I); renderInvAge(I); renderInvAlerts(s);
-    var pos = I.filter(function (g) { return g.qty > 0 && g.value > 0; });
-    $('#invByGroup').innerHTML = hbars(groupSum(pos, function (g) { return g.group; }, function (g) { return g.value; }).slice(0, 7).map(function (x) { return { label: x.key, value: x.v, note: plural(x.n, 'item') }; }), { empty: 'No stock.' });
-    $('#invTopItems').innerHTML = hbars(s.top10.slice(0, 7).map(function (g) { return { label: g._title, value: g.value, note: (s.value ? Math.round(g.value / s.value * 100) : 0) + '%' }; }), { empty: 'No stock.', cls: 'p-ok' });
-    var byCo = {};
-    state.raw.bins.filter(inCo).forEach(function (b) { byCo[b._company] = (byCo[b._company] || 0) + b._val; });
-    $('#invByCompany').innerHTML = hbars(Object.keys(byCo).map(function (k) { return { label: k, value: byCo[k] }; }).sort(function (a, b) { return b.value - a.value; }), { empty: 'No stock.' });
-    state.tables.inventory.setRows(I);
-    $$('.tab').forEach(function (t) { if (t.dataset.tab === 'inventory') $('.count', t).textContent = s.itemsInStock; });
-    $('#invFoot').innerHTML = '<span>Showing ' + I.length + ' stock items · value from Bin.stock_value · movement dates from Stock Ledger Entry' + (state.raw.noAge ? ' (unavailable — dead-stock analysis hidden)' : (state.raw.ageFrom ? ' (scanned back to ' + fmtDate(state.raw.ageFrom) + '; older items show "Before" that date)' : '')) + '</span><span>Confidential · ' + esc(CURRENCY) + ' · as of ' + fmtDate(TODAY) + '</span>';
+  /* ============================================================ 6. actions pending (v5 "Needs attention" lists) */
+  function actSpecs() {
+    return [
+      { id: 'a_fmend', client: true, short: tr('Facility contracts ending', 'عقود مرافق تنتهي'), title: tr('Facility contracts past their end date or ending within ' + EXPIRY_SOON_DAYS + ' days', 'عقود مرافق انتهت أو تنتهي خلال ' + EXPIRY_SOON_DAYS + ' يومًا'), why: tr('Active contracts. Renew the agreement or mark the facility Closed.', 'عقود نشطة. جدد العقد أو أغلق المرفق.') },
+      { id: 'a_fmdoc', client: true, short: tr('Licences and permits', 'التراخيص والتصاريح'), title: tr('Licences / permits expired or expiring within ' + DOC_SOON_DAYS + ' days', 'تراخيص / تصاريح منتهية أو تنتهي خلال ' + DOC_SOON_DAYS + ' يومًا'), why: tr('Commercial licence, CR, civil defence, national address, service contracts and permits on active facilities.', 'الرخصة التجارية والسجل والدفاع المدني والعنوان الوطني وعقود الخدمات والتصاريح على المرافق النشطة.') },
+      { id: 'a_fmrent', client: true, short: tr('Rent instalments', 'أقساط الإيجار'), title: tr('Rent instalments not marked paid', 'أقساط إيجار غير مسددة'), why: tr('Past due, or due within ' + RENT_DUE_DAYS + ' days, by the Paid tick-boxes on each facility.', 'متأخرة أو مستحقة خلال ' + RENT_DUE_DAYS + ' يومًا، حسب خانات السداد في كل مرفق.') },
+      { id: 'a_short', client: true, short: tr('Shortage or negative stock', 'نقص أو مخزون سالب'), title: tr('Items short (projected qty below zero) or negative in a warehouse', 'أصناف ناقصة (المتوقع أقل من صفر) أو سالبة في مستودع'), why: tr('Post the missing receipt, correct the stock or raise a request.', 'رحّل الاستلام الناقص أو صحح المخزون أو أنشئ طلبًا.') },
+      { id: 'a_low', client: true, short: tr('Low stock', 'مخزون منخفض'), title: tr('Items at or below their reorder level', 'أصناف عند حد إعادة الطلب أو أقل'), why: tr('Reorder level from the item (custom reorder level, else safety stock).', 'حد إعادة الطلب من الصنف (الحد المخصص وإلا مخزون الأمان).') },
+      { id: 'a_ar', client: true, short: tr('Overdue receivables', 'مستحقات متأخرة'), title: tr('Customer invoices past their due date', 'فواتير عملاء تجاوزت الاستحقاق'), why: tr('Largest first. Chase or escalate.', 'الأكبر أولًا. تابع أو صعّد.') },
+      { id: 'a_ap', client: true, short: tr('Payables due', 'مدفوعات مستحقة'), title: tr('Supplier bills overdue or due within ' + PAYABLE_SOON_DAYS + ' days', 'فواتير موردين متأخرة أو مستحقة خلال ' + PAYABLE_SOON_DAYS + ' أيام'), why: tr('Earliest due first.', 'الأقرب استحقاقًا أولًا.') },
+      { id: 'a_cash', client: true, short: tr('Negative cash / bank', 'نقد / بنك سالب'), title: tr('Bank and cash accounts with a negative balance', 'حسابات بنك ونقد برصيد سالب'), why: tr('GL balance below zero.', 'رصيد الأستاذ أقل من صفر.') }
+    ];
   }
-
-  function renderInvByWh() {
-    var m = {};
-    state.raw.bins.filter(inCo).forEach(function (b) {
-      if (!matchQ([b.item_code, b._wh])) return;
-      var g = m[b.warehouse] || (m[b.warehouse] = { wh: b.warehouse, name: b._wh, v: 0, n: 0 });
-      g.v += b._val; g.n++;
-    });
-    var list = Object.keys(m).map(function (k) { return m[k]; }).filter(function (g) { return g.v > 0; }).sort(function (a, b) { return b.v - a.v; }).slice(0, 8);
-    if (!list.length) { $('#invByWh').innerHTML = emptyState('No stock', 'No stock value for the current filters.'); return; }
-    var max = niceMax(list[0].v);
-    var cols = list.map(function (g) {
-      var h = g.v / max * 100;
-      return '<button class="bcol" data-wh="' + esc(g.wh) + '" style="--bc:var(--c-info)" title="' + esc(g.name) + ' — ' + money(g.v) + ' ' + CURRENCY + ' · ' + plural(g.n, 'line') + '"><span class="bv" style="bottom:calc(' + h + '% + 4px)">' + compact(g.v) + '</span><div class="bar" style="height:' + h + '%"></div></button>';
-    });
-    var labels = list.map(function (g) { return '<span title="' + esc(g.name) + '">' + esc(g.name.length > 15 ? g.name.slice(0, 14) + '…' : g.name) + '<small>' + plural(g.n, 'line') + '</small></span>'; });
-    $('#invByWh').innerHTML = plotHtml(cols, labels, max, 290);
-  }
-
-  function renderInvHealth(I) {
-    if (!I.length) { $('#invHealth').innerHTML = emptyState('No stock', 'Nothing matches the current filters.'); return; }
-    var order = ['neg', 'short', 'low', 'dead', 'ok'];
-    var rows = order.map(function (k) { var l = I.filter(function (g) { return g.health === k; }); return { k: k, n: l.length, v: sum(l, 'value') }; });
-    $('#invHealth').innerHTML = '<div class="stack">' + rows.filter(function (r) { return r.n; }).map(function (r) { return '<i style="flex:' + r.n + ';background:' + HEALTH[r.k].color + '" title="' + HEALTH[r.k].label + ': ' + r.n + '"></i>'; }).join('') + '</div>' +
-      '<div class="stack-legend">' + rows.map(function (r) { return '<div class="sl-row"><span class="nm"><i style="background:' + HEALTH[r.k].color + '"></i>' + HEALTH[r.k].label + '</span><span class="n">' + r.n + '</span><span class="a">' + (r.v ? compact(r.v) : '—') + '</span></div>'; }).join('') + '</div>';
-  }
-
-  function renderInvAge(I) {
-    if (state.raw.noAge) { $('#invAge').innerHTML = state.raw.noAgeWhy === 'perm' ? emptyState('Movement dates unavailable', 'Your role cannot read Stock Ledger Entry, so stock age cannot be calculated.') : emptyState('Movement dates could not be loaded', 'Stock Ledger Entry query failed' + (state.raw.noAgeDetail ? ' (' + state.raw.noAgeDetail + ')' : '') + '. Use Refresh to retry.'); return; }
-    var agg = {};
-    AGE_B.concat([{ k: 'unk', label: 'No movement', color: 'var(--c-muted)' }]).forEach(function (b) { agg[b.k] = { v: 0, n: 0 }; });
-    I.forEach(function (g) { if (g._age) { agg[g._age].v += g.value; agg[g._age].n++; } });
-    var list = AGE_B.concat(agg.unk.n ? [{ k: 'unk', label: 'No movement', color: 'var(--c-muted)' }] : []);
-    var mx = Math.max.apply(null, list.map(function (b) { return agg[b.k].v; })) || 0;
-    if (!mx) { $('#invAge').innerHTML = emptyState('No stock', 'Nothing to age for the current filters.'); return; }
-    var max = niceMax(mx);
-    var cols = list.map(function (b) {
-      var h = agg[b.k].v / max * 100;
-      return '<button class="bcol" data-age="' + b.k + '" style="--bc:' + b.color + '" title="' + b.label + ' — ' + money(agg[b.k].v) + ' ' + CURRENCY + ' · ' + plural(agg[b.k].n, 'item') + '"><span class="bv" style="bottom:calc(' + h + '% + 4px)">' + (agg[b.k].v ? compact(agg[b.k].v) : '') + '</span><div class="bar" style="height:' + h + '%"></div></button>';
-    });
-    var labels = list.map(function (b) { return '<span>' + b.label + '<small>' + plural(agg[b.k].n, 'item') + '</small></span>'; });
-    $('#invAge').innerHTML = plotHtml(cols, labels, max, 290);
-  }
-
-  function renderInvAlerts(s) {
-    var lows = s.low.slice().sort(function (a, b) { return (a.qty / (a.reorder || 1)) - (b.qty / (b.reorder || 1)); });
-    var shorts = s.short.slice().sort(function (a, b) { return a.projected - b.projected; });
-    var negs = s.neg.slice().sort(function (a, b) { return a.qty - b.qty; });
-    var deads = s.dead.slice().sort(function (a, b) { return b.value - a.value; });
-    renderSeg('#invAlertSeg', 'inv', [
-      { k: 'low', label: 'Low', n: lows.length }, { k: 'short', label: 'Shortage', n: shorts.length, hot: true },
-      { k: 'neg', label: 'Negative', n: negs.length, hot: true }, { k: 'dead', label: 'Dead', n: deads.length }
-    ]);
-    var t = state.alertTab.inv, list = t === 'low' ? lows : t === 'short' ? shorts : t === 'neg' ? negs : deads, html;
-    html = list.slice(0, 30).map(function (g) {
-      var sub = t === 'low' ? 'Qty ' + money(g.qty) + ' · reorder level ' + money(g.reorder) : t === 'short' ? 'On hand ' + money(g.qty) + ' · reserved ' + money(g.reserved) + ' · incoming ' + money(g.ordered) : t === 'neg' ? 'Qty ' + money(g.qty) + ' · ' + plural(g.nwh, 'warehouse') : 'Last moved ' + (g.last ? fmtDate(g.last) : '—') + ' · qty ' + money(g.qty);
-      var pill = t === 'dead' ? '<span class="pill slate">' + plural(g.days, 'day') + ' idle</span>' : t === 'low' ? '<span class="pill warn">Low</span>' : '<span class="pill bad">' + (t === 'short' ? 'Short ' + money(-g.projected) : 'Negative') + '</span>';
-      return alertItem('inventory', g.name, g._title, esc(sub), t === 'dead' ? money(g.value) : '', pill);
-    }).join('') || emptyState('All clear', 'No items in this category.');
-    $('#invAlertList').innerHTML = html;
-  }
-
-  /* ------------------------------------------------------------------
-     7. FINANCE TAB
-     ------------------------------------------------------------------ */
-  var PERIODS = { year: 'This year', quarter: 'This quarter', month: 'This month', lastmonth: 'Last month', l12: 'Last 12 months' };
-
-  function periodKeys() {
-    var m = state.raw.fin12 || [];
-    if (!m.length) return [];
-    var cur = m[m.length - 1].key, p = state.filters.period;
-    if (p === 'l12') return m.map(function (x) { return x.key; });
-    if (p === 'month') return [cur];
-    if (p === 'lastmonth') return [m[m.length - 2].key];
-    var y = cur.slice(0, 4), mo = parseInt(cur.slice(5), 10) - 1, q = Math.floor(mo / 3);
-    return m.map(function (x) { return x.key; }).filter(function (k) {
-      if (k.slice(0, 4) !== y) return false;
-      return p === 'year' ? true : Math.floor((parseInt(k.slice(5), 10) - 1) / 3) === q;
-    });
-  }
-  function plSum(keys) {
-    var out = { rev: 0, exp: 0, byCo: {} };
-    keys.forEach(function (k) {
-      var cell = state.raw.pl[k] || {};
-      Object.keys(cell).forEach(function (co) {
-        if (state.filters.company !== 'all' && co !== state.filters.company) return;
-        out.rev += cell[co].rev; out.exp += cell[co].exp;
-        var g = out.byCo[co] || (out.byCo[co] = { rev: 0, exp: 0 });
-        g.rev += cell[co].rev; g.exp += cell[co].exp;
-      });
-    });
-    return out;
-  }
-  function finRows() {
-    var f = function (r) { return inCo(r) && matchQ([r._party, r.name, r.bill_no || '', r._company]); };
-    return { AR: state.raw.si.filter(f), AP: state.raw.pi.filter(f) };
-  }
-
-  function renderFin() {
-    var R = finRows(), AR = R.AR, AP = R.AP, all = AR.concat(AP);
-    var cash = state.raw.cash.filter(inCo);
-    var keys = periodKeys(), pl = plSum(keys), net = pl.rev - pl.exp;
-    var cashTot = sum(cash, '_bal'), arTot = sum(AR, '_out'), apTot = sum(AP, '_out');
-    var arOver = AR.filter(function (r) { return r._overdue; }), apOver = AP.filter(function (r) { return r._overdue; });
-    var arOverAmt = sum(arOver, '_out'), apOverAmt = sum(apOver, '_out');
-    state.view.fin = all;
-    state.finStats = { cashTot: cashTot, arTot: arTot, apTot: apTot, arOverAmt: arOverAmt, apOverAmt: apOverAmt, pl: pl, net: net, AR: AR, AP: AP };
-
-    renderBand('#finBand', [
-      { title: 'Finance · Position today', items: [
-        { goto: 'finance', icon: 'bank', color: 'var(--c-info)', label: 'Cash & bank', value: compact(cashTot), unit: CURRENCY, sub: plural(cash.length, 'active account') },
-        { extra: 'fin_ar', icon: 'wallet', color: 'var(--c-ok)', label: 'Receivable', value: compact(arTot), unit: CURRENCY, sub: plural(AR.length, 'open invoice') },
-        { extra: 'fin_arover', icon: 'alert', color: 'var(--c-bad)', label: 'Overdue receivable', value: compact(arOverAmt), unit: CURRENCY, sub: (arTot ? Math.round(arOverAmt / arTot * 100) : 0) + '% of receivable' },
-        { extra: 'fin_ap', icon: 'wallet', color: 'var(--c-warn)', label: 'Payable', value: compact(apTot), unit: CURRENCY, sub: plural(AP.length, 'open bill') },
-        { extra: 'fin_apover', icon: 'alert', color: 'var(--c-orange)', label: 'Overdue payable', value: compact(apOverAmt), unit: CURRENCY, sub: (apTot ? Math.round(apOverAmt / apTot * 100) : 0) + '% of payable' }
-      ] },
-      { title: 'Performance · ' + PERIODS[state.filters.period], items: [
-        { goto: 'finance', icon: 'trend', color: 'var(--c-ok)', label: 'Revenue', value: compact(pl.rev), unit: CURRENCY, sub: 'Income accounts' },
-        { goto: 'finance', icon: 'wallet', color: 'var(--c-warn)', label: 'Expenses', value: compact(pl.exp), unit: CURRENCY, sub: 'Expense accounts' },
-        { goto: 'finance', icon: 'percent', color: net >= 0 ? 'var(--c-ok)' : 'var(--c-bad)', label: 'Net profit', value: (net < 0 ? '−' : '') + compact(Math.abs(net)), unit: CURRENCY, sub: (pl.rev ? Math.round(net / pl.rev * 100) : 0) + '% margin' }
-      ] }
-    ]);
-
-    var ins = [];
-    var ar90 = AR.filter(function (r) { return r._days > 90; });
-    if (ar90.length) ins.push({ lvl: 'bad', icon: 'alert', extra: 'fin_ar90', title: compact(sum(ar90, '_out')) + ' ' + CURRENCY + ' receivable is over 90 days late', text: plural(ar90.length, 'invoice') + ' · chase or escalate' });
-    var soon = AP.filter(EXTRA.fin_apsoon.fn), soonAmt = sum(soon, '_out'), dueNow = sum(AP.filter(function (r) { return r._overdue; }), '_out');
-    if (soon.length || dueNow) ins.push({ lvl: (cashTot < soonAmt + dueNow) ? 'bad' : 'info', icon: 'calendar', extra: 'fin_apsoon', title: compact(soonAmt) + ' ' + CURRENCY + ' payable due in ' + PAYABLE_SOON_DAYS + ' days (+ ' + compact(dueNow) + ' already overdue)', text: cashTot >= soonAmt + dueNow ? 'Cash & bank balance covers it' : 'Cash & bank is short by ' + compact(soonAmt + dueNow - cashTot) + ' ' + CURRENCY });
-    if (pl.rev || pl.exp) ins.push({ lvl: net < 0 ? 'bad' : 'ok', icon: 'trend', goto: 'finance', title: net < 0 ? 'Expenses exceed revenue by ' + compact(-net) + ' ' + CURRENCY : 'Net profit ' + compact(net) + ' ' + CURRENCY + ' (' + (pl.rev ? Math.round(net / pl.rev * 100) : 0) + '% margin)', text: PERIODS[state.filters.period] + ' · from GL income & expense accounts' });
-    var top = groupSum(AR, function (r) { return r._party; }, function (r) { return r._out; });
-    if (arTot > 0 && top.length > 1) { var t5 = top.slice(0, 5).reduce(function (t, g) { return t + g.v; }, 0); ins.push({ lvl: t5 / arTot >= 0.6 ? 'warn' : 'info', icon: 'users', goto: 'finance', title: Math.round(t5 / arTot * 100) + '% of receivables sit with 5 customers', text: 'Largest: ' + top[0].key + ' · ' + compact(top[0].v) + ' ' + CURRENCY }); }
-    var neg = cash.filter(function (a) { return a._bal < 0; });
-    if (neg.length) ins.push({ lvl: 'warn', icon: 'bank', goto: 'finance', title: plural(neg.length, 'bank / cash account') + ' with a negative balance', text: 'See Needs attention → Cash' });
-    renderIns('#finInsights', ins);
-
-    renderFinAging(AR, AP); renderFinNet(cashTot, arTot, apTot);
-    renderFinPL(); renderFinCashflow(); renderFinCash(cash);
-    renderFinAlerts(AR, AP, cash);
-    $('#finTopCust').innerHTML = hbars(top.slice(0, 7).map(function (g) { return { label: g.key, value: g.v, note: arTot ? Math.round(g.v / arTot * 100) + '%' : '' }; }), { empty: 'No open receivables.', cls: 'p-ok' });
-    var topS = groupSum(AP, function (r) { return r._party; }, function (r) { return r._out; });
-    $('#finTopSupp').innerHTML = hbars(topS.slice(0, 7).map(function (g) { return { label: g.key, value: g.v, note: apTot ? Math.round(g.v / apTot * 100) + '%' : '' }; }), { empty: 'No open payables.' });
-    $('#finByCoSub').textContent = PERIODS[state.filters.period];
-    $('#finByCompany').innerHTML = hbars(Object.keys(pl.byCo).map(function (k) { var v = pl.byCo[k].rev - pl.byCo[k].exp; return { label: k, value: v, cls: v < 0 ? 'p-bad' : 'p-ok' }; }).sort(function (a, b) { return b.value - a.value; }), { empty: 'No profit & loss postings in this period.' });
-    state.tables.finance.setRows(all);
-    $$('.tab').forEach(function (t) { if (t.dataset.tab === 'finance') $('.count', t).textContent = all.length; });
-    $('#finFoot').innerHTML = '<span>Open invoices: submitted documents with outstanding amount &gt; 0 (credit notes excluded) · revenue / expense from GL Entry (period closing vouchers excluded)</span><span>Confidential · ' + esc(CURRENCY) + ' · as of ' + fmtDate(TODAY) + '</span>';
-  }
-
-  function renderFinAging(AR, AP) {
-    var a = {}, p = {}, an = {}, pn = {};
-    BUCKETS.forEach(function (b) { a[b.k] = 0; p[b.k] = 0; an[b.k] = 0; pn[b.k] = 0; });
-    AR.forEach(function (r) { a[r._bucket] += r._out; an[r._bucket]++; });
-    AP.forEach(function (r) { p[r._bucket] += r._out; pn[r._bucket]++; });
-    var mx = 0; BUCKETS.forEach(function (b) { mx = Math.max(mx, a[b.k], p[b.k]); });
-    if (!mx) { $('#finAging').innerHTML = emptyState('Nothing outstanding', 'No open receivables or payables.'); return; }
-    var max = niceMax(mx);
-    var cols = BUCKETS.map(function (b) {
-      return '<button class="bcol dual" data-finb="' + b.k + '" title="' + b.label + ' — receivable ' + money(a[b.k]) + ' (' + an[b.k] + ') · payable ' + money(p[b.k]) + ' (' + pn[b.k] + ')">' +
-        '<div class="bar s-a" style="height:' + a[b.k] / max * 100 + '%"></div><div class="bar s-b" style="height:' + p[b.k] / max * 100 + '%"></div></button>';
-    });
-    var labels = BUCKETS.map(function (b) { return '<span>' + b.label + '<small>' + compact(a[b.k]) + ' / ' + compact(p[b.k]) + '</small></span>'; });
-    $('#finAging').innerHTML = plotHtml(cols, labels, max, 290);
-  }
-
-  function renderFinNet(cash, ar, ap) {
-    var net = cash + ar - ap;
-    $('#finNet').innerHTML = '<div class="net-list">' +
-      '<div class="net-row"><span>Cash &amp; bank</span><b>' + money(cash) + '</b></div>' +
-      '<div class="net-row"><span>+ Receivable</span><b class="pos">' + money(ar) + '</b></div>' +
-      '<div class="net-row"><span>− Payable</span><b class="neg">' + money(ap) + '</b></div>' +
-      '<div class="net-row tot"><span>Net position</span><b class="' + (net >= 0 ? 'pos' : 'neg') + '">' + money(net) + ' <small style="font-weight:600;color:var(--muted)">' + CURRENCY + '</small></b></div></div>' +
-      '<p class="card-sub" style="padding:12px 0 0">Liquid funds plus what customers owe, less what is owed to suppliers.</p>';
-  }
-
-  function monthsForChart() {
-    var m = state.raw.fin12 || [];
-    return m.map(function (x, i) { return { key: x.key, label: x.label, now: i === m.length - 1, title: x.label + ' ' + x.yr }; });
-  }
-  function renderFinPL() {
-    var ms = monthsForChart(), rev = [], exp = [];
-    ms.forEach(function (m) { var s = plSum([m.key]); rev.push(s.rev); exp.push(s.exp); m.title += ' — revenue ' + money(s.rev) + ' · expenses ' + money(s.exp) + ' · net ' + money(s.rev - s.exp); });
-    var F = state.raw.plFail, allFailed = !!(F && F.n >= 12), h = allFailed ? '' : dualPlot(ms, rev, exp, 290);
-    var plHtml = allFailed ? emptyState('Revenue vs expenses could not be loaded', F.why + '. Use Refresh to retry.') : (h || emptyState('No postings', 'No income or expense postings in the last 12 months.'));
-    if (F && !allFailed && h) plHtml += '<p class="card-sub" style="padding:8px 0 0;color:var(--bad)">' + esc(F.n + ' of 12 months could not be loaded (' + F.months.join(', ') + '): ' + F.why + '. Those months show as 0.') + '</p>';
-    $('#finPL').innerHTML = plHtml; $('#ovPL').innerHTML = plHtml;
-  }
-  function renderFinCashflow() {
-    var ms = monthsForChart(), inn = {}, out = {};
-    state.raw.pe.filter(inCo).forEach(function (p) {
-      if (p.payment_type === 'Receive') inn[p._m] = (inn[p._m] || 0) + num(p.base_received_amount);
-      else out[p._m] = (out[p._m] || 0) + num(p.base_paid_amount);
-    });
-    var a = ms.map(function (m) { return inn[m.key] || 0; }), b = ms.map(function (m) { return out[m.key] || 0; });
-    ms.forEach(function (m, i) { m.title += ' — received ' + money(a[i]) + ' · paid ' + money(b[i]) + ' · net ' + money(a[i] - b[i]); });
-    $('#finCashflow').innerHTML = dualPlot(ms, a, b, 290) || emptyState('No payments', 'No payment entries in the last 12 months.');
-  }
-  function renderFinCash(cash) {
-    var list = cash.slice().sort(function (a, b) { return Math.abs(b._bal) - Math.abs(a._bal); }).filter(function (a) { return Math.abs(a._bal) >= 0.5; }).slice(0, 8);
-    $('#finCash').innerHTML = hbars(list.map(function (a) { return { label: String(a.account_name || a.name).replace(/^\d+\s*-\s*/, ''), value: a._bal, note: a.account_type, cls: a._bal < 0 ? 'p-bad' : 'p-ok' }; }), { empty: 'No bank / cash balances found.' });
-  }
-
-  function renderFinAlerts(AR, AP, cash) {
-    var arO = AR.filter(function (r) { return r._overdue; }).sort(function (a, b) { return b._out - a._out; });
-    var apO = AP.filter(function (r) { return r._overdue; }).sort(function (a, b) { return b._out - a._out; });
-    var apS = AP.filter(EXTRA.fin_apsoon.fn).sort(function (a, b) { return a._due < b._due ? -1 : 1; });
-    var negs = cash.filter(function (a) { return a._bal < 0; }).sort(function (a, b) { return a._bal - b._bal; });
-    renderSeg('#finAlertSeg', 'fin', [
-      { k: 'ar', label: 'Late receivables', n: arO.length, hot: true }, { k: 'ap', label: 'Late payables', n: apO.length },
-      { k: 'apsoon', label: 'Due soon', n: apS.length }, { k: 'cash', label: 'Cash', n: negs.length }
-    ]);
-    var t = state.alertTab.fin, html;
-    var inv = function (r) { return alertItem('finance', r.name, r._party, esc(r.name) + ' · due ' + fmtDate(r._due) + ' · ' + esc(r._company), money(r._out), r._overdue ? '<span class="pill bad">' + plural(r._days, 'day') + ' late</span>' : dayPill(daysBetween(TODAY, r._due))); };
-    if (t === 'ar') html = arO.slice(0, 30).map(inv).join('') || emptyState('All clear', 'No overdue receivables.');
-    else if (t === 'ap') html = apO.slice(0, 30).map(inv).join('') || emptyState('All clear', 'No overdue payables.');
-    else if (t === 'apsoon') html = apS.slice(0, 30).map(inv).join('') || emptyState('Nothing due', 'No payables fall due in the next ' + PAYABLE_SOON_DAYS + ' days.');
-    else html = negs.slice(0, 30).map(function (a) { return '<button class="alert-item" data-route-btn="Account|' + esc(a.name) + '"><div class="l"><div class="t">' + esc(a.account_name || a.name) + '</div><div class="s">' + esc(a._company) + ' · ' + esc(a.account_type) + '</div></div><div class="r"><div class="amt" style="color:var(--bad)">' + money(a._bal) + '</div><span class="pill bad">Negative</span></div></button>'; }).join('') || emptyState('Looks fine', 'No bank or cash account is overdrawn.');
-    $('#finAlertList').innerHTML = html;
-  }
-
-
-  /* ------------------------------------------------------------------
-     7b. OVERVIEW TAB
-     ------------------------------------------------------------------ */
-  function ovRows(rows) {
-    return '<div class="net-list">' + rows.map(function (r) {
-      return '<div class="net-row"><span>' + r[0] + '</span><b' + (r[2] ? ' style="color:' + r[2] + '"' : '') + '>' + r[1] + '</b></div>';
-    }).join('') + '</div>';
-  }
-  function renderOverview() {
-    var f = state.fmStats, v = state.invStats, n = state.finStats;
-    if (!f || !v || !n) return;
-    var BAD = 'var(--bad)', WARN = 'var(--warn)', OK = 'var(--ok)';
-    var danger = function (x, c) { return x > 0 ? c : ''; };
-
-    renderBand('#ovBand', [
-      { title: 'Facilities', items: [
-        { goto: 'fm', icon: 'building', color: 'var(--c-info)', label: 'Active facilities', value: f.A.length, sub: compact(f.area) + ' sqm' },
-        { goto: 'fm', icon: 'wallet', color: 'var(--c-warn)', label: 'Annualised rent', value: compact(f.annual), unit: CURRENCY, sub: 'Active contracts' },
-        { extra: 'fm_exp90', icon: 'calendar', color: 'var(--c-orange)', label: 'Ending in ' + EXPIRY_SOON_DAYS + ' days', value: f.exp90.length, sub: f.expired.length + ' already past end date' }
-      ] },
-      { title: 'Inventory', items: [
-        { goto: 'inventory', icon: 'box', color: 'var(--c-info)', label: 'Stock value', value: compact(v.value), unit: CURRENCY, sub: plural(v.itemsInStock, 'item') + ' in stock' },
-        { extra: 'inv_short', icon: 'alert', color: 'var(--c-bad)', label: 'Shortage / negative', value: v.short.length + ' / ' + v.neg.length, sub: v.low.length + ' more at low stock' }
-      ] },
-      { title: 'Finance', items: [
-        { goto: 'finance', icon: 'bank', color: 'var(--c-info)', label: 'Cash & bank', value: compact(n.cashTot), unit: CURRENCY, sub: 'GL balance' },
-        { extra: 'fin_arover', icon: 'alert', color: 'var(--c-bad)', label: 'Overdue receivable', value: compact(n.arOverAmt), unit: CURRENCY, sub: 'of ' + compact(n.arTot) + ' receivable' },
-        { extra: 'fin_apover', icon: 'alert', color: 'var(--c-orange)', label: 'Overdue payable', value: compact(n.apOverAmt), unit: CURRENCY, sub: 'of ' + compact(n.apTot) + ' payable' },
-        { goto: 'finance', icon: 'trend', color: n.net >= 0 ? 'var(--c-ok)' : 'var(--c-bad)', label: 'Net profit', value: (n.net < 0 ? '−' : '') + compact(Math.abs(n.net)), unit: CURRENCY, sub: PERIODS[state.filters.period] }
-      ] }
-    ]);
-
-    var cand = [];
-    var soonAmt = sum(n.AP.filter(EXTRA.fin_apsoon.fn), '_out') + sum(n.AP.filter(function (r) { return r._overdue; }), '_out');
-    if (soonAmt > n.cashTot) cand.push({ lvl: 'bad', icon: 'bank', extra: 'fin_apsoon', title: 'Cash is short by ' + compact(soonAmt - n.cashTot) + ' ' + CURRENCY + ' against overdue + near-term payables', text: 'Cash & bank ' + compact(n.cashTot) + ' vs payable ' + compact(soonAmt) });
-    var ar90 = n.AR.filter(function (r) { return r._days > 90; });
-    if (ar90.length) cand.push({ lvl: 'bad', icon: 'alert', extra: 'fin_ar90', title: compact(sum(ar90, '_out')) + ' ' + CURRENCY + ' receivable is over 90 days late', text: plural(ar90.length, 'invoice') });
-    if (n.net < 0) cand.push({ lvl: 'bad', icon: 'trend', goto: 'finance', title: 'Expenses exceed revenue by ' + compact(-n.net) + ' ' + CURRENCY, text: PERIODS[state.filters.period] });
-    if (f.expired.length) cand.push({ lvl: 'bad', icon: 'building', extra: 'fm_expired', title: plural(f.expired.length, 'facility contract') + ' past the end date but still active', text: 'Renew or close them' });
-    if (f.docsExpired) cand.push({ lvl: 'bad', icon: 'shield', extra: 'fm_docs', title: plural(f.docsExpired, 'licence / permit') + ' expired', text: 'Commercial licence, CR, civil defence, contracts' });
-    if (v.short.length + v.neg.length) cand.push({ lvl: 'bad', icon: 'box', extra: v.short.length ? 'inv_short' : 'inv_neg', title: plural(v.short.length + v.neg.length, 'item') + ' short or negative in stock', text: v.short.length + ' shortage · ' + v.neg.length + ' negative' });
-    if (f.exp90.length) cand.push({ lvl: 'warn', icon: 'calendar', extra: 'fm_exp90', title: plural(f.exp90.length, 'facility contract') + ' end within ' + EXPIRY_SOON_DAYS + ' days', text: compact(sum(f.exp90, '_annual')) + ' ' + CURRENCY + ' annual rent' });
-    if (!state.raw.noAge && v.dead.length) cand.push({ lvl: 'warn', icon: 'clock', extra: 'inv_dead', title: compact(v.deadVal) + ' ' + CURRENCY + ' tied up in dead stock', text: plural(v.dead.length, 'item') });
-    if (f.instOver.length) cand.push({ lvl: 'warn', icon: 'wallet', extra: 'fm_inst', title: compact(f.instOverAmt) + ' ' + CURRENCY + ' rent instalments not marked paid', text: plural(f.instOver.length, 'instalment') });
-    var rank = { bad: 0, warn: 1, info: 2, ok: 3 };
-    cand.sort(function (a, b) { return rank[a.lvl] - rank[b.lvl]; });
-    renderIns('#ovInsights', cand);
-
-    // top priorities across areas
-    var items = [];
-    (state.fmAlerts ? state.fmAlerts.contracts.slice(0, 3) : []).forEach(function (r) { items.push(alertItem('fm', r.name, r._name, 'Facilities · contract ends ' + fmtDate(r._end), compact(r._annual), dayPill(r._days))); });
-    (state.fmAlerts ? state.fmAlerts.docs.slice(0, 2) : []).forEach(function (x) { items.push(alertItem('fm', x.r.name, x.r._name, 'Facilities · ' + esc(x.d.label), '', dayPill(x.d.days))); });
-    v.short.slice().sort(function (a, b) { return a.projected - b.projected; }).slice(0, 2).forEach(function (g) { items.push(alertItem('inventory', g.name, g._title, 'Inventory · short by ' + money(-g.projected) + ' ' + esc(g.uom), '', '<span class="pill bad">Shortage</span>')); });
-    n.AR.filter(function (r) { return r._overdue; }).sort(function (a, b) { return b._out - a._out; }).slice(0, 3).forEach(function (r) { items.push(alertItem('finance', r.name, r._party, 'Finance · receivable due ' + fmtDate(r._due), money(r._out), '<span class="pill bad">' + plural(r._days, 'day') + ' late</span>')); });
-    n.AP.filter(EXTRA.fin_apsoon.fn).sort(function (a, b) { return b._out - a._out; }).slice(0, 2).forEach(function (r) { items.push(alertItem('finance', r.name, r._party, 'Finance · payable due ' + fmtDate(r._due), money(r._out), dayPill(daysBetween(TODAY, r._due)))); });
-    $('#ovPriorities').innerHTML = items.join('') || emptyState('All clear', 'Nothing urgent across the three areas.');
-
-    $('#ovFm').innerHTML = ovRows([
-      ['Active facilities', f.A.length], ['Annualised rent', money(f.annual) + ' ' + CURRENCY],
-      ['Ending within ' + EXPIRY_SOON_DAYS + ' days', f.exp90.length, danger(f.exp90.length, WARN)], ['Past end date (still active)', f.expired.length, danger(f.expired.length, BAD)],
-      ['Licences / permits expired', f.docsExpired, danger(f.docsExpired, BAD)], ['Rent instalments overdue', money(f.instOverAmt) + ' ' + CURRENCY, danger(f.instOverAmt, WARN)]
-    ]);
-    $('#ovInv').innerHTML = ovRows([
-      ['Stock value', money(v.value) + ' ' + CURRENCY], ['Items in stock', v.itemsInStock],
-      ['Low stock', v.low.length, danger(v.low.length, WARN)], ['Shortage', v.short.length, danger(v.short.length, BAD)],
-      ['Negative stock', v.neg.length, danger(v.neg.length, BAD)], ['Dead stock value', state.raw.noAge ? 'n/a' : money(v.deadVal) + ' ' + CURRENCY, danger(v.deadVal, WARN)]
-    ]);
-    $('#ovFin').innerHTML = ovRows([
-      ['Cash & bank', money(n.cashTot) + ' ' + CURRENCY], ['Receivable', money(n.arTot), ''], ['  of which overdue', money(n.arOverAmt), danger(n.arOverAmt, BAD)],
-      ['Payable', money(n.apTot)], ['Revenue · ' + PERIODS[state.filters.period], money(n.pl.rev)],
-      ['Net profit', money(n.net), n.net < 0 ? BAD : OK]
-    ]);
-    $('#ovFoot').innerHTML = '<span>Group overview across all companies' + (state.filters.company !== 'all' ? ' · filtered to ' + esc(state.filters.company) : '') + '</span><span>Confidential · ' + esc(CURRENCY) + ' · as of ' + fmtDate(TODAY) + '</span>';
-  }
-
-  /* ------------------------------------------------------------------
-     8. TABLES
-     ------------------------------------------------------------------ 
-   */
-
-  function DataTable(host, cfg) {
-    var st = { filter: 'all', toggle: false, extra: null, extraLabel: '', sortKey: cfg.sort && cfg.sort.key, dir: (cfg.sort && cfg.sort.dir) || 'desc', page: 1 };
-    var size = cfg.pageSize || 10;
-    var rows = [];
-
-    var filterHtml = cfg.filter ? '<select data-f="filter" aria-label="Filter"><option value="all">' + esc(cfg.filter.label) + '</option>' +
-      cfg.filter.options.map(function (o) { return '<option value="' + esc(o) + '">' + esc(o) + '</option>'; }).join('') + '</select>' : '';
-    var toggleHtml = cfg.toggle ? '<label class="toggle"><input type="checkbox" data-f="toggle"> ' + esc(cfg.toggle.label) + '</label>' : '';
-
-    host.innerHTML =
-      '<div class="tbl-tools">' + filterHtml + toggleHtml + '<button class="chip" data-f="clearExtra" hidden></button><span class="tbl-count"></span></div>' +
-      '<div class="tbl-wrap"><table><thead><tr></tr></thead><tbody></tbody></table></div>' +
-      '<div class="pager"><span class="info"></span><div class="btns"></div></div>';
-
-    var thead = $('thead tr', host), tbody = $('tbody', host);
-    thead.innerHTML = cfg.columns.map(function (c, i) {
-      return '<th class="' + (c.num ? 'num ' : '') + (c.sort === false ? '' : 'sortable') + '" data-col="' + i + '">' + esc(c.label) + (c.sort === false ? '' : '<span class="arr">↕</span>') + '</th>';
-    }).join('');
-
-    function filtered() {
-      var out = rows.filter(function (r) {
-        if (st.filter !== 'all' && cfg.filter.get(r) !== st.filter) return false;
-        if (st.toggle && !cfg.toggle.test(r)) return false;
-        if (st.extra && !st.extra(r)) return false;
-        return true;
-      });
-      var col = cfg.columns.filter(function (c) { return c.key === st.sortKey; })[0];
-      if (col) {
-        out.sort(function (a, b) {
-          var x = a[col.key], y = b[col.key];
-          var xn = x == null || x === '', yn = y == null || y === '';
-          if (xn && yn) return 0; if (xn) return 1; if (yn) return -1;
-          var res = (typeof x === 'number' && typeof y === 'number') ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true });
-          return st.dir === 'asc' ? res : -res;
-        });
-      }
-      return out;
+  function actClient() {
+    var o = {};
+    if (D.fmErr) { ['a_fmend', 'a_fmdoc', 'a_fmrent'].forEach(function (k) { o[k] = 'ERR:' + D.fmErr; }); }
+    else if (HAVE.fm) {
+      var s = fmStats(), con = s.A.filter(function (r) { return r._days != null && r._days <= EXPIRY_SOON_DAYS; }).sort(function (a, b) { return a._days - b._days; });
+      o.a_fmend = { rows: con, count: con.length, item: function (r) { var p = r._days < 0 ? 'high' : r._days <= 30 ? 'med' : 'low'; return { p: p, score: score(p, r._annual, Math.max(0, -r._days)), dt: 'DM Facilities Management', name: r.name, title: r._name, desc: [r._type, r._loc].join(' · '), who: r._company, due: r._days < 0 ? tr('Ended ' + daysTxt(-r._days) + ' ago', 'انتهى قبل ' + daysTxt(-r._days)) : tr('Ends in ' + daysTxt(r._days), 'ينتهي خلال ' + daysTxt(r._days)), tone: r._days < 0 ? 'bad' : 'warn' }; } };
+      var docs = s.docs.slice().sort(function (a, b) { return a.d.days - b.d.days; });
+      o.a_fmdoc = { rows: docs, count: docs.length, item: function (x) { var p = x.d.days < 0 ? 'high' : 'med'; return { p: p, score: score(p, 0, Math.max(0, -x.d.days)), dt: 'DM Facilities Management', name: x.r.name, title: x.r._name, desc: x.d.label, who: x.r._company, due: x.d.days < 0 ? tr('Expired ' + fmtD(x.d.date), 'انتهى ' + fmtD(x.d.date)) : tr('Expires ' + fmtD(x.d.date), 'ينتهي ' + fmtD(x.d.date)), tone: x.d.days < 0 ? 'bad' : 'warn' }; } };
+      var rent = s.instOver.map(function (x) { return { r: x.r, i: x.i, over: true }; }).concat(s.instSoon.map(function (x) { return { r: x.r, i: x.i, over: false }; })).sort(function (a, b) { return a.i.due < b.i.due ? -1 : 1; });
+      o.a_fmrent = { rows: rent, count: rent.length, item: function (x) { var p = x.over ? 'med' : 'low'; return { p: p, score: score(p, x.i.amt, Math.max(0, -daysTo(x.i.due))), dt: 'DM Facilities Management', name: x.r.name, title: x.r._name, desc: tr('Instalment ', 'القسط ') + x.i.k + ' · ' + moneyS(x.i.amt, coCur(x.r._company)), who: x.r._company, due: (x.over ? tr('Not paid · due ', 'غير مسدد · ') : tr('Due ', 'يستحق ')) + fmtD(x.i.due), tone: x.over ? 'bad' : 'warn' }; } };
     }
-
-    function draw() {
-      var list = filtered();
-      var pages = Math.max(Math.ceil(list.length / size), 1);
-      if (st.page > pages) st.page = pages;
-      var slice = list.slice((st.page - 1) * size, st.page * size);
-
-      $$('th', thead).forEach(function (th) {
-        var c = cfg.columns[+th.dataset.col], on = c.key === st.sortKey;
-        th.classList.toggle('sorted', on);
-        var a = $('.arr', th);
-        if (a) a.textContent = on ? (st.dir === 'asc' ? '↑' : '↓') : '↕';
-      });
-
-      tbody.innerHTML = slice.length ? slice.map(function (r) {
-        return '<tr class="row-click" tabindex="0" data-name="' + esc(r.name) + '">' + cfg.columns.map(function (c) {
-          return '<td class="' + (c.num ? 'num' : '') + '">' + c.render(r) + '</td>';
-        }).join('') + '</tr>';
-      }).join('') : '<tr><td colspan="' + cfg.columns.length + '">' + emptyState('No records found', rows.length ? 'Try changing the filters.' : 'No records match the current dashboard filters.') + '</td></tr>';
-
-      var chip = $('[data-f="clearExtra"]', host);
-      chip.hidden = !st.extra;
-      chip.innerHTML = st.extra ? esc(st.extraLabel) + ' ' + icon('close', true) : '';
-      $('.tbl-count', host).textContent = plural(list.length, 'record') + (list.length !== rows.length ? ' of ' + rows.length : '');
-      $('.info', host).textContent = list.length ? 'Showing ' + ((st.page - 1) * size + 1) + '–' + Math.min(st.page * size, list.length) + ' of ' + list.length : '';
-      var btns = '<button data-p="prev" ' + (st.page <= 1 ? 'disabled' : '') + '>‹</button>';
-      var to = Math.min(pages, Math.max(1, st.page - 2) + 4), from = Math.max(1, to - 4);
-      for (var p = from; p <= to; p++) btns += '<button data-p="' + p + '" class="' + (p === st.page ? 'cur' : '') + '">' + p + '</button>';
-      btns += '<button data-p="next" ' + (st.page >= pages ? 'disabled' : '') + '>›</button>';
-      $('.btns', host).innerHTML = pages > 1 ? btns : '';
-      api.filteredRows = list;
+    if (D.invErr) { ['a_short', 'a_low'].forEach(function (k) { o[k] = 'ERR:' + D.invErr; }); }
+    else if (HAVE.inv) {
+      var v = invStats(), sh = v.neg.concat(v.short).sort(function (a, b) { return Math.min(a.projected, a.qty) - Math.min(b.projected, b.qty); });
+      o.a_short = { rows: sh, count: sh.length, item: function (g) { return { p: 'high', score: score('high', g.value, 0), dt: 'Item', name: g.name, title: g._title, desc: g.name + ' · ' + g.group, who: plural(g.nwh, tr('warehouse', 'مستودع'), tr('warehouses', 'مستودعات')), due: g.health === 'neg' ? tr('Negative ', 'سالب ') + '⁦' + amtq(g.qty) + ' ' + g.uom + '⁩' : tr('Short ', 'نقص ') + '⁦' + amtq(-g.projected) + ' ' + g.uom + '⁩', tone: 'bad' }; } };
+      var lw = v.low.slice().sort(function (a, b) { return (a.qty / (a.reorder || 1)) - (b.qty / (b.reorder || 1)); });
+      o.a_low = { rows: lw, count: lw.length, item: function (g) { return { p: 'med', score: score('med', g.value, 0), dt: 'Item', name: g.name, title: g._title, desc: g.name + ' · ' + g.group, who: null, due: '⁦' + amtq(g.qty) + ' / ' + amtq(g.reorder) + ' ' + g.uom + '⁩', tone: 'warn' }; } };
     }
-
-    host.addEventListener('change', function (e) {
-      var f = e.target.dataset && e.target.dataset.f;
-      if (f === 'filter') { st.filter = e.target.value; st.page = 1; draw(); }
-      if (f === 'toggle') { st.toggle = !!e.target.checked; st.page = 1; draw(); }
-    });
-    host.addEventListener('click', function (e) {
-      if (e.target.closest('[data-f="clearExtra"]')) { st.extra = null; st.page = 1; draw(); return; }
-      var th = e.target.closest('th.sortable');
-      if (th) {
-        var c = cfg.columns[+th.dataset.col];
-        if (st.sortKey === c.key) st.dir = st.dir === 'asc' ? 'desc' : 'asc'; else { st.sortKey = c.key; st.dir = c.num ? 'desc' : 'asc'; }
-        draw(); return;
-      }
-      var pb = e.target.closest('.pager button');
-      if (pb && !pb.disabled) {
-        var p = pb.dataset.p;
-        st.page = p === 'prev' ? st.page - 1 : p === 'next' ? st.page + 1 : +p; draw(); return;
-      }
-      var tr = e.target.closest('tr.row-click');
-      if (tr && !e.target.closest('a')) openDrawer(cfg.key, tr.dataset.name);
-    });
-    host.addEventListener('keydown', function (e) {
-      if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('tr.row-click')) { e.preventDefault(); openDrawer(cfg.key, e.target.dataset.name); }
-    });
-
-    var api = {
-      setRows: function (r) { rows = r; draw(); },
-      setToggle: function (v) { st.toggle = !!v; var cb = $('[data-f="toggle"]', host); if (cb) cb.checked = !!v; st.page = 1; draw(); },
-      setExtra: function (fn, label) { st.extra = fn; st.extraLabel = label; st.page = 1; draw(); },
-      reset: function () { st.filter = 'all'; st.toggle = false; st.extra = null; st.page = 1; var s = $('[data-f="filter"]', host); if (s) s.value = 'all'; var cb = $('[data-f="toggle"]', host); if (cb) cb.checked = false; },
-      filteredRows: []
-    };
-    return api;
-  }
-
-
-  /* ------------------------------------------------------------------
-     (tables, drawer, actions)
-     ------------------------------------------------------------------ */
-
-  function fmStatusBadge(r) {
-    if (!r._active) return '<span class="badge b-slate">Closed</span>';
-    if (r._days == null) return '<span class="badge b-slate">No end date</span>';
-    if (r._days < 0) return '<span class="badge b-bad">Expired ' + plural(-r._days, 'day') + ' ago</span>';
-    if (r._days <= 30) return '<span class="badge b-bad">Ends in ' + plural(r._days, 'day') + '</span>';
-    if (r._days <= EXPIRY_SOON_DAYS) return '<span class="badge b-warn">Ends in ' + plural(r._days, 'day') + '</span>';
-    return '<span class="badge b-ok">Active</span>';
-  }
-  function t2(main, sub) { return '<div class="main-t">' + esc(main || '—') + '</div>' + (sub ? '<div class="sub">' + sub + '</div>' : ''); }
-  var DASH = '<span style="color:var(--muted)">—</span>';
-
-  function initTables() {
-    state.tables.fm = DataTable($('#fmTable'), {
-      key: 'fm',
-      filter: { label: 'All facility types', options: ['Warehouse', 'Showroom', 'Office', 'Land', 'Accomadation'], get: function (r) { return r._type; } },
-      toggle: { label: 'Needs attention', test: function (r) { return r._attn; } },
-      sort: { key: '_annual', dir: 'desc' },
-      columns: [
-        { key: '_name', label: 'Facility', render: function (r) { return t2(r._name, '<span class="mono">' + esc(r.name) + '</span>'); } },
-        { key: '_type', label: 'Type', render: function (r) { return esc(r._type) + '<div class="sub">' + esc(r.facility_type || '') + '</div>'; } },
-        { key: '_company', label: 'Company', render: function (r) { return esc(r._company); } },
-        { key: '_loc', label: 'Location', render: function (r) { return locTag(r._loc); } },
-        { key: '_area', label: 'Area sqm', num: true, render: function (r) { return r._area ? money(r._area) : DASH; } },
-        { key: '_end', label: 'Contract end', render: function (r) { return r._end ? fmtDate(r._end) : DASH; } },
-        { key: '_annual', label: 'Annual rent', num: true, render: function (r) { return r._annual ? '<b>' + money(r._annual) + '</b>' : DASH; } },
-        { key: '_psqm', label: 'Rent / sqm', num: true, render: function (r) { return r._psqm ? money(r._psqm) : DASH; } },
-        { key: '_nbad', label: 'Licence flags', num: true, render: function (r) { return r._nbad ? '<span class="pill ' + (r._docBad.some(function (d) { return d.days < 0; }) ? 'bad' : 'warn') + '">' + r._nbad + '</span>' : DASH; } },
-        { key: '_days', label: 'Status', render: fmStatusBadge }
-      ]
-    });
-
-    state.tables.inventory = DataTable($('#invTable'), {
-      key: 'inventory',
-      filter: { label: 'All stock conditions', options: ['Negative stock', 'Shortage', 'Low stock', 'Dead stock', 'Healthy'], get: function (r) { return HEALTH[r.health].label; } },
-      toggle: { label: 'Needs action', test: function (r) { return r.health !== 'ok'; } },
-      sort: { key: 'value', dir: 'desc' },
-      columns: [
-        { key: '_title', label: 'Item', render: function (r) { return t2(r._title, '<span class="mono">' + esc(r.name) + '</span>'); } },
-        { key: 'group', label: 'Item group', render: function (r) { return esc(r.group); } },
-        { key: 'nwh', label: 'Whs', num: true, render: function (r) { return r.nwh; } },
-        { key: 'qty', label: 'Qty', num: true, render: function (r) { return money(r.qty) + '<div class="sub">' + esc(r.uom) + '</div>'; } },
-        { key: 'value', label: 'Stock value', num: true, render: function (r) { return '<b>' + money(r.value) + '</b>'; } },
-        { key: 'reserved', label: 'Reserved', num: true, render: function (r) { return r.reserved ? money(r.reserved) : DASH; } },
-        { key: 'projected', label: 'Projected', num: true, render: function (r) { return '<span style="color:' + (r.projected < 0 ? 'var(--bad)' : 'inherit') + '">' + money(r.projected) + '</span>'; } },
-        { key: 'reorder', label: 'Reorder lvl', num: true, render: function (r) { return r.reorder ? money(r.reorder) : DASH; } },
-        { key: 'days', label: 'Last moved', render: function (r) { return r.last ? fmtDate(r.last) + '<div class="sub">' + plural(r.days, 'day') + ' ago</div>' : DASH; } },
-        { key: 'health', label: 'Condition', render: function (r) { return '<span class="badge ' + HEALTH[r.health].cls + '">' + HEALTH[r.health].label + '</span>'; } }
-      ]
-    });
-
-    state.tables.finance = DataTable($('#finTable'), {
-      key: 'finance',
-      filter: { label: 'Receivable & payable', options: ['Receivable', 'Payable'], get: function (r) { return r._label; } },
-      toggle: { label: 'Overdue only', test: function (r) { return r._overdue; } },
-      sort: { key: '_out', dir: 'desc' },
-      columns: [
-        { key: '_label', label: 'Type', render: function (r) { return '<span class="badge ' + (r._kind === 'AR' ? 'b-info' : 'b-warn') + '">' + r._label + '</span>'; } },
-        { key: '_party', label: 'Party', render: function (r) { return t2(r._party, '<span class="mono">' + esc(r.name) + '</span>'); } },
-        { key: '_company', label: 'Company', render: function (r) { return esc(r._company); } },
-        { key: '_due', label: 'Due date', render: function (r) { return fmtDate(r._due) + (r._overdue ? '<div class="sub" style="color:var(--bad)">' + plural(r._days, 'day') + ' overdue</div>' : ''); } },
-        { key: '_total', label: 'Invoice total', num: true, render: function (r) { return money(r._total); } },
-        { key: '_out', label: 'Outstanding', num: true, render: function (r) { return '<b>' + money(r._out) + '</b>'; } },
-        { key: 'status', label: 'Status', render: function (r) { return '<span class="badge ' + (r._overdue ? 'b-bad' : 'b-slate') + '">' + esc(r.status || (r._overdue ? 'Overdue' : 'Unpaid')) + '</span>'; } }
-      ]
-    });
-  }
-
-  /* ------------------------------------------------------------------
-     9. DETAIL DRAWER
-     ------------------------------------------------------------------ */
-  function kv(k, v, full) { return '<div class="' + (full ? 'full' : '') + '"><div class="k">' + esc(k) + '</div><div class="v">' + (v == null || v === '' ? '—' : v) + '</div></div>'; }
-  function link(dt, name) { return name ? '<a data-route="' + esc(dt) + '|' + esc(name) + '">' + esc(name) + '</a>' : '—'; }
-  function yesNo(v) { return v ? '<span class="pill ok">Yes</span>' : '<span class="pill slate">No</span>'; }
-  function navOffset() {
-    var off = 0;
-    try {
-      var nb = document.querySelector('header.navbar') || document.querySelector('.navbar');
-      if (nb) { var r = nb.getBoundingClientRect(); if (r.height && r.bottom > 0) off = Math.min(Math.ceil(r.bottom), 140); }
-    } catch (e) { /* ignore */ }
-    return off;
-  }
-  function kpi(l, v, color) { return '<div class="mini"><div class="l">' + esc(l) + '</div><div class="v"' + (color ? ' style="color:' + color + '"' : '') + '>' + v + '</div></div>'; }
-
-  function openDrawer(key, name) {
-    var h = '', title, sub, statusHtml = '', actions = '', r;
-
-    if (key === 'fm') {
-      r = state.raw.fm.filter(function (x) { return x.name === name; })[0];
-      if (!r) return;
-      title = r._name; sub = r._type + ' · ' + r._loc + ' · ' + r.name; statusHtml = fmStatusBadge(r);
-      h += '<div class="dr-kpis">' + kpi('Annual rent', money(r._annual)) + kpi('Contract value', money(r._total)) + kpi('Area sqm', r._area ? money(r._area) : '—') + '</div>';
-      h += '<div class="dr-section"><h4>Agreement</h4><div class="kv">' +
-        kv('Company', esc(r._company)) + kv('Facility type', esc(r.facility_type)) +
-        kv('Category', esc(r.facility_catogory)) + kv('Contract status', esc(r.facility_contract_status)) +
-        kv('Agreement', esc(r.agreement_type)) + kv('Contract no', esc(r.contract_number)) +
-        kv('Start', fmtDate(r._start)) + kv('End', r._end ? fmtDate(r._end) + (r._days != null ? ' · ' + (r._days < 0 ? plural(-r._days, 'day') + ' ago' : 'in ' + plural(r._days, 'day')) : '') : '') +
-        kv('Auto renewal', esc(r.auto_renewal)) + kv('Rent per sqm / year', r._psqm ? money(r._psqm) + ' ' + CURRENCY : '') +
-        kv('Landlord', esc(r.owner_name)) + kv('Landlord phone', r.owner_number ? '<a href="tel:' + esc(r.owner_number) + '">' + esc(r.owner_number) + '</a>' : '') +
-        kv('Payment mode', esc(r.rent_mode)) + kv('Instalments', esc(r.rent_installments)) + '</div></div>';
-      if (r._inst.length) {
-        h += '<div class="dr-section"><h4>Rent instalments</h4><table class="mini-tbl"><thead><tr><th>#</th><th>Due</th><th class="num">Amount</th><th>Status</th></tr></thead><tbody>' +
-          r._inst.map(function (i) { return '<tr><td>' + i.k + '</td><td>' + fmtDate(i.due) + '</td><td class="num">' + money(i.amt) + '</td><td>' + (i.paid ? '<span class="pill ok">Paid</span>' : i.due < TODAY ? '<span class="pill bad">Not paid</span>' : '<span class="pill slate">Upcoming</span>') + '</td></tr>'; }).join('') + '</tbody></table></div>';
-      }
-      if (r._docs.length) {
-        h += '<div class="dr-section"><h4>Licences &amp; compliance</h4><table class="mini-tbl"><thead><tr><th>Document</th><th>Expiry</th><th>Status</th></tr></thead><tbody>' +
-          r._docs.slice().sort(function (a, b) { return a.days - b.days; }).map(function (d) { return '<tr><td>' + esc(d.label) + '</td><td>' + fmtDate(d.date) + '</td><td>' + (d.days < 0 ? '<span class="pill bad">Expired</span>' : d.days <= DOC_SOON_DAYS ? '<span class="pill warn">' + plural(d.days, 'day') + ' left</span>' : '<span class="pill ok">Valid</span>') + '</td></tr>'; }).join('') + '</tbody></table></div>';
-      }
-      var svc = [['Fire maintenance', r.fire_contractor], ['Cleaning', r.cleaning_cont], ['Camera maintenance', r.camera_contractor]].filter(function (x) { return x[1]; });
-      h += '<div class="dr-section"><h4>Safety &amp; services</h4><div class="kv">' + kv('Fire layout', yesNo(r.fire_layout)) + kv('Sign board', yesNo(r.sign_board)) + kv('Medical kit', yesNo(r.medical_kit)) +
-        svc.map(function (x) { return kv(x[0] + ' contractor', esc(x[1])); }).join('') + '</div></div>';
-      if (r.additional_notes) h += '<div class="dr-section"><h4>Notes</h4><div>' + esc(r.additional_notes) + '</div></div>';
-      actions += '<button class="btn btn-primary" data-route-btn="DM Facilities Management|' + esc(r.name) + '">' + icon('external', true) + ' Open in ERPNext</button>';
+    if (D.finErr) { ['a_ar', 'a_ap', 'a_cash'].forEach(function (k) { o[k] = 'ERR:' + D.finErr; }); }
+    else if (HAVE.fin) {
+      var n = finStats(), inv = function (dt, p) { return function (r) { return { p: p, score: score(p, r._out, r._days), dt: dt, name: r.name, title: r._party, desc: r.name + ' · ' + moneyS(r._out, coCur(r._company)), who: r._company, due: r._overdue ? tr(daysTxt(r._days) + ' late', 'متأخر ' + daysTxt(r._days)) : tr('Due ', 'يستحق ') + fmtD(r._due), tone: r._overdue ? 'bad' : 'warn' }; }; };
+      var ar = n.arOver.slice().sort(function (a, b) { return b._out - a._out; }), ap = n.apOver.concat(n.apSoon).sort(function (a, b) { return a._due < b._due ? -1 : 1; }), neg = n.cash.filter(function (a) { return a._bal < 0; }).sort(function (a, b) { return a._bal - b._bal; });
+      o.a_ar = { rows: ar, count: ar.length, item: inv('Sales Invoice', 'high') }; o.a_ap = { rows: ap, count: ap.length, item: inv('Purchase Invoice', 'med') };
+      o.a_cash = RAW.cashErr ? 'ERR:tech' : { rows: neg, count: neg.length, item: function (a) { return { p: 'low', score: score('low', -a._bal, 0), dt: 'Account', name: a.name, title: a.account_name || a.name, desc: a.account_type, who: a._company, due: moneyS(a._bal, coCur(a._company)), tone: 'bad' }; } };
     }
+    return Object.keys(o).length ? o : null;
+  }
 
-    if (key === 'inventory') {
-      r = state.view.inv.filter(function (x) { return x.name === name; })[0];
-      if (!r) return;
-      title = r._title; sub = r.name + ' · ' + r.group; statusHtml = '<span class="badge ' + HEALTH[r.health].cls + '">' + HEALTH[r.health].label + '</span>';
-      h += '<div class="dr-kpis">' + kpi('On hand', money(r.qty) + ' <small>' + esc(r.uom) + '</small>') + kpi('Stock value', money(r.value)) + kpi('Projected', money(r.projected), r.projected < 0 ? 'var(--bad)' : '') + '</div>';
-      h += '<div class="dr-section"><h4>Item</h4><div class="kv">' + kv('Item group', esc(r.group)) + kv('UOM', esc(r.uom)) +
-        kv('Reorder level', r.reorder ? money(r.reorder) : '') + kv('Reserved', money(r.reserved)) + kv('Incoming (ordered)', money(r.ordered)) +
-        kv('Last movement', r.last ? (r.approx ? 'Before ' : '') + fmtDate(r.last) + ' · ' + plural(r.days, 'day') + (r.approx ? '+' : '') + ' ago' : (state.raw.noAge ? 'Not available' : 'No movement recorded')) + '</div></div>';
-      h += '<div class="dr-section"><h4>By warehouse</h4><table class="mini-tbl"><thead><tr><th>Warehouse</th><th class="num">Qty</th><th class="num">Reserved</th><th class="num">Value</th></tr></thead><tbody>' +
-        r.whs.slice().sort(function (a, b) { return b._val - a._val; }).map(function (b) { return '<tr><td>' + esc(b._wh) + '</td><td class="num" style="color:' + (b._qty < 0 ? 'var(--bad)' : 'inherit') + '">' + money(b._qty) + '</td><td class="num">' + (b._res ? money(b._res) : '—') + '</td><td class="num">' + money(b._val) + '</td></tr>'; }).join('') + '</tbody></table></div>';
-      actions += '<button class="btn btn-primary" data-route-btn="Item|' + esc(r.name) + '">' + icon('external', true) + ' Open item</button>';
+  /* ============================================================ 7. shared pieces */
+  function amtq(v) { return Number(v || 0).toLocaleString('en-US', { maximumFractionDigits: 2 }); }
+  function fmtD(d) { return d ? String(d).slice(0, 10) : '—'; }
+  function banner() {
+    var h = '', o = otherCos(), errs = [].concat(tab === 'fm' ? ERR.fm : tab === 'inventory' ? ERR.inv : tab === 'finance' ? ERR.fin : ERR.fm.concat(ERR.inv, ERR.fin));
+    if (CACHED_AT && busy()) { var t = new Date(CACHED_AT); h += alertBox('info', esc(tr('Showing saved data from ', 'عرض البيانات المحفوظة من ') + ('0' + t.getHours()).slice(-2) + ':' + ('0' + t.getMinutes()).slice(-2) + tr(' while fresh data loads.', ' أثناء تحميل البيانات الحديثة.'))); }
+    if (o.length) { h += alertBox('info', esc(tr('Amounts are in ', 'المبالغ بعملة ') + scopeCur() + tr('. Companies in another currency are not included: ', '. الشركات بعملة أخرى غير مشمولة: ') + o.join(', ') + tr('. Pick one in Filters to see it on its own.', '. اخترها من المرشحات لعرضها منفردة.'))); }
+    var stale = ['fm', 'inv', 'fin'].filter(function (k) { return D[k + 'Err'] && HAVE[k]; });
+    if (stale.length) { h += alertBox('warn', esc(tr('Refresh failed (source unavailable); showing the last loaded data for ', 'فشل التحديث (المصدر غير متاح)؛ تظهر آخر بيانات محملة لـ ') + stale.map(function (k) { return { fm: tr('facilities', 'المرافق'), inv: tr('inventory', 'المخزون'), fin: tr('finance', 'المالية') }[k]; }).join(', ') + '.')); }
+    if (errs.length) { h += alertBox('warn', '<b>' + esc(tr('Some data could not be loaded: ', 'تعذر تحميل بعض البيانات: ')) + '</b>' + esc(errs.join(' · '))); }
+    return h;
+  }
+  function need(k, AM) {
+    if (D[k + 'Err'] && !HAVE[k]) { return srcErr(D[k + 'Err'], k === 'fm' ? 'DM Facilities Management' : k === 'inv' ? 'Bin' : 'Sales Invoice') + (AM ? actionsPanel(AM) : ''); }
+    if (!HAVE[k]) { return '<div class="dms-grid dms-kpis dms-ov-kpis" aria-busy="true">' + skel(6, 'dms-skel-kpi') + '</div>' + (AM ? '<div class="dms-main2">' + actionsPanel(AM) + '<div class="dms-skel dms-skel-panel"></div></div>' : '<div class="dms-skel dms-skel-panel"></div>'); }
+    return '';
+  }
+  function facts(rows) { return '<div class="dms-facts fi-facts">' + rows.map(function (r) { return '<div><span class="dms-sm">' + esc(r[0]) + '</span><b class="dms-num' + (r[2] ? ' dms-tone-' + r[2] : '') + '">' + r[1] + '</b></div>'; }).join('') + '</div>'; }
+  function m$(v) { return cur$(v, scopeCur()); }
+  function mm(v) { return esc(money(v)) + ' <small>' + esc(scopeCur()) + '</small>'; }
+  var QF = { fm: '', inventory: '', finance: '' };
+  function chips(t, list) { return '<div class="fi-qf" role="group">' + list.map(function (q) { return '<button type="button" class="dms-btn dms-btn-sm' + (QF[t] === q[0] ? ' dms-btn-primary' : '') + '" data-act="qf" data-v="' + t + ':' + q[0] + '" aria-pressed="' + (QF[t] === q[0]) + '">' + esc(q[1]) + '</button>'; }).join('') + '</div>'; }
+  function monthsBar(keys, series, fmt) { return barChart(keys, 'month', series, fmt || money); }
+
+  /* ============================================================ 8. overview */
+  function tabOverview(AM) {
+    if (!HAVE.fm && !HAVE.inv && !HAVE.fin) { return D.fmErr && D.invErr && D.finErr ? srcErr(D.fmErr, 'DM Facilities Management') + actionsPanel(AM) : need('fm', AM); }
+    var f = HAVE.fm ? fmStats() : null, v = HAVE.inv ? invStats() : null, n = HAVE.fin ? finStats() : null, na = function (x, k) { return x ? null : (D[k + 'Err'] ? '—' : '…'); };
+    var h = kpis([
+      kpi({ label: tr('Active facilities', 'المرافق النشطة'), dot: 'var(--dms-navy)', val: na(f, 'fm') || num(f.A.length), sub: f ? esc(money(f.annual) + ' ' + scopeCur() + tr(' annual rent', ' إيجار سنوي')) : '', act: 'go:fm:' }),
+      kpi({ label: tr('Contracts ending ≤ ' + EXPIRY_SOON_DAYS + ' days', 'عقود تنتهي ≤ ' + EXPIRY_SOON_DAYS + ' يومًا'), dot: 'var(--dms-age3)', val: na(f, 'fm') || num(f.exp90.length), sub: f ? esc(num(f.expired.length) + tr(' already past end date', ' تجاوزت تاريخ الانتهاء')) : '', act: 'go:fm:exp90' }),
+      kpi({ label: tr('Stock value', 'قيمة المخزون'), val: na(v, 'inv') || m$(v.value), sub: v ? esc(num(v.itemsInStock) + tr(' items in stock', ' صنف متوفر')) : '', act: 'go:inventory:' }),
+      kpi({ label: tr('Shortage / negative', 'نقص / سالب'), dot: 'var(--dms-bad)', val: na(v, 'inv') || num(v.short.length) + ' / ' + num(v.neg.length), sub: v ? esc(num(v.low.length) + tr(' more at low stock', ' أخرى منخفضة')) : '', act: 'go:inventory:short' }),
+      kpi({ label: tr('Cash and bank', 'النقد والبنك'), val: na(n, 'fin') || (RAW.cashErr ? '—' : m$(n.cashTot)), sub: n ? esc(tr('GL balance · ', 'رصيد الأستاذ · ') + num(n.cash.length) + tr(' accounts', ' حساب')) : '', act: 'go:finance:' }),
+      kpi({ label: tr('Overdue receivable', 'مستحقات متأخرة'), dot: 'var(--dms-bad)', val: na(n, 'fin') || m$(n.arOverAmt), sub: n ? esc(tr('of ', 'من ') + money(n.arTot) + tr(' receivable', ' مستحقة')) : '', act: 'go:finance:arover' })
+    ], true);
+    var keys = (RAW.fin12 || []).map(function (x) { return x.key; }), pr = function (k) { return plSum([k]); };
+    h += '<div class="dms-main2">' + actionsPanel(AM) + '<div class="dms-stackcol">' + panel(tr('Revenue vs expenses', 'الإيرادات مقابل المصروفات'), !n ? skel(1, 'dms-skel-panel') : plChart(keys, pr), '', esc(scopeCur() + tr(' · last 12 months · GL', ' · آخر 12 شهرًا · الأستاذ'))) +
+      panel(tr('Group summary', 'ملخص المجموعة'), (f ? facts([[tr('Annualised rent', 'الإيجار السنوي'), mm(f.annual)], [tr('Licences expired', 'تراخيص منتهية'), num(f.docsExpired), f.docsExpired ? 'bad' : ''], [tr('Rent instalments overdue', 'أقساط متأخرة'), mm(f.instOverAmt), f.instOverAmt ? 'warn' : '']]) : '') +
+        (v ? facts([[tr('Low stock', 'مخزون منخفض'), num(v.low.length), v.low.length ? 'warn' : ''], [tr('Dead stock value', 'قيمة المخزون الراكد'), RAW.noAge ? (RAW.noAgeWhy === 'pending' ? esc(tr('Calculating…', 'جارٍ الحساب…')) : '—') : mm(v.deadVal), v.deadVal ? 'warn' : ''], [tr('Warehouses with stock', 'مستودعات بها مخزون'), num(v.whCount)]]) : '') +
+        (n ? facts([[tr('Payable', 'الدائنون'), mm(n.apTot)], [tr('Overdue payable', 'دائنون متأخرون'), mm(n.apOverAmt), n.apOverAmt ? 'warn' : ''], [tr('Net profit · period', 'صافي الربح · الفترة'), mm(n.net), n.net < 0 ? 'bad' : 'ok']]) : '')) + '</div></div>';
+    return h;
+  }
+  function plChart(keys, pr) {
+    var F = RAW.plFail; if (F && F.n >= 12) { return alertBox('err', esc(tr('Revenue vs expenses could not be loaded: ', 'تعذر تحميل الإيرادات والمصروفات: ') + F.why)); }
+    var c = {}; keys.forEach(function (k) { c[k] = pr(k); });
+    return monthsBar(keys, [{ label: tr('Revenue', 'الإيرادات'), color: 'var(--dms-ok)', val: function (k) { return c[k].rev; } }, { label: tr('Expenses', 'المصروفات'), color: 'var(--dms-age3)', val: function (k) { return c[k].exp; } }]) + (F ? note(esc(F.n + tr(' of 12 months could not be loaded (', ' من 12 شهرًا تعذر تحميلها (') + F.months.join(', ') + '): ' + F.why)) : '');
+  }
+
+  /* ============================================================ 9. facilities */
+  var FMQ = { '': function () { return true; }, attn: function (r) { return r._attn; }, exp90: function (r) { return r._active && r._days != null && r._days >= 0 && r._days <= EXPIRY_SOON_DAYS; }, expired: function (r) { return r._active && r._days != null && r._days < 0; }, inst: function (r) { return r._instOver.length > 0; }, docs: function (r) { return r._docBad.length > 0; }, nodate: function (r) { return r._active && r._days == null; } };
+  function fmBadge(r) { if (!r._active) { return stat('n', tr('Closed', 'مغلق')); } if (r._days == null) { return stat('n', tr('No end date', 'بلا تاريخ انتهاء')); } if (r._days < 0) { return stat('bad', tr('Ended ' + daysTxt(-r._days) + ' ago', 'انتهى قبل ' + daysTxt(-r._days))); } if (r._days <= EXPIRY_SOON_DAYS) { return stat(r._days <= 30 ? 'bad' : 'warn', tr('Ends in ' + daysTxt(r._days), 'ينتهي خلال ' + daysTxt(r._days))); } return stat('ok', tr('Active', 'نشط')); }
+  function tabFm() {
+    var n0 = need('fm'); if (n0) { return n0; }
+    var s = fmStats(), A = s.A;
+    var h = kpis([
+      kpi({ label: tr('Active facilities', 'المرافق النشطة'), dot: 'var(--dms-navy)', val: num(A.length), sub: esc(num(s.F.length - A.length) + tr(' closed · ', ' مغلق · ') + money(s.area) + tr(' sqm', ' م²')), act: 'qf2:fm:' }),
+      kpi({ label: tr('Annualised rent', 'الإيجار السنوي'), val: m$(s.annual), sub: esc(tr('Avg ', 'المتوسط ') + money(s.psqm) + ' ' + scopeCur() + tr(' / sqm / year', ' / م² / سنة')) }),
+      kpi({ label: tr('Ending in ' + EXPIRY_SOON_DAYS + ' days', 'تنتهي خلال ' + EXPIRY_SOON_DAYS + ' يومًا'), dot: 'var(--dms-age3)', val: num(s.exp90.length), sub: esc(money(sumK(s.exp90, '_annual')) + ' ' + scopeCur() + tr(' annual rent', ' إيجار سنوي')), top: QF.fm === 'exp90' ? tagc(esc(tr('Shown', 'معروضة'))) : '', act: 'qf2:fm:exp90' }),
+      kpi({ label: tr('Past contract end', 'تجاوزت نهاية العقد'), dot: 'var(--dms-bad)', val: num(s.expired.length), sub: esc(tr('Still marked active', 'ما زالت نشطة')), top: QF.fm === 'expired' ? tagc(esc(tr('Shown', 'معروضة'))) : '', act: 'qf2:fm:expired' }),
+      kpi({ label: tr('Instalments overdue', 'أقساط متأخرة'), dot: 'var(--dms-bad)', val: m$(s.instOverAmt), sub: esc(plural(s.instOver.length, tr('instalment', 'قسط'), tr('instalments', 'أقساط')) + tr(' unpaid', ' غير مسددة')), top: QF.fm === 'inst' ? tagc(esc(tr('Shown', 'معروضة'))) : '', act: 'qf2:fm:inst' }),
+      kpi({ label: tr('Licences / permits', 'التراخيص / التصاريح'), dot: 'var(--dms-age4)', val: num(s.docsExpired) + ' / ' + num(s.docsSoon), sub: esc(tr('expired / expiring ≤ ' + DOC_SOON_DAYS + 'd', 'منتهية / تنتهي ≤ ' + DOC_SOON_DAYS + ' يومًا')), top: QF.fm === 'docs' ? tagc(esc(tr('Shown', 'معروضة'))) : '', act: 'qf2:fm:docs' })
+    ]);
+    var keys = []; for (var i = 0; i < 12; i++) { keys.push(addMonths(TODAY.slice(0, 7) + '-01', i).slice(0, 7)); }
+    var agg = {}; A.forEach(function (r) { if (r._days != null && r._days >= 0) { var k = String(r._end).slice(0, 7); agg[k] = (agg[k] || 0) + r._annual; } });
+    h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Contracts ending, next 12 months', 'العقود المنتهية، 12 شهرًا القادمة'), keys.some(function (k) { return agg[k]; }) ? monthsBar(keys, [{ label: tr('Annual rent ending', 'الإيجار السنوي المنتهي'), color: 'var(--dms-royal)', val: function (k) { return agg[k] || 0; } }]) : empty(tr('No active contract ends in the next 12 months.', 'لا عقد نشط ينتهي خلال 12 شهرًا.')), '', esc(scopeCur() + ' · ' + num(s.expired.length) + tr(' already past end', ' تجاوزت النهاية'))) +
+      panel(tr('Licences and permits', 'التراخيص والتصاريح'), docMix(A), '', esc(tr('Active facilities', 'المرافق النشطة'))) + '</div>';
+    var gb = function (kf) { return hbars(groupSum(A, kf, function (r) { return r._annual; }).filter(function (g) { return g.v; }).slice(0, 8).map(function (g) { return { label: g.key + ' (' + g.n + ')', value: g.v }; }), money); };
+    h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Annual rent by facility type', 'الإيجار السنوي حسب نوع المرفق'), A.length ? gb(function (r) { return r._type; }) : empty(), '', esc(scopeCur())) + panel(tr('Annual rent by location', 'الإيجار السنوي حسب الموقع'), A.length ? gb(function (r) { return r._loc; }) : empty(), '', esc(scopeCur())) + '</div>';
+    h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Annual rent by company', 'الإيجار السنوي حسب الشركة'), A.length ? gb(function (r) { return r._company; }) : empty(), '', esc(scopeCur())) + panel(tr('Assets', 'الأصول'), assetsPanel(), '', D.fmErr ? '' : esc(scopeCur())) + '</div>';
+    var rows = s.F.filter(FMQ[QF.fm] || FMQ['']);
+    return h + panel(tr('Facilities', 'المرافق'), chips('fm', [['', tr('All', 'الكل')], ['attn', tr('Needs attention', 'تحتاج متابعة')], ['exp90', tr('Ending ≤ 90 days', 'تنتهي ≤ 90 يومًا')], ['expired', tr('Past end', 'تجاوزت النهاية')], ['inst', tr('Instalments overdue', 'أقساط متأخرة')], ['docs', tr('Licence flags', 'تنبيهات التراخيص')], ['nodate', tr('No end date', 'بلا تاريخ انتهاء')]]) +
+      regTable({ id: 't_fm', rows: rows, sk: 'annual', dir: -1, file: 'facilities', text: function (r) { return [r._name, r.name, r._loc, r.owner_name, r._company, r._type, r.contract_number].join(' '); }, empty: tr('No facilities match.', 'لا مرافق مطابقة.'), cols: [
+        { k: 'name', h: tr('Facility', 'المرفق'), s: function (r) { return r._name; }, r: function (r) { return '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="fac:' + esc(r.name) + '">' + bdi(r._name) + '</button><span class="dms-sm fi-sub">' + esc(r.name) + '</span>'; }, c: function (r) { return r._name; } },
+        { k: 'type', h: tr('Type', 'النوع'), s: function (r) { return r._type; }, r: function (r) { return bdi(r._type) + '<span class="dms-sm fi-sub">' + esc(r.facility_type || '') + '</span>'; }, c: function (r) { return r._type; } },
+        { k: 'co', h: tr('Company / location', 'الشركة / الموقع'), s: function (r) { return r._company; }, r: function (r) { return bdi(r._company) + '<span class="dms-sm fi-sub">' + esc(r._loc) + '</span>'; }, c: function (r) { return r._company + ' / ' + r._loc; } },
+        { k: 'area', h: tr('Area sqm', 'المساحة م²'), num: 1, s: function (r) { return r._area; }, r: function (r) { return r._area ? num(r._area) : '<span class="dms-sm">—</span>'; }, c: function (r) { return r._area; } },
+        { k: 'end', h: tr('Contract end', 'نهاية العقد'), s: function (r) { return r._end || '9999'; }, r: function (r) { return r._end ? dtc(String(r._end).slice(0, 10)) : '<span class="dms-sm">—</span>'; }, c: function (r) { return r._end; } },
+        { k: 'annual', h: tr('Annual rent', 'الإيجار السنوي'), num: 1, s: function (r) { return r._annual; }, r: function (r) { return r._annual ? '<b>' + moneyB(r._annual, coCur(r._company)) + '</b>' : '<span class="dms-sm">—</span>'; }, c: function (r) { return r._annual; } },
+        { k: 'psqm', h: tr('Rent / sqm', 'الإيجار / م²'), num: 1, s: function (r) { return r._psqm; }, r: function (r) { return r._psqm ? esc(money(r._psqm)) : '<span class="dms-sm">—</span>'; }, c: function (r) { return r._psqm; } },
+        { k: 'flags', h: tr('Licence flags', 'تنبيهات التراخيص'), num: 1, s: function (r) { return r._docBad.length; }, r: function (r) { return r._docBad.length ? stat(r._docBad.some(function (d) { return d.days < 0; }) ? 'bad' : 'warn', String(r._docBad.length)) : '<span class="dms-sm">—</span>'; }, c: function (r) { return r._docBad.length; } },
+        { k: 'st', h: tr('Status', 'الحالة'), s: function (r) { return r._active ? (r._days == null ? 1e6 : r._days) : 2e6; }, r: fmBadge, c: function (r) { return r._active ? (r._days == null ? 'No end date' : r._days < 0 ? 'Ended' : 'Active') : 'Closed'; } }] }), '', esc(num(rows.length) + ' / ' + num(RAW.fm.length) + tr(' facility records · annualised rent = total rent ÷ contract years', ' سجل مرفق · الإيجار السنوي = إجمالي الإيجار ÷ سنوات العقد')));
+  }
+  function docMix(A) {
+    var rows = DOC_DEFS.map(function (d) { var l = A.filter(function (r) { return r[d[0]]; }); if (!l.length) { return null; } var ex = 0, so = 0; l.forEach(function (r) { var dy = daysTo(r[d[0]]); if (dy < 0) { ex++; } else if (dy <= DOC_SOON_DAYS) { so++; } }); return { label: tr(d[1], d[2]), total: l.length, ex: ex, so: so }; }).filter(Boolean);
+    if (!rows.length) { return empty(tr('No licence or permit expiry is recorded on the active facilities.', 'لا تواريخ انتهاء مسجلة للتراخيص على المرافق النشطة.')); }
+    return '<div class="fi-docs">' + rows.map(function (r) { return '<div class="fi-doc"><span>' + bdi(r.label) + '</span>' + mixBar([{ label: tr('Valid', 'سارية'), value: r.total - r.ex - r.so, color: 'var(--dms-ok)' }, { label: tr('Expiring', 'تنتهي قريبًا'), value: r.so, color: 'var(--dms-age3)' }, { label: tr('Expired', 'منتهية'), value: r.ex, color: 'var(--dms-bad)' }]) + '<span class="dms-sm">' + esc(num(r.total - r.ex - r.so) + tr(' valid · ', ' سارية · ') + num(r.so) + tr(' soon · ', ' قريبًا · ')) + '<b class="' + (r.ex ? 'dms-tone-bad' : '') + '">' + esc(num(r.ex) + tr(' expired', ' منتهية')) + '</b></span></div>'; }).join('') + '</div>';
+  }
+  function assetsPanel() {
+    var A = RAW.assets.filter(inCo); if (!A.length) { return empty(tr('No submitted assets for this scope.', 'لا أصول معتمدة لهذا النطاق.')); }
+    var ins = A.filter(function (r) { return r.insurance_end_date && r.insurance_end_date <= addDays(TODAY, DOC_SOON_DAYS); }).length, rep = RAW.repairs.filter(inCo).length;
+    return facts([[tr('Assets', 'الأصول'), num(A.length)], [tr('Gross cost', 'التكلفة الإجمالية'), mm(sumK(A, '_gross'))], [tr('Net book value', 'القيمة الدفترية'), mm(sumK(A, '_nbv'))], [tr('Repairs pending', 'إصلاحات معلقة'), num(rep), rep ? 'warn' : '']]) +
+      hbars(groupSum(A, function (r) { return r.asset_category; }, function (r) { return r._gross; }).slice(0, 5).map(function (g) { return { label: g.key + ' (' + g.n + ')', value: g.v }; }), money) + (ins ? note(esc(num(ins) + tr(' assets with insurance expired or expiring in ' + DOC_SOON_DAYS + ' days.', ' أصل بتأمين منتهٍ أو ينتهي خلال ' + DOC_SOON_DAYS + ' يومًا.'))) : '');
+  }
+
+  /* ============================================================ 10. inventory */
+  var INQ = { '': function () { return true; }, act: function (g) { return g.health !== 'ok'; }, neg: function (g) { return g.health === 'neg'; }, short: function (g) { return g.health === 'short' || g.health === 'neg'; }, low: function (g) { return g.health === 'low'; }, dead: function (g) { return g.health === 'dead'; } };
+  function tabInv() {
+    var n0 = need('inv'); if (n0) { return n0; }
+    var s = invStats(), I = s.I, topPct = s.value > 0 ? Math.round(s.top10Val / s.value * 100) : 0, ageTxt = RAW.noAge ? (RAW.noAgeWhy === 'pending' ? tr('Calculating…', 'جارٍ الحساب…') : tr('Movement data unavailable', 'بيانات الحركة غير متاحة')) : '';
+    var h = kpis([
+      kpi({ label: tr('Stock value', 'قيمة المخزون'), dot: 'var(--dms-navy)', val: m$(s.value), sub: esc(num(s.itemsInStock) + tr(' items in stock · top 10 hold ', ' صنف متوفر · أعلى 10 تمثل ') + topPct + '%'), act: 'qf2:inventory:' }),
+      kpi({ label: tr('Warehouses with stock', 'مستودعات بها مخزون'), val: num(s.whCount), sub: esc(tr('Active, non-empty', 'نشطة وغير فارغة')) }),
+      kpi({ label: tr('Dead stock', 'مخزون راكد'), dot: '#8a97a8', val: RAW.noAge ? (RAW.noAgeWhy === 'pending' ? '…' : '—') : m$(s.deadVal), sub: esc(RAW.noAge ? ageTxt : plural(s.dead.length, tr('item', 'صنف'), tr('items', 'أصناف')) + tr(' idle > ' + DEAD_STOCK_DAYS + 'd', ' خامل > ' + DEAD_STOCK_DAYS + ' يومًا')), top: QF.inventory === 'dead' ? tagc(esc(tr('Shown', 'معروضة'))) : '', act: RAW.noAge ? null : 'qf2:inventory:dead' }),
+      kpi({ label: tr('Low stock', 'مخزون منخفض'), dot: 'var(--dms-age3)', val: num(s.low.length), sub: esc(tr('At / below reorder level', 'عند حد إعادة الطلب أو أقل')), top: QF.inventory === 'low' ? tagc(esc(tr('Shown', 'معروضة'))) : '', act: 'qf2:inventory:low' }),
+      kpi({ label: tr('Shortage', 'نقص'), dot: 'var(--dms-bad)', val: num(s.short.length), sub: esc(tr('Projected qty below zero', 'المتوقع أقل من صفر')), top: QF.inventory === 'short' ? tagc(esc(tr('Shown', 'معروضة'))) : '', act: 'qf2:inventory:short' }),
+      kpi({ label: tr('Negative stock', 'مخزون سالب'), dot: 'var(--dms-age5)', val: num(s.neg.length), sub: esc(tr('Needs a stock correction', 'يحتاج تصحيح مخزون')), top: QF.inventory === 'neg' ? tagc(esc(tr('Shown', 'معروضة'))) : '', act: 'qf2:inventory:neg' })
+    ]);
+    var byWh = {}; RAW.bins.filter(inCo).forEach(function (b) { if (!matchQ([b.item_code, b._wh])) { return; } var g = byWh[b.warehouse] || (byWh[b.warehouse] = { label: b._wh, value: 0 }); g.value += b._val; });
+    var whl = Object.keys(byWh).map(function (k) { return byWh[k]; }).filter(function (g) { return g.value > 0; }).sort(function (a, b) { return b.value - a.value; }).slice(0, 8);
+    var hr = ['neg', 'short', 'low', 'dead', 'ok'].map(function (k) { var l = I.filter(function (g) { return g.health === k; }); return { label: tr(HEALTH[k][0], HEALTH[k][1]) + ' (' + l.length + ')', value: sumK(l, 'value'), color: HEALTH[k][3] }; });
+    h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Stock value by warehouse', 'قيمة المخزون حسب المستودع'), whl.length ? hbars(whl, money) : empty(), '', esc(scopeCur() + tr(' · top 8', ' · أعلى 8'))) + panel(tr('Stock condition', 'حالة المخزون'), I.length ? hbars(hr, money) : empty(), '', esc(tr('Value by condition', 'القيمة حسب الحالة'))) + '</div>';
+    var ag = AGE_B.map(function (b) { var l = I.filter(function (g) { return g._age === b[0]; }); return { label: tr(b[1], b[2]) + ' (' + l.length + ')', value: sumK(l, 'value'), color: b[3] }; });
+    h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Stock value by last movement', 'قيمة المخزون حسب آخر حركة'), RAW.noAge ? (RAW.noAgeWhy === 'pending' ? skel(1, 'dms-skel-panel') : alertBox('warn', esc(RAW.noAgeWhy === 'perm' ? tr('Your role cannot read Stock Ledger Entry, so stock age cannot be calculated.', 'دورك لا يقرأ قيود دفتر المخزون، فلا يمكن حساب العمر.') : tr('Stock Ledger Entry query failed. Use Refresh to retry.', 'فشل استعلام دفتر المخزون. استخدم التحديث.')))) : hbars(ag, money), '', esc(tr('Windows of 30 / 90 / 180 / 365 days', 'فترات 30 / 90 / 180 / 365 يومًا'))) +
+      panel(tr('Stock value by item group', 'قيمة المخزون حسب مجموعة الأصناف'), hbars(groupSum(I.filter(function (g) { return g.qty > 0 && g.value > 0; }), function (g) { return g.group; }, function (g) { return g.value; }).slice(0, 8).map(function (g) { return { label: g.key + ' (' + g.n + ')', value: g.v }; }), money), '', esc(scopeCur())) + '</div>';
+    var rows = I.filter(INQ[QF.inventory] || INQ['']);
+    return h + panel(tr('Stock items', 'أصناف المخزون'), chips('inventory', [['', tr('All', 'الكل')], ['act', tr('Needs action', 'تحتاج إجراء')], ['short', tr('Short or negative', 'نقص أو سالب')], ['low', tr('Low', 'منخفض')], ['dead', tr('Dead', 'راكد')]]) +
+      regTable({ id: 't_inv', rows: rows, sk: 'value', dir: -1, file: 'stock_items', text: function (g) { return [g.name, g._title, g.group].join(' '); }, empty: tr('No items match.', 'لا أصناف مطابقة.'), cols: [
+        { k: 'item', h: tr('Item', 'الصنف'), s: function (g) { return g._title; }, r: function (g) { return '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="item:' + esc(g.name) + '">' + bdi(g._title) + '</button><span class="dms-sm fi-sub">' + esc(g.name + ' · ' + g.group) + '</span>'; }, c: function (g) { return g.name + ' ' + g._title; } },
+        { k: 'nwh', h: tr('Warehouses', 'المستودعات'), num: 1, s: function (g) { return g.nwh; }, r: function (g) { return num(g.nwh); }, c: function (g) { return g.nwh; } },
+        { k: 'qty', h: tr('Qty', 'الكمية'), num: 1, s: function (g) { return g.qty; }, r: function (g) { return '<span class="dms-num' + (g.qty < 0 ? ' dms-tone-bad' : '') + '">' + esc(amtq(g.qty)) + '</span> <span class="dms-sm">' + esc(g.uom) + '</span>'; }, c: function (g) { return g.qty; } },
+        { k: 'value', h: tr('Stock value', 'قيمة المخزون'), num: 1, s: function (g) { return g.value; }, r: function (g) { return '<b>' + esc(money(g.value)) + '</b>'; }, c: function (g) { return g.value; } },
+        { k: 'res', h: tr('Reserved', 'المحجوز'), num: 1, s: function (g) { return g.reserved; }, r: function (g) { return g.reserved ? esc(amtq(g.reserved)) : '<span class="dms-sm">—</span>'; }, c: function (g) { return g.reserved; } },
+        { k: 'proj', h: tr('Projected', 'المتوقع'), num: 1, s: function (g) { return g.projected; }, r: function (g) { return '<span class="dms-num' + (g.projected < 0 ? ' dms-tone-bad' : '') + '">' + esc(amtq(g.projected)) + '</span>'; }, c: function (g) { return g.projected; } },
+        { k: 'reorder', h: tr('Reorder level', 'حد إعادة الطلب'), num: 1, s: function (g) { return g.reorder; }, r: function (g) { return g.reorder ? esc(amtq(g.reorder)) : '<span class="dms-sm">—</span>'; }, c: function (g) { return g.reorder; } },
+        { k: 'last', h: tr('Last moved', 'آخر حركة'), s: function (g) { return g.days == null ? 1e9 : g.days; }, r: function (g) { return g.ageLabel ? esc(g.ageLabel) : '<span class="dms-sm">—</span>'; }, c: function (g) { return g.ageLabel; } },
+        { k: 'health', h: tr('Condition', 'الحالة'), s: function (g) { return ['neg', 'short', 'low', 'dead', 'ok'].indexOf(g.health); }, r: function (g) { return stat(HEALTH[g.health][2], tr(HEALTH[g.health][0], HEALTH[g.health][1])); }, c: function (g) { return HEALTH[g.health][0]; } }] }), '', esc(tr('Value from Bin.stock_value · last movement from Stock Ledger Entry windows · quantities in each item’s stock UOM', 'القيمة من Bin.stock_value · آخر حركة من فترات دفتر المخزون · الكميات بوحدة مخزون الصنف')));
+  }
+
+  /* ============================================================ 11. finance */
+  var FIQ = { '': function () { return true; }, ar: function (r) { return r._kind === 'AR'; }, ap: function (r) { return r._kind === 'AP'; }, arover: function (r) { return r._kind === 'AR' && r._overdue; }, apover: function (r) { return r._kind === 'AP' && r._overdue; }, ar90: function (r) { return r._kind === 'AR' && r._days > 90; } };
+  function tabFin() {
+    var n0 = need('fin'); if (n0) { return n0; }
+    var s = finStats(), all = s.AR.concat(s.AP), pc = function (a, b) { return b ? Math.round(a / b * 100) + '%' : '0%'; };
+    var h = kpis([
+      kpi({ label: tr('Cash and bank', 'النقد والبنك'), dot: 'var(--dms-navy)', val: RAW.cashErr ? '—' : m$(s.cashTot), sub: esc(num(s.cash.length) + tr(' active accounts', ' حساب نشط')) }),
+      kpi({ label: tr('Receivable', 'المدينون'), dot: 'var(--dms-ok)', val: m$(s.arTot), sub: esc(num(s.AR.length) + tr(' open invoices · ', ' فاتورة مفتوحة · ') + pc(s.arOverAmt, s.arTot) + tr(' overdue', ' متأخر')), top: QF.finance === 'ar' ? tagc(esc(tr('Shown', 'معروضة'))) : '', act: 'qf2:finance:ar' }),
+      kpi({ label: tr('Overdue receivable', 'مدينون متأخرون'), dot: 'var(--dms-bad)', val: m$(s.arOverAmt), sub: esc(num(s.arOver.length) + tr(' invoices', ' فاتورة')), top: QF.finance === 'arover' ? tagc(esc(tr('Shown', 'معروضة'))) : '', act: 'qf2:finance:arover' }),
+      kpi({ label: tr('Payable', 'الدائنون'), dot: 'var(--dms-age3)', val: m$(s.apTot), sub: esc(num(s.AP.length) + tr(' open bills · ', ' فاتورة مفتوحة · ') + pc(s.apOverAmt, s.apTot) + tr(' overdue', ' متأخر')), top: QF.finance === 'ap' ? tagc(esc(tr('Shown', 'معروضة'))) : '', act: 'qf2:finance:ap' }),
+      kpi({ label: tr('Overdue payable', 'دائنون متأخرون'), dot: 'var(--dms-age4)', val: m$(s.apOverAmt), sub: esc(num(s.apSoon.length) + tr(' more due in ' + PAYABLE_SOON_DAYS + ' days', ' أخرى خلال ' + PAYABLE_SOON_DAYS + ' أيام')), top: QF.finance === 'apover' ? tagc(esc(tr('Shown', 'معروضة'))) : '', act: 'qf2:finance:apover' }),
+      kpi({ label: tr('Net profit · period', 'صافي الربح · الفترة'), dot: s.net >= 0 ? 'var(--dms-ok)' : 'var(--dms-bad)', val: s.keys.length ? m$(s.net) : '—', sub: esc(s.keys.length ? tr('Revenue ', 'الإيرادات ') + money(s.pl.rev) + ' · ' + pc(s.net, s.pl.rev) + tr(' margin', ' هامش') : tr('Period outside the last 12 months', 'الفترة خارج آخر 12 شهرًا')) })
+    ]);
+    var b = function (list) { var m = {}; BUCKETS.forEach(function (x) { m[x[0]] = 0; }); list.forEach(function (r) { m[r._bucket] += r._out; }); return BUCKETS.map(function (x) { return { label: tr(x[1], x[2]), value: m[x[0]], color: x[3] }; }); };
+    h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Receivable aging', 'أعمار المدينين'), s.AR.length ? hbars(b(s.AR), money) : empty(tr('No open receivables.', 'لا مدينون مفتوحون.')), '', esc(scopeCur())) + panel(tr('Payable aging', 'أعمار الدائنين'), s.AP.length ? hbars(b(s.AP), money) : empty(tr('No open payables.', 'لا دائنون مفتوحون.')), '', esc(scopeCur())) + '</div>';
+    var keys = (RAW.fin12 || []).map(function (x) { return x.key; }), inn = {}, out = {};
+    RAW.pe.filter(inCo).forEach(function (p) { if (p.payment_type === 'Receive') { inn[p._m] = (inn[p._m] || 0) + num0(p.base_received_amount); } else { out[p._m] = (out[p._m] || 0) + num0(p.base_paid_amount); } });
+    h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Revenue vs expenses', 'الإيرادات مقابل المصروفات'), plChart(keys, function (k) { return plSum([k]); }), '', esc(scopeCur() + tr(' · last 12 months', ' · آخر 12 شهرًا'))) +
+      panel(tr('Payments received vs paid', 'المقبوضات مقابل المدفوعات'), keys.some(function (k) { return inn[k] || out[k]; }) ? monthsBar(keys, [{ label: tr('Received', 'المقبوض'), color: 'var(--dms-royal)', val: function (k) { return inn[k] || 0; } }, { label: tr('Paid', 'المدفوع'), color: 'var(--dms-age3)', val: function (k) { return out[k] || 0; } }]) : empty(tr('No payment entries in the last 12 months.', 'لا قيود دفع في آخر 12 شهرًا.')), '', esc(scopeCur())) + '</div>';
+    var net = s.cashTot + s.arTot - s.apTot, cashL = s.cash.slice().sort(function (a, b2) { return Math.abs(b2._bal) - Math.abs(a._bal); }).filter(function (a) { return Math.abs(a._bal) >= 0.5; }).slice(0, 8);
+    h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Net position', 'صافي المركز'), facts([[tr('Cash and bank', 'النقد والبنك'), RAW.cashErr ? '—' : mm(s.cashTot)], [tr('+ Receivable', '+ المدينون'), mm(s.arTot), 'ok'], [tr('− Payable', '− الدائنون'), mm(s.apTot), 'warn'], [tr('Net position', 'صافي المركز'), mm(net), net >= 0 ? 'ok' : 'bad']]) + note(esc(tr('Liquid funds plus what customers owe, less what is owed to suppliers.', 'الأموال السائلة زائد مستحقات العملاء ناقص مستحقات الموردين.')))) +
+      panel(tr('Bank and cash balances', 'أرصدة البنوك والنقد'), RAW.cashErr ? alertBox('warn', esc(tr('Cash balances could not be read.', 'تعذرت قراءة أرصدة النقد.'))) : cashL.length ? hbars(cashL.map(function (a) { return { label: String(a.account_name || a.name).replace(/^\d+\s*-\s*/, ''), value: a._bal, color: a._bal < 0 ? 'var(--dms-bad)' : null }; }), money) : empty(), '', esc(scopeCur())) + '</div>';
+    var topC = groupSum(s.AR, function (r) { return r._party; }, function (r) { return r._out; }).slice(0, 7), topS = groupSum(s.AP, function (r) { return r._party; }, function (r) { return r._out; }).slice(0, 7);
+    h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Top customers by receivable', 'أعلى العملاء مديونية'), topC.length ? hbars(topC.map(function (g) { return { label: g.key, value: g.v }; }), money) : empty(), '', esc(scopeCur())) + panel(tr('Top suppliers by payable', 'أعلى الموردين دائنية'), topS.length ? hbars(topS.map(function (g) { return { label: g.key, value: g.v }; }), money) : empty(), '', esc(scopeCur())) + '</div>';
+    var rows = all.filter(FIQ[QF.finance] || FIQ['']);
+    return h + panel(tr('Open invoices', 'الفواتير المفتوحة'), chips('finance', [['', tr('All', 'الكل')], ['ar', tr('Receivable', 'مدينون')], ['ap', tr('Payable', 'دائنون')], ['arover', tr('Overdue receivable', 'مدينون متأخرون')], ['apover', tr('Overdue payable', 'دائنون متأخرون')], ['ar90', tr('Receivable > 90 days late', 'مدينون متأخرون > 90 يومًا')]]) +
+      regTable({ id: 't_fin', rows: rows, sk: 'out', dir: -1, file: 'open_invoices', text: function (r) { return [r._party, r.name, r.bill_no || '', r._company].join(' '); }, empty: tr('No open invoices match.', 'لا فواتير مطابقة.'), cols: [
+        { k: 'kind', h: tr('Type', 'النوع'), s: function (r) { return r._kind; }, r: function (r) { return stat(r._kind === 'AR' ? 'ok' : 'warn', r._kind === 'AR' ? tr('Receivable', 'مدين') : tr('Payable', 'دائن')); }, c: function (r) { return r._kind === 'AR' ? 'Receivable' : 'Payable'; } },
+        { k: 'party', h: tr('Party', 'الطرف'), s: function (r) { return r._party; }, r: function (r) { return bdi(r._party) + '<span class="dms-sm fi-sub">' + docLink(r._kind === 'AR' ? 'Sales Invoice' : 'Purchase Invoice', r.name) + '</span>'; }, c: function (r) { return r._party + ' / ' + r.name; } },
+        { k: 'co', h: tr('Company', 'الشركة'), s: function (r) { return r._company; }, r: function (r) { return bdi(r._company); }, c: function (r) { return r._company; } },
+        { k: 'due', h: tr('Due date', 'الاستحقاق'), s: function (r) { return r._due || ''; }, r: function (r) { return dtc(String(r._due).slice(0, 10)) + (r._overdue ? ' ' + stat('bad', tr(daysTxt(r._days) + ' late', 'متأخر ' + daysTxt(r._days))) : ''); }, c: function (r) { return r._due; } },
+        { k: 'tot', h: tr('Invoice total', 'إجمالي الفاتورة'), num: 1, s: function (r) { return r._total; }, r: function (r) { return moneyB(r._total, coCur(r._company)); }, c: function (r) { return r._total; } },
+        { k: 'out', h: tr('Outstanding', 'المستحق'), num: 1, s: function (r) { return r._out; }, r: function (r) { return '<b>' + moneyB(r._out, coCur(r._company)) + '</b>'; }, c: function (r) { return r._out; } }] }), '', esc(tr('Submitted documents with outstanding amount > 0 · revenue / expense from GL Entry (period closing vouchers excluded)', 'مستندات معتمدة برصيد > 0 · الإيرادات / المصروفات من قيود الأستاذ (دون قيود إقفال الفترة)')));
+  }
+  function tabActions(AM) { return actionsTab(AM, tr('As of today across the company scope; not limited by the period.', 'حتى اليوم ضمن نطاق الشركات؛ غير مقيدة بالفترة.')); }
+
+  /* ============================================================ 12. drill-downs (v5 drawer) and events */
+  function drill(id) {
+    if (id.indexOf('fac:') === 0) {
+      var r = RAW.fm.filter(function (x) { return x.name === id.slice(4); })[0]; if (!r) { return null; } var cur = coCur(r._company);
+      var svc = [[tr('Fire maintenance', 'صيانة الحريق'), r.fire_contractor], [tr('Cleaning', 'النظافة'), r.cleaning_cont], [tr('Camera maintenance', 'صيانة الكاميرات'), r.camera_contractor]].filter(function (x) { return x[1]; });
+      var body = facts([[tr('Annual rent', 'الإيجار السنوي'), esc(moneyFull(r._annual, cur))], [tr('Contract value', 'قيمة العقد'), esc(moneyFull(r._total, cur))], [tr('Area sqm', 'المساحة م²'), r._area ? num(r._area) : '—'], [tr('Status', 'الحالة'), fmBadge(r)]]) +
+        '<h4 class="fi-h">' + esc(tr('Agreement', 'العقد')) + '</h4>' + facts([[tr('Company', 'الشركة'), esc(r._company)], [tr('Facility type', 'نوع المرفق'), esc(r.facility_type || '—')], [tr('Category', 'الفئة'), esc(r.facility_catogory || '—')], [tr('Agreement', 'نوع الاتفاقية'), esc(r.agreement_type || '—')], [tr('Contract no', 'رقم العقد'), esc(r.contract_number || '—')], [tr('Start', 'البداية'), esc(fmtD(r._start))], [tr('End', 'النهاية'), esc(fmtD(r._end))], [tr('Auto renewal', 'تجديد تلقائي'), esc(r.auto_renewal || '—')], [tr('Landlord', 'المالك'), esc(r.owner_name || '—')], [tr('Landlord phone', 'هاتف المالك'), r.owner_number ? '<a href="tel:' + esc(r.owner_number) + '">' + bdi(r.owner_number) + '</a>' : '—'], [tr('Payment mode', 'طريقة الدفع'), esc(r.rent_mode || '—')], [tr('Instalments', 'الأقساط'), esc(r.rent_installments || '—')]]) +
+        (r._inst.length ? '<h4 class="fi-h">' + esc(tr('Rent instalments', 'أقساط الإيجار')) + '</h4>' + facts(r._inst.map(function (i) { return [tr('Instalment ', 'القسط ') + i.k + ' · ' + fmtD(i.due), esc(moneyFull(i.amt, cur)) + ' ' + (i.paid ? stat('ok', tr('Paid', 'مسدد')) : i.due < TODAY ? stat('bad', tr('Not paid', 'غير مسدد')) : stat('n', tr('Upcoming', 'قادم'))), '']; })) : '') +
+        (r._docs.length ? '<h4 class="fi-h">' + esc(tr('Licences and compliance', 'التراخيص والامتثال')) + '</h4>' + facts(r._docs.slice().sort(function (a, b) { return a.days - b.days; }).map(function (d) { return [d.label + ' · ' + fmtD(d.date), d.days < 0 ? stat('bad', tr('Expired', 'منتهية')) : d.days <= DOC_SOON_DAYS ? stat('warn', tr(daysTxt(d.days) + ' left', 'متبقٍ ' + daysTxt(d.days))) : stat('ok', tr('Valid', 'سارية')), '']; })) : '') +
+        '<h4 class="fi-h">' + esc(tr('Safety and services', 'السلامة والخدمات')) + '</h4>' + facts([[tr('Fire layout', 'مخطط الحريق'), r.fire_layout ? stat('ok', tr('Yes', 'نعم')) : stat('n', tr('No', 'لا'))], [tr('Sign board', 'اللوحة'), r.sign_board ? stat('ok', tr('Yes', 'نعم')) : stat('n', tr('No', 'لا'))], [tr('Medical kit', 'حقيبة الإسعاف'), r.medical_kit ? stat('ok', tr('Yes', 'نعم')) : stat('n', tr('No', 'لا'))]].concat(svc.map(function (x) { return [x[0] + tr(' contractor', ' المقاول'), esc(x[1])]; }))) +
+        (r.additional_notes ? '<h4 class="fi-h">' + esc(tr('Notes', 'ملاحظات')) + '</h4><p class="fi-pre">' + esc(r.additional_notes) + '</p>' : '');
+      return { title: r._name, sub: [r._type, r._loc].join(' · '), link: ['DM Facilities Management', r.name, r.name], body: body };
     }
-
-    if (key === 'finance') {
-      r = state.raw.si.concat(state.raw.pi).filter(function (x) { return x.name === name; })[0];
-      if (!r) return;
-      title = r._party; sub = r._label + ' · ' + r.name; statusHtml = '<span class="badge ' + (r._overdue ? 'b-bad' : 'b-slate') + '">' + esc(r.status || (r._overdue ? 'Overdue' : 'Unpaid')) + '</span>';
-      var paidPct = r._total ? Math.min(Math.max((r._total - r._out) / r._total, 0), 1) * 100 : 0;
-      h += '<div class="dr-kpis">' + kpi('Invoice total', money(r._total)) + kpi('Outstanding', money(r._out), r._overdue ? 'var(--bad)' : 'var(--warn)') + kpi('Days overdue', r._overdue ? String(r._days) : '0') + '</div>';
-      h += '<div class="dr-section"><div class="progress"><i class="p-ok" style="width:' + paidPct + '%"></i></div><div class="card-sub" style="margin-top:8px;padding:0">' + Math.round(paidPct) + '% settled</div></div>';
-      h += '<div class="dr-section"><h4>Invoice</h4><div class="kv">' + kv('Party', esc(r._party)) + kv('Company', esc(r._company)) +
-        kv('Posting date', fmtDate(r.posting_date)) + kv('Due date', fmtDate(r._due)) + kv('Document', '<span class="mono">' + esc(r.name) + '</span>') +
-        (r.bill_no ? kv('Supplier bill no', esc(r.bill_no)) : '') + '</div></div>';
-      actions += '<button class="btn btn-primary" data-route-btn="' + (r._kind === 'AR' ? 'Sales Invoice' : 'Purchase Invoice') + '|' + esc(r.name) + '">' + icon('external', true) + ' Open in ERPNext</button>';
+    if (id.indexOf('item:') === 0) {
+      var g = invItems().filter(function (x) { return x.name === id.slice(5); })[0]; if (!g) { return null; }
+      return { title: g._title, sub: g.name + ' · ' + g.group, link: ['Item', g.name, g.name], body: facts([[tr('On hand', 'المتوفر'), esc(amtq(g.qty) + ' ' + g.uom)], [tr('Stock value', 'قيمة المخزون'), mm(g.value)], [tr('Projected', 'المتوقع'), esc(amtq(g.projected)), g.projected < 0 ? 'bad' : ''], [tr('Reserved', 'المحجوز'), esc(amtq(g.reserved))], [tr('Incoming (ordered)', 'الوارد (مطلوب)'), esc(amtq(g.ordered))], [tr('Reorder level', 'حد إعادة الطلب'), g.reorder ? esc(amtq(g.reorder)) : '—'], [tr('Last movement', 'آخر حركة'), esc(g.ageLabel || '—')], [tr('Condition', 'الحالة'), stat(HEALTH[g.health][2], tr(HEALTH[g.health][0], HEALTH[g.health][1]))]]),
+        spec: { rows: g.whs.slice().sort(function (a, b) { return b._val - a._val; }), file: 'item_' + g.name, cols: [{ h: tr('Warehouse', 'المستودع'), r: function (b) { return bdi(b._wh); }, c: function (b) { return b.warehouse; } }, { h: tr('Qty', 'الكمية'), num: 1, r: function (b) { return '<span class="dms-num' + (b._qty < 0 ? ' dms-tone-bad' : '') + '">' + esc(amtq(b._qty)) + '</span>'; }, c: function (b) { return b._qty; } }, { h: tr('Reserved', 'المحجوز'), num: 1, r: function (b) { return b._res ? esc(amtq(b._res)) : '—'; }, c: function (b) { return b._res; } }, { h: tr('Value', 'القيمة'), num: 1, r: function (b) { return esc(money(b._val)); }, c: function (b) { return b._val; } }] } };
     }
-
-    if (!title) return;
-    actions += '<button class="btn btn-soft" data-close>Close</button>';
-    $('#drawerBody').innerHTML =
-      '<div class="dr-head"><div><h2>' + esc(title) + '</h2><div class="sub">' + esc(sub) + '</div><div style="margin-top:8px">' + statusHtml + '</div></div>' +
-      '<button class="icon-btn" data-close aria-label="Close">' + icon('close') + '</button></div>' + h + '<div class="dr-actions">' + actions + '</div>';
-    var sc = $('#scrim'), dr = $('#drawer'), off = navOffset();
-    sc.style.top = off + 'px'; dr.style.top = off + 'px';
-    sc.hidden = false;
-    requestAnimationFrame(function () { sc.classList.add('show'); dr.classList.add('open'); });
-    dr.setAttribute('aria-hidden', 'false');
-    dr.scrollTop = 0;
-  }
-  function closeDrawer() {
-    var sc = $('#scrim'), dr = $('#drawer');
-    sc.classList.remove('show'); dr.classList.remove('open');
-    dr.setAttribute('aria-hidden', 'true');
-    setTimeout(function () { if (!dr.classList.contains('open')) sc.hidden = true; }, 220);
-  }
-
-  /* ------------------------------------------------------------------
-     10. ACTIONS
-     ------------------------------------------------------------------ */
-  var EXPORTS = {
-    fm: [['id', function (r) { return r.name; }], ['facility', function (r) { return r._name; }], ['type', function (r) { return r._type; }], ['ownership', function (r) { return r.facility_type; }],
-      ['company', function (r) { return r._company; }], ['location', function (r) { return r._loc; }], ['area_sqm', function (r) { return r._area; }], ['contract_start', function (r) { return r._start; }],
-      ['contract_end', function (r) { return r._end; }], ['days_to_end', function (r) { return r._days; }], ['annual_rent', function (r) { return Math.round(r._annual); }], ['contract_value', function (r) { return r._total; }],
-      ['contract_status', function (r) { return r.facility_contract_status; }], ['auto_renewal', function (r) { return r.auto_renewal; }], ['landlord', function (r) { return r.owner_name; }], ['contract_no', function (r) { return r.contract_number; }]],
-    inventory: [['item_code', function (r) { return r.name; }], ['item_name', function (r) { return r._title; }], ['item_group', function (r) { return r.group; }], ['uom', function (r) { return r.uom; }],
-      ['qty', function (r) { return r.qty; }], ['stock_value', function (r) { return r.value; }], ['reserved', function (r) { return r.reserved; }], ['ordered', function (r) { return r.ordered; }],
-      ['projected', function (r) { return r.projected; }], ['reorder_level', function (r) { return r.reorder; }], ['last_movement', function (r) { return r.last; }], ['condition', function (r) { return HEALTH[r.health].label; }],
-      ['warehouses', function (r) { return r.whs.map(function (b) { return b._wh; }).join('; '); }]],
-    finance: [['type', function (r) { return r._label; }], ['document', function (r) { return r.name; }], ['party', function (r) { return r._party; }], ['company', function (r) { return r._company; }],
-      ['posting_date', function (r) { return r.posting_date; }], ['due_date', function (r) { return r._due; }], ['days_overdue', function (r) { return r._days; }], ['invoice_total', function (r) { return r._total; }],
-      ['outstanding', function (r) { return r._out; }], ['status', function (r) { return r.status; }]]
-  };
-  function exportCsv(key) {
-    var rows = (state.tables[key] && state.tables[key].filteredRows) || [], defs = EXPORTS[key];
-    var q = function (v) { v = v == null ? '' : String(v); return '"' + v.replace(/"/g, '""') + '"'; };
-    var csv = '﻿' + defs.map(function (d) { return q(d[0]); }).join(',') + '\n' + rows.map(function (r) { return defs.map(function (d) { return q(d[1](r)); }).join(','); }).join('\n');
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-    a.download = { fm: 'facilities', inventory: 'stock_items', finance: 'open_invoices' }[key] + '_' + TODAY + '.csv';
-    document.body.appendChild(a); a.click();
-    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
-  }
-  function copyText(text, msg) {
-        text = tr(text); msg = tr(msg || 'Copied');
-    var done = function () { if (window.frappe && frappe.show_alert) frappe.show_alert({ message: msg || 'Copied', indicator: 'green' }, 3); };
-    try { if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(done); return; } } catch (e) { /* fall through */ }
-    var ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
-    try { document.execCommand('copy'); done(); } catch (e2) { /* ignore */ }
-    ta.remove();
-  }
-  function filterNote() {
-    var f = state.filters, p = [];
-    if (f.q) p.push('“' + f.q + '”');
-    if (f.company !== 'all') p.push(f.company);
-    return p.length ? '(filtered: ' + p.join(', ') + ')' : '';
-  }
-  function buildSummary() {
-    var L = [];
-    if (state.tab === 'overview' && state.fmStats && state.invStats && state.finStats) {
-      var o1 = state.fmStats, o2 = state.invStats, o3 = state.finStats;
-      L.push('Group overview — ' + fmtDate(TODAY), filterNote(), '');
-      L.push('Facilities: ' + o1.A.length + ' active · annualised rent ' + CURRENCY + ' ' + money(o1.annual) + ' · ' + o1.exp90.length + ' contracts ending ≤ ' + EXPIRY_SOON_DAYS + 'd · ' + o1.docsExpired + ' licences expired');
-      L.push('Inventory: stock value ' + CURRENCY + ' ' + money(o2.value) + ' · low ' + o2.low.length + ' · shortage ' + o2.short.length + ' · negative ' + o2.neg.length);
-      L.push('Finance: cash ' + CURRENCY + ' ' + money(o3.cashTot) + ' · receivable ' + money(o3.arTot) + ' (overdue ' + money(o3.arOverAmt) + ') · payable ' + money(o3.apTot) + ' (overdue ' + money(o3.apOverAmt) + ') · net profit ' + money(o3.net) + ' (' + PERIODS[state.filters.period] + ')');
-    } else if (state.tab === 'fm' && state.fmStats) {
-      var s = state.fmStats;
-      L.push('Facilities summary — ' + fmtDate(TODAY), filterNote(), '');
-      L.push('Active facilities: ' + s.A.length + ' · ' + compact(s.area) + ' sqm');
-      L.push('Annualised rent: ' + CURRENCY + ' ' + money(s.annual));
-      L.push('Contracts ending within ' + EXPIRY_SOON_DAYS + ' days: ' + s.exp90.length + ' · past end date but active: ' + s.expired.length);
-      L.push('Rent instalments not marked paid: ' + CURRENCY + ' ' + money(s.instOverAmt) + ' (' + s.instOver.length + ')');
-      L.push('Licences / permits expired: ' + s.docsExpired + ' · expiring ≤ ' + DOC_SOON_DAYS + ' days: ' + s.docsSoon);
-    } else if (state.tab === 'inventory' && state.invStats) {
-      var v = state.invStats;
-      L.push('Inventory summary — ' + fmtDate(TODAY), filterNote(), '');
-      L.push('Stock value: ' + CURRENCY + ' ' + money(v.value) + ' across ' + v.itemsInStock + ' items / ' + v.whCount + ' warehouses');
-      L.push('Low stock: ' + v.low.length + ' · Shortage: ' + v.short.length + ' · Negative: ' + v.neg.length);
-      if (!state.raw.noAge) L.push('Dead stock (> ' + DEAD_STOCK_DAYS + ' days): ' + CURRENCY + ' ' + money(v.deadVal) + ' (' + v.dead.length + ' items)');
-    } else if (state.tab === 'finance' && state.finStats) {
-      var f = state.finStats;
-      L.push('Finance summary — ' + fmtDate(TODAY) + ' · ' + PERIODS[state.filters.period], filterNote(), '');
-      L.push('Cash & bank: ' + CURRENCY + ' ' + money(f.cashTot));
-      L.push('Receivable: ' + CURRENCY + ' ' + money(f.arTot) + ' (overdue ' + money(f.arOverAmt) + ')');
-      L.push('Payable: ' + CURRENCY + ' ' + money(f.apTot) + ' (overdue ' + money(f.apOverAmt) + ')');
-      L.push('Revenue: ' + money(f.pl.rev) + ' · Expenses: ' + money(f.pl.exp) + ' · Net profit: ' + money(f.net));
-    } else L.push('Nothing loaded yet.');
-    return L.filter(function (x, i) { return x !== '' || i > 0; }).join('\n');
-  }
-  function goRoute(dt, name) { if (window.frappe && frappe.set_route) frappe.set_route('Form', dt, name); }
-  function scrollTo(sel) { try { var el = $(sel); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { /* ignore */ } }
-
-  function renderRailLinks(tab) {
-    $('#railLinks').innerHTML = (RAIL_LINKS[tab] || []).map(function (l) {
-      return '<button class="rlink" data-' + (l[0] === 'report' ? 'report' : 'list') + '="' + esc(l[1]) + '" title="' + esc(l[1]) + '">' + icon(l[0] === 'report' ? 'file' : 'list', true) + '<span class="lbl">' + esc(l[2]) + '</span></button>';
-    }).join('');
-  }
-  function setTab(name) {
-    state.tab = name;
-    $$('.tab').forEach(function (t) {
-      var on = t.dataset.tab === name;
-      t.classList.toggle('active', on); t.setAttribute('aria-selected', on); t.tabIndex = on ? 0 : -1;
-    });
-    $$('.view').forEach(function (v) { v.classList.toggle('active', v.id === 'view-' + name); });
-    try { localStorage.setItem('fif-tab', name); } catch (e) { /* ignore */ }
-    renderRailLinks(name);
-    updateFilterUI();
-    closeDrawer();
-    showBanner();
-    loadTab(name);
-  }
-
-  /* ------------------------------------------------------------------
-     11. THEME & RESPONSIVE WIDTH
-     ------------------------------------------------------------------ */
-  function erpTheme() {
-    var el = document.documentElement, t = el.getAttribute('data-theme');
-    if (t === 'dark' || t === 'light') return t;
-    var m = el.getAttribute('data-theme-mode');
-    if (m === 'dark' || m === 'light') return m;
-    return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
-  }
-  function syncTheme() { $('#tld').setAttribute('data-theme', THEME_MODE === 'auto' ? erpTheme() : 'light'); }
-  function setWidthClass() {
-    var el = $('#tld'), w = 0;
-    try { w = el.getBoundingClientRect().width; } catch (e) { /* ignore */ }
-    if (!w) w = el.offsetWidth || 1200;
-    el.setAttribute('data-w', w >= 1320 ? 'xl' : w >= 1040 ? 'l' : w >= 740 ? 'm' : 's');
-  }
-
-  /* ------------------------------------------------------------------
-     12. EVENTS & BOOT
-     ------------------------------------------------------------------ */
-  function drillTable(tableKey, fn, label, scrollSel) {
-    var t = state.tables[tableKey];
-    t.reset(); t.setExtra(fn, label);
-    scrollTo(scrollSel);
-  }
-
-  function initStatic() {
-    $$('[data-ico]').forEach(function (el) { el.innerHTML = icon(el.dataset.ico, true); });
-    $$('.tab').forEach(function (t) {
-      var l = TAB_LABELS[t.dataset.tab];
-      t.innerHTML = icon(l[0]) + '<span class="lbl">' + l[1] + '</span>' + (t.dataset.tab === 'overview' ? '' : '<span class="count">0</span>');
-      t.setAttribute('aria-selected', t.classList.contains('active')); t.title = l[1];
-    });
-    $('#btnRefresh').innerHTML = icon('refresh', true) + '<span>Refresh</span>';
-    $('#btnCopy').innerHTML = icon('copy', true) + '<span>Copy summary</span>';
-    $('#btnCopy').title = 'Copy management summary';
-    $$('[data-action="export"]').forEach(function (b) { b.innerHTML = icon('download', true) + ' Export CSV'; });
-    $$('[data-action="list"]').forEach(function (b) { b.innerHTML = icon('list', true) + ' Open list'; });
-    $$('[data-action="new"]').forEach(function (b) { b.innerHTML = icon('plus', true) + ' New'; });
-
-    root.addEventListener('click', function (e) {
-      var t;
-      if (e.target.closest('#btnReset')) { state.filters = Object.assign({}, DEFAULT_FILTERS); $('#fSearch').value = ''; return applyFilters(); }
-      if (e.target.closest('#btnCopy')) return copyText(buildSummary(), 'Summary copied');
-      if ((t = e.target.closest('.tab'))) return setTab(t.dataset.tab);
-
-      if ((t = e.target.closest('[data-fmend]'))) {
-        var k = t.dataset.fmend;
-        return drillTable('fm', function (r) { return r._active && r._days != null && (k === 'expired' ? r._days < 0 : (r._days >= 0 && String(r._end).slice(0, 7) === k)); }, k === 'expired' ? 'Contracts already past end date' : 'Contracts ending ' + k, '#fmTable');
-      }
-      if ((t = e.target.closest('[data-wh]'))) {
-        var wh = t.dataset.wh;
-        return drillTable('inventory', function (r) { return r.whs.some(function (b) { return b.warehouse === wh; }); }, 'Warehouse: ' + shortWh(wh), '#invTable');
-      }
-      if ((t = e.target.closest('[data-age]'))) {
-        var ak = t.dataset.age, lab = (AGE_B.filter(function (b) { return b.k === ak; })[0] || { label: 'No movement' }).label;
-        return drillTable('inventory', function (r) { return r._age === ak; }, 'Last moved: ' + lab, '#invTable');
-      }
-      if ((t = e.target.closest('[data-finb]'))) {
-        var fb = t.dataset.finb, bl = BUCKETS.filter(function (b) { return b.k === fb; })[0].label;
-        return drillTable('finance', function (r) { return r._bucket === fb; }, 'Aging: ' + bl, '#finTable');
-      }
-      if ((t = e.target.closest('[data-extra]'))) {
-        var ex = EXTRA[t.dataset.extra];
-        if (!ex) return;
-        if (state.tab !== ex.tab) setTab(ex.tab);
-        return drillTable(ex.table, ex.fn, ex.label, '#' + { fm: 'fmTable', inventory: 'invTable', finance: 'finTable' }[ex.table]);
-      }
-      if ((t = e.target.closest('[data-goto]'))) { var g = t.dataset.goto; if (g !== state.tab) setTab(g); return scrollTo({ fm: '#fmTable', inventory: '#invTable', finance: '#finTable' }[g]); }
-      if ((t = e.target.closest('[data-alert]'))) { var pr = t.dataset.alert.split('|'); state.alertTab[pr[0]] = pr[1]; return applyFilters(); }
-      if ((t = e.target.closest('[data-open]'))) return openDrawer(t.dataset.open, t.dataset.name);
-      if (e.target.closest('[data-close]') || e.target.closest('#scrim')) return closeDrawer();
-      if ((t = e.target.closest('[data-route]'))) { var a = t.dataset.route.split('|'); return goRoute(a[0], a[1]); }
-      if ((t = e.target.closest('[data-route-btn]'))) { var b = t.dataset.routeBtn.split('|'); return goRoute(b[0], b[1]); }
-      if ((t = e.target.closest('[data-report]'))) return frappe.set_route('query-report', t.dataset.report);
-      if ((t = e.target.closest('[data-list]'))) return frappe.set_route('List', t.dataset.list);
-      if ((t = e.target.closest('[data-action]'))) {
-        var ac = t.dataset.action;
-        if (ac === 'export') return exportCsv(t.dataset.target);
-        if (ac === 'list') return frappe.set_route('List', t.dataset.doctype);
-        if (ac === 'new') return frappe.new_doc(t.dataset.doctype);
-      }
-      if (e.target.closest('#btnLang')) return setLang(LANG === 'ar' ? 'en' : 'ar', true);
-      if (e.target.closest('#btnRefresh')) {
-        if (state.tab === 'overview') { state.loaded.fm = state.loaded.inventory = state.loaded.finance = false; }
-        state.loaded[state.tab] = false; return loadTab(state.tab, true);
-      }
-    });
-    root.addEventListener('change', function (e) {
-      var id = e.target.id;
-      if (id === 'fCompany') { state.filters.company = e.target.value; applyFilters(); }
-      if (id === 'fPeriod') { state.filters.period = e.target.value; applyFilters(); }
-    });
-    var timer = null;
-    root.addEventListener('input', function (e) {
-      if (e.target.id !== 'fSearch') return;
-      var v = e.target.value;
-      clearTimeout(timer);
-      timer = setTimeout(function () { state.filters.q = v.trim(); applyFilters(); }, 180);
-    });
-    root.addEventListener('keydown', function (e) {
-      var tr = e.target.closest && e.target.closest('tr[data-open]');
-      if (tr && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openDrawer(tr.dataset.open, tr.dataset.name); }
-    });
-    $('.tabs').addEventListener('keydown', function (e) {
-      var k = e.key;
-      if (k !== 'ArrowRight' && k !== 'ArrowLeft') return;
-      var tabs = $$('.tab'), i = tabs.findIndex(function (t) { return t.dataset.tab === state.tab; });
-      i = (i + (k === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
-      e.preventDefault(); setTab(tabs[i].dataset.tab); tabs[i].focus();
-    });
-    document.addEventListener('keydown', function onKey(ev) {
-      if (!root.host || !root.host.isConnected) { document.removeEventListener('keydown', onKey); return; }
-      if (ev.key === 'Escape') closeDrawer();
-    });
-  }
-
-  /* ------------------------------------------------------------------
-     LANGUAGE  (English / العربية) — translates the rendered DOM using the
-     dictionary below. Add or fix a phrase by editing AR_DICT.
-     ------------------------------------------------------------------ */
-  var AR_DICT = {
-    // chrome
-    'FM, Inventory & Finance': 'المرافق والمخزون والمالية',
-    'Facilities, stock and financial position in one place.': 'المرافق والمخزون والمركز المالي في مكان واحد.',
-    'Overview': 'نظرة عامة', 'Facilities': 'المرافق', 'Inventory': 'المخزون', 'Finance': 'المالية',
-    'Loading…': 'جارٍ التحميل…', 'Updated ': 'آخر تحديث ', 'Refresh': 'تحديث', 'Reset': 'إعادة ضبط', 'Reset filters': 'إعادة ضبط الفلاتر',
-    'Search': 'بحث', 'Facility, item, warehouse, party, invoice…': 'منشأة، صنف، مستودع، طرف، فاتورة…',
-    'Company': 'الشركة', 'All companies': 'كل الشركات', 'Period (profit & loss)': 'الفترة (الأرباح والخسائر)',
-    'This year': 'هذه السنة', 'This quarter': 'هذا الربع', 'This month': 'هذا الشهر', 'Last month': 'الشهر الماضي', 'Last 12 months': 'آخر 12 شهرًا',
-    'Copy management summary': 'نسخ ملخص الإدارة', 'Summary copied': 'تم نسخ الملخص', 'Copied': 'تم النسخ', 'Language': 'اللغة',
-    'Open': 'فتح', 'Open list': 'فتح القائمة', 'Open item': 'فتح الصنف', ' Open in ERPNext': ' فتح في ERPNext', 'Open in ERPNext': 'فتح في ERPNext',
-    ' Export CSV': ' تصدير CSV', 'Export CSV': 'تصدير CSV', 'New': 'جديد', 'Close': 'إغلاق',
-    'Facilities list': 'قائمة المرافق', 'Stock balance': 'رصيد المخزون', 'Receivable': 'المدينون', 'P&L': 'الأرباح والخسائر', 'Assets list': 'قائمة الأصول',
-    'Warehouse Wise Stock Balance': 'رصيد المخزون حسب المستودع', 'Accounts Receivable': 'الذمم المدينة', 'Accounts Payable': 'الذمم الدائنة',
-    'Profit and Loss Statement': 'قائمة الأرباح والخسائر', 'Balance Sheet': 'الميزانية العمومية', 'Cash Flow': 'التدفق النقدي',
-    // overview + cards
-    'Revenue vs expenses': 'الإيرادات مقابل المصروفات', 'Profit & loss accounts · last 12 months': 'حسابات الأرباح والخسائر · آخر 12 شهرًا',
-    'Top priorities': 'أهم الأولويات', 'Most urgent items across facilities, stock and finance': 'أكثر البنود إلحاحًا في المرافق والمخزون والمالية',
-    'Leases, rent and licences': 'العقود والإيجارات والتراخيص', 'Stock value and risks': 'قيمة المخزون والمخاطر', 'Cash, receivables and profit': 'النقد والمدينون والأرباح',
-    'Revenue': 'الإيرادات', 'Expenses': 'المصروفات', 'Expense': 'المصروف', 'Income': 'الدخل',
-    'Group overview — ': 'نظرة عامة على المجموعة — ', 'Group overview across all companies': 'نظرة عامة على المجموعة لكل الشركات',
-    ' · filtered to ': ' · مصفّاة على ', 'Confidential · ': 'سري · ', ' · as of ': ' · حتى ',
-    'Active facilities': 'المرافق النشطة', 'Annualised rent': 'الإيجار السنوي', 'Active contracts': 'العقود النشطة', 'Ending in ': 'تنتهي خلال ',
-    'Stock value': 'قيمة المخزون', 'Shortage / negative': 'عجز / سالب', 'Cash & bank': 'النقد والبنك', 'GL balance': 'رصيد دفتر الأستاذ',
-    'Overdue receivable': 'مدينون متأخرون', 'Overdue payable': 'دائنون متأخرون', 'Net profit': 'صافي الربح', 'Net profit ': 'صافي الربح ',
-    ' sqm': ' م²', 'sqm': 'م²', 'Area sqm': 'المساحة م²',
-    ' already past end date': ' تجاوزت تاريخ الانتهاء', 'already past end date': 'تجاوزت تاريخ الانتهاء',
-    ' in stock': ' في المخزون', ' more at low stock': ' أخرى بمخزون منخفض', ' more at low stock': ' أخرى بمخزون منخفض', ' of ': ' من ',
-    ' receivable': ' مدينون', ' payable': ' دائنون',
-    // insights/alerts
-    ' receivable is over 90 days late': ' مدينون متأخرون أكثر من 90 يومًا', ' payables due ': ' دائنون مستحقون ',
-    ' facility contract': ' عقد منشأة', ' facility contracts': ' عقود منشآت', ' past the end date but still active': ' تجاوزت تاريخ الانتهاء وما زالت نشطة',
-    'Renew or close them': 'جدّدها أو أغلقها', 'Renew the agreement or mark the facility Closed': 'جدّد الاتفاقية أو اجعل المنشأة مغلقة',
-    ' licence / permit expired': ' ترخيص / تصريح منتهٍ', ' licence / permits expired': ' تراخيص / تصاريح منتهية', ' licence / permits': ' تراخيص / تصاريح', ' licence / permit': ' ترخيص / تصريح',
-    'Commercial licence, CR, civil defence, contracts': 'الرخصة التجارية، السجل التجاري، الدفاع المدني، العقود',
-    'Commercial licence, CR, civil defence, contracts … see Needs attention': 'الرخصة التجارية، السجل التجاري، الدفاع المدني، العقود … راجع "يحتاج انتباه"',
-    ' short or negative in stock': ' عجز أو سالب في المخزون', ' end within ': ' تنتهي خلال ', ' annual rent': ' إيجار سنوي',
-    ' tied up in dead stock': ' محتجزة في مخزون راكد', ' rent instalments not marked paid': ' أقساط إيجار غير مسددة',
-    'Cash is short by ': 'عجز في النقد بمقدار ', 'Cash & bank is short by ': 'عجز في النقد والبنك بمقدار ', ' against overdue + near-term payables': ' مقابل الدائنين المتأخرين وقريبي الاستحقاق',
-    'Cash & bank balance covers it': 'رصيد النقد والبنك يغطيها', 'Expenses exceed revenue by ': 'المصروفات تتجاوز الإيرادات بمقدار ',
-    'Everything looks on track': 'كل شيء على المسار الصحيح', 'Looks clean': 'سليم', 'Looks fine': 'لا مشكلة', 'All clear': 'لا شيء عاجل',
-    'Nothing urgent across the three areas.': 'لا شيء عاجل في المجالات الثلاثة.',
-    'Needs attention': 'يحتاج انتباه', 'Needs action': 'يحتاج إجراء', 'Contracts, licences and rent to action': 'العقود والتراخيص والإيجارات المطلوب متابعتها',
-    // facilities
-    'Contract expiry timeline': 'الجدول الزمني لانتهاء العقود', 'Annualised rent of contracts ending each month · click a bar to filter the table': 'الإيجار السنوي للعقود المنتهية كل شهر · اضغط على عمود لتصفية الجدول',
-    'Rent by facility type': 'الإيجار حسب نوع المنشأة', 'Annualised rent · active contracts': 'الإيجار السنوي · العقود النشطة', 'Rent by location': 'الإيجار حسب الموقع', 'Top locations': 'أعلى المواقع',
-    'Rent by company': 'الإيجار حسب الشركة', 'Annualised rent': 'الإيجار السنوي', 'Licences & compliance validity': 'صلاحية التراخيص والامتثال',
-    'Active facilities · only documents that have an expiry date recorded': 'المرافق النشطة · المستندات التي لها تاريخ انتهاء مسجل فقط',
-    'Fixed assets': 'الأصول الثابتة', 'Asset register · submitted, not sold or scrapped': 'سجل الأصول · المعتمدة وغير المباعة أو المخردة',
-    'Leases, rent agreements and licences · click a row for the full file': 'العقود واتفاقيات الإيجار والتراخيص · اضغط على صف لعرض الملف كاملًا',
-    'Past contract end': 'تجاوز نهاية العقد', 'Past contract end (still active)': 'تجاوز نهاية العقد (ما زال نشطًا)', 'Past end date (still active)': 'تجاوز تاريخ الانتهاء (ما زال نشطًا)',
-    'Contracts already past end date': 'عقود تجاوزت تاريخ الانتهاء', 'Contracts ending ': 'عقود تنتهي خلال ', 'Contracts ending within ': 'عقود تنتهي خلال ', 'Contracts': 'العقود',
-    ' contracts ending ≤ ': ' عقود تنتهي ≤ ', 'No contract ends within ': 'لا عقود تنتهي خلال ', 'No active contract ends in the next 12 months.': 'لا عقد نشط ينتهي خلال 12 شهرًا القادمة.',
-    'No active contracts.': 'لا عقود نشطة.', 'No contract end date': 'بلا تاريخ انتهاء', 'No contract end dates': 'لا تواريخ انتهاء للعقود', 'No rent amount recorded': 'لا مبلغ إيجار مسجل',
-    'Licence / permit expired or expiring': 'ترخيص / تصريح منتهٍ أو قارب على الانتهاء', 'Licence flags': 'تنبيهات التراخيص', 'Licences': 'التراخيص', 'Licences / permits': 'التراخيص / التصاريح',
-    'Licences / permits expired': 'تراخيص / تصاريح منتهية', 'Licences / permits expired: ': 'تراخيص / تصاريح منتهية: ', 'No licence or permit is expired or expiring.': 'لا ترخيص أو تصريح منتهٍ أو قارب على الانتهاء.',
-    'No licence or permit expiry is recorded on the active facilities.': 'لا تواريخ انتهاء تراخيص مسجلة على المرافق النشطة.', ' expired / expiring ≤ ': ' منتهٍ / ينتهي ≤ ', 'expired / expiring ≤ ': 'منتهٍ / ينتهي ≤ ',
-    'Rent instalments overdue': 'أقساط الإيجار المتأخرة', 'Rent instalments not marked paid: ': 'أقساط إيجار غير مسددة: ', 'Instalments': 'الأقساط', 'Instalment ': 'القسط ', 'Instalments overdue': 'أقساط متأخرة',
-    'Unpaid instalments past due': 'أقساط غير مسددة متأخرة', 'No unpaid instalments past due or due in the next ': 'لا أقساط غير مسددة متأخرة أو مستحقة خلال ', 'Based on the Paid tick-boxes on each facility': 'بناءً على خانات "مدفوع" في كل منشأة',
-    'Compliance & rent': 'الامتثال والإيجار', 'Facilities · Portfolio': 'المرافق · المحفظة', 'Facilities summary — ': 'ملخص المرافق — ', 'Facilities · ': 'المرافق · ', 'Facilities: ': 'المرافق: ',
-    'Facilities · contract ends ': 'المرافق · ينتهي العقد ', 'Active facilities: ': 'المرافق النشطة: ', ' active · annualised rent ': ' نشطة · الإيجار السنوي ', ' closed · ': ' مغلقة · ', 'Annualised rent: ': 'الإيجار السنوي: ',
-    ' facility records · annualised rent = total rent ÷ contract years': ' سجل منشأة · الإيجار السنوي = إجمالي الإيجار ÷ سنوات العقد',
-    'Avg rent / sqm': 'متوسط الإيجار / م²', 'Rent / sqm': 'الإيجار / م²', 'Rent per sqm / year': 'الإيجار لكل م² / سنة', 'Area (sqm) missing — rent per sqm not available': 'المساحة غير مسجلة — الإيجار لكل م² غير متاح',
-    'Facility': 'المنشأة', 'Facility type': 'نوع المنشأة', 'All facility types': 'كل أنواع المنشآت', 'Location': 'الموقع', 'Landlord': 'المالك', 'Landlord phone': 'هاتف المالك', 'Contract no': 'رقم العقد', 'Contract end': 'نهاية العقد',
-    'Contract status': 'حالة العقد', 'Contract value': 'قيمة العقد', 'Agreement': 'الاتفاقية', 'Lease Agreement': 'عقد إيجار', 'Auto renewal': 'تجديد تلقائي', 'Per year': 'سنويًا', 'Annual rent': 'الإيجار السنوي', 'Rent': 'الإيجار',
-    'Warehouse': 'المستودع', 'Showroom': 'صالة عرض', 'Office': 'مكتب', 'Land': 'أرض', 'Accomadation': 'سكن', 'Owned': 'مملوك', 'Rented': 'مستأجر', 'Leased': 'مؤجَّر', 'Active': 'نشط', 'Closed': 'مغلق',
-    'Commercial licence': 'الرخصة التجارية', 'Commercial registration (CR)': 'السجل التجاري', 'Civil defence (CD)': 'الدفاع المدني', 'National address': 'العنوان الوطني', 'Industrial licence': 'الرخصة الصناعية',
-    'Construction environmental permit': 'تصريح البيئة للإنشاء', 'Operational environmental permit': 'تصريح البيئة للتشغيل', 'Fire maintenance': 'صيانة الحريق', 'Fire maintenance contract': 'عقد صيانة الحريق',
-    'Camera maintenance': 'صيانة الكاميرات', 'Camera maintenance contract': 'عقد صيانة الكاميرات', 'Cleaning': 'النظافة', 'Cleaning contract': 'عقد النظافة', 'Fire layout': 'مخطط الحريق', 'Sign board': 'اللوحة الإعلانية', 'Medical kit': 'حقيبة إسعاف',
-    'Asset': 'الأصل', 'Asset Repair': 'إصلاح الأصول', 'Repairs': 'الإصلاحات', 'No assets': 'لا أصول', 'No submitted assets for the selected company.': 'لا أصول معتمدة للشركة المحددة.', 'Sold': 'مباع', 'Scrapped': 'مخرَّد', 'Submitted': 'معتمد', 'Draft': 'مسودة', 'Cancelled': 'ملغى',
-    'Category': 'الفئة', 'Status': 'الحالة', 'Document': 'المستند', 'Expired': 'منتهٍ', 'Expiring': 'قارب على الانتهاء', 'Valid': 'ساري', ' valid · ': ' ساري · ', ' soon · ': ' قريبًا · ', 'No expiry dates': 'لا تواريخ انتهاء',
-    'Start': 'البداية', 'End': 'النهاية', 'Pending': 'معلق', 'Paid': 'مدفوع', 'Unpaid': 'غير مدفوع', 'Pay': 'دفع', 'Receive': 'استلام', 'Multiple': 'متعدد', 'Unassigned': 'غير محدد', 'Unspecified': 'غير محدد', 'Company not set': 'الشركة غير محددة',
-    ' · ends ': ' · ينتهي ', ' · due ': ' · الاستحقاق ', ' · paid ': ' · مدفوع ', ' · past end date but active: ': ' · تجاوز النهاية وما زال نشطًا: ', ' · expiring ≤ ': ' · ينتهي ≤ ',
-    // inventory
-    'Stock value by warehouse': 'قيمة المخزون حسب المستودع', 'Top warehouses · click a bar to filter the table': 'أعلى المستودعات · اضغط على عمود لتصفية الجدول', 'Stock health': 'سلامة المخزون', 'Items by condition': 'الأصناف حسب الحالة',
-    'Stock ageing': 'أعمار المخزون', 'Stock Ageing': 'أعمار المخزون', 'Stock risks': 'مخاطر المخزون', 'Items in stock': 'أصناف في المخزون', 'Warehouses with stock': 'مستودعات بها مخزون', 'Top-10 concentration': 'تركّز أعلى 10',
-    'Top 10 items hold ': 'أعلى 10 أصناف تمثل ', '% of stock value': '% من قيمة المخزون', 'Dead stock': 'مخزون راكد', 'Dead stock value': 'قيمة المخزون الراكد', 'Dead stock (> ': 'مخزون راكد (> ', ' idle > ': ' خامل > ',
-    'Low stock': 'مخزون منخفض', 'Low stock: ': 'مخزون منخفض: ', 'Low': 'منخفض', 'Healthy': 'سليم', 'Dead': 'راكد', 'Negative': 'سالب', 'Negative stock': 'مخزون سالب', 'Shortage': 'عجز', 'No stock': 'لا مخزون', 'No stock.': 'لا مخزون.',
-    'All stock conditions': 'كل حالات المخزون', 'Condition': 'الحالة', 'Item': 'الصنف', 'Item group': 'مجموعة الصنف', 'On hand': 'المتوفر', 'On hand ': 'المتوفر ', 'Qty': 'الكمية', 'Qty ': 'الكمية ', 'Reserved': 'محجوز', 'Projected': 'المتوقع', 'Projected qty': 'الكمية المتوقعة',
-    'Incoming (ordered)': 'وارد (مطلوب)', 'Reorder level': 'حد إعادة الطلب', 'Reorder lvl': 'حد الطلب', 'Last moved': 'آخر حركة', 'Last moved ': 'آخر حركة ', 'Last moved: ': 'آخر حركة: ', 'Last movement': 'آخر حركة', 'No movement': 'بلا حركة', 'No movement recorded': 'لا حركة مسجلة',
-    'Movement data unavailable': 'بيانات الحركة غير متاحة', 'Movement dates unavailable': 'تواريخ الحركة غير متاحة', 'Whs': 'مستودع', 'Val': 'القيمة', 'Bin': 'الرصيد', 'Stock Projected Qty': 'الكمية المتوقعة للمخزون', 'Stock Ledger Entry': 'قيد دفتر المخزون',
-    'At / below reorder level': 'عند / تحت حد إعادة الطلب', 'Projected qty below zero': 'الكمية المتوقعة أقل من صفر', 'Needs a stock correction': 'يحتاج تصحيح مخزون', 'Post the missing receipt or correct with a stock reconciliation': 'سجّل الاستلام المفقود أو صحّح بتسوية مخزون',
-    'Reserved / demanded quantity exceeds stock + incoming orders': 'الكمية المحجوزة/المطلوبة تتجاوز المخزون + الطلبات الواردة', 'Raise purchase requests': 'أنشئ طلبات شراء', ' will run short (projected qty < 0)': ' سينفد (الكمية المتوقعة < 0)',
-    'Inventory · Stock position': 'المخزون · وضع المخزون', 'Inventory summary — ': 'ملخص المخزون — ', 'Inventory: stock value ': 'المخزون: قيمة المخزون ', 'Stock value: ': 'قيمة المخزون: ', 'Warehouse: ': 'المستودع: ', 'Inventory · short by ': 'المخزون · عجز بمقدار ',
-    ' · low ': ' · منخفض ', ' · negative ': ' · سالب ', ' · shortage ': ' · عجز ', ' · Negative: ': ' · سالب: ', ' · Shortage: ': ' · عجز: ', ' shortage · ': ' عجز · ', ' negative': ' سالب', ' · qty ': ' · الكمية ', ' · reserved ': ' · محجوز ', ' · incoming ': ' · وارد ', ' · reorder level ': ' · حد الطلب ',
-    ' stock items · value from Bin.stock_value · movement dates from Stock Ledger Entry': ' صنف مخزني · القيمة من Bin.stock_value · تواريخ الحركة من Stock Ledger Entry', ' (unavailable — dead-stock analysis hidden)': ' (غير متاح — تحليل المخزون الراكد مخفي)',
-    'Revenue vs expenses could not be loaded': 'تعذر تحميل الإيرادات مقابل المصروفات', 'Movement dates could not be loaded': 'تعذر تحميل تواريخ الحركة', 'Use Refresh to retry.': 'استخدم «تحديث» لإعادة المحاولة.', 'Before ': 'قبل ', 'Some data could not be loaded:': 'تعذر تحميل بعض البيانات:',
-    'Your role cannot read Stock Ledger Entry, so stock age cannot be calculated.': 'صلاحيتك لا تسمح بقراءة Stock Ledger Entry، لذا لا يمكن حساب عمر المخزون.', 'Aging cannot be tracked for these': 'لا يمكن تتبع العمر لهذه الأصناف',
-    'No items in this category.': 'لا أصناف في هذه الفئة.', 'No stock value for the current filters.': 'لا قيمة مخزون للفلاتر الحالية.', 'Items': 'الأصناف', ' items / ': ' صنف / ', 'Bin (shortages)': 'الرصيد (العجز)', 'Short ': 'عجز ',
-    // finance
-    'Receivable & payable': 'المدينون والدائنون', 'Payable': 'الدائنون', 'Payable: ': 'الدائنون: ', 'Receivable: ': 'المدينون: ', 'Payables': 'الدائنون', 'Receivables': 'المدينون', 'Overdue payables': 'دائنون متأخرون', 'Overdue receivables': 'مدينون متأخرون',
-    'Late payables': 'دائنون متأخرون', 'Late receivables': 'مدينون متأخرون', 'Receivables overdue > 90 days': 'مدينون متأخرون > 90 يومًا', 'Payables due in ': 'دائنون مستحقون خلال ', 'Due soon': 'مستحق قريبًا', 'Not yet due': 'لم يستحق بعد', 'Overdue': 'متأخر', 'Overdue only': 'المتأخر فقط',
-    'Outstanding': 'المتبقي', 'Invoice total': 'إجمالي الفاتورة', 'Due date': 'تاريخ الاستحقاق', 'Posting date': 'تاريخ الترحيل', 'Days overdue': 'أيام التأخير', 'Party': 'الطرف', 'Supplier bill no': 'رقم فاتورة المورد', 'Type': 'النوع', 'Account': 'الحساب',
-    'Sales Invoice': 'فاتورة مبيعات', 'Purchase Invoice': 'فاتورة مشتريات', 'Payment Entry': 'قيد دفع', 'GL Entry': 'قيد دفتر الأستاذ', 'GL Entry (cash balances)': 'قيد دفتر الأستاذ (أرصدة النقد)', 'Period Closing Voucher': 'قسيمة إقفال الفترة',
-    'Account (bank / cash)': 'حساب (بنك / نقد)', 'Account (profit & loss)': 'حساب (أرباح وخسائر)', 'Bank': 'بنك', 'Cash': 'نقد', 'Cash & bank: ': 'النقد والبنك: ', 'Cash & bank ': 'النقد والبنك ', 'bank / cash account': 'حساب بنك / نقد', 'Cash flow': 'التدفق النقدي', 'Balance sheet': 'الميزانية',
-    'Profit and Loss': 'الأرباح والخسائر', 'Income accounts': 'حسابات الدخل', 'Expense accounts': 'حسابات المصروفات', 'Performance · ': 'الأداء · ', 'Finance · Position today': 'المالية · الوضع اليوم', 'Finance summary — ': 'ملخص المالية — ', 'Finance · payable due ': 'المالية · دائنون مستحقون ',
-    'Finance · receivable due ': 'المالية · مدينون مستحقون ', 'Finance: cash ': 'المالية: النقد ', 'Revenue · ': 'الإيرادات · ', 'Revenue: ': 'الإيرادات: ', ' · Expenses: ': ' · المصروفات: ', ' · Net profit: ': ' · صافي الربح: ', ' · expenses ': ' · المصروفات ', ' · net ': ' · الصافي ',
-    ' — receivable ': ' — مدينون ', ' — received ': ' — مستلم ', ' — revenue ': ' — إيرادات ', ' · receivable ': ' · مدينون ', ') · net profit ': ') · صافي الربح ', ') · payable ': ') · دائنون ', ' (overdue ': ' (متأخر ', ' · chase or escalate': ' · تابع أو صعّد',
-    '% margin': '% هامش', '% margin)': '% هامش)', '% of payable': '% من الدائنين', '% of receivable': '% من المدينين', '% settled': '% مسدد', '% of receivables sit with 5 customers': '% من المدينين لدى 5 عملاء', 'Largest: ': 'الأكبر: ',
-    'Aging: ': 'العمر: ', '0–30 days': '0–30 يومًا', '1–30 days': '1–30 يومًا', '31–60 days': '31–60 يومًا', '61–90 days': '61–90 يومًا', '31–90 days': '31–90 يومًا', '91–180 days': '91–180 يومًا', '181–365 days': '181–365 يومًا', '> 180 days': '> 180 يومًا', '> 1 year': '> سنة',
-    'No open receivables.': 'لا مدينين مفتوحين.', 'No open payables.': 'لا دائنين مفتوحين.', 'No open receivables or payables.': 'لا مدينين أو دائنين مفتوحين.', 'No overdue receivables.': 'لا مدينين متأخرين.', 'No overdue payables.': 'لا دائنين متأخرين.', 'No payables fall due in the next ': 'لا دائنين تستحق خلال ',
-    'Nothing due': 'لا مستحقات', 'Nothing outstanding': 'لا متبقيات', 'Nothing to age for the current filters.': 'لا شيء لتحليل أعماره للفلاتر الحالية.', 'No bank / cash balances found.': 'لا أرصدة بنك / نقد.', 'No bank or cash account is overdrawn.': 'لا حساب بنك أو نقد مكشوف.', 'See Needs attention → Cash': 'راجع "يحتاج انتباه" ← النقد',
-    'No income or expense postings in the last 12 months.': 'لا قيود دخل أو مصروفات في آخر 12 شهرًا.', 'No postings': 'لا قيود', 'No profit & loss postings in this period.': 'لا قيود أرباح وخسائر في هذه الفترة.', 'No payment entries in the last 12 months.': 'لا قيود دفع في آخر 12 شهرًا.', 'No payments': 'لا مدفوعات', 'Payment mode': 'طريقة الدفع',
-    ' · from GL income & expense accounts': ' · من حسابات الدخل والمصروفات', 'Top customers': 'أعلى العملاء', 'Top suppliers': 'أعلى الموردين', 'Customer': 'العميل', 'Supplier': 'المورد',
-    // general
-    'Data checks': 'فحوصات البيانات', 'No data gaps found.': 'لا فجوات في البيانات.', 'No data': 'لا بيانات', 'Not available': 'غير متاح', 'Yes': 'نعم', 'No': 'لا', 'List': 'القائمة', 'Form': 'النموذج', 'Active, non-empty': 'نشط وغير فارغ', 'Still marked active': 'ما زال نشطًا',
-    'No records found': 'لا سجلات', 'No records match the current dashboard filters.': 'لا سجلات تطابق فلاتر اللوحة الحالية.', 'Nothing loaded yet.': 'لم يتم تحميل شيء بعد.', 'Nothing matches the current filters.': 'لا نتائج للفلاتر الحالية.', 'Nothing needs attention for the current filters.': 'لا شيء يحتاج انتباه للفلاتر الحالية.',
-    'Nothing to show for the current filters.': 'لا شيء لعرضه للفلاتر الحالية.', 'Try changing the filters.': 'جرّب تغيير الفلاتر.', 'Showing ': 'عرض ', 'Prev': 'السابق', 'Next': 'التالي', 'rows': 'صفوف', 'row': 'صف',
-    'Some data could not be loaded': 'تعذر تحميل بعض البيانات', '. You may not have read permission for these DocTypes.': '. قد لا تملك صلاحية القراءة لهذه الأنواع.', 'Some data could not be loaded:': 'تعذر تحميل بعض البيانات:',
-    ' days (+ ': ' يوم (+ ', 'Months': 'الأشهر',
-    'Jan': 'يناير', 'Feb': 'فبراير', 'Mar': 'مارس', 'Apr': 'أبريل', 'May': 'مايو', 'Jun': 'يونيو', 'Jul': 'يوليو', 'Aug': 'أغسطس', 'Sep': 'سبتمبر', 'Oct': 'أكتوبر', 'Nov': 'نوفمبر', 'Dec': 'ديسمبر',
-    'Confidential': 'سري', 'SAR': 'ر.س',
-    // plurals / units (kept last — short words)
-    ' days': ' يوم', ' day': ' يوم', ' late': ' تأخير', ' ago': ' مضت', ' invoices': ' فاتورة', ' invoice': ' فاتورة', ' instalments': ' أقساط', ' instalment': ' قسط', ' items': ' صنف', ' item': ' صنف',
-    ' customers': ' عملاء', ' suppliers': ' موردين', ' accounts': ' حسابات', ' account': ' حساب', ' warehouses': ' مستودعات', ' warehouse': ' مستودع', ' facilities': ' منشآت', ' facility': ' منشأة', ' contracts': ' عقود', ' contract': ' عقد', ' assets': ' أصول', ' repairs': ' إصلاحات',
-    ' SAR': ' ر.س', 'Active bank and cash accounts · GL balance': 'حسابات البنك والنقد النشطة · رصيد دفتر الأستاذ', ' active accounts': ' حسابات نشطة',
-    ' open invoices': ' فاتورة مفتوحة', ' open bills': ' فاتورة مورد مفتوحة', ' records': ' سجل', ' lines': ' سطر', 'Open invoices': 'الفواتير المفتوحة', 'Open receivables': 'المدينون المفتوحون', 'Open payables': 'الدائنون المفتوحون',
-    'Open invoices by days past due date · click a bar to drill in': 'الفواتير المفتوحة حسب أيام التأخر عن الاستحقاق · اضغط على عمود للتفصيل', 'Receivables and payables aging': 'أعمار المدينين والدائنين',
-    'Net position': 'صافي المركز', 'Cash + receivable − payable': 'النقد + المدينون − الدائنون', 'Liquid funds plus what customers owe, less what is owed to suppliers.': 'السيولة مضافًا إليها مستحقات العملاء ومخصومًا منها المستحق للموردين.',
-    'Collections, payments and cash': 'التحصيلات والمدفوعات والنقد', 'Payment entries · received vs paid · last 12 months': 'قيود الدفع · المستلم مقابل المدفوع · آخر 12 شهرًا',
-    'Received': 'المستلم', 'Due': 'المستحق', 'Amount': 'المبلغ', 'Upcoming': 'القادم', 'Expiry': 'الانتهاء', 'Invoice': 'الفاتورة', 'Assets': 'الأصول', 'Gross cost': 'التكلفة الإجمالية', 'Net book value': 'صافي القيمة الدفترية',
-    'Items that should be actioned': 'أصناف تحتاج إجراء', 'Licences & compliance': 'التراخيص والامتثال', 'Safety & services': 'السلامة والخدمات', 'Stock age (last movement)': 'عمر المخزون (آخر حركة)',
-    'Stock value by days since the item last moved · click a bar to drill in': 'قيمة المخزون حسب الأيام منذ آخر حركة للصنف · اضغط على عمود للتفصيل', 'Top groups': 'أعلى المجموعات', 'Value by company': 'القيمة حسب الشركة', 'Value by item group': 'القيمة حسب مجموعة الصنف',
-    'Via warehouse company': 'عبر شركة المستودع', 'Top items by value': 'أعلى الأصناف قيمة', 'Share of total stock value': 'النسبة من إجمالي قيمة المخزون', ' of total stock value': ' من إجمالي قيمة المخزون', 'Stock items': 'أصناف المخزون',
-    'One row per item across warehouses · click a row for warehouse breakdown': 'صف لكل صنف عبر المستودعات · اضغط على صف لعرض التفصيل حسب المستودع', 'Top customers owing': 'أعلى العملاء مديونية', 'Top suppliers owed': 'أعلى الموردين استحقاقًا',
-    'Cash & bank balances': 'أرصدة النقد والبنك', 'Net profit by company': 'صافي الربح حسب الشركة', 'Receivables and payables with an outstanding balance · click a row for details': 'المدينون والدائنون برصيد مستحق · اضغط على صف للتفاصيل',
-    'Open invoices: submitted documents with outstanding amount > 0 (credit notes excluded) · revenue / expense from GL Entry (period closing vouchers excluded)': 'الفواتير المفتوحة: مستندات معتمدة بمبلغ مستحق > 0 (باستثناء إشعارات الدائن) · الإيرادات / المصروفات من قيود دفتر الأستاذ (باستثناء قسائم إقفال الفترة)',
-    ' rent falls due in the next ': ' إيجار يستحق خلال الـ ', ' of rent instalments not marked paid': ' من أقساط الإيجار غير المسددة', ' instalments unpaid': ' أقساط غير مسددة', ' instalment unpaid': ' قسط غير مسدد', ' payable due within ': ' دائنون مستحقون خلال ',
-    ' already overdue)': ' متأخر بالفعل)', ' due in ': ' مستحق خلال ', 'of which overdue': 'منها متأخر', ' at or below reorder level': ' عند حد إعادة الطلب أو أقل', ' with negative stock in a warehouse': ' برصيد سالب في مستودع', ' without movement for over ': ' بلا حركة لأكثر من ',
-    ' with insurance expired or expiring ': ' بتأمين منتهٍ أو ينتهي ', ' asset': ' أصل', ' left': ' متبقٍ', 'Top items': 'أعلى الأصناف', 'Stock by': 'المخزون حسب', 'Part of': 'جزء من',
-    'Ending ': 'تنتهي ', 'Ending within ': 'تنتهي خلال ', ' expired': ' منتهٍ', ' payable due ': ' دائنون مستحقون ', 'of total stock value': 'من إجمالي قيمة المخزون', 'Receivable & payable aging': 'أعمار المدينين والدائنين',
-    '+ Receivable': '+ المدينون', '− Payable': '− الدائنون', 'Payable · ': 'دائنون · ', 'Receivable · ': 'مدينون · ', ' of which overdue': ' منها متأخر', '\u00a0SAR': ' ر.س', 'SAR ': 'ر.س ',
-    'as of ': 'حتى ', 'Nos': 'وحدة', 'Pending repairs': 'إصلاحات معلقة', ' pending': ' معلق', 'Repairs pending': 'إصلاحات معلقة', 'Rent instalments': 'أقساط الإيجار',
-    'Today': 'اليوم', 'today': 'اليوم', 'Yesterday': 'أمس', 'Tomorrow': 'غدًا', 'Due today': 'مستحق اليوم'
-  };
-  var LANG = 'en';
-  var I18N = { re: null, map: null, exact: {}, txt: new WeakMap(), attr: new WeakMap(), obs: null, pending: false };
-  function escRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
-  function buildI18n() {
-    // single plain words are translated only when they are the whole text (so item / account / customer names are never touched)
-    I18N.exact = {}; I18N.map = {};
-    Object.keys(AR_DICT).forEach(function (k) {
-      if (/^[A-Za-z&]+$/.test(k)) I18N.exact[k] = AR_DICT[k]; else I18N.map[k] = AR_DICT[k];
-    });
-    var keys = Object.keys(I18N.map).sort(function (a, b) { return b.length - a.length; });
-    I18N.re = new RegExp(keys.map(function (k) {
-      var s = escRe(k);
-      if (/^[A-Za-z]/.test(k)) s = '(?<![A-Za-z])' + s;
-      if (/[A-Za-z]$/.test(k)) s += '(?![A-Za-z])';
-      return s;
-    }).join('|'), 'g');
-  }
-  function tr(s) {
-    if (LANG !== 'ar' || !s) return s;
-    if (!I18N.re) buildI18n();
-    s = String(s);
-    var t = s.trim();
-    if (I18N.exact[t] != null) return s.replace(t, I18N.exact[t]);
-    var MON = { Jan: 'يناير', Feb: 'فبراير', Mar: 'مارس', Apr: 'أبريل', May: 'مايو', Jun: 'يونيو', Jul: 'يوليو', Aug: 'أغسطس', Sep: 'سبتمبر', Oct: 'أكتوبر', Nov: 'نوفمبر', Dec: 'ديسمبر' };
-    s = s.replace(/\b(\d{1,2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{4})\b/g, function (m, d, mo, y) { return d + ' ' + MON[mo] + ' ' + y; })
-      .replace(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{2})$/, function (m, mo, y) { return MON[mo] + ' ' + y; })
-      .replace(/(^|\s)of (\d)/g, '$1من $2').replace(/\bin (\d+) days?\b/g, 'خلال $1 يومًا').replace(/\b(\d+) days? ago\b/g, 'منذ $1 يومًا');
-    return s.replace(I18N.re, function (m) { return I18N.map[m]; });
-  }
-  function i18nNode(n) {
-    var rec = I18N.txt.get(n);
-    if (rec && n.data === rec.tr) { if (LANG !== 'ar') { n.data = rec.orig; I18N.txt.delete(n); } return; }
-    if (LANG !== 'ar') return;
-    var orig = n.data, t = tr(orig);
-    I18N.txt.set(n, { orig: orig, tr: t });
-    if (t !== orig) n.data = t;
-  }
-  var I18N_ATTRS = ['title', 'placeholder', 'aria-label'];
-  function i18nEl(el) {
-    I18N_ATTRS.forEach(function (a) {
-      var v = el.getAttribute(a); if (v == null) return;
-      var m = I18N.attr.get(el) || {}, rec = m[a];
-      if (rec && v === rec.tr) { if (LANG !== 'ar') { el.setAttribute(a, rec.orig); delete m[a]; } return; }
-      if (LANG !== 'ar') return;
-      var t = tr(v); m[a] = { orig: v, tr: t }; I18N.attr.set(el, m);
-      if (t !== v) el.setAttribute(a, t);
-    });
-  }
-  function i18nWalk() {
-    I18N.pending = false;
-    if (I18N.obs) I18N.obs.disconnect();
-    var w = document.createTreeWalker(root, 4 | 1, null), n;
-    while ((n = w.nextNode())) {
-      if (n.nodeType === 3) {
-        var p = n.parentNode;
-        if (p && (p.nodeName === 'STYLE' || p.nodeName === 'SCRIPT' || (p.closest && p.closest('[data-noi18n]')))) continue;
-        i18nNode(n);
-      } else if (!(n.closest && n.closest('[data-noi18n]'))) i18nEl(n);
+    if (id.indexOf('cli:') === 0) {
+      var k = id.slice(4), cc = actClient(), x = cc && cc[k], sp = actSpecs().filter(function (y) { return y.id === k; })[0];
+      if (!x || typeof x === 'string' || !sp) { return null; }
+      return { title: sp.title, sub: sp.why, spec: { rows: x.rows.slice(0, 500).map(x.item), file: k, text: function (it) { return [it.title, it.desc, it.who].join(' '); }, cols: [
+        { h: tr('Record', 'السجل'), r: function (it) { return docLink(it.dt, it.name, it.title); }, c: function (it) { return it.name; } },
+        { h: tr('Details', 'التفاصيل'), r: function (it) { return '<span class="dms-sm">' + bdi(it.desc) + '</span>'; }, c: function (it) { return it.desc; } },
+        { h: tr('Company', 'الشركة'), r: function (it) { return bdi(it.who || '—'); }, c: function (it) { return it.who; } },
+        { h: tr('When / amount', 'متى / المبلغ'), r: function (it) { return '<span class="dms-tone-' + it.tone + '">' + esc(it.due) + '</span>'; }, c: function (it) { return it.due; } }] } };
     }
-    if (I18N.obs) I18N.obs.observe(root, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: I18N_ATTRS });
+    return null;
   }
-  function i18nSchedule() { if (!I18N.pending) { I18N.pending = true; setTimeout(i18nWalk, 0); } }
-  function setLang(l, save) {
-    LANG = l === 'ar' ? 'ar' : 'en';
-    var el = $('#tld');
-    el.setAttribute('dir', LANG === 'ar' ? 'rtl' : 'ltr');
-    el.setAttribute('lang', LANG);
-    el.dataset.lang = LANG;
-    var b = $('#btnLang'); if (b) { b.textContent = LANG === 'ar' ? 'English' : 'العربية'; }
-    if (save) { try { localStorage.setItem('fif-lang', LANG); } catch (e) { /* ignore */ } }
-    if (!I18N.obs && typeof MutationObserver !== 'undefined') I18N.obs = new MutationObserver(i18nSchedule);
-    i18nWalk();
+  function onAct(a, v) {
+    if (a === 'kpi' && v.indexOf('go:') === 0) { var p = v.split(':'); QF[p[1]] = p[2] || ''; goTab(p[1], false, true); return true; }
+    if (a === 'kpi' && v.indexOf('qf2:') === 0) { var q = v.split(':'); QF[q[1]] = QF[q[1]] === q[2] ? '' : (q[2] || ''); renderSoft(); return true; }
+    if (a === 'qf') { var r = v.split(':'); QF[r[0]] = r[1] || ''; renderSoft(); return true; }
+    return false;
   }
 
-  initStatic();
-  initTables();
-  syncTheme();
-  if (THEME_MODE === 'auto' && typeof MutationObserver !== 'undefined') {
-    var mo = new MutationObserver(function () { if (root.host && !root.host.isConnected) { mo.disconnect(); return; } syncTheme(); });
-    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-theme-mode'] });
-  }
-  setWidthClass();
-  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(setWidthClass).observe($('#tld'));
-  else window.addEventListener('resize', setWidthClass);
+  start();
+})();
 
-  var savedTab = null;
-  try { savedTab = localStorage.getItem('fif-tab'); } catch (e) { /* ignore */ }
-  setTab(savedTab && TAB_LABELS[savedTab] ? savedTab : 'overview');
-  var savedLang = null;
-  try { savedLang = localStorage.getItem('fif-lang'); } catch (e) { /* ignore */ }
-  if (!savedLang && window.frappe && frappe.boot && /^ar/.test(frappe.boot.lang || '')) savedLang = 'ar';
-  setLang(savedLang === 'ar' ? 'ar' : 'en', false);
+/* ==== DM theme sync (same as tools/erp/shell/dark_theme.py output; maintained here since this block is built on the standard) ==== */
+;(function () {
+  var r = typeof root_element !== 'undefined' ? root_element : null, h = r && r.host;
+  if (!h || h.__dmsTheme) return; h.__dmsTheme = 1;
+  var s = function () { h.setAttribute('data-dms-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'); };
+  s(); new MutationObserver(s).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 })();

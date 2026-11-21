@@ -21,10 +21,10 @@ const unique=functions(finance+'Blocked Customer Dashboard/CP Blocked Customer/d
 test('Customer balances count once across salesperson rows',()=>{const row={customer_id:'C1',customer_name:'Same',actual_outstanding:100,is_blocked:1};assert.equal(unique([row,{...row}]).length,1);});
 test('Different customer IDs with the same display name stay separate',()=>assert.equal(unique([{customer_id:'C1',customer_name:'Same'},{customer_id:'C2',customer_name:'Same'}]).length,2));
 test('Conflicting duplicated amounts are rejected',()=>assert.throws(()=>unique([{customer_id:'C1',customer_name:'A',actual_outstanding:1},{customer_id:'C1',customer_name:'A',actual_outstanding:2}])));
-const production=functions('08. Operations & Logistics/Production Dashboard/dashboard.js',['belongsToFactory','groupValues'],{state:{factory:'F1'},FACTORIES:[{name:'F1',company:'DM',legacy_branch_label:'Factory 1',confirmedWarehouses:['WH1']} ]});
-test('Production finds child warehouse receipts without a header warehouse',()=>assert.equal(production.belongsToFactory({items:[{t_warehouse:'WH1'}]},'stock'),true));
-test('Production excludes unconfirmed/unmapped warehouses',()=>assert.equal(production.belongsToFactory({items:[{t_warehouse:'WH2'}]},'stock'),false));
-test('Production groups quantities by item and unit',()=>{const groups=production.groupValues([{item:'A',uom:'Kg',qty:2},{item:'A',uom:'Nos',qty:3}],r=>r.item+'/'+r.uom,r=>r.qty);assert.equal(groups.length,2);});
+const production=functions('08. Operations & Logistics/Production Dashboard/dashboard.js',['fac','byWh','grp','n0'],{F:{factory:'F1'},FAC:[{name:'F1',company:'DM',legacy_branch_label:'Factory 1',confirmed:['WH1']}]});
+test('Production finds child warehouse receipts without a header warehouse',()=>assert.equal([{t_warehouse:'WH1'}].some(i=>production.byWh(i.t_warehouse)||production.byWh(i.s_warehouse)),true));
+test('Production excludes unconfirmed/unmapped warehouses',()=>assert.equal([{t_warehouse:'WH2'}].some(i=>production.byWh(i.t_warehouse)||production.byWh(i.s_warehouse)),false));
+test('Production groups quantities by item and unit',()=>{const groups=production.grp([{item:'A',uom:'Kg',qty:2},{item:'A',uom:'Nos',qty:3}],r=>r.item+'/'+r.uom,r=>r.qty);assert.equal(groups.length,2);});
 const period=functions(finance+'Finance Internal Controller/dashboard.js',['periodHits'],{S:{company:'',from:'',to:''},gl:(dt,options)=>{assert(!options.filters.some(f=>f[0]==='disabled'));return Promise.resolve([]);}}).periodHits;
 const reference=functions(finance+'Credit Controller Dashboard/dashboard.js',['reportReferenceTotal'],{}).reportReferenceTotal;
 test('Native report reference excludes its generated total row',()=>assert.equal(reference({columns:[{fieldname:'sales_person'}],result:[{sales_person:'A',total_collection:100},{sales_person:'B',total_collection:200},{sales_person:'Total',total_collection:300}]},'total_collection'),300));
@@ -41,8 +41,8 @@ test('An intentional custom widget heading is preserved',()=>{const h={textConte
 test('Heading repair does not scan the document when no owning widget exists',()=>assert.doesNotThrow(()=>heading({getRootNode:()=>({})},'Contracting')));
 async function main(){
  await period();checks++;console.log('PASS Accounting Period query has no nonexistent disabled filter');
- const fetched=functions('08. Operations & Logistics/Production Dashboard/dashboard.js',['fetchSource'],{PAGE_SIZE:100,callERP:async(method,args)=>Array.from({length:Math.min(args.limit_page_length,Math.max(0,1005-args.limit_start))},(_,i)=>({name:'WO'+(args.limit_start+i)}))}).fetchSource;
- const result=await fetched({doctype:'Work Order',key:'wo',date:'planned_start_date'},'2026-11-01','2026-11-16');assert.equal(result.rows.length,1005);assert.equal(result.complete,true);checks++;console.log('PASS Production loads complete sources beyond the former 1000-row ceiling');
+ const prod='08. Operations & Logistics/Production Dashboard/dashboard.js',fetched=functions(prod,['fetchAll'],{getCount:async()=>1005,getList:async args=>Array.from({length:Math.min(args.limit_page_length,Math.max(0,1005-args.limit_start))},(_,i)=>({name:'WO'+(args.limit_start+i)})),Promise}).fetchAll;
+ const rows=await fetched({doctype:'Work Order',filters:[]},null,50000);assert.equal(rows.length,1005);assert(/fetchAll\(\{ doctype: 'Work Order'/.test(code(prod)),'Production reads work orders through fetchAll');checks++;console.log('PASS Production loads complete sources beyond the former 1000-row ceiling');
  console.log(checks+' regression checks passed.');
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

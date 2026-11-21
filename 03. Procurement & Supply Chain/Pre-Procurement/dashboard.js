@@ -1,516 +1,1184 @@
+/* ===== DM Group KSA — Pre-Procurement Command Center — SCRIPT field · v2 =====
+   Read-only. Material Request (purpose Purchase, workflow state not Closed), Purchase Order, Supplier and Company through
+   frappe.client.get_list / frappe.client.get with the user's own permissions. One currency per view: values are summed only
+   across companies that share the system currency (or the one company picked), and the banner names the companies left
+   out. Built on the DM dashboard standard; the shared runtime between the "DMS kit" markers is generated from
+   tools/erp/kit/dms-kit.js (edit the kit and run build_kit.py, not the copy). */
 (function () {
-  const R = (typeof root_element !== 'undefined' && root_element) ? root_element : document;
-  const $ = (s) => R.querySelector(s);
-  const $$ = (s) => Array.from(R.querySelectorAll(s));
-  const root = $('#pcc');
-  if (!root) return;
-
-  /* ---------- i18n ---------- */
-  const I18N = {
-    en: {
-      title: 'Pre-Procurement Command Center', updated: 'Last updated', refresh: 'Refresh', company: 'Company', from: 'From', to: 'To',
-      status: 'Status', search: 'Search', search_ph: 'Search records...', reset: 'Reset', loading: 'Loading live data…',
-      open_list: 'Open in ERPNext', export: 'Export CSV', open_form: 'Open form', all: 'All',
-      pg_prev: 'Previous', pg_next: 'Next', pg_page: 'Page', pg_of: 'of',
-      tab_overview: 'Overview', tab_mr: 'Material Requests', tab_po: 'Purchase Orders', tab_sup: 'Suppliers & Delays',
-      records: 'records', none: 'No records match the current filters.', clear_kpi: 'Clear card filter ✕',
-      doc: 'Document', type: 'Type', date: 'Date', required_by: 'Required By', due: 'Due', days_late: 'Days Late', age: 'Age (days)', owner: 'Owner',
-      ordered: 'Ordered %', received: 'Received %', billed: 'Billed %', supplier: 'Supplier', total: 'Total', group: 'Group',
-      orders: 'Orders', po_value: 'PO Value', overdue_pos: 'Overdue POs', avg_recv: 'Avg Received %',
-      item: 'Item', item_name: 'Item Name', rate: 'Rate', qty: 'Qty', amount: 'Amount', uom: 'UOM', items: 'Items', grand_total: 'Grand Total',
-      k_mr_total: 'All Purchase MRs', k_mr_draft: 'Draft', k_mr_open: 'Open / Pending', k_mr_overdue: 'Overdue', k_mr_ordered: 'Fully Ordered', k_mr_stopped: 'Stopped',
-      k_po_total: 'All POs', k_po_open: 'Awaiting Receipt', k_po_overdue: 'Overdue Delivery', k_po_done: 'Fully Received', k_po_draft: 'Draft', k_po_value: 'Total Value',
-      k_sup_active: 'Active Suppliers', k_sup_engaged: 'Engaged (with PO)', k_sup_late: 'With Overdue POs',
-      k_ov_mr_open: 'Open MRs', k_ov_mr_over: 'Overdue MRs', k_ov_po_open: 'POs Awaiting Receipt', k_ov_po_over: 'Overdue POs', k_ov_val: 'PO Value',
-      c_status: 'By Status', c_month: 'By Month', c_month_val: 'Value by Month', c_aging: 'Open MR Aging (days)', c_top_sup: 'Top Suppliers by Value', c_funnel: 'Procurement Funnel',
-      attention: 'Needs Attention (overdue)', t_orders: 'Purchase Orders',
-      partial: 'showing the most recent records only (row ceiling reached) – narrow the date range', err_load: 'Could not load', err_perm: 'Check your read permission on this DocType.', no_ds: 'Not available',
-      no_access: 'No access to', timeout: 'Request timed out', sub_mr_open: 'Submitted · Pending / Partially Ordered', sub_mr_over: 'Open and Required By before today', sub_po_open: 'Submitted · To Receive', sub_po_over: 'Awaiting receipt and past Required By'
-    },
-    ar: {
-      title: 'مركز قيادة ما قبل المشتريات', updated: 'آخر تحديث', refresh: 'تحديث', company: 'الشركة', from: 'من', to: 'إلى',
-      status: 'الحالة', search: 'بحث', search_ph: 'ابحث في السجلات...', reset: 'إعادة ضبط', loading: 'جارٍ تحميل البيانات المباشرة…',
-      open_list: 'فتح في ERPNext', export: 'تصدير CSV', open_form: 'فتح النموذج', all: 'الكل',
-      pg_prev: 'السابق', pg_next: 'التالي', pg_page: 'صفحة', pg_of: 'من',
-      tab_overview: 'نظرة عامة', tab_mr: 'طلبات المواد', tab_po: 'أوامر الشراء', tab_sup: 'الموردون والتأخيرات',
-      records: 'سجل', none: 'لا توجد سجلات مطابقة للفلاتر الحالية.', clear_kpi: 'إلغاء فلتر البطاقة ✕',
-      doc: 'المستند', type: 'النوع', date: 'التاريخ', required_by: 'مطلوب بتاريخ', due: 'الاستحقاق', days_late: 'أيام التأخير', age: 'العمر (يوم)', owner: 'المالك',
-      ordered: '% الطلب', received: '% الاستلام', billed: '% الفوترة', supplier: 'المورد', total: 'الإجمالي', group: 'المجموعة',
-      orders: 'الأوامر', po_value: 'قيمة الأوامر', overdue_pos: 'أوامر متأخرة', avg_recv: 'متوسط % الاستلام',
-      item: 'الصنف', item_name: 'اسم الصنف', rate: 'السعر', qty: 'الكمية', amount: 'المبلغ', uom: 'الوحدة', items: 'الأصناف', grand_total: 'الإجمالي الكلي',
-      k_mr_total: 'كل طلبات الشراء', k_mr_draft: 'مسودة', k_mr_open: 'مفتوحة / معلقة', k_mr_overdue: 'متأخرة', k_mr_ordered: 'مكتملة الطلب', k_mr_stopped: 'موقوفة',
-      k_po_total: 'كل الأوامر', k_po_open: 'بانتظار الاستلام', k_po_overdue: 'تأخر التسليم', k_po_done: 'مستلمة بالكامل', k_po_draft: 'مسودة', k_po_value: 'إجمالي القيمة',
-      k_sup_active: 'موردون نشطون', k_sup_engaged: 'متفاعلون (لديهم أمر)', k_sup_late: 'لديهم أوامر متأخرة',
-      k_ov_mr_open: 'طلبات مفتوحة', k_ov_mr_over: 'طلبات متأخرة', k_ov_po_open: 'أوامر بانتظار الاستلام', k_ov_po_over: 'أوامر متأخرة', k_ov_val: 'قيمة الأوامر',
-      c_status: 'حسب الحالة', c_month: 'حسب الشهر', c_month_val: 'القيمة حسب الشهر', c_aging: 'أعمار الطلبات المفتوحة (يوم)', c_top_sup: 'أعلى الموردين قيمة', c_funnel: 'مسار المشتريات',
-      attention: 'يحتاج انتباه (متأخر)', t_orders: 'أوامر الشراء',
-      partial: 'عرض أحدث السجلات فقط (بلغ الحد الأقصى) – ضيّق نطاق التاريخ', err_load: 'تعذر تحميل', err_perm: 'تحقق من صلاحية القراءة لهذا المستند.', no_ds: 'غير متاح',
-      no_access: 'لا توجد صلاحية للوصول إلى', timeout: 'انتهت مهلة الطلب', sub_mr_open: 'معتمدة · معلقة / مطلوبة جزئيًا', sub_mr_over: 'مفتوحة وتاريخ المطلوب قبل اليوم', sub_po_open: 'معتمدة · بانتظار الاستلام', sub_po_over: 'بانتظار الاستلام وتجاوزت تاريخ المطلوب'
-    }
+  'use strict';
+  var APP = {
+    key: '__dmsPreProc',
+    period: 'ytd',
+    tabs: [
+      { id: 'overview', en: 'Overview', ar: 'نظرة عامة' }, { id: 'mr', en: 'Material requests', ar: 'طلبات المواد' }, { id: 'po', en: 'Purchase orders', ar: 'أوامر الشراء' },
+      { id: 'sup', en: 'Suppliers and delays', ar: 'الموردون والتأخيرات' }, { id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }
+    ],
+    filters: [
+      { k: 'company', en: 'Company', ar: 'الشركة', none: ['All system-currency companies', 'كل شركات عملة النظام'], options: function () { return (REF.companies || []).map(function (c) { return { v: c.name, l: c.name + (c.default_currency && c.default_currency !== CUR ? ' (' + c.default_currency + ')' : '') }; }); } },
+      { k: 'supplier', en: 'Supplier', ar: 'المورد', options: function () { return supOptions(); } }
+    ],
+    sources: ['mr', 'po'],
+    dtLabels: { 'Material Request': ['Material request', 'طلب مواد'], 'Purchase Order': ['Purchase order', 'أمر شراء'], 'Supplier': ['Supplier', 'مورد'] },
+    title: function () { return tr('Pre-Procurement Command Center', 'مركز قيادة ما قبل المشتريات'); },
+    stamp: function () { return tr('Purchase material requests, purchase orders and supplier delivery', 'طلبات مواد الشراء وأوامر الشراء وتسليم الموردين'); },
+    periodNote: function () { return tr('The period filters by issue date (transaction date), not by the required-by date. Actions pending cover every open document, whatever the period.', 'الفترة حسب تاريخ الإصدار وليس تاريخ الاحتياج. الإجراءات المعلقة تشمل كل المستندات المفتوحة بغض النظر عن الفترة.'); },
+    filterNote: function () { return tr('Supplier applies to purchase orders and the supplier view; material requests have no supplier.', 'المورد يطبق على أوامر الشراء وعرض الموردين؛ طلبات المواد بلا مورد.'); },
+    load: function () { loadAll(); },
+    actions: function () { return actModel(actSpecs(), 'act', actClient()); },
+    banner: function () { return banner(); },
+    content: function (t, AM) { return ({ overview: tabOverview, mr: tabMr, po: tabPo, sup: tabSup, actions: tabActions })[t](AM); },
+    drill: function (id) { return drill(id); },
+    onAct: function (a, v, n, id) { return onAct(a, v, n, id); }
   };
-  const DT_NAMES = { 'Material Request': ['Material Request', 'طلب مواد'], 'Purchase Order': ['Purchase Order', 'أمر شراء'], 'Supplier': ['Supplier', 'مورد'] };
 
-  const S = { lang: 'en', tab: 'overview', company: '', from: '', to: '', status: '', q: '', kpi: '', sort: null, page: 1, ps: 25, cache: {}, errors: {}, partial: {} };
-  try { S.lang = localStorage.getItem('pcc_lang') || (frappe.boot && frappe.boot.lang === 'ar' ? 'ar' : 'en'); } catch (e) {}
-  const t = (k) => (I18N[S.lang][k] != null ? I18N[S.lang][k] : (I18N.en[k] || k));
-  const dtn = (d) => (DT_NAMES[d] ? DT_NAMES[d][S.lang === 'ar' ? 1 : 0] : d);
+  /* ==== DMS kit v1 · generated from tools/erp/kit/dms-kit.js by build_kit.py — edit the kit, not this copy ==== */
+  /* Shared runtime for DM dashboards on the standard (toolbar, period, filters, tabs, tables, drill-downs, charts,
+     actions pending). Copied into each dashboard.js by tools/erp/kit/build_kit.py; the dashboard defines `APP` before
+     this block. Read-only helpers: frappe.client.get_list / frappe.desk.query_report.run under the viewer's permissions. */
+  var G = window;
+  var ROOT = (typeof root_element !== 'undefined' && root_element) ? root_element : document;
+  var HOST = ROOT.querySelector('[data-dms-root]');
+  if (!HOST) { return; }
+  if (G[APP.key] && typeof G[APP.key].destroy === 'function') { try { G[APP.key].destroy(); } catch (e) { /* ignore */ } }
+  var abort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  var SIG = abort ? { signal: abort.signal } : false;
+  var timers = [], destroyed = false, GEN = 0, BOOTED = false, LOADED = '';
+  G[APP.key] = { destroy: function () { destroyed = true; GEN++; if (abort) { abort.abort(); } timers.forEach(clearTimeout); timers = []; } };
+  var CFG = Object.assign({ conc: 6, pageSize: 25, modalPage: 15, weekStart: 0 }, APP.cfg || {});
+  var CUR = 'SAR';
+  try { CUR = (frappe.boot.sysdefaults && frappe.boot.sysdefaults.currency) || 'SAR'; } catch (e) { /* default */ }
+  var LANG = 'en';
+  try { var sv = G.localStorage.getItem('dms_lang'); if (sv === 'ar' || sv === 'en') { LANG = sv; } } catch (e) { /* storage unavailable */ }
+  function tr(en, ar) { return LANG === 'ar' ? ar : en; }
 
   /* ---------- helpers ---------- */
-  const pad = (n) => String(n).padStart(2, '0');
-  const now = new Date();
-  const TODAY = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-  const days = (a, b) => Math.round((new Date(b) - new Date(a)) / 864e5);
-  const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const nf = (n, d) => new Intl.NumberFormat(S.lang === 'ar' ? 'ar-SA-u-nu-latn' : 'en-US', { maximumFractionDigits: d == null ? 0 : d }).format(n || 0);
-  const sum = (rows, f) => rows.reduce((a, r) => a + (parseFloat(r[f]) || 0), 0);
-  const route = (...a) => { try { frappe.set_route(...a); } catch (e) { window.open('/app/' + a.map((x) => String(x).toLowerCase().replace(/ /g, '-')).join('/'), '_blank'); } };
-  /* open an ERPNext list view with filters (object of field -> value | [operator, value]) in a new tab */
-  const openErp = (dt, f) => {
-    const qs = Object.keys(f || {}).map((k) => {
-      const v = f[k];
-      return encodeURIComponent(k) + '=' + encodeURIComponent(typeof v === 'object' ? JSON.stringify(v) : String(v));
-    }).join('&');
-    window.open('/app/' + String(dt).toLowerCase().replace(/ /g, '-') + (qs ? '?' + qs : ''), '_blank');
-  };
-  /* Direct, silent API call: no Frappe popups, always settles (timeout), 403 -> error with .perm */
-  const call = (method, args) => new Promise((resolve, reject) => {
-    let done = false; const ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-    const timer = setTimeout(() => { if (done) return; done = true; if (ctl) { try { ctl.abort(); } catch (x) {} } reject(new Error(t('timeout'))); }, 90000);
-    const body = new URLSearchParams();
-    Object.keys(args || {}).forEach((k) => { const v = args[k]; if (v === undefined || v === null) return; body.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v)); });
-    fetch('/api/method/' + method, { method: 'POST', credentials: 'same-origin', signal: ctl ? ctl.signal : undefined,
-      headers: { 'X-Frappe-CSRF-Token': (window.frappe && frappe.csrf_token) || '', Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' }, body: body.toString() })
-      .then((r) => r.text().then((txt) => ({ r, txt })))
-      .then(({ r, txt }) => {
-        if (done) return; done = true; clearTimeout(timer);
-        let j = null; try { j = JSON.parse(txt); } catch (x) {}
-        if (r.ok && j && !j.exc) { resolve(j.message); return; }
-        const ex = String((j && (j.exception || j.exc_type)) || '');
-        const perm = r.status === 401 || r.status === 403 || /permission/i.test(ex);
-        const e = new Error(perm ? t('no_access') : (ex.split(':').slice(-1)[0].trim() || ('HTTP ' + r.status))); e.perm = perm; reject(e);
-      })
-      .catch((err) => { if (done) return; done = true; clearTimeout(timer); reject(err || new Error('request failed')); });
-  });
-  const PAGE = 2000, CEIL = 20000;
-  const getList = async (doctype, fields, filters, extra) => {
-    let out = [], start = 0;
-    for (;;) {
-      const page = (await call('frappe.client.get_list', Object.assign({ doctype, fields, filters, limit_page_length: PAGE, limit_start: start, order_by: 'creation desc' }, extra || {}))) || [];
-      out = out.concat(page);
-      if (page.length < PAGE) break;
-      start += PAGE;
-      if (out.length >= CEIL) { S.partial[doctype] = true; break; }
-    }
-    return out;
-  };
-  const badgeCls = (s) => {
-    s = String(s || '').toLowerCase();
-    if (/(ordered|received|completed|closed|submitted|to bill|accepted)/.test(s) && !/(partially|to receive)/.test(s)) return 'ok';
-    if (/(draft|pending|partially|to receive|open)/.test(s)) return 'warn';
-    if (/(cancel|stop|expired|lost|reject|overdue)/.test(s)) return 'bad';
-    return 'info';
-  };
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function clean(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+  function plain(s, n) { return clean(String(s || '').replace(/<[^>]*>/g, ' ')).slice(0, n || 90); }
+  function $(sel) { return HOST.querySelector(sel); }
+  function later(fn, ms) { var id = setTimeout(function () { if (!destroyed) { fn(); } }, ms); timers.push(id); return id; }
+  function bdi(s) { return '<bdi>' + esc(s) + '</bdi>'; }
+  function num(n) { return (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString('en-US'); }
+  function money(v) {
+    if (v == null || isNaN(v)) { return '—'; }
+    var a = Math.abs(v), s = v < 0 ? '-' : '';
+    if (a >= 1e9) { return s + (a / 1e9).toFixed(2) + 'B'; }
+    if (a >= 1e6) { return s + (a / 1e6).toFixed(2) + 'M'; }
+    if (a >= 1e4) { return s + (a / 1e3).toFixed(1) + 'K'; }
+    return s + Math.round(a).toLocaleString('en-US');
+  }
+  function amt(v) { return (v == null || isNaN(v)) ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function moneyS(v, cur) { return (cur || CUR) + ' ' + money(v); }
+  function moneyB(v, cur) { return '<bdi>' + esc(moneyS(v, cur)) + '</bdi>'; }
+  function moneyFull(v, cur) { return (v == null || isNaN(v)) ? '' : (cur || CUR) + ' ' + amt(v); }
+  function cur$(v, cur) { return '<bdi>' + esc(money(v)) + '<small>' + esc(cur || CUR) + '</small></bdi>'; }
+  function pct(n, d, dp) { return (d > 0 && n != null) ? (n / d * 100).toFixed(dp == null ? 1 : dp) + '%' : tr('N/A', 'غير متاح'); }
+  function sum(arr, f) { var t = 0; for (var i = 0; i < arr.length; i++) { t += (f ? f(arr[i]) : arr[i]) || 0; } return t; }
+  function vals(o) { return Object.keys(o).map(function (k) { return o[k]; }); }
+  function uniq(a) { var m = {}; a.forEach(function (x) { if (x) { m[x] = 1; } }); return Object.keys(m).sort(function (x, y) { return x.localeCompare(y); }); }
+  function rep(s, n) { var o = ''; for (var i = 0; i < n; i++) { o += s; } return o; }
+  function one(r) { return (r && r[0]) || {}; }
+  function groupBy(rows, f) { var m = {}; rows.forEach(function (r) { var k = f(r); (m[k] || (m[k] = [])).push(r); }); return m; }
+  var NAtxt = function () { return tr('Not assigned', 'غير مُعيَّن'); };
 
-  /* ---------- dataset definitions ----------
-     base = filters for the data load, erp = equivalent filters for the ERPNext list view.
-     Material Requests in workflow state "Closed" are excluded everywhere. */
-  const DS = {
-    mr: { dt: 'Material Request', date: 'transaction_date', company: true,
-      base: [['material_request_type', '=', 'Purchase'], ['docstatus', '<', 2], ['workflow_state', '!=', 'Closed']],
-      erp: { material_request_type: 'Purchase', docstatus: ['!=', 2], workflow_state: ['!=', 'Closed'] },
-      fields: ['name', 'status', 'workflow_state', 'transaction_date', 'schedule_date', 'company', 'per_ordered', 'per_received', 'docstatus', 'owner'] },
-    po: { dt: 'Purchase Order', date: 'transaction_date', company: true, base: [['docstatus', '<', 2]],
-      erp: { docstatus: ['!=', 2] },
-      fields: ['name', 'supplier', 'supplier_name', 'status', 'transaction_date', 'schedule_date', 'grand_total', 'base_grand_total', 'currency', 'per_received', 'per_billed', 'company', 'docstatus'] },
-    sup: { dt: 'Supplier', date: null, company: false, base: [], erp: {}, fields: ['name', 'supplier_name', 'supplier_group', 'disabled'] }
-  };
-  const enrich = (k, r) => {
-    r._dt = DS[k].dt;
-    if (r.transaction_date) r._age = Math.max(0, days(r.transaction_date, TODAY));
-    if (r.schedule_date) r._late = Math.max(0, days(r.schedule_date, TODAY));
-    return r;
-  };
-  async function load(k) {
-    if (S.cache[k]) return S.cache[k];
-    const d = DS[k], f = d.base.slice();
-    if (d.company && S.company) f.push(['company', '=', S.company]);
-    if (d.date && S.from) f.push([d.date, '>=', S.from]);
-    if (d.date && S.to) f.push([d.date, '<=', S.to]);
+  /* ---------- dates (ERP site time zone, calendar arithmetic) ---------- */
+  function siteTz() {
     try {
-      const rows = (await getList(d.dt, d.fields, f)) || [];
-      delete S.errors[k];
-      return (S.cache[k] = rows.map((r) => enrich(k, r)));
-    } catch (e) {
-      S.errors[k] = { dt: d.dt, perm: !!(e && e.perm), msg: (e && e.message) || '' }; return (S.cache[k] = []);
+      if (G.frappe && frappe.boot) {
+        if (frappe.boot.time_zone && frappe.boot.time_zone.system) { return frappe.boot.time_zone.system; }
+        if (frappe.boot.sysdefaults && frappe.boot.sysdefaults.time_zone) { return frappe.boot.sysdefaults.time_zone; }
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+  function siteParts() {
+    var tz = siteTz(), o = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }, p;
+    if (tz) { o.timeZone = tz; }
+    try { p = new Intl.DateTimeFormat('en-CA', o).formatToParts(new Date()); } catch (e) { delete o.timeZone; p = new Intl.DateTimeFormat('en-CA', o).formatToParts(new Date()); }
+    var m = {}; p.forEach(function (x) { m[x.type] = x.value; }); if (m.hour === '24') { m.hour = '00'; } return m;
+  }
+  function parseISO(s) {
+    if (!s || typeof s !== 'string') { return null; }
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s); if (!m) { return null; }
+    var y = +m[1], mo = +m[2], d = +m[3], ms = Date.UTC(y, mo - 1, d), dt = new Date(ms);
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) { return null; }
+    return ms;
+  }
+  function isoOf(ms) { var d = new Date(ms); return d.getUTCFullYear() + '-' + ('0' + (d.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + d.getUTCDate()).slice(-2); }
+  function addDays(iso, n) { return isoOf(parseISO(iso) + n * 86400000); }
+  function diffDays(a, b) { return Math.round((parseISO(b) - parseISO(a)) / 86400000); }
+  var TODAY = '', STAMP = '';
+  function setToday() { var p = siteParts(); TODAY = p.year + '-' + p.month + '-' + p.day; STAMP = p.hour + ':' + p.minute; }
+  function monthStart(iso) { return iso.slice(0, 8) + '01'; }
+  function monthEnd(iso) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7); return isoOf(Date.UTC(y, m, 0)); }
+  function addMonths(iso, n) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n; return isoOf(Date.UTC(y, m, 1)); }
+  function weekStartOf(iso) { var dow = new Date(parseISO(iso)).getUTCDay(); return addDays(iso, -((dow - CFG.weekStart + 7) % 7)); }
+  function quarterStart(iso) { var m = +iso.slice(5, 7); return iso.slice(0, 5) + ('0' + (Math.floor((m - 1) / 3) * 3 + 1)).slice(-2) + '-01'; }
+  function shiftMonths(iso, n) {
+    var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n, d = +iso.slice(8, 10), last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    return isoOf(Date.UTC(y, m, Math.min(d, last)));
+  }
+  function periodRange(key, cf, ct) {
+    var t = TODAY, y = t.slice(0, 4), ws = weekStartOf(t), qs = quarterStart(t), lm = addMonths(monthStart(t), -1);
+    switch (key) {
+      case 'today': return [t, t];
+      case 'yesterday': return [addDays(t, -1), addDays(t, -1)];
+      case 'week': return [ws, addDays(ws, 6)];
+      case 'lastWeek': return [addDays(ws, -7), addDays(ws, -1)];
+      case 'month': return [monthStart(t), monthEnd(t)];
+      case 'lastMonth': return [lm, monthEnd(lm)];
+      case 'quarter': return [qs, monthEnd(addMonths(qs, 2))];
+      case 'year': return [y + '-01-01', y + '-12-31'];
+      case 'prevYear': return [(y - 1) + '-01-01', (y - 1) + '-12-31'];
+      case 'custom': return [cf, ct];
+      default: return [y + '-01-01', t];   // ytd
     }
   }
-
-  /* ---------- predicates ---------- */
-  const PO_OPEN_STATUS = ['To Receive and Bill', 'To Receive'];
-  const MR_OPEN_STATUS = ['Pending', 'Partially Ordered'];
-  const P = {
-    mrOpen: (r) => r.docstatus === 1 && MR_OPEN_STATUS.includes(r.status),
-    mrOver: (r) => P.mrOpen(r) && r.schedule_date && r.schedule_date < TODAY,
-    poOpen: (r) => r.docstatus === 1 && PO_OPEN_STATUS.includes(r.status),
-    poOver: (r) => P.poOpen(r) && r.schedule_date && r.schedule_date < TODAY && (r.per_received || 0) < 100
-  };
-
-  /* ---------- tab configs (table columns + KPI cards) ----------
-     kpi.f = filters used by "Open in ERPNext" when that card is selected */
-  const C = {
-    mr: { ds: 'mr', title: 'tab_mr',
-      cols: [{ k: 'name', lk: 'doc', type: 'link' }, { k: 'transaction_date', lk: 'date', type: 'date' }, { k: 'schedule_date', lk: 'required_by', type: 'date' }, { k: 'status', lk: 'status', type: 'status' },
-        { k: 'per_ordered', lk: 'ordered', type: 'pct' }, { k: 'per_received', lk: 'received', type: 'pct' }, { k: '_age', lk: 'age', type: 'num' }, { k: 'owner', lk: 'owner', type: 'text' }],
-      kpis: [{ id: 'all', lk: 'k_mr_total', test: () => true, f: {} },
-        { id: 'draft', lk: 'k_mr_draft', test: (r) => r.docstatus === 0, cls: 'warn', f: { docstatus: 0 } },
-        { id: 'open', lk: 'k_mr_open', test: P.mrOpen, cls: 'warn', f: { docstatus: 1, status: ['in', MR_OPEN_STATUS] } },
-        { id: 'over', lk: 'k_mr_overdue', test: P.mrOver, cls: 'bad', f: { docstatus: 1, status: ['in', MR_OPEN_STATUS], schedule_date: ['<', TODAY] } },
-        { id: 'ordered', lk: 'k_mr_ordered', test: (r) => r.status === 'Ordered', cls: 'ok', f: { status: 'Ordered' } },
-        { id: 'stopped', lk: 'k_mr_stopped', test: (r) => r.status === 'Stopped', cls: 'bad', f: { status: 'Stopped' } }],
-      charts: ['status', 'month', 'aging'] },
-    po: { ds: 'po', title: 'tab_po', valueField: 'base_grand_total',
-      cols: [{ k: 'name', lk: 'doc', type: 'link' }, { k: 'supplier_name', lk: 'supplier', type: 'text' }, { k: 'transaction_date', lk: 'date', type: 'date' }, { k: 'schedule_date', lk: 'required_by', type: 'date' },
-        { k: 'status', lk: 'status', type: 'status' }, { k: 'per_received', lk: 'received', type: 'pct' }, { k: 'per_billed', lk: 'billed', type: 'pct' }, { k: 'grand_total', lk: 'grand_total', type: 'money' }],
-      kpis: [{ id: 'all', lk: 'k_po_total', test: () => true, f: {} },
-        { id: 'draft', lk: 'k_po_draft', test: (r) => r.docstatus === 0, cls: 'warn', f: { docstatus: 0 } },
-        { id: 'open', lk: 'k_po_open', test: P.poOpen, cls: 'warn', f: { docstatus: 1, status: ['in', PO_OPEN_STATUS] } },
-        { id: 'over', lk: 'k_po_overdue', test: P.poOver, cls: 'bad', f: { docstatus: 1, status: ['in', PO_OPEN_STATUS], schedule_date: ['<', TODAY], per_received: ['<', 100] } },
-        { id: 'done', lk: 'k_po_done', test: (r) => (r.per_received || 0) >= 100, cls: 'ok', f: { per_received: ['>=', 100] } },
-        { id: 'val', lk: 'k_po_value', test: () => true, sum: 'base_grand_total', f: {} }],
-      charts: ['status', 'monthVal', 'topSup'] }
-  };
-
-  /* filters for "Open in ERPNext" of a generic tab (company, period, selected card, status) */
-  function erpFilters(tab) {
-    const cfg = C[tab], d = DS[cfg.ds], f = Object.assign({}, d.erp);
-    if (d.company && S.company) f.company = S.company;
-    if (d.date) {
-      if (S.from && S.to) f[d.date] = ['Between', [S.from, S.to]];
-      else if (S.from) f[d.date] = ['>=', S.from];
-      else if (S.to) f[d.date] = ['<=', S.to];
+  /* Comparison window: the same span one preset unit earlier; custom ranges compare with the equally long range before. */
+  function prevRange(key, from, to) {
+    switch (key) {
+      case 'today': case 'yesterday': return [addDays(from, -1), addDays(to, -1)];
+      case 'week': case 'lastWeek': return [addDays(from, -7), addDays(to, -7)];
+      case 'month': case 'lastMonth': return [shiftMonths(from, -1), shiftMonths(to, -1)];
+      case 'quarter': return [shiftMonths(from, -3), shiftMonths(to, -3)];
+      case 'ytd': case 'year': case 'prevYear': return [shiftMonths(from, -12), shiftMonths(to, -12)];
+      default: var n = diffDays(from, to) + 1; return [addDays(from, -n), addDays(from, -1)];
     }
-    const kp = cfg.kpis.find((k) => k.id === S.kpi);
-    if (kp && kp.f) Object.assign(f, kp.f);
-    if (S.status) f.status = S.status;
-    return f;
   }
+  /* In-progress periods stop at today, so this month to date compares with the same days of last month. */
+  function clip(r) { return [r[0], r[1] > TODAY && r[0] <= TODAY ? TODAY : r[1]]; }
+  function cmpRanges() { var c = clip(PERIOD); return { cur: c, prev: prevRange(F.period, c[0], c[1]) }; }
+  function monthList(from, to) { var out = [], cur = monthStart(from); for (var i = 0; i < 72 && cur <= to; i++) { out.push(cur.slice(0, 7)); cur = addMonths(cur, 1); } return out; }
+  function locale() { return LANG === 'ar' ? 'ar-SA-u-nu-latn-ca-gregory' : 'en-GB'; }
+  function fmtDate(iso, yr) {
+    try { var o = { day: 'numeric', month: 'short', timeZone: 'UTC' }; if (yr) { o.year = 'numeric'; } return new Intl.DateTimeFormat(locale(), o).format(new Date(parseISO(String(iso).slice(0, 10)))); } catch (e) { return iso; }
+  }
+  function rangeLabel(r) {
+    if (!r || !r[0] || !r[1]) { return ''; }
+    return r[0] === r[1] ? fmtDate(r[0], true) : fmtDate(r[0], r[0].slice(0, 4) !== r[1].slice(0, 4)) + ' – ' + fmtDate(r[1], true);
+  }
+  var PLR = null;
+  function daysTxt(n) {
+    if (LANG !== 'ar') { return num(n) + (n === 1 ? ' day' : ' days'); }
+    var c = 'other'; try { c = (PLR || (PLR = new Intl.PluralRules('ar'))).select(n); } catch (e) { /* generic form */ }
+    return c === 'one' ? 'يوم واحد' : c === 'two' ? 'يومان' : c === 'few' ? n + ' أيام' : c === 'many' ? n + ' يومًا' : n + ' يوم';
+  }
+  function ageOf(iso) { var d = iso ? diffDays(String(iso).slice(0, 10), TODAY) : 0; return isNaN(d) ? 0 : Math.max(0, d); }
+  function lateTxt(iso) {
+    var d = diffDays(String(iso).slice(0, 10), TODAY); if (isNaN(d)) { return ''; }
+    return d > 0 ? tr(daysTxt(d) + ' overdue', 'متأخر ' + daysTxt(d)) : d === 0 ? tr('Due today', 'مستحق اليوم') : tr('Due in ' + daysTxt(-d), 'مستحق خلال ' + daysTxt(-d));
+  }
+  function agoTxt(iso, en, ar) { var a = ageOf(iso); return a ? tr((en || 'Waiting') + ' ' + daysTxt(a), (ar || 'منذ') + ' ' + daysTxt(a)) : tr('Today', 'اليوم'); }
 
-  /* ---------- charts (pure SVG/CSS, no dependencies) ---------- */
-  const PAL = ['#2563eb', '#16a34a', '#d97706', '#dc2626', '#7c3aed', '#0891b2', '#db2777', '#65a30d', '#475569'];
-  function donut(title, data, onClickAttr) {
-    const total = data.reduce((a, d) => a + d.v, 0);
-    if (!total) return `<div class="card"><h3>${esc(title)}</h3><div class="empty">${t('none')}</div></div>`;
-    const Rr = 52, Cc = 2 * Math.PI * Rr; let off = 0;
-    const arcs = data.map((d, i) => {
-      const len = d.v / total * Cc;
-      const s = `<circle cx="75" cy="75" r="${Rr}" fill="none" stroke="${PAL[i % PAL.length]}" stroke-width="22" stroke-dasharray="${len} ${Cc - len}" stroke-dashoffset="${-off}" transform="rotate(-90 75 75)" ${onClickAttr}="${esc(d.l)}"><title>${esc(d.l)}: ${nf(d.v)}</title></circle>`;
-      off += len; return s;
-    }).join('');
-    const leg = data.map((d, i) => `<span ${onClickAttr}="${esc(d.l)}"><i style="background:${PAL[i % PAL.length]}"></i>${esc(d.l)} (${nf(d.v)})</span>`).join('');
-    return `<div class="card"><h3>${esc(title)}</h3><div class="donut-wrap"><svg viewBox="0 0 150 150">${arcs}<text x="75" y="80" text-anchor="middle" font-size="18" font-weight="700" fill="currentColor">${nf(total)}</text></svg><div class="legend">${leg}</div></div></div>`;
-  }
-  function hbars(title, data, fmt) {
-    if (!data.length) return `<div class="card"><h3>${esc(title)}</h3><div class="empty">${t('none')}</div></div>`;
-    const mx = Math.max(...data.map((d) => d.v), 1);
-    return `<div class="card"><h3>${esc(title)}</h3><div class="hbars">${data.map((d) =>
-      `<div class="hb" ${d.attr || ''}><span class="t" title="${esc(d.l)}">${esc(d.l)}</span><span class="tr"><i style="width:${d.v / mx * 100}%"></i></span><span class="n">${fmt ? fmt(d.v) : nf(d.v)}</span></div>`).join('')}</div></div>`;
-  }
-  function vbars(title, data) {
-    if (!data.length) return `<div class="card"><h3>${esc(title)}</h3><div class="empty">${t('none')}</div></div>`;
-    const mx = Math.max(...data.map((d) => d.v), 1);
-    return `<div class="card"><h3>${esc(title)}</h3><div class="vbars">${data.map((d) =>
-      `<div class="vb"><b>${nf(d.v)}</b><i style="height:${Math.max(2, d.v / mx * 100)}px" title="${esc(d.l)}: ${nf(d.v)}"></i><span>${esc(d.l)}</span></div>`).join('')}</div></div>`;
-  }
-  const countBy = (rows, f) => { const m = {}; rows.forEach((r) => { const k = r[f] || '—'; m[k] = (m[k] || 0) + 1; }); return Object.entries(m).map(([l, v]) => ({ l, v })).sort((a, b) => b.v - a.v); };
-  const byMonth = (rows, dateF, valF) => { const m = {}; rows.forEach((r) => { const k = (r[dateF] || '').slice(0, 7); if (k) m[k] = (m[k] || 0) + (valF ? parseFloat(r[valF]) || 0 : 1); }); return Object.keys(m).sort().slice(-12).map((k) => ({ l: k, v: m[k] })); };
-  function chartHtml(id, rows, cfg) {
-    if (id === 'status') return donut(t('c_status'), countBy(rows, 'status'), 'data-status');
-    if (id === 'month') return vbars(t('c_month'), byMonth(rows, 'transaction_date'));
-    if (id === 'monthVal') return vbars(t('c_month_val'), byMonth(rows, 'transaction_date', cfg.valueField));
-    if (id === 'aging') {
-      const o = rows.filter(P.mrOpen), b = [['0-7', 0, 7], ['8-30', 8, 30], ['31-60', 31, 60], ['60+', 61, 1e9]];
-      return hbars(t('c_aging'), b.map(([l, a, z]) => ({ l, v: o.filter((r) => r._age >= a && r._age <= z).length })));
-    }
-    if (id === 'topSup') {
-      const m = {}; rows.forEach((r) => { const k = r.supplier_name || r.supplier || '—'; m[k] = (m[k] || 0) + (parseFloat(r[cfg.valueField]) || 0); });
-      return hbars(t('c_top_sup'), Object.entries(m).map(([l, v]) => ({ l, v })).sort((a, b) => b.v - a.v).slice(0, 8).map((d) => ({ ...d, attr: `data-q="${esc(d.l)}"` })));
-    }
-    return '';
-  }
-
-  /* ---------- view builders: each returns {kpis, charts, table, erp} ---------- */
-  function applyFilters(rows, cols, ignoreSearch) {
-    let out = rows;
-    if (S.status) out = out.filter((r) => r.status === S.status);
-    if (S.q && !ignoreSearch) { const q = S.q.toLowerCase(); out = out.filter((r) => cols.some((c) => String(r[c.k] == null ? '' : r[c.k]).toLowerCase().includes(q))); }
-    return out;
-  }
-  const errOf = (ds) => S.errors[ds];
-  const naText = (ds) => `${t('no_access')} ${dtn(DS[ds].dt)}`;
-  async function viewGeneric(tab) {
-    const cfg = C[tab], base = await load(cfg.ds);
-    const scoped = base.filter((r) => !S.q || cfg.cols.some((c) => String(r[c.k] == null ? '' : r[c.k]).toLowerCase().includes(S.q.toLowerCase())));
-    const kpis = cfg.kpis.map((k) => {
-      if (errOf(cfg.ds)) return { id: k.id, label: t(k.lk), cls: k.cls, value: '—', sub: errOf(cfg.ds).perm ? naText(cfg.ds) : t('err_load') + ' ' + dtn(DS[cfg.ds].dt), na: true };
-      const m = scoped.filter(k.test); return { id: k.id, label: t(k.lk), cls: k.cls, value: k.sum ? nf(sum(m, k.sum)) : nf(m.length) };
+  /* ---------- ERP read-only API layer (bounded concurrency, one retry, cancellation) ---------- */
+  var REQ_TIMEOUT = 90000;
+  function callP(method, args) {
+    return new Promise(function (resolve, reject) {
+      var done = false, ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var timer = setTimeout(function () { if (done) { return; } done = true; if (ctl) { try { ctl.abort(); } catch (x) { /* ignore */ } } var te = new Error('Request timed out'); te.timeout = true; reject(te); }, REQ_TIMEOUT);
+      var body = new URLSearchParams();
+      Object.keys(args || {}).forEach(function (k) { var v = args[k]; if (v === undefined || v === null) { return; } body.append(k, (typeof v === 'object') ? JSON.stringify(v) : String(v)); });
+      fetch('/api/method/' + method, { method: 'POST', credentials: 'same-origin', signal: ctl ? ctl.signal : undefined,
+        headers: { 'X-Frappe-CSRF-Token': (G.frappe && frappe.csrf_token) || '', 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' }, body: body.toString() })
+        .then(function (r) { return r.text().then(function (txt) { return { r: r, txt: txt }; }); })
+        .then(function (o) {
+          if (done) { return; } done = true; clearTimeout(timer);
+          var j = null; try { j = JSON.parse(o.txt); } catch (x) { /* ignore */ }
+          if (o.r.ok && j && !j.exc) { resolve(j.message === undefined ? null : j.message); return; }
+          var ex = String((j && (j.exception || j.exc_type)) || '');
+          var perm = o.r.status === 401 || o.r.status === 403 || /permission/i.test(ex);
+          var e = new Error((perm ? 'No access to ' + ((args && (args.doctype || args.report_name)) || method) : (ex.split(':').slice(-1)[0].trim() || ('HTTP ' + o.r.status))));
+          e.status = perm ? 403 : o.r.status; reject(e);
+        })
+        .catch(function (err) { if (done) { return; } done = true; clearTimeout(timer); reject(err || new Error('request failed')); });
     });
-    const kp = cfg.kpis.find((k) => k.id === S.kpi);
-    let rows = applyFilters(base, cfg.cols);
-    if (kp) rows = rows.filter(kp.test);
-    const chartRows = applyFilters(base, cfg.cols);
-    return { kpis, charts: cfg.charts.map((c) => chartHtml(c, chartRows, cfg)).join(''),
-      table: { title: t(cfg.title), cols: cfg.cols.filter((c) => !c.hide), rows, dt: DS[cfg.ds].dt, statusRows: base }, statusSrc: base,
-      erp: () => ({ dt: DS[cfg.ds].dt, f: erpFilters(tab) }) };
+  }
+  var active = 0, queue = [];
+  function pump() {
+    while (active < CFG.conc && queue.length) {
+      var j = queue.shift(); active++;
+      j.fn().then(j.res, j.rej).then(function () { active--; pump(); });
+    }
+  }
+  function limited(fn) { return new Promise(function (res, rej) { queue.push({ fn: fn, res: res, rej: rej }); pump(); }); }
+  function guarded(chk, method, args) {
+    return limited(function () {
+      if (destroyed || (chk && !chk())) { return Promise.resolve(null); }
+      return callP(method, args).catch(function (e) { if (e && (e.status === 403 || e.timeout || e.status === 417)) { throw e; } return new Promise(function (r) { setTimeout(r, 400); }).then(function () { return callP(method, args); }); });
+    });
+  }
+  function errKind(e) {
+    var txt = ''; try { txt = (e && (e.responseText || e.statusText || e.message)) || ''; } catch (x) { /* ignore */ }
+    return (/PermissionError|not permitted|No access|403/i.test(String(txt)) || (e && e.status === 403)) ? 'perm' : 'tech';
+  }
+  function getList(args, chk) { return guarded(chk, 'frappe.client.get_list', args); }
+  function getCount(dt, filters, chk) { return getList({ doctype: dt, fields: ['count(name) as n'], filters: filters || [], limit_page_length: 1 }, chk).then(function (r) { return +one(r).n || 0; }); }
+  /* All rows of a bounded list (paged); rejects with e.tooLarge when the source exceeds `cap`. */
+  function fetchAll(args, chk, cap) {
+    cap = cap || 20000;
+    return getCount(args.doctype, args.filters, chk).then(function (n) {
+      if (n > cap) { var e = new Error('too large'); e.tooLarge = n; throw e; }
+      var jobs = []; for (var i = 0; i < Math.ceil(n / 500); i++) { jobs.push(getList(Object.assign({}, args, { order_by: args.order_by || 'name asc', limit_start: i * 500, limit_page_length: 500 }), chk)); }
+      return Promise.all(jobs).then(function (res) { var out = []; res.forEach(function (r) { if (r) { out = out.concat(r); } }); return out; });
+    });
+  }
+  function docUrl(dt, name) {
+    try { if (G.frappe && frappe.utils && frappe.utils.get_form_link) { return frappe.utils.get_form_link(dt, name); } } catch (e) { /* fall through */ }
+    return '/app/' + dt.toLowerCase().replace(/ /g, '-') + '/' + encodeURIComponent(name);
+  }
+  function docLink(dt, name, label) { return '<a class="dms-link" href="' + esc(docUrl(dt, name)) + '" target="_blank" rel="noopener noreferrer"><bdi>' + esc(label || name) + '</bdi> ↗</a>'; }
+
+  /* ---------- data store: each source loads and renders independently; stale generations are dropped ---------- */
+  var D = {};
+  var softT = null;
+  function soon() { if (softT) { return; } softT = later(function () { softT = null; renderSoft(); }, 40); }
+  function run(key, fn) {
+    var g = GEN, chk = function () { return g === GEN && !destroyed; }, tok = {};
+    D[key] = null; D[key + 'Err'] = null; D[key + 'Tok'] = tok;
+    var mine = function () { return chk() && D[key + 'Tok'] === tok; };
+    fn(mine).then(function (v) { if (!mine()) { return; } D[key] = v; if (APP.afterLoad) { APP.afterLoad(key); } soon(); },
+      function (e) { if (!mine()) { return; } D[key + 'Err'] = e && e.tooLarge ? 'large:' + e.tooLarge : errKind(e); if (G.console && e && !e.status && !e.tooLarge) { console.error(APP.key, key, e); } soon(); });
+  }
+  function busy() { return !BOOTED || (APP.sources || []).some(function (k) { return D[k] == null && D[k + 'Err'] == null; }); }
+  function errText(kind) { return /^large:/.test(String(kind)) ? tr('too many records (' + num(+String(kind).slice(6)) + ') — narrow the filters or period', 'عدد كبير من السجلات (' + num(+String(kind).slice(6)) + ') — ضيّق المرشحات أو الفترة') : kind === 'perm' ? tr('permission denied for your user', 'لا تملك صلاحية القراءة') : tr('technical error while reading', 'خطأ تقني أثناء القراءة'); }
+
+  /* ---------- UI primitives ---------- */
+  var ICO = {
+    refresh: '<path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/>', filter: '<path d="M4 5h16l-6.2 7.6V19l-3.6 1.6v-8z"/>',
+    cal: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/>', down: '<path d="m6 9 6 6 6-6"/>',
+    prev: '<path d="m15 6-6 6 6 6"/>', next: '<path d="m9 6 6 6-6 6"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
+    up: '<path d="M12 19V6M6.5 11.5 12 6l5.5 5.5"/>', dn: '<path d="M12 5v13M6.5 12.5 12 18l5.5-5.5"/>', dl: '<path d="M12 4v11M7 10.5 12 15.5l5-5M5 20h14"/>'
+  };
+  function ico(n, cls) { return '<svg class="dms-ico' + (cls ? ' ' + cls : '') + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + ICO[n] + '</svg>'; }
+  function kpi(o) {
+    var inner = '<span class="dms-kpi-h"><span class="dms-kpi-l">' + (o.dot ? '<i class="dms-dot" style="--dms-c:' + o.dot + '"></i>' : '') + esc(o.label) + '</span>' + (o.top || '') + '</span>' +
+      '<span class="dms-kpi-n">' + o.val + '</span>' + (o.sub ? '<span class="dms-kpi-s">' + o.sub + '</span>' : '') + (o.foot != null ? '<span class="dms-kpi-f">' + o.foot + '</span>' : '');
+    var t = o.tip ? ' title="' + esc(o.tip) + '"' : '';
+    return o.act ? '<button type="button" class="dms-kpi" data-act="kpi" data-v="' + esc(o.act) + '"' + t + '>' + inner + '</button>' : '<div class="dms-kpi"' + t + '>' + inner + '</div>';
+  }
+  function kpis(list, ov) { return '<div class="dms-grid dms-kpis' + (ov ? ' dms-ov-kpis' : '') + '">' + list.join('') + '</div>'; }
+  function tagc(txt) { return '<span class="dms-tag">' + txt + '</span>'; }
+  function stat(k, txt) { return '<span class="dms-stat dms-stat-' + k + '">' + esc(txt) + '</span>'; }
+  function ctx(html) { return '<span class="dms-kpi-ctx">' + html + '</span>'; }
+  function badge(txt, color) { return '<span class="dms-badge" style="--dms-c:' + color + '">' + esc(txt) + '</span>'; }
+  function wait() { return '<span class="dms-sm">' + esc(tr('Calculating…', 'جارٍ الحساب…')) + '</span>'; }
+  function asOf() { return tagc(esc(tr('As of today', 'حتى اليوم'))); }
+  /* Value of a source-backed KPI: '…' while loading, '—' when the source failed (never a false zero). */
+  function kv(key, f) { return D[key + 'Err'] ? '—' : D[key] == null ? '…' : f(D[key]); }
+  function ks(key, f) { return D[key + 'Err'] ? esc(tr('Unavailable', 'غير متاح')) : D[key] == null ? wait() : f(D[key]); }
+  function spark(vs) {
+    var n = vs.length, real = vs.filter(function (v) { return v != null; }), pts = [];
+    if (n < 3 || real.length < 3 || !real.some(function (v) { return v > 0; })) { return ''; }
+    var max = Math.max.apply(null, real), min = Math.min(0, Math.min.apply(null, real)), rng = (max - min) || 1;
+    vs.forEach(function (v, i) { if (v != null) { pts.push([(i / (n - 1) * 100).toFixed(2), (26 - (v - min) / rng * 23).toFixed(2)]); } });
+    var line = pts.map(function (p) { return p.join(','); }).join(' L');
+    return '<svg class="dms-spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path class="dms-spark-a" d="M' + pts[0][0] + ',28 L' + line + ' L' + pts[pts.length - 1][0] + ',28 Z"/><path class="dms-spark-l" d="M' + line + '"/></svg>';
+  }
+  /* Change vs the comparison window. fmt formats values; small count bases show "was N" instead of a percentage. */
+  function deltaChip(cur, prev, R, fmt, isCount, lowerIsBetter) {
+    if (cur == null || prev == null || !R) { return ''; }
+    fmt = fmt || moneyS;
+    var tip = tr('This period', 'هذه الفترة') + ' (' + rangeLabel(R[0]) + '): ' + fmt(cur) + '\n' + tr('Previous', 'السابقة') + ' (' + rangeLabel(R[1]) + '): ' + fmt(prev);
+    var sr = '<span class="dms-sr"> ' + esc(tr('vs previous period', 'مقارنة بالفترة السابقة')) + '</span>';
+    if (prev === 0 || (isCount && prev < 5)) { return '<span class="dms-delta dms-flat" data-tip="' + esc(tip) + '">' + esc(tr('was', 'كان')) + ' <bdi>' + esc(fmt(prev)) + '</bdi>' + sr + '</span>'; }
+    var p = (cur - prev) / prev * 100, a = Math.abs(p), k = a < 0.05 ? 'flat' : p > 0 ? 'up' : 'down', tone = k === 'flat' ? 'flat' : ((k === 'up') !== !!lowerIsBetter ? 'up' : 'down');
+    var txt = a > 999 ? '10×+' : (a < 10 ? a.toFixed(1) : Math.round(a)) + '%';
+    return '<span class="dms-delta dms-' + tone + '" data-tip="' + esc(tip) + '">' + (k === 'flat' ? '' : ico(k === 'up' ? 'up' : 'dn')) + '<bdi>' + (k === 'down' ? '−' : '') + txt + '</bdi>' + sr + '</span>';
+  }
+  function panel(title, body, extra, meta) {
+    return '<section class="dms-panelbox ' + (extra || '') + '"><div class="dms-ph"><h3 class="dms-h3">' + esc(title) + '</h3>' + (meta ? '<span class="dms-ph-meta">' + meta + '</span>' : '') + '</div>' + body + '</section>';
+  }
+  function note(txt) { return '<p class="dms-note">' + txt + '</p>'; }
+  function alertBox(kind, html) { return '<div class="dms-alert dms-alert-' + kind + '" role="' + (kind === 'err' ? 'alert' : 'status') + '">' + html + '</div>'; }
+  function empty(txt) { return '<div class="dms-empty">' + esc(txt || tr('No data for the current filters.', 'لا توجد بيانات للمرشحات الحالية.')) + '</div>'; }
+  function srcErr(kind, what) { return alertBox('err', '<b>' + esc(tr('Source unavailable', 'المصدر غير متاح')) + ':</b> ' + esc(what) + ' — ' + esc(errText(kind))); }
+  function skel(n, cls) { return rep('<div class="dms-skel ' + (cls || '') + '"></div>', n); }
+  /* Body for a panel backed by source `key`: skeleton while loading, named error on failure, else f(data). */
+  function src(key, what, f) { return D[key + 'Err'] ? srcErr(D[key + 'Err'], what) : D[key] == null ? skel(1, 'dms-skel-panel') : f(D[key]); }
+
+  /* ---------- charts (HTML/CSS; hover details via the shared tooltip, data-tip) ---------- */
+  function niceMax(v) { if (!(v > 0)) { return 1; } var p = Math.pow(10, Math.floor(Math.log(v) / Math.LN10)), f = v / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
+  function axisFmt(v) { var a = Math.abs(v); return a >= 1e9 ? +(v / 1e9).toFixed(1) + 'B' : a >= 1e6 ? +(v / 1e6).toFixed(1) + 'M' : a >= 1e3 ? +(v / 1e3).toFixed(1) + 'K' : String(a < 10 ? +v.toFixed(2) : Math.round(v)); }
+  function bucketLabel(k, g, short) {
+    if (g === 'cat') { return String(k); }
+    if (g === 'week' && !short) { return tr('Week of ', 'أسبوع ') + fmtDate(k, true); }
+    if (g !== 'month') { return fmtDate(k, !short); }
+    try { return new Intl.DateTimeFormat(locale(), { month: 'short', year: '2-digit', timeZone: 'UTC' }).format(new Date(parseISO(k + '-01'))); } catch (e) { return k; }
+  }
+  /* Count charts get whole-number ticks (top is a multiple of 4), so small counts never show 0, 1, 1, 2, 2. */
+  function countTop(max, fmt) { var t = niceMax(max); return fmt === num ? Math.max(4, Math.ceil(t / 4) * 4) : t; }
+  function granName(g) { return g === 'day' ? tr('by day', 'يوميًا') : g === 'week' ? tr('by week', 'أسبوعيًا') : tr('by month', 'شهريًا'); }
+  /* Time buckets for a range: daily up to 45 days, weekly up to 120 days, monthly beyond; stops at today. */
+  function buckets(range) {
+    var from = range[0], to = clip(range)[1], span = diffDays(from, to) + 1, g = span <= 45 ? 'day' : span <= 120 ? 'week' : 'month', keys = [], cur, i;
+    function keyOf(iso) { iso = String(iso).slice(0, 10); return g === 'day' ? iso : g === 'week' ? weekStartOf(iso) : iso.slice(0, 7); }
+    if (to < from) { return { keys: [], gran: g, keyOf: keyOf }; }
+    if (g === 'month') { keys = monthList(from, to); } else { cur = keyOf(from); for (i = 0; i < 200 && cur <= to; i++) { keys.push(cur); cur = addDays(cur, g === 'day' ? 1 : 7); } }
+    return { keys: keys, gran: g, keyOf: keyOf };
+  }
+  /* Grouped rows (one per date) folded into buckets: rows[dateField], rows[valField]. */
+  function series(range, rows, dateF, valF) {
+    var B = buckets(range), d = {}; B.keys.forEach(function (k) { d[k] = { v: 0, n: 0 }; });
+    (rows || []).forEach(function (r) { var k = B.keyOf(r[dateF]); if (d[k]) { d[k].v += valF ? (+r[valF] || 0) : 1; d[k].n += +r.n || (valF ? 0 : 1); } });
+    B.d = d; return B;
+  }
+  function legend(series) { return '<div class="dms-legend">' + series.map(function (s) { return '<span><i style="--dms-c:' + s.color + '"></i>' + esc(s.label) + '</span>'; }).join('') + '</div>'; }
+  /* Column chart. ser = [{label, color, val: function (key) {}}]; fmt formats values (default money). */
+  function barChart(keys, gran, ser, fmt, extraTip, emptyTxt) {
+    if (!Array.isArray(ser)) { ser = [ser]; }
+    fmt = fmt || moneyFull; var max = 0;
+    keys.forEach(function (k) { ser.forEach(function (s) { max = Math.max(max, s.val(k) || 0); }); });
+    if (!keys.length || !max) { return empty(emptyTxt || tr('Nothing in this range.', 'لا شيء في هذا النطاق.')); }
+    var top = countTop(max, fmt), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, gran) + ser.map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k) || 0); }).join('') + (extraTip ? extraTip(k) : '');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '">' + ser.map(function (s) { var v = s.val(k) || 0; return '<i class="dms-bar' + (v ? '' : ' dms-bar-0') + '" style="height:' + (v / top * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i>'; }).join('') + '</div>';
+    }).join('');
+    var aria = ser.map(function (s) { return s.label + ': ' + keys.map(function (k) { return bucketLabel(k, gran, true) + ' ' + fmt(s.val(k) || 0); }).join(', '); }).join('; ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + (ser.length > 1 ? legend(ser) : '');
+  }
+  /* Line chart for balances (may go negative). ser = [{label, color, val(key), dash?}]; the first series is the main line. */
+  function lineChart(keys, gran, ser, fmt) {
+    fmt = fmt || moneyFull; var all = [];
+    keys.forEach(function (k) { ser.forEach(function (s) { var v = s.val(k); if (v != null) { all.push(v); } }); });
+    if (!keys.length || !all.length) { return empty(); }
+    var mx = Math.max.apply(null, all), mn = Math.min.apply(null, all), hi = mx > 0 ? niceMax(mx) : 0, lo = mn < 0 ? -niceMax(-mn) : 0;
+    if (hi === lo) { hi = lo + 1; }
+    var y = function (v) { return (100 - (v - lo) / (hi - lo) * 100).toFixed(2); }, x = function (i) { return (keys.length < 2 ? 50 : i / (keys.length - 1) * 100).toFixed(2); };
+    var ticks = [0, 0.25, 0.5, 0.75, 1].map(function (t) { return lo + (hi - lo) * t; });
+    var paths = ser.map(function (s) { var pts = keys.map(function (k, i) { var v = s.val(k); return v == null ? null : x(i) + ',' + y(v); }).filter(Boolean); return '<polyline class="dms-line' + (s.dash ? ' dms-line-ref' : '') + '" style="--dms-c:' + s.color + '" points="' + pts.join(' ') + '"/>'; }).join('');
+    var zero = lo < 0 ? '<i class="dms-gl dms-gl-0" style="bottom:' + ((0 - lo) / (hi - lo) * 100).toFixed(2) + '%"></i>' : '';
+    var hits = keys.map(function (k) { return '<div class="dms-col dms-col-hit" data-tip="' + esc(bucketLabel(k, gran) + ser.map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k)); }).join('')) + '"></div>'; }).join('');
+    var aria = ser[0].label + ': ' + keys.map(function (k) { return bucketLabel(k, gran, true) + ' ' + fmt(ser[0].val(k)); }).join(', ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (v, i) { return '<span style="bottom:' + i * 25 + '%">' + axisFmt(v) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + [0, 25, 50, 75, 100].map(function (b) { return '<i class="dms-gl" style="bottom:' + b + '%"></i>'; }).join('') + zero + '<svg class="dms-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">' + paths + '</svg><div class="dms-cols">' + hits + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + (ser.length > 1 ? legend(ser) : '');
+  }
+  /* Stacked columns (one bar per key, segments per series). */
+  function stackChart(keys, gran, ser, fmt) {
+    fmt = fmt || num; var tot = {}, max = 0;
+    keys.forEach(function (k) { tot[k] = sum(ser, function (s) { return s.val(k) || 0; }); max = Math.max(max, tot[k]); });
+    if (!keys.length || !max) { return empty(); }
+    var top = countTop(max, fmt), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, gran) + ser.filter(function (s) { return s.val(k); }).map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k)); }).join('');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '"><span class="dms-stackbar" style="height:' + (tot[k] / top * 100).toFixed(2) + '%">' + ser.map(function (s) { var v = s.val(k) || 0; return v ? '<i style="flex:' + v + ' 0 0;background:' + s.color + '"></i>' : ''; }).join('') + '</span></div>';
+    }).join('');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(ser.map(function (s) { return s.label; }).join(', ')) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + legend(ser);
+  }
+  function fitChartLabels() {
+    HOST.querySelectorAll('.dms-xaxis').forEach(function (axis) {
+      var labels = axis.querySelectorAll('span'), widest = 0;
+      labels.forEach(function (label) { var range = document.createRange(); range.selectNodeContents(label); widest = Math.max(widest, range.getBoundingClientRect().width); });
+      var slots = Math.max(1, Math.min(8, Math.floor(axis.clientWidth / (widest + 16)))), step = Math.max(1, Math.ceil(labels.length / slots));
+      labels.forEach(function (label, i) { label.style.visibility = i % step ? 'hidden' : 'visible'; });
+    });
+  }
+  /* Share rows: label · bar · value · %. items = [{label, value, color, act?, tip?}]; ordered=true keeps the given order. */
+  function shareList(items, head, fmt, ordered) {
+    fmt = fmt || num; var tot = sum(items, function (s) { return s.value; }), rows = items.filter(function (s) { return s.value; });
+    if (!ordered) { rows = rows.slice().sort(function (a, b) { return b.value - a.value; }); }
+    if (!tot) { return empty(); }
+    return (head ? '<div class="dms-share-t">' + head + '</div>' : '') + rows.map(function (s) {
+      var tip = s.tip || (s.label + ': ' + fmt(s.value) + ' (' + pct(s.value, tot) + ')');
+      var inner = '<span class="dms-share-l"><i class="dms-dot" style="--dms-c:' + s.color + '"></i>' + bdi(s.label) + '</span><span class="dms-share-b"><i style="width:' + (s.value / tot * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i></span>' +
+        '<span class="dms-num">' + esc(fmt(s.value)) + '</span><span class="dms-share-p dms-num">' + pct(s.value, tot, 0) + '</span>';
+      return s.act ? '<button type="button" class="dms-share dms-share-btn" data-act="kpi" data-v="' + esc(s.act) + '" data-tip="' + esc(tip) + '">' + inner + '</button>' : '<div class="dms-share" data-tip="' + esc(tip) + '">' + inner + '</div>';
+    }).join('');
+  }
+  /* Ranked horizontal bars: items = [{label, value, color?, act?}]. */
+  function hbars(items, fmt, color) {
+    if (!items.length) { return empty(); }
+    var max = Math.max.apply(null, items.map(function (i) { return Math.abs(i.value); }).concat([1])); fmt = fmt || num;
+    return items.map(function (i) {
+      var inner = '<span class="dms-split-l">' + bdi(i.label) + '</span><span class="dms-split"><i style="width:' + (Math.abs(i.value) / max * 100).toFixed(2) + '%;background:' + (i.color || color || 'var(--dms-royal)') + '"></i></span><span class="dms-num dms-split-v">' + esc(fmt(i.value)) + '</span>';
+      var tip = ' data-tip="' + esc(i.label + ': ' + fmt(i.value)) + '"';
+      return i.act ? '<button type="button" class="dms-stack-row dms-split-row" data-act="kpi" data-v="' + esc(i.act) + '"' + tip + '>' + inner + '</button>' : '<div class="dms-stack-row dms-split-row"' + tip + '>' + inner + '</div>';
+    }).join('');
+  }
+  /* Two-part bars ranked by total: items = [{label, total, part, act?}]; parts = [{label, color}] for part and remainder. */
+  function splitBars(items, parts, fmt) {
+    if (!items.length) { return empty(); }
+    fmt = fmt || money; var max = Math.max.apply(null, items.map(function (i) { return i.total; }).concat([1]));
+    return items.map(function (i) {
+      var tip = i.label + '\n' + parts[0].label + ': ' + fmt(i.part) + '\n' + parts[1].label + ': ' + fmt(i.total - i.part);
+      var bar = '<span class="dms-split"><i style="width:' + (i.part / max * 100).toFixed(2) + '%;background:' + parts[0].color + '"></i><i style="width:' + (Math.max(0, i.total - i.part) / max * 100).toFixed(2) + '%;background:' + parts[1].color + '"></i></span>';
+      var inner = '<span class="dms-split-l">' + bdi(i.label) + '</span>' + bar + '<span class="dms-num dms-split-v">' + esc(fmt(i.total)) + '</span>';
+      return i.act ? '<button type="button" class="dms-stack-row dms-split-row" data-act="kpi" data-v="' + esc(i.act) + '" data-tip="' + esc(tip) + '">' + inner + '</button>' : '<div class="dms-stack-row dms-split-row" data-tip="' + esc(tip) + '">' + inner + '</div>';
+    }).join('') + legend(parts);
+  }
+  function mixBar(segs) {
+    var tot = sum(segs, function (s) { return s.value; }); if (!tot) { return ''; }
+    return '<span class="dms-mix"><span class="dms-mix-b">' + segs.map(function (s) { return s.value ? '<i style="width:' + (s.value / tot * 100).toFixed(2) + '%;background:' + s.color + '" data-tip="' + esc(s.label + ': ' + (s.fmt || num)(s.value)) + '"></i>' : ''; }).join('') + '</span></span>';
+  }
+  var PAL = ['var(--dms-royal)', '#6b8be0', '#1f8a5b', '#d97a1e', '#8a97a8', '#a3b4ef', '#c2412d', '#d6a419', '#4b5a6e', '#b6bfca'];
+
+  /* ---------- tables: client-side (search / sort / pagination / CSV) and server-side (paginated, sortable, CSV) ---------- */
+  var TBL = {}, TS = {}, SS = {}, focusId = null;
+  function regTable(spec) { TBL[spec.id] = spec; return '<div class="dms-tbl" data-tbl="' + esc(spec.id) + '"></div>'; }
+  function fillTables(scope) { var els = (scope || HOST).querySelectorAll('[data-tbl]'); for (var i = 0; i < els.length; i++) { fillTable(els[i].getAttribute('data-tbl'), els[i]); } }
+  function clientRows(sp, st) {
+    var rows = sp.rows, q = st.q.trim().toLowerCase();
+    if (q) { rows = rows.filter(function (r) { return sp.text(r).toLowerCase().indexOf(q) >= 0; }); }
+    if (st.sk) { var col = sp.cols.filter(function (c) { return c.k === st.sk; })[0]; if (col && col.s) { rows = rows.slice().sort(function (a, b) { var x = col.s(a), y = col.s(b); return (x < y ? -1 : x > y ? 1 : 0) * st.dir; }); } }
+    return rows;
+  }
+  function thead(sp, sk, dir, act, id) {
+    return '<thead><tr>' + sp.cols.map(function (c) {
+      var key = act === 'ssort' ? c.sf : c.k, can = act === 'ssort' ? !!c.sf : !!c.s, on = can && sk === key;
+      return '<th class="' + (can ? 'dms-th-s' : '') + (c.num ? ' dms-th-n' : '') + '"' + (can ? ' data-act="' + act + '" data-id="' + esc(id) + '" data-v="' + esc(key) + '" tabindex="0" aria-sort="' + (on ? (dir > 0 ? 'ascending' : 'descending') : 'none') + '"' : '') + '>' + esc(c.h) + (on ? (dir > 0 ? ' ▲' : ' ▼') : '') + '</th>';
+    }).join('') + '</tr></thead>';
+  }
+  function tcells(sp, r) { return '<tr>' + sp.cols.map(function (c) { return '<td' + (c.num ? ' class="dms-td-n"' : '') + '>' + c.r(r) + '</td>'; }).join('') + '</tr>'; }
+  function fillTable(id, el) {
+    var sp = TBL[id]; el = el || HOST.querySelector('[data-tbl="' + id + '"]'); if (!sp || !el) { return; }
+    if (sp.server) { return fillServer(id, el); }
+    var st = TS[id] || (TS[id] = { q: '', page: 1, sk: sp.sk || '', dir: sp.dir || 1 }), rows = clientRows(sp, st);
+    var ps = sp.pageSize || CFG.pageSize, pages = Math.max(1, Math.ceil(rows.length / ps)); if (st.page > pages) { st.page = pages; }
+    var slice = rows.slice((st.page - 1) * ps, st.page * ps);
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(tr('Search this table…', 'ابحث في الجدول…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search this table', 'ابحث في الجدول')) + '"><span class="dms-tb-r"><span class="dms-sm">' + num(rows.length) + ' ' + esc(rows.length === 1 ? tr('row', 'سجل') : tr('rows', 'سجل')) + (st.q ? ' / ' + num(sp.rows.length) : '') + '</span>' +
+      (rows.length ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csv" data-id="' + esc(id) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    if (sp.notice) { h += sp.notice; }
+    if (!rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
+    h += '<div class="dms-tablewrap"><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'tsort', id) + '<tbody>' + slice.map(function (r) { return tcells(sp, r); }).join('') + '</tbody>' + (sp.foot ? '<tfoot>' + sp.foot(rows) + '</tfoot>' : '') + '</table></div>';
+    h += pager(id, 'tpage', st.page, pages, rows.length, ps);
+    el.innerHTML = h; restoreFocus(el, id);
+  }
+  function pager(id, act, pg, pages, total, ps) {
+    if (total <= ps) { return ''; }
+    return '<div class="dms-pager"><span>' + esc(tr('Showing', 'عرض')) + ' ' + num((pg - 1) * ps + 1) + '–' + num(Math.min(pg * ps, total)) + ' / ' + num(total) + '</span><span><button type="button" class="dms-btn" data-act="' + act + '" data-id="' + esc(id) + '" data-v="-1"' + (pg <= 1 ? ' disabled' : '') + '>‹ ' + esc(tr('Previous', 'السابق')) + '</button> ' +
+      esc(tr('Page', 'صفحة')) + ' ' + pg + ' ' + esc(tr('of', 'من')) + ' ' + pages + ' <button type="button" class="dms-btn" data-act="' + act + '" data-id="' + esc(id) + '" data-v="1"' + (pg >= pages ? ' disabled' : '') + '>' + esc(tr('Next', 'التالي')) + ' ›</button></span></div>';
+  }
+  function restoreFocus(el, id) { if (focusId === id) { var i = el.querySelector('[data-tq]'); if (i) { i.focus(); try { i.setSelectionRange(i.value.length, i.value.length); } catch (e) { /* ignore */ } } } }
+  function srvArgs(sp, st) {
+    var q = st.q.trim(), base = { doctype: sp.dt, filters: sp.filters };
+    if (sp.parent) { base.parent = sp.parent; }
+    if (q && sp.search) { base.or_filters = sp.search.map(function (f) { return [sp.dt, f, 'like', '%' + q + '%']; }); }
+    return base;
+  }
+  function srvOrder(sp, st) { return st.sk ? st.sk + (st.dir > 0 ? ' asc' : ' desc') : sp.order; }
+  function fillServer(id, el) {
+    var sp = TBL[id], st = SS[id] || (SS[id] = { q: '', page: 1, total: null, rows: null, loading: false, err: null, req: 0, sk: '', dir: 1 });
+    if (!st.dirty && st.rows && st.key === JSON.stringify(sp.filters)) { return paintServer(id, el); }
+    st.dirty = false; st.key = JSON.stringify(sp.filters);
+    var req = ++st.req; st.loading = true; st.err = null;
+    var ps = sp.pageSize || CFG.modalPage, base = srvArgs(sp, st);
+    paintServer(id, el);
+    var chk = function () { return !destroyed && SS[id] && SS[id].req === req; };
+    if (sp.loader) { sp.loader(st.page - 1, ps, st.q.trim(), srvOrder(sp, st)).then(function (res) { if (!chk()) { return; } st.total = res.total; st.rows = res.rows || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); }, function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } }); return; }
+    var cnt = getList(Object.assign({}, base, { fields: ['count(name) as n'], limit_page_length: 1 }), chk).then(function (r) { return r ? +one(r).n || 0 : null; });
+    var rows = getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: (st.page - 1) * ps, limit_page_length: ps }), chk);
+    Promise.all([cnt, rows]).then(function (res) {
+      if (!chk()) { return; } st.total = res[0]; st.rows = res[1] || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]'));
+    }).catch(function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } });
+  }
+  function paintServer(id, el) {
+    if (!el) { return; } var sp = TBL[id], st = SS[id], ps = sp.pageSize || CFG.modalPage;
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(sp.searchHint || tr('Search…', 'بحث…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search', 'بحث')) + '"><span class="dms-tb-r"><span class="dms-sm">' + (st.total == null ? '' : num(st.total) + ' ' + esc(st.total === 1 ? tr('record', 'سجل') : tr('records', 'سجل'))) + '</span>' +
+      (st.total ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csvall" data-id="' + esc(id) + '" title="' + esc(tr('Export up to 5,000 rows', 'تصدير حتى 5,000 سجل')) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    if (st.err) { el.innerHTML = h + alertBox('err', esc(st.err === 'perm' ? tr('Permission denied for your user.', 'لا تملك صلاحية القراءة.') : tr('Technical error while reading this list.', 'خطأ تقني أثناء قراءة القائمة.')) + ' <button type="button" class="dms-linkbtn" data-act="sretry" data-id="' + esc(id) + '">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>'); return restoreFocus(el, id); }
+    if (st.loading && !st.rows) { el.innerHTML = h + '<div class="dms-skel"></div>'; return restoreFocus(el, id); }
+    if (!st.rows || !st.rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
+    var pages = Math.max(1, Math.ceil((st.total || 0) / ps));
+    h += '<div class="dms-tablewrap" style="opacity:' + (st.loading ? .55 : 1) + '"' + (st.loading ? ' aria-busy="true"' : '') + '><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'ssort', id) + '<tbody>' + st.rows.map(function (r) { return tcells(sp, r); }).join('') + '</tbody></table></div>' + pager(id, 'spage', st.page, pages, st.total || 0, ps);
+    el.innerHTML = h; restoreFocus(el, id);
+  }
+  function csvCell(v) { v = v == null ? '' : String(v); if (/^[=+\-@\t\r]/.test(v) && !/^-?[\d.,]+$/.test(v)) { v = "'" + v; } return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  function download(name, sp, rows) {
+    var cols = sp.cols.filter(function (c) { return c.c; }), lines = [cols.map(function (c) { return csvCell(c.h); }).join(',')].concat(rows.map(function (r) { return cols.map(function (c) { return csvCell(c.c(r)); }).join(','); }));
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+    a.download = String(name).replace(/[^\w-]+/g, '_') + '_' + TODAY + '.csv'; HOST.appendChild(a); a.click(); later(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+  function exportServer(id) {
+    var sp = TBL[id], st = SS[id], out = [], step = 500, base = srvArgs(sp, st), g = GEN;
+    if (sp.loader) { toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…')); var acc = [], pg = function (p) { return sp.loader(p, 500, st.q.trim(), srvOrder(sp, st)).then(function (res) { acc = acc.concat(res.rows || []); return (res.rows || []).length === 500 && acc.length < 5000 ? pg(p + 1) : acc; }); }; pg(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); }); return; }
+    function next(s) {
+      return getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: s, limit_page_length: step }), function () { return g === GEN; }).then(function (r) {
+        out = out.concat(r || []); return (r && r.length === step && out.length < 5000) ? next(s + step) : out;
+      });
+    }
+    toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…'));
+    next(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); });
+  }
+  function toast(msg, bad) { var e = document.createElement('div'); e.className = 'dms-toast' + (bad ? ' dms-toast-err' : ''); e.setAttribute('role', 'status'); e.textContent = msg; HOST.appendChild(e); later(function () { e.remove(); }, 3500); }
+  /* common cells */
+  function dtc(v) { return v ? '<span class="dms-num">' + esc(String(v).slice(0, 10)) + '</span>' : '<span class="dms-sm">—</span>'; }
+  function who(v) { return v ? bdi(v) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>'; }
+  function txt(v) { return v ? bdi(v) : '<span class="dms-sm">—</span>'; }
+  function amc(v) { return v == null || v === '' ? '<span class="dms-sm">—</span>' : '<span class="dms-num">' + esc(amt(v)) + '</span>'; }
+  function overdueTag(due) { var d = diffDays(String(due || TODAY).slice(0, 10), TODAY); return d > 0 ? '<span class="dms-days ' + (d > 90 ? 'dms-days-bad' : 'dms-days-warn') + '">' + num(d) + '</span>' : '<span class="dms-sm">—</span>'; }
+  function col(h, f, o) { o = o || {}; return Object.assign({ h: h, sf: o.sort === false ? undefined : f, r: function (x) { return o.fmt ? o.fmt(x[f], x) : txt(x[f]); }, c: function (x) { return x[f]; } }, o); }
+  function linkCol(h, dt, f, labelF) { return { h: h, sf: f, r: function (x) { return docLink(typeof dt === 'function' ? dt(x) : dt, x[f], labelF ? x[labelF] || x[f] : x[f]); }, c: function (x) { return x[f]; } }; }
+
+  /* ---------- actions pending ---------- */
+  var PRIO = { high: ['High', 'عالية'], med: ['Medium', 'متوسطة'], low: ['Low', 'منخفضة'] };
+  function score(p, amount, age) { return { high: 300, med: 200, low: 100 }[p] + Math.min(40, Math.log(1 + Math.abs(amount || 0)) / Math.LN10 * 6) + Math.min(20, (age || 0) / 10); }
+  /* Server specs ({id, server:true, dt, filters, fields, order, it(row) → item}) load count + 6 most urgent rows each. */
+  function loadActions(specs, key) {
+    run(key || 'act', function (chk) {
+      return Promise.all(specs.filter(function (s) { return s.server; }).map(function (s) {
+        var c = getList({ doctype: s.dt, fields: ['count(name) as n'], filters: s.filters, limit_page_length: 1 }, chk).then(function (r) { return +one(r).n || 0; }, function (e) { return 'ERR:' + errKind(e); });
+        var l = (s.rank ? fetchAll({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order }, chk, 2000) : getList({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order, limit_page_length: 6 }, chk)).then(function (r) { return r || []; }, function (e) { return 'ERR:' + errKind(e); });
+        return Promise.all([c, l]).then(function (x) { return { id: s.id, count: typeof x[1] === 'string' ? x[1] : x[0], rows: Array.isArray(x[1]) ? x[1] : [] }; });
+      })).then(function (res) { var o = {}; res.forEach(function (x) { o[x.id] = x; }); return o; });
+    });
+  }
+  /* client: {id: {rows, item}} for client specs, null while their sources load, or 'ERR:kind'. */
+  function actModel(specs, key, client) {
+    var counts = {}, items = [], A = D[key || 'act'], AE = D[(key || 'act') + 'Err'];
+    specs.forEach(function (s) {
+      if (s.client) {
+        var c = client == null ? null : typeof client === 'string' ? client : client[s.id];
+        if (typeof c === 'string') { counts[s.id] = c; }
+        else if (c) { counts[s.id] = c.count != null ? c.count : c.rows.length; c.rows.slice(0, 6).forEach(function (r) { items.push(c.item(r)); }); }
+        return;
+      }
+      if (AE) { counts[s.id] = 'ERR:' + AE; return; }
+      var x = A && A[s.id]; if (!x) { return; }
+      counts[s.id] = x.count;
+      x.rows.forEach(function (r) { var it = s.it(r); it.dt = it.dt || s.dt; it.name = it.name || r.name; items.push(it); });
+    });
+    items.sort(function (a, b) { return b.score - a.score; });
+    var seen = {}; items = items.filter(function (it) { var k = it.dt + '|' + it.name; if (seen[k]) { return false; } seen[k] = 1; return true; });   /* one row per record, under its most urgent category */
+    return { specs: specs, counts: counts, items: items, ready: specs.every(function (s) { return counts[s.id] !== undefined; }) };
+  }
+  function pendingTotal(AM) {
+    if (!AM) { return null; }
+    var t = 0, any = false; Object.keys(AM.counts).forEach(function (k) { var c = AM.counts[k]; if (typeof c === 'number') { t += c; any = true; } });
+    return any ? t : null;
+  }
+  function dtLabel(dt) { var L = APP.dtLabels && APP.dtLabels[dt]; return L ? tr(L[0], L[1]) : dt; }
+  function arow(it) {
+    return '<a class="dms-arow" href="' + esc(it.href || docUrl(it.dt, it.name)) + '" target="_blank" rel="noopener noreferrer">' +
+      '<span class="dms-prio dms-prio-' + it.p + '">' + esc(tr(PRIO[it.p][0], PRIO[it.p][1])) + '</span>' +
+      '<span class="dms-arow-main"><span class="dms-arow-t"><bdi>' + esc(it.title || it.name) + '</bdi><span class="dms-arow-dt">' + esc(dtLabel(it.dt)) + '</span></span><span class="dms-arow-d">' + bdi(it.desc || '') + '</span></span>' +
+      '<span class="dms-arow-who">' + (it.who ? bdi(it.who) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>') + '</span>' +
+      '<span class="dms-arow-due dms-tone-' + (it.tone || 'n') + '">' + esc(it.due || '') + '</span><span class="dms-sr"> (' + esc(tr('opens in a new tab', 'يفتح في علامة تبويب جديدة')) + ')</span></a>';
+  }
+  function drillId(s) { return s.drill || ((s.client ? 'cli:' : 'srv:') + s.id); }
+  function catBtn(s, c) {
+    var err = typeof c === 'string', inner = '<span class="dms-acat-t">' + esc(s.short) + '</span><b class="dms-num">' + (err || c == null ? '—' : num(c)) + '</b>';
+    return (!err && c) ? '<button type="button" class="dms-acat" data-act="kpi" data-v="' + esc(drillId(s)) + '" title="' + esc(s.title + ' — ' + tr('view all', 'عرض الكل')) + '">' + inner + '</button>'
+      : '<div class="dms-acat dms-acat-off" title="' + esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.title) + '">' + inner + '</div>';
+  }
+  function actionsPanel(AM) {
+    var tot = pendingTotal(AM);
+    var h = '<section class="dms-panelbox dms-actpanel" id="dms-pending" tabindex="-1" aria-labelledby="dms-pending-h"><div class="dms-ph"><h3 class="dms-h3" id="dms-pending-h">' + esc(tr('Actions pending', 'الإجراءات المعلقة')) +
+      (tot != null ? ' <span class="dms-h3-n dms-num">' + num(tot) + '</span>' : '') + '</h3><span class="dms-ph-meta">' + esc(tr('As of today · most urgent first', 'حتى اليوم · الأكثر إلحاحًا أولًا')) + '</span>' +
+      (tab !== 'actions' && APP.tabs.some(function (x) { return x.id === 'actions'; }) ? '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="goto:actions">' + esc(tr('View all', 'عرض الكل')) + '</button>' : '') + '</div>';
+    if (!AM) { return h + '<div class="dms-arows" aria-busy="true">' + skel(6, 'dms-skel-row') + '</div></section>'; }
+    var known = AM.specs.filter(function (s) { return AM.counts[s.id] !== undefined; });
+    if (!known.length) { return h + '<div class="dms-arows" aria-busy="true">' + skel(6, 'dms-skel-row') + '</div></section>'; }
+    var errs = known.filter(function (s) { return typeof AM.counts[s.id] === 'string'; });
+    if (AM.ready && errs.length === AM.specs.length) { return h + alertBox('err', esc(tr('Pending actions could not be loaded.', 'تعذر تحميل الإجراءات المعلقة.')) + ' <button type="button" class="dms-linkbtn" data-act="refresh">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>') + '</section>'; }
+    var items = AM.items.slice(0, CFG.actRows || 7);
+    h += items.length ? '<div class="dms-arows">' + items.map(arow).join('') + '</div>' : (AM.ready ? '<div class="dms-empty dms-empty-sm">' + esc(tr('Nothing pending for this selection.', 'لا توجد إجراءات معلقة لهذا الاختيار.')) + '</div>' : '<div class="dms-arows" aria-busy="true">' + skel(4, 'dms-skel-row') + '</div>');
+    h += '<div class="dms-acats">' + AM.specs.map(function (s) { return catBtn(s, AM.counts[s.id]); }).join('') + '</div>';
+    if (errs.length) { h += note(esc(tr('Could not load: ', 'تعذر التحميل: ') + errs.map(function (s) { return s.short; }).join(', '))); }
+    return h + '</section>';
+  }
+  function actionsTab(AM, info) {
+    var h = alertBox('info', esc(info || tr('Action lists are as of today and not filtered by the period. They follow the filters where the source supports them.', 'قوائم الإجراءات حتى اليوم وغير مرتبطة بالفترة، وتتبع المرشحات حيثما يدعمها المصدر.')));
+    h += kpis((AM ? AM.specs : []).map(function (s) {
+      var c = AM.counts[s.id], err = typeof c === 'string';
+      return kpi({ label: s.title, val: c === undefined ? '…' : err ? '—' : num(c), sub: esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.why), act: (!err && c) ? drillId(s) : null });
+    }));
+    return h + actionsPanel(AM);
   }
 
-  async function viewOverview() {
-    const [mr, po] = await Promise.all([load('mr'), load('po')]);
-    const mrOpen = mr.filter(P.mrOpen), mrOver = mr.filter(P.mrOver), poOpen = po.filter(P.poOpen), poOver = po.filter(P.poOver);
-    const k = (id, lk, v, cls, go, sub, ds) => (errOf(ds) ? { id, label: t(lk), value: '—', cls, go, sub: errOf(ds).perm ? naText(ds) : t('err_load') + ' ' + dtn(DS[ds].dt), na: true } : { id, label: t(lk), value: v, cls, go, sub: sub ? t(sub) : '' });
-    const kpis = [k('mo', 'k_ov_mr_open', nf(mrOpen.length), 'warn', ['mr', 'open'], 'sub_mr_open', 'mr'), k('mv', 'k_ov_mr_over', nf(mrOver.length), 'bad', ['mr', 'over'], 'sub_mr_over', 'mr'),
-      k('po', 'k_ov_po_open', nf(poOpen.length), 'warn', ['po', 'open'], 'sub_po_open', 'po'), k('pv', 'k_ov_po_over', nf(poOver.length), 'bad', ['po', 'over'], 'sub_po_over', 'po'), k('pval', 'k_ov_val', nf(sum(po, 'base_grand_total')), 'ok', ['po', 'val'], '', 'po')];
-    const aging = chartHtml('aging', mr, {});
-    const funnel = hbars(t('c_funnel'), [{ l: t('tab_mr'), v: mr.length }, { l: t('tab_po'), v: po.length }]);
-    const att = [].concat(mrOver.map((r) => ({ name: r.name, _dt: r._dt, due: r.schedule_date, late: r._late, status: r.status })),
-      poOver.map((r) => ({ name: r.name, _dt: r._dt, due: r.schedule_date, late: r._late, status: r.status, supplier_name: r.supplier_name }))).sort((a, b) => b.late - a.late);
-    return { kpis, charts: funnel + aging + donut(t('c_status') + ' – ' + t('tab_po'), countBy(po, 'status'), 'data-nav-po'),
-      table: { title: t('attention'), dt: null, rows: att, cols: [{ k: 'name', lk: 'doc', type: 'link' }, { k: '_dt', lk: 'type', type: 'dt' }, { k: 'supplier_name', lk: 'supplier', type: 'text' }, { k: 'due', lk: 'due', type: 'date' }, { k: 'late', lk: 'days_late', type: 'num' }, { k: 'status', lk: 'status', type: 'status' }] }, noStatus: true };
+  /* ---------- drill-downs (overlay) ---------- */
+  var OVL = null;
+  function openDrill(id) {
+    if (id.indexOf('goto:') === 0) { goTab(id.slice(5)); return; }
+    var r = null;
+    if (id.indexOf('srv:') === 0 && APP.actSpecs) {
+      var s = APP.actSpecs().filter(function (x) { return x.id === id.slice(4); })[0];
+      if (s && s.table) { delete SS.drill; r = { title: s.title, sub: s.why, spec: Object.assign({ id: 'drill', server: true, dt: s.dt, filters: s.filters, order: s.order, file: s.id }, s.table()) }; }
+    }
+    if (!r && APP.drill) { r = APP.drill(id); }
+    if (!r || (!r.spec && r.body == null)) { return; }
+    if (r.spec) { r.spec.id = 'drill'; if (!r.spec.server && !r.spec.pageSize) { r.spec.pageSize = CFG.modalPage; } }
+    delete SS.drill; delete TS.drill;
+    var opener = OVL ? OVL.opener : activeEl();
+    OVL = Object.assign(r, { id: id, prev: OVL && r.stack !== false ? OVL : null, opener: opener, openerKey: OVL ? OVL.openerKey : opener && opener.getAttribute && opener.getAttribute('data-v') }); renderOverlay();
+  }
+  function overlayHTML() {
+    if (!OVL) { return ''; }
+    var link = OVL.link ? ' ' + docLink(OVL.link[0], OVL.link[1], OVL.link[2]) : '';
+    return '<div class="dms-overlay" data-act="ovbg"><div class="dms-modal" role="dialog" aria-modal="true" aria-labelledby="dms-dialog-title"><div class="dms-dhead"><div>' + (OVL.prev ? '<button type="button" class="dms-linkbtn" data-act="ovback">‹ ' + esc(tr('Back', 'رجوع')) + '</button>' : '') + '<h3 id="dms-dialog-title">' + esc(OVL.title) + '</h3>' + (OVL.sub || link ? '<p class="dms-sm">' + esc(OVL.sub || '') + link + '</p>' : '') + '</div><button type="button" class="dms-x" data-act="closeov" aria-label="' + esc(tr('Close', 'إغلاق')) + '">×</button></div>' + (OVL.body || '') + (OVL.spec ? regTable(OVL.spec) : '') + '</div></div>';
+  }
+  function renderOverlay() { var el = $('[data-ref="overlay"]'); if (!el) { return; } var app = $('.dms-app'); if (app) { app.inert = !!OVL; } if (!OVL) { Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { delete TBL[k]; } }); } else { delete TBL.drill; } el.innerHTML = overlayHTML(); fillTables(el); var x = el.querySelector('.dms-x'); if (x) { x.focus(); } }
+  function closeOverlay() {
+    var previous = OVL; OVL = null; renderOverlay(); delete SS.drill; delete TS.drill;
+    if (!previous) { return; }
+    var opener = previous.opener;
+    if (!opener || !opener.isConnected) { opener = Array.prototype.find.call(HOST.querySelectorAll('[data-act="kpi"]'), function (el) { return el.getAttribute('data-v') === previous.openerKey; }); }
+    if (opener) { opener.focus({ preventScroll: true }); }
   }
 
-  async function viewSup() {
-    const [sup, po] = await Promise.all([load('sup'), load('po')]);
-    const m = {};
-    const blank = (name, sname, grp, dis) => ({ name, supplier_name: sname, supplier_group: grp, disabled: dis, orders: 0, pv: 0, over: 0, recv: [], _dt: 'Supplier' });
-    sup.forEach((s) => (m[s.name] = blank(s.name, s.supplier_name || s.name, s.supplier_group, s.disabled)));
-    const ensure = (r) => m[r.supplier] || (m[r.supplier] = blank(r.supplier, r.supplier_name || r.supplier, '', 0));
-    po.forEach((r) => { const o = ensure(r); o.orders++; o.pv += parseFloat(r.base_grand_total) || 0; if (P.poOver(r)) o.over++; if (r.docstatus === 1) o.recv.push(r.per_received || 0); });
-    const rows = Object.values(m).map((o) => { o.avg_recv = o.recv.length ? o.recv.reduce((a, b) => a + b, 0) / o.recv.length : 0; return o; });
-    const scoped = rows.filter((r) => !S.q || (r.supplier_name + ' ' + r.name + ' ' + (r.supplier_group || '')).toLowerCase().includes(S.q.toLowerCase()));
-    const T = { active: (r) => !r.disabled, engaged: (r) => r.orders > 0, late: (r) => r.over > 0 };
-    const na = (ds) => (errOf(ds) ? { value: '—', sub: errOf(ds).perm ? naText(ds) : t('err_load') + ' ' + dtn(DS[ds].dt), na: true } : null);
-    const kpis = [Object.assign({ id: 'active', label: t('k_sup_active'), value: nf(scoped.filter(T.active).length), cls: 'ok' }, na('sup') || {}), Object.assign({ id: 'engaged', label: t('k_sup_engaged'), value: nf(scoped.filter(T.engaged).length) }, na('po') || {}),
-      Object.assign({ id: 'late', label: t('k_sup_late'), value: nf(scoped.filter(T.late).length), cls: 'bad' }, na('po') || {})];
-    let shown = scoped.filter(T.engaged); if (S.kpi && T[S.kpi]) shown = scoped.filter(T[S.kpi]);
-    const topVal = scoped.slice().sort((a, b) => b.pv - a.pv).slice(0, 8).filter((r) => r.pv > 0).map((r) => ({ l: r.supplier_name, v: r.pv, attr: `data-q="${esc(r.supplier_name)}"` }));
-    const lateTop = scoped.filter(T.late).sort((a, b) => b.over - a.over).slice(0, 8).map((r) => ({ l: r.supplier_name, v: r.over, attr: `data-q="${esc(r.supplier_name)}"` }));
-    const erp = () => {
-      if (S.kpi === 'active') return { dt: 'Supplier', f: { disabled: 0 } };
-      if (S.kpi === 'late') return { dt: 'Purchase Order', f: Object.assign(erpFilters('po'), C.po.kpis.find((x) => x.id === 'over').f) };
-      if (S.kpi === 'engaged') return { dt: 'Purchase Order', f: erpFilters('po') };
-      const names = shown.map((r) => r.name);
-      if (names.length && names.length <= 150) return { dt: 'Supplier', f: { name: ['in', names] } };
-      return { dt: 'Purchase Order', f: erpFilters('po') };
+  /* ---------- filters, period, toolbar, tabs ---------- */
+  var F = { period: APP.period || 'month', from: '', to: '' }, PERIOD = [];
+  (APP.filters || []).forEach(function (f) { F[f.k] = ''; });
+  var tab = APP.tabs[0].id, POP = null, FD = null, FS = {}, CAL = null, ANIM = false, built = false, AMC = null;
+  var PERIODS = [['today', 'Today', 'اليوم'], ['yesterday', 'Yesterday', 'أمس'], ['week', 'This week', 'هذا الأسبوع'], ['lastWeek', 'Last week', 'الأسبوع الماضي'],
+    ['month', 'This month', 'هذا الشهر'], ['lastMonth', 'Last month', 'الشهر الماضي'], ['quarter', 'This quarter', 'هذا الربع'], ['ytd', 'Year to date', 'السنة حتى اليوم'],
+    ['year', 'This year', 'هذه السنة'], ['prevYear', 'Previous year', 'السنة الماضية'], ['custom', 'Custom range', 'نطاق مخصص']];
+  var PGROUPS = [['today', 'yesterday'], ['week', 'lastWeek'], ['month', 'lastMonth'], ['quarter', 'ytd', 'year', 'prevYear'], ['custom']];
+  function curPeriod() { return periodRange(F.period, F.from, F.to); }
+  function periodName(k) { var p = PERIODS.filter(function (x) { return x[0] === k; })[0]; return p ? tr(p[1], p[2]) : k; }
+  function filterCount() { return (APP.filters || []).filter(function (f) { return F[f.k]; }).length; }
+  function optList(f, draft) { var l = f.options ? f.options(draft || F) : []; return (l || []).map(function (x) { return typeof x === 'string' ? { v: x, l: x } : x; }); }
+  function optLabel(f, v) { var o = optList(f).filter(function (x) { return x.v === v; })[0]; return o ? o.l : (f.label ? f.label(v) : v); }
+  function pendingBtnHTML() {
+    var n = pendingTotal(AMC), lbl = n == null ? (AMC && AMC.ready ? '—' : '…') : num(n);
+    return '<button type="button" class="dms-pend' + (n ? ' dms-pend-on' : '') + '" data-act="pending" data-fk="pending" title="' + esc(tr('Pending actions as of today — show the list', 'الإجراءات المعلقة حتى اليوم — عرض القائمة')) + '">' +
+      '<i class="dms-pend-dot" aria-hidden="true"></i><b class="dms-num">' + lbl + '</b><span class="dms-pend-l">' + esc(tr('pending', 'معلّقة')) + '</span></button>';
+  }
+  function opt(v, label, cur) { return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(label) + '</option>'; }
+  function ffield(f) {
+    if (f.type === 'text' || f.type === 'date') { return '<div class="dms-ff"><label for="dms-fd-' + f.k + '">' + esc(tr(f.en, f.ar)) + '</label><input type="' + (f.type === 'date' ? 'date' : 'search') + '" id="dms-fd-' + f.k + '" class="dms-input" data-fd="' + f.k + '" data-fk="fd:' + f.k + '" value="' + esc(FD[f.k] || '') + '" placeholder="' + esc(f.ph ? tr(f.ph[0], f.ph[1]) : '') + '" autocomplete="off"></div>'; }
+    var list = optList(f, FD), label = tr(f.en, f.ar), k = f.k;
+    var q = clean(FS[k]).toLowerCase(), cur = FD[k], shown = list.filter(function (x) { return !q || String(x.l).toLowerCase().indexOf(q) >= 0 || String(x.v).toLowerCase().indexOf(q) >= 0; }), more = shown.length > 200;
+    shown = shown.slice(0, 200);
+    if (cur && !shown.some(function (x) { return x.v === cur; })) { shown.unshift({ v: cur, l: optLabel(f, cur) }); }
+    var h = '<div class="dms-ff"><label for="dms-fd-' + k + '">' + esc(label) + '</label>';
+    if (list.length > 8) { h += '<input type="search" class="dms-input" data-fs="' + k + '" data-fk="fs:' + k + '" value="' + esc(FS[k] || '') + '" placeholder="' + esc(tr('Search ' + num(list.length) + ' options', 'ابحث في ' + num(list.length) + ' خيار')) + '" aria-label="' + esc(tr('Search', 'بحث') + ' — ' + label) + '" autocomplete="off">'; }
+    h += '<select id="dms-fd-' + k + '" class="dms-input" data-fd="' + k + '" data-fk="fd:' + k + '">' + opt('', f.none ? tr(f.none[0], f.none[1]) : tr('All', 'الكل'), cur) + shown.map(function (x) { return opt(x.v, x.l, cur); }).join('') + '</select>';
+    if (q && !shown.length) { h += '<span class="dms-ff-hint">' + esc(tr('No matches', 'لا نتائج')) + '</span>'; }
+    else if (more) { h += '<span class="dms-ff-hint">' + esc(tr('First 200 matches — type to narrow', 'أول 200 نتيجة — اكتب للتضييق')) + '</span>'; }
+    return h + '</div>';
+  }
+  function filtersPopHTML() {
+    var n = APP.filterNote ? APP.filterNote() : '';
+    return '<div class="dms-pop dms-pop-filters" role="dialog" aria-label="' + esc(tr('Filters', 'المرشحات')) + '"><div class="dms-pop-b">' + APP.filters.map(ffield).join('') + '</div>' +
+      (n ? '<p class="dms-pop-note">' + esc(n) + '</p>' : '') +
+      '<div class="dms-pop-f"><button type="button" class="dms-btn" data-act="fclear" data-fk="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button><button type="button" class="dms-btn dms-btn-primary" data-act="fapply" data-fk="fapply">' + esc(tr('Apply', 'تطبيق')) + '</button></div></div>';
+  }
+  function calendarHTML() {
+    var v = CAL.view, first = weekStartOf(v), mon = v.slice(0, 7), fdy = CAL.focus && CAL.focus.slice(0, 7) === mon ? CAL.focus : (CAL.from && CAL.from.slice(0, 7) === mon ? CAL.from : v), wd = '', rows = '', r, c, d;
+    for (c = 0; c < 7; c++) { try { wd += '<span role="columnheader">' + esc(new Intl.DateTimeFormat(locale(), { weekday: 'narrow', timeZone: 'UTC' }).format(new Date(parseISO(addDays(first, c))))) + '</span>'; } catch (e) { wd += '<span></span>'; } }
+    for (r = 0; r < 6; r++) {
+      rows += '<div role="row" class="dms-cal-row">';
+      for (c = 0; c < 7; c++) {
+        d = addDays(first, r * 7 + c);
+        var end = d === CAL.from || d === CAL.to, inR = CAL.from && CAL.to && d > CAL.from && d < CAL.to;
+        rows += '<button type="button" role="gridcell" class="dms-day' + (d.slice(0, 7) !== mon ? ' dms-out' : '') + (d === TODAY ? ' dms-today' : '') + (inR ? ' dms-in' : '') + (end ? ' dms-end' : '') +
+          (CAL.from && CAL.to && d === CAL.from && d !== CAL.to ? ' dms-s' : '') + (CAL.from && CAL.to && d === CAL.to && d !== CAL.from ? ' dms-e' : '') + '" data-act="calday" data-v="' + d + '" data-fk="day:' + d + '" tabindex="' + (d === fdy ? 0 : -1) +
+          '" aria-pressed="' + end + '" aria-label="' + esc(fmtDate(d, true)) + '"><bdi>' + (+d.slice(8, 10)) + '</bdi></button>';
+      }
+      rows += '</div>';
+    }
+    var ok = CAL.from && CAL.to, msg = ok ? '<bdi>' + esc(rangeLabel([CAL.from, CAL.to])) + '</bdi> · ' + esc(daysTxt(diffDays(CAL.from, CAL.to) + 1)) : esc(CAL.from ? tr('Select an end date', 'اختر تاريخ النهاية') : tr('Select a start date', 'اختر تاريخ البداية'));
+    var title = v; try { title = new Intl.DateTimeFormat(locale(), { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(parseISO(v))); } catch (e) { /* ISO fallback */ }
+    return '<div class="dms-cal"><div class="dms-cal-h"><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="-1" data-fk="calprev" aria-label="' + esc(tr('Previous month', 'الشهر السابق')) + '">' + ico('prev', 'dms-flip') + '</button>' +
+      '<b aria-live="polite">' + esc(title) + '</b><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="1" data-fk="calnext" aria-label="' + esc(tr('Next month', 'الشهر التالي')) + '">' + ico('next', 'dms-flip') + '</button></div>' +
+      '<div class="dms-cal-g" role="grid" aria-label="' + esc(title) + '"><div class="dms-cal-wd" role="row">' + wd + '</div>' + rows + '</div>' +
+      '<div class="dms-cal-f"><span class="dms-cal-msg" aria-live="polite">' + msg + '</span><span class="dms-cal-btns"><button type="button" class="dms-btn" data-act="popclose" data-fk="calcancel">' + esc(tr('Cancel', 'إلغاء')) + '</button>' +
+      '<button type="button" class="dms-btn dms-btn-primary" data-act="calapply" data-fk="calapply"' + (ok ? '' : ' disabled') + '>' + esc(tr('Apply', 'تطبيق')) + '</button></span></div></div>';
+  }
+  function periodPopHTML() {
+    var n = APP.periodNote ? APP.periodNote() : '';
+    return '<div class="dms-pop dms-pop-period' + (CAL ? ' dms-has-cal' : '') + '" role="dialog" aria-label="' + esc(tr('Select period', 'اختر الفترة')) + '"><div class="dms-presets">' +
+      PGROUPS.map(function (g) {
+        return '<div class="dms-pgroup">' + g.map(function (k) {
+          var on = CAL ? k === 'custom' : F.period === k;
+          return '<button type="button" class="dms-preset' + (on ? ' dms-on' : '') + '" aria-pressed="' + on + '" data-act="preset" data-v="' + k + '" data-fk="preset:' + k + '"><span>' + esc(periodName(k)) + '</span>' +
+            (k !== 'custom' ? '<small><bdi>' + esc(rangeLabel(periodRange(k))) + '</bdi></small>' : '') + '</button>';
+        }).join('') + '</div>';
+      }).join('') + '</div>' + (CAL ? calendarHTML() : '') + (n ? '<p class="dms-pop-note dms-pop-note-p">' + esc(n) + '</p>' : '') + '</div>';
+  }
+  function toolbarHTML() {
+    var ac = filterCount(), R = PERIOD, hasF = APP.filters && APP.filters.length;
+    return '<div class="dms-topbar"><div class="dms-tb-title"><h2 class="dms-title">' + esc(APP.title()) + '</h2><p class="dms-sub" data-ref="stamp"></p></div>' +
+      '<div class="dms-tb-ctrls"><div class="dms-pendwrap" data-ref="pendwrap">' + pendingBtnHTML() + '</div>' +
+      (APP.period === false ? '' : '<div class="dms-anchor"><button type="button" class="dms-btn dms-period" data-act="pop" data-v="period" data-fk="pop:period" aria-haspopup="dialog" aria-expanded="' + (POP === 'period') + '" aria-label="' + esc(tr('Period', 'الفترة') + ': ' + periodName(F.period) + ' ' + rangeLabel(R)) + '">' + ico('cal') +
+        '<span class="dms-period-t"><b>' + esc(periodName(F.period)) + '</b><span class="dms-period-r"><bdi>' + esc(rangeLabel(R)) + '</bdi></span></span>' + ico('down', 'dms-chev') + '</button>' + (POP === 'period' ? periodPopHTML() : '') + '</div>') +
+      (hasF ? '<div class="dms-anchor"><button type="button" class="dms-btn' + (ac ? ' dms-btn-on' : '') + '" data-act="pop" data-v="filters" data-fk="pop:filters" aria-haspopup="dialog" aria-expanded="' + (POP === 'filters') + '">' + ico('filter') +
+        '<span class="dms-btn-t">' + esc(tr('Filters', 'المرشحات')) + '</span>' + (ac ? '<span class="dms-count" aria-label="' + esc(ac + ' ' + tr('active', 'نشط')) + '">' + ac + '</span>' : '') + '</button>' + (POP === 'filters' ? filtersPopHTML() : '') + '</div>' : '') +
+      '<button type="button" class="dms-btn dms-icobtn" data-act="refresh" data-ref="refresh" data-fk="refresh" aria-label="' + esc(tr('Refresh data', 'تحديث البيانات')) + '" title="' + esc(tr('Refresh data (keeps filters)', 'تحديث البيانات (مع الإبقاء على المرشحات)')) + '">' + ico('refresh') + '</button></div>' +
+      '<div class="dms-lang" role="group" aria-label="Language / اللغة"><button type="button" data-act="lang" data-v="en" data-fk="lang:en" lang="en" aria-pressed="' + (LANG === 'en') + '"' + (LANG === 'en' ? ' class="dms-on"' : '') + '>English</button>' +
+        '<button type="button" data-act="lang" data-v="ar" data-fk="lang:ar" lang="ar" aria-pressed="' + (LANG === 'ar') + '"' + (LANG === 'ar' ? ' class="dms-on"' : '') + '>العربية</button></div></div>';
+  }
+  function chipsHTML() {
+    var a = (APP.filters || []).filter(function (f) { return F[f.k]; }); if (!a.length) { return ''; }
+    return '<div class="dms-chips">' + a.map(function (f) {
+      var v = optLabel(f, F[f.k]), lab = tr(f.en, f.ar);
+      return '<span class="dms-chip"><span class="dms-chip-k">' + esc(lab) + '</span><bdi>' + esc(v) + '</bdi><button type="button" class="dms-chip-x" data-act="rmf" data-v="' + f.k + '" data-fk="rmf:' + f.k + '" aria-label="' + esc(tr('Remove filter', 'إزالة المرشح') + ' ' + lab + ': ' + v) + '">' + ico('x') + '</button></span>';
+    }).join('') + (a.length > 1 ? '<button type="button" class="dms-linkbtn" data-act="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button>' : '') + '</div>';
+  }
+  function tabsHTML() {
+    var pend = pendingTotal(AMC);
+    return '<div class="dms-tabs" role="tablist" aria-label="' + esc(tr('Sections', 'الأقسام')) + '">' + APP.tabs.map(function (x) {
+      var on = x.id === tab, lbl = tr(x.en, x.ar), b = x.id === 'actions' && pend ? '<span class="dms-tab-n dms-num" title="' + esc(tr('Pending actions as of today', 'الإجراءات المعلقة حتى اليوم')) + '">' + num(pend) + '</span>' : '';
+      return '<button class="dms-tab' + (on ? ' dms-on' : '') + '" role="tab" id="dms-tab-' + x.id + '" aria-selected="' + on + '" aria-controls="dms-panel" tabindex="' + (on ? 0 : -1) + '" data-act="tab" data-v="' + x.id + '" data-fk="tab:' + x.id + '" title="' + esc(lbl) + '" type="button"><span>' + esc(lbl) + '</span>' + b + '</button>';
+    }).join('') + '</div>';
+  }
+
+  /* ---------- rendering: a fixed skeleton whose regions repaint independently (focus kept via data-fk) ---------- */
+  function activeEl() { try { return ROOT.activeElement || null; } catch (e) { return null; } }
+  function paint(el, html) {
+    if (!el) { return; }
+    var a = activeEl(), fk = a && el.contains(a) && a.getAttribute ? a.getAttribute('data-fk') : null, ss = null;
+    if (fk && typeof a.selectionStart === 'number') { try { ss = [a.selectionStart, a.selectionEnd]; } catch (e) { /* not a text input */ } }
+    el.innerHTML = html;
+    if (fk) { focusFk(fk); if (ss) { var n = activeEl(); try { n.setSelectionRange(ss[0], ss[1]); } catch (e) { /* ignore */ } } }
+  }
+  function focusFk(k) { var n = HOST.querySelector('[data-fk="' + k + '"]'); if (n) { try { n.focus({ preventScroll: true }); } catch (e) { n.focus(); } } }
+  function skeleton() {
+    HOST.innerHTML = '<div class="dms-app"><div data-ref="tb"></div><div data-ref="chips"></div><div data-ref="tabs"></div><div class="dms-sheet" role="tabpanel" id="dms-panel" data-ref="sheet"><div data-ref="banner"></div><div class="dms-content" data-ref="content"></div></div>' +
+      '<div class="dms-tip" data-ref="tip" role="tooltip" hidden></div></div><div data-ref="overlay"></div>';
+    built = true;
+  }
+  function renderHeaderState() {
+    var b = $('[data-ref="refresh"]'), s = $('[data-ref="stamp"]'), bz = busy();
+    if (b) { b.classList.toggle('dms-busy', bz); b.setAttribute('aria-busy', String(bz)); }
+    if (s) { s.textContent = (APP.stamp ? APP.stamp() : tr('Read-only', 'للقراءة فقط')) + (LOADED ? ' · ' + tr('Updated ', 'آخر تحديث ') + LOADED : '') + (bz ? ' · ' + tr('loading…', 'جارٍ التحميل…') : ''); }
+    paint($('[data-ref="pendwrap"]'), pendingBtnHTML());
+    paint($('[data-ref="tabs"]'), tabsHTML());
+  }
+  function renderToolbar() { paint($('[data-ref="tb"]'), toolbarHTML()); paint($('[data-ref="chips"]'), chipsHTML()); renderHeaderState(); }
+  function contentHTML() {
+    if (!BOOTED) {
+      return '<div class="dms-grid dms-kpis dms-ov-kpis" aria-busy="true">' + skel(CFG.kpiCount || 6, 'dms-skel-kpi') + '</div><div class="dms-main2"><div class="dms-skel dms-skel-panel"></div><div class="dms-skel dms-skel-panel"></div></div>' +
+        note(esc(tr('Loading from ERPNext…', 'جارٍ التحميل من ERPNext…')));
+    }
+    if (APP.period !== false && (!PERIOD[0] || PERIOD[0] > PERIOD[1])) { return alertBox('err', esc(tr('Choose a valid date range.', 'اختر نطاق تاريخ صحيحًا.'))); }
+    return APP.content(tab, AMC);
+  }
+  function renderSoft() {
+    PERIOD = curPeriod(); AMC = APP.actions ? APP.actions() : null;
+    var keep = {}; Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { keep[k] = TBL[k]; } }); TBL = keep;
+    var b = $('[data-ref="banner"]'), c = $('[data-ref="content"]'), sh = $('[data-ref="sheet"]');
+    if (b) { b.innerHTML = BOOTED && APP.banner ? APP.banner() : ''; }
+    if (c) { paint(c, contentHTML()); c.classList.remove('dms-enter'); if (ANIM) { void c.offsetWidth; c.classList.add('dms-enter'); } ANIM = false; fillTables(c); fitChartLabels(); if (APP.afterRender) { APP.afterRender(c); } }
+    if (sh) { sh.setAttribute('aria-labelledby', 'dms-tab-' + tab); }
+    renderHeaderState();
+  }
+  function renderAll() {
+    HOST.setAttribute('dir', LANG === 'ar' ? 'rtl' : 'ltr'); HOST.setAttribute('lang', LANG);
+    if (!built) { skeleton(); }
+    PERIOD = curPeriod(); renderToolbar(); renderSoft();
+  }
+  /* Full reload (filters, refresh): new generation, empty store, tables back to page 1. */
+  function reload() {
+    setToday(); PERIOD = curPeriod(); GEN++; D = {}; LOADED = STAMP;
+    Object.keys(SS).forEach(function (k) { SS[k].dirty = true; SS[k].page = 1; }); Object.keys(TS).forEach(function (k) { TS[k].page = 1; });
+    APP.load(); ANIM = true; renderAll();
+  }
+
+  /* ---------- navigation and popovers ---------- */
+  function goTab(id, focusTab, force) {
+    if (tab !== id || force) { tab = id; ANIM = true; if (APP.onTab) { APP.onTab(id); } renderAll(); }
+    var t = $('#dms-tab-' + id); if (!t) { return; }
+    try { t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) { /* ignore */ }
+    if (focusTab) { t.focus(); }
+  }
+  function openPop(w) {
+    POP = w; CAL = null;
+    if (w === 'filters') { FD = {}; APP.filters.forEach(function (f) { FD[f.k] = F[f.k]; }); FS = {}; }
+    else if (F.period === 'custom' && F.from && F.to) { CAL = { from: F.from, to: F.to, view: monthStart(F.from), focus: F.from }; }
+    renderToolbar(); focusFk(w === 'filters' ? 'fd:' + APP.filters[0].k : CAL ? 'day:' + CAL.focus : 'preset:' + F.period);
+  }
+  function closePop(restore) { var w = POP; if (!w) { return; } POP = null; CAL = null; renderToolbar(); if (restore) { focusFk('pop:' + w); } }
+  function applyFilters(next) {
+    var prev = {}; APP.filters.forEach(function (f) { prev[f.k] = F[f.k]; F[f.k] = (next && next[f.k]) || ''; }); POP = null;
+    if (APP.onFilters) { APP.onFilters(prev); }
+    reload();
+  }
+  function applyPeriod(key, from, to) {
+    F.period = key; if (key === 'custom') { F.from = from; F.to = to; }
+    POP = null; CAL = null; setToday(); PERIOD = curPeriod();
+    Object.keys(SS).forEach(function (k) { if (TBL[k] && TBL[k].period) { SS[k].dirty = true; SS[k].page = 1; } });
+    if (APP.onPeriod) { APP.onPeriod(); } else { reload(); return; }
+    ANIM = true; renderAll(); focusFk('pop:period');
+  }
+  function calPick(d) {
+    if (!CAL.from || CAL.to) { CAL.from = d; CAL.to = null; } else if (d < CAL.from) { CAL.to = CAL.from; CAL.from = d; } else { CAL.to = d; }
+    CAL.focus = d;
+  }
+  function calMove(d) { CAL.focus = d; if (d.slice(0, 7) !== CAL.view.slice(0, 7)) { CAL.view = monthStart(d); } renderToolbar(); focusFk('day:' + d); }
+
+  /* ---------- tooltip (one shared element; positioned against the dashboard, clamped to its width) ---------- */
+  function showTip(n) {
+    var tip = $('[data-ref="tip"]'), app = $('.dms-app'); if (!tip || !app) { return; }
+    tip.textContent = n.getAttribute('data-tip'); tip.hidden = false;
+    var a = app.getBoundingClientRect(), r = n.getBoundingClientRect(), w = tip.offsetWidth, hgt = tip.offsetHeight;
+    var x = Math.max(4, Math.min(r.left - a.left + r.width / 2 - w / 2, a.width - w - 4)), y = r.top - a.top - hgt - 8;
+    if (y < 0) { y = r.bottom - a.top + 8; }
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  }
+  function hideTip() { var tip = $('[data-ref="tip"]'); if (tip) { tip.hidden = true; } }
+  function onOver(ev) { var n = ev.target.closest ? ev.target.closest('[data-tip]') : null; if (n && HOST.contains(n)) { showTip(n); } else { hideTip(); } }
+
+  /* ---------- events (single delegated set, removed on destroy) ---------- */
+  function onClick(ev) {
+    var n = ev.target.closest ? ev.target.closest('[data-act]') : null;
+    if (POP && !(ev.target.closest && ev.target.closest('.dms-anchor'))) { closePop(false); }
+    if (!n || !HOST.contains(n)) { return; }
+    var a = n.getAttribute('data-act'), v = n.getAttribute('data-v'), id = n.getAttribute('data-id');
+    if (APP.onAct && APP.onAct(a, v, n, id) === true) { return; }
+    if (a === 'ovbg') { if (ev.target === n) { closeOverlay(); } return; }
+    if (a === 'closeov') { closeOverlay(); return; }
+    if (a === 'ovback' && OVL && OVL.prev) { var pv = OVL.prev; delete SS.drill; delete TS.drill; OVL = pv; if (OVL.spec) { regTable(OVL.spec); } renderOverlay(); return; }
+    if (a === 'tab') { goTab(v); return; }
+    if (a === 'lang') { if (LANG !== v) { LANG = v; try { G.localStorage.setItem('dms_lang', LANG); } catch (e) { /* ignore */ } POP = null; CAL = null; renderAll(); if (OVL) { var o = OVL; OVL = null; renderOverlay(); openDrill(o.id); } focusFk('lang:' + v); } return; }
+    if (a === 'refresh') { if (APP.onRefresh) { APP.onRefresh(); } reload(); return; }
+    if (a === 'pop') { if (POP === v) { closePop(true); } else { openPop(v); } return; }
+    if (a === 'popclose') { closePop(true); return; }
+    if (a === 'preset') {
+      if (v !== 'custom') { applyPeriod(v); return; }
+      var r0 = PERIOD[0] || TODAY, r1 = PERIOD[1] || TODAY; CAL = { from: r0, to: r1, view: monthStart(r1 > TODAY ? TODAY : r1), focus: r1 > TODAY ? TODAY : r1 };
+      renderToolbar(); focusFk('day:' + CAL.focus); return;
+    }
+    if (a === 'calnav' && CAL) { CAL.view = addMonths(CAL.view, +v); CAL.focus = CAL.view; renderToolbar(); return; }
+    if (a === 'calday' && CAL) { calPick(v); renderToolbar(); focusFk('day:' + v); return; }
+    if (a === 'calapply' && CAL && CAL.from && CAL.to) { applyPeriod('custom', CAL.from, CAL.to); return; }
+    if (a === 'fapply') { applyFilters(FD); focusFk('pop:filters'); return; }
+    if (a === 'fclear') { applyFilters(null); focusFk('pop:filters'); return; }
+    if (a === 'rmf') { var nf = {}; APP.filters.forEach(function (f) { nf[f.k] = F[f.k]; }); nf[v] = ''; applyFilters(nf); focusFk('pop:filters'); return; }
+    if (a === 'pending') {
+      goTab(APP.tabs[0].id); var p = $('#dms-pending');
+      if (p) { var still = G.matchMedia && G.matchMedia('(prefers-reduced-motion: reduce)').matches; try { p.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' }); } catch (e) { p.scrollIntoView(); } p.focus({ preventScroll: true }); }
+      return;
+    }
+    if (a === 'kpi') { openDrill(v); return; }
+    if (a === 'tpage') { TS[id].page = Math.max(1, TS[id].page + (+v)); fillTable(id); return; }
+    if (a === 'tsort') { var st = TS[id]; if (st.sk === v) { st.dir = -st.dir; } else { st.sk = v; st.dir = 1; } st.page = 1; fillTable(id); focusHead(id, v); return; }
+    if (a === 'spage') { var ss = SS[id]; ss.page = Math.max(1, ss.page + (+v)); ss.dirty = true; fillTable(id); return; }
+    if (a === 'ssort') { var s2 = SS[id]; if (s2.sk === v) { s2.dir = -s2.dir; } else { s2.sk = v; s2.dir = 1; } s2.page = 1; s2.dirty = true; fillTable(id); focusHead(id, v); return; }
+    if (a === 'sretry') { SS[id].dirty = true; fillTable(id); return; }
+    if (a === 'csv') { var sp = TBL[id]; download(sp.file || id, sp, clientRows(sp, TS[id])); return; }
+    if (a === 'csvall') { exportServer(id); return; }
+  }
+  function focusHead(id, v) { var th = HOST.querySelector('[data-tbl="' + id + '"] th[data-v="' + v + '"]'); if (th) { th.focus(); } }
+  function onInput(ev) {
+    var n = ev.target; if (!n || !n.getAttribute || !HOST.contains(n)) { return; }
+    var fs = n.getAttribute('data-fs'), fd = n.getAttribute('data-fd'), tq = n.getAttribute('data-tq');
+    if (APP.onInput && APP.onInput(n, ev) === true) { return; }
+    if (fs) { if (FS[fs] === n.value) { return; } FS[fs] = n.value; renderToolbar(); return; }
+    if (fd) { if (!FD || FD[fd] === n.value) { return; } FD[fd] = n.value; if (n.type === 'search') { return; } if (APP.filters.some(function (f) { return f.dependsOn === fd; })) { APP.filters.forEach(function (f) { if (f.dependsOn === fd && FD[f.k] && !optList(f, FD).some(function (x) { return x.v === FD[f.k]; })) { FD[f.k] = ''; } }); renderToolbar(); } return; }
+    if (tq) {
+      focusId = tq; var spx = TBL[tq]; if (!spx) { return; }
+      if (spx.server) { var s2 = SS[tq]; if (s2.q === n.value) { return; } s2.q = n.value; s2.page = 1; clearTimeout(onInput.t); onInput.t = later(function () { s2.dirty = true; fillTable(tq); }, 350); }
+      else { var s1 = TS[tq] || (TS[tq] = { q: '', page: 1, sk: spx.sk || '', dir: spx.dir || 1 }); if (s1.q === n.value) { return; } s1.q = n.value; s1.page = 1; fillTable(tq); }
+    }
+  }
+  function onKey(ev) {
+    var t = ev.target, act = t && t.getAttribute ? t.getAttribute('data-act') : null, rtl = LANG === 'ar', k = ev.key;
+    if (k === 'Escape') {
+      if (POP) { ev.preventDefault(); closePop(true); return; }
+      if (OVL) { closeOverlay(); }
+      return;
+    }
+    if ((k === 'Enter' || k === ' ') && (act === 'tsort' || act === 'ssort')) { ev.preventDefault(); t.click(); return; }
+    if (k === 'Tab' && OVL) {
+      var modal = $('.dms-modal'), controls = Array.prototype.filter.call(modal.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), [tabindex="0"]'), function (el) { return el.getClientRects().length; });
+      var first = controls[0], last = controls[controls.length - 1];
+      if (ev.shiftKey && t === first) { ev.preventDefault(); last.focus(); }
+      else if (!ev.shiftKey && t === last) { ev.preventDefault(); first.focus(); }
+    }
+    if (act === 'tab' && /^(ArrowLeft|ArrowRight|Home|End)$/.test(k)) {
+      var ids = APP.tabs.map(function (x) { return x.id; }), i = ids.indexOf(t.getAttribute('data-v')), L = ids.length;
+      var d = k === 'Home' ? -i : k === 'End' ? L - 1 - i : ((k === 'ArrowRight') !== rtl ? 1 : -1);
+      ev.preventDefault(); goTab(ids[(i + d + L) % L], true); return;
+    }
+    if (act === 'calday' && CAL) {
+      var cur = t.getAttribute('data-v'), step = { ArrowRight: rtl ? -1 : 1, ArrowLeft: rtl ? 1 : -1, ArrowUp: -7, ArrowDown: 7 }[k];
+      if (step) { ev.preventDefault(); calMove(addDays(cur, step)); return; }
+      if (k === 'PageUp' || k === 'PageDown') { ev.preventDefault(); calMove(shiftMonths(cur, k === 'PageUp' ? -1 : 1)); return; }
+      if (k === 'Home' || k === 'End') { ev.preventDefault(); calMove(k === 'Home' ? weekStartOf(cur) : addDays(weekStartOf(cur), 6)); }
+    }
+  }
+  /* Start: wire events, render the skeleton, run APP.boot (reference lists), then the first load. */
+  function start() {
+    HOST.addEventListener('click', onClick, SIG);
+    HOST.addEventListener('input', onInput, SIG);
+    HOST.addEventListener('change', onInput, SIG);
+    HOST.addEventListener('keydown', onKey, SIG);
+    HOST.addEventListener('pointerover', onOver, SIG);
+    HOST.addEventListener('pointerleave', hideTip, SIG);
+    HOST.addEventListener('focusin', function (ev) { var n = ev.target.closest && ev.target.closest('[data-tip]'); if (n) { showTip(n); } }, SIG);
+    HOST.addEventListener('focusout', hideTip, SIG);
+    document.addEventListener('pointerdown', function (ev) {
+      if (!POP) { return; } var p = ev.composedPath ? ev.composedPath() : [];
+      for (var i = 0; i < p.length; i++) { if (p[i] === HOST) { return; } }
+      closePop(false);
+    }, SIG);
+    if (!G.frappe || !frappe.call) { HOST.innerHTML = '<div class="dms-empty">Frappe client API not available.</div>'; return; }
+    setToday(); PERIOD = curPeriod();
+    var chartResize = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fitChartLabels) : null;
+    if (chartResize) { chartResize.observe(HOST); if (abort) { abort.signal.addEventListener('abort', function () { chartResize.disconnect(); }); } }
+    if (document.fonts) { document.fonts.ready.then(function () { if (!destroyed) { fitChartLabels(); } }); }
+    renderAll();
+    var g = GEN, chk = function () { return g === GEN && !destroyed; };
+    Promise.resolve(APP.boot ? APP.boot(chk) : null).catch(function (e) { if (G.console) { console.error(APP.key, 'boot', e); } }).then(function () { if (destroyed) { return; } BOOTED = true; reload(); });
+  }
+  /* ==== end DMS kit ==== */
+
+  /* ============================================================ definitions (v1 rules) */
+  var MR = 'Material Request', PO = 'Purchase Order', SU = 'Supplier';
+  var MR_OPEN = ['Pending', 'Partially Ordered'], PO_OPEN = ['To Receive and Bill', 'To Receive'];
+  var MR_BASE = [[MR, 'material_request_type', '=', 'Purchase'], [MR, 'docstatus', '<', 2], [MR, 'workflow_state', '!=', 'Closed']];
+  var MR_F = ['name', 'status', 'workflow_state', 'transaction_date', 'schedule_date', 'company', 'per_ordered', 'per_received', 'docstatus', 'owner'];
+  var PO_F = ['name', 'supplier', 'supplier_name', 'status', 'transaction_date', 'schedule_date', 'grand_total', 'base_grand_total', 'currency', 'per_received', 'per_billed', 'company', 'docstatus'];
+  var P = {
+    mrOpen: function (r) { return r.docstatus === 1 && MR_OPEN.indexOf(r.status) > -1; },
+    mrOver: function (r) { return P.mrOpen(r) && r.schedule_date && r.schedule_date < TODAY; },
+    poOpen: function (r) { return r.docstatus === 1 && PO_OPEN.indexOf(r.status) > -1; },
+    poOver: function (r) { return P.poOpen(r) && r.schedule_date && r.schedule_date < TODAY && (+r.per_received || 0) < 100; }
+  };
+  function userName(u) { if (!u) { return ''; } try { return frappe.user.full_name(u) || u; } catch (e) { return u; } }
+  function ageDays(d) { return d ? Math.max(0, diffDays(String(d).slice(0, 10), TODAY)) : null; }
+
+  /* ============================================================ scope: one currency per view */
+  var REF = { companies: null, coErr: null };
+  function scopeCos() {
+    var cs = REF.companies || [];
+    if (F.company) { return [F.company]; }
+    var same = cs.filter(function (c) { return (c.default_currency || CUR) === CUR; }).map(function (c) { return c.name; });
+    return same.length ? same : cs.slice(0, 1).map(function (c) { return c.name; });
+  }
+  function curOf(co) { var c = (REF.companies || []).filter(function (x) { return x.name === co; })[0]; return (c && c.default_currency) || CUR; }
+  function scopeCur() { var s = scopeCos(); return s.length ? curOf(s[0]) : CUR; }
+  function otherCos() { return F.company ? [] : (REF.companies || []).filter(function (c) { return scopeCos().indexOf(c.name) < 0; }).map(function (c) { return c.name + ' (' + c.default_currency + ')'; }); }
+  function coFilter(dt) { var s = scopeCos(); return s.length ? [[dt, 'company', 'in', s]] : []; }
+  function per(dt) { return [[dt, 'transaction_date', '>=', PERIOD[0]], [dt, 'transaction_date', '<=', PERIOD[1]]]; }
+
+  /* ============================================================ loading */
+  var REFP = null;
+  function loadAll() {
+    REFP = REFP || getList({ doctype: 'Company', fields: ['name', 'default_currency'], order_by: 'name asc', limit_page_length: 0 }, null).then(function (r) { REF.companies = r || []; }, function (e) { REF.companies = []; REF.coErr = errKind(e); });
+    var after = function (fn) { return function (chk) { return REFP.then(function () { return fn(chk); }); }; };
+    run('mr', after(function (chk) { return fetchAll({ doctype: MR, fields: MR_F, filters: MR_BASE.concat(coFilter(MR), per(MR)), order_by: 'transaction_date desc' }, chk); }));
+    run('po', after(function (chk) { return fetchAll({ doctype: PO, fields: PO_F, filters: [[PO, 'docstatus', '<', 2]].concat(coFilter(PO), per(PO), F.supplier ? [[PO, 'supplier', '=', F.supplier]] : []), order_by: 'transaction_date desc' }, chk); }));
+    run('sup', function (chk) { return fetchAll({ doctype: SU, fields: ['name', 'supplier_name', 'supplier_group', 'disabled'], filters: [], order_by: 'supplier_name asc' }, chk); });
+    actSpecs().forEach(function (s) { run(s.id, after(function (chk) { var f = s.f(); return Promise.all([getCount(s.dt, f, chk), getList({ doctype: s.dt, fields: s.dt === MR ? MR_F : PO_F, filters: f, order_by: s.order, limit_page_length: 6 }, chk)]).then(function (r) { return { count: r[0], rows: r[1] || [] }; }); })); });
+  }
+  function supOptions() { var m = {}; (D.po || []).forEach(function (r) { m[r.supplier] = r.supplier_name || r.supplier; }); if (F.supplier && !m[F.supplier]) { m[F.supplier] = F.supplier; } return Object.keys(m).map(function (k) { return { v: k, l: m[k] }; }).sort(function (a, b) { return a.l.localeCompare(b.l); }); }
+
+  /* ============================================================ actions pending (all open documents, not the period) */
+  function actSpecs() {
+    var mrb = function () { return MR_BASE.concat(coFilter(MR)); }, pob = function () { return [[PO, 'docstatus', '<', 2]].concat(coFilter(PO), F.supplier ? [[PO, 'supplier', '=', F.supplier]] : []); };
+    return [
+      { id: 'a_poo', client: true, dt: PO, order: 'schedule_date asc', p: 'high', tone: 'bad', short: tr('Overdue deliveries', 'تسليمات متأخرة'), title: tr('Purchase orders past their required-by date', 'أوامر شراء تجاوزت تاريخ الاحتياج'), why: tr('Submitted, still to receive, required-by date passed and not fully received. Oldest first.', 'معتمدة، بانتظار الاستلام، تجاوزت التاريخ ولم تستلم بالكامل. الأقدم أولًا.'),
+        f: function () { return pob().concat([[PO, 'docstatus', '=', 1], [PO, 'status', 'in', PO_OPEN], [PO, 'schedule_date', '<', TODAY], [PO, 'per_received', '<', 100]]); } },
+      { id: 'a_mro', client: true, dt: MR, order: 'schedule_date asc', p: 'high', tone: 'bad', short: tr('Overdue material requests', 'طلبات مواد متأخرة'), title: tr('Open purchase material requests past their required-by date', 'طلبات مواد شراء مفتوحة تجاوزت تاريخ الاحتياج'), why: tr('Submitted, pending or partially ordered. Oldest first.', 'معتمدة، معلقة أو مطلوبة جزئيًا. الأقدم أولًا.'),
+        f: function () { return mrb().concat([[MR, 'docstatus', '=', 1], [MR, 'status', 'in', MR_OPEN], [MR, 'schedule_date', '<', TODAY]]); } },
+      { id: 'a_mrd', client: true, dt: MR, order: 'transaction_date asc', p: 'med', tone: 'warn', short: tr('Draft material requests', 'طلبات مواد مسودة'), title: tr('Purchase material requests still in draft', 'طلبات مواد شراء ما زالت مسودة'), why: tr('Not submitted, so procurement cannot order them. Oldest first.', 'غير معتمدة، فلا يمكن طلبها. الأقدم أولًا.'),
+        f: function () { return mrb().concat([[MR, 'docstatus', '=', 0]]); } },
+      { id: 'a_pod', client: true, dt: PO, order: 'transaction_date asc', p: 'med', tone: 'warn', short: tr('Draft purchase orders', 'أوامر شراء مسودة'), title: tr('Purchase orders still in draft', 'أوامر شراء ما زالت مسودة'), why: tr('Not submitted to the supplier yet. Oldest first.', 'لم ترسل للمورد بعد. الأقدم أولًا.'),
+        f: function () { return pob().concat([[PO, 'docstatus', '=', 0]]); } },
+      { id: 'a_hold', client: true, dt: PO, order: 'transaction_date asc', p: 'low', tone: 'n', short: tr('On hold', 'معلقة'), title: tr('Purchase orders on hold', 'أوامر شراء معلقة'), why: tr('Status On Hold. Release or close them.', 'الحالة On Hold. أفرج عنها أو أغلقها.'),
+        f: function () { return pob().concat([[PO, 'docstatus', '=', 1], [PO, 'status', '=', 'On Hold']]); } }
+    ];
+  }
+  function actItem(s) {
+    return function (r) {
+      var late = r.schedule_date ? diffDays(r.schedule_date, TODAY) : 0, old = ageDays(r.transaction_date) || 0, isLate = s.id === 'a_poo' || s.id === 'a_mro';
+      return { p: s.p, score: score(s.p, 0, isLate ? late : old), dt: s.dt, name: r.name, title: s.dt === PO ? (r.supplier_name || r.supplier || r.name) : r.name, desc: s.dt === PO ? r.name + ' · ' + moneyS(+r.grand_total || 0, r.currency) : (r.company || '') + ' · ' + (r.status || '') + (r.per_ordered ? ' · ' + Math.round(r.per_ordered) + '% ' + tr('ordered', 'مطلوب') : ''),
+        who: s.dt === MR ? userName(r.owner) : (r.company || null), due: isLate ? tr(daysTxt(late) + ' late', 'متأخر ' + daysTxt(late)) : tr('Issued ', 'صدر ') + (r.transaction_date || '') + ' · ' + daysTxt(old), tone: s.tone };
     };
-    return { kpis, charts: hbars(t('c_top_sup'), topVal) + hbars(t('k_sup_late'), lateTop),
-      table: { title: t('tab_sup'), dt: 'Supplier', rows: shown, cols: [{ k: 'name', lk: 'supplier', type: 'link' }, { k: 'supplier_name', lk: 'item_name', type: 'text', hide: true }, { k: 'supplier_group', lk: 'group', type: 'text' },
-        { k: 'orders', lk: 'orders', type: 'num' }, { k: 'pv', lk: 'po_value', type: 'money' }, { k: 'over', lk: 'overdue_pos', type: 'num' }, { k: 'avg_recv', lk: 'avg_recv', type: 'pct' }] }, noStatus: true, erp };
+  }
+  function actClient() {
+    var o = {}; actSpecs().forEach(function (s) { if (D[s.id + 'Err']) { o[s.id] = 'ERR:' + D[s.id + 'Err']; } else if (D[s.id]) { o[s.id] = { rows: D[s.id].rows, count: D[s.id].count, item: actItem(s) }; } });
+    return Object.keys(o).length ? o : null;
   }
 
-  /* ---------- rendering ---------- */
-  let VIEW = null;
-  function cell(c, r) {
-    const v = r[c.k];
-    switch (c.type) {
-      case 'link': return `<a class="lnk">${esc(r.supplier_name && c.k === 'name' && r._dt === 'Supplier' ? r.supplier_name : v)}</a>`;
-      case 'status': return `<span class="badge ${badgeCls(v)}">${esc(v)}</span>`;
-      case 'pct': return `<div class="bar" title="${nf(v, 0)}%"><i style="width:${Math.min(100, v || 0)}%"></i></div>`;
-      case 'pct1': return nf(v, 1) + '%';
-      case 'money': return nf(v);
-      case 'money2': return nf(v, 2);
-      case 'num': return nf(v);
-      case 'dt': return esc(dtn(v));
-      default: return esc(v == null ? '' : v);
+  /* ============================================================ shared pieces */
+  function banner() {
+    var h = '', o = otherCos();
+    if (o.length) { h += alertBox('info', esc(tr('Values are in ', 'القيم بعملة ') + scopeCur() + tr('. Companies in another currency are not included: ', '. الشركات بعملة أخرى غير مشمولة: ') + o.join(', ') + tr('. Pick one in Filters to see it on its own.', '. اخترها من المرشحات لعرضها منفردة.'))); }
+    if (REF.coErr) { h += alertBox('warn', esc(tr('Company list unavailable; figures are not split by company currency.', 'قائمة الشركات غير متاحة؛ لا تقسيم حسب عملة الشركة.'))); }
+    return h;
+  }
+  function pctBar(v) { v = Math.max(0, Math.min(100, +v || 0)); return '<span class="pp-pct" title="' + Math.round(v) + '%"><span class="pp-pct-t"><i style="width:' + v + '%"></i></span><b class="dms-num">' + Math.round(v) + '%</b></span>'; }
+  function stTone(s) { s = String(s || ''); return /Completed|Ordered|Received|Delivered|To Bill/.test(s) && !/Partially/.test(s) ? 'ok' : /Stopped|Cancel|Closed|On Hold/.test(s) ? 'bad' : /Draft|Pending|Partially|To Receive/.test(s) ? 'warn' : 'n'; }
+  function docBtn(dt, r, label) { return '<button type="button" class="dms-linkbtn" data-act="doc" data-v="' + esc(dt + '|' + r.name) + '">' + bdi(label || r.name) + '</button>'; }
+  function statusOf(r) { return r.docstatus === 0 ? 'Draft' : r.status || '—'; }
+  function countBy(rows, fn) { var m = {}; rows.forEach(function (r) { var k = fn(r) || '—'; m[k] = (m[k] || 0) + 1; }); return Object.keys(m).map(function (k) { return { k: k, c: m[k] }; }).sort(function (a, b) { return b.c - a.c; }); }
+  function need(keys) { for (var i = 0; i < keys.length; i++) { var k = keys[i]; if (D[k + 'Err']) { return srcErr(D[k + 'Err'], k === 'mr' ? MR : k === 'po' ? PO : SU); } } for (var j = 0; j < keys.length; j++) { if (!D[keys[j]]) { return '<div class="dms-grid dms-kpis" aria-busy="true">' + skel(6, 'dms-skel-kpi') + '</div><div class="dms-skel dms-skel-panel"></div>'; } } return ''; }
+  var AGE_B = [['0–7', 0, 7], ['8–30', 8, 30], ['31–60', 31, 60], ['61+', 61, 1e9]];
+  function agingBars(mr) { var o = mr.filter(P.mrOpen); return hbars(AGE_B.map(function (b, i) { return { label: b[0] + ' ' + tr('days', 'يوم'), value: o.filter(function (r) { var a = ageDays(r.transaction_date); return a >= b[1] && a <= b[2]; }).length, color: ['var(--dms-age0)', 'var(--dms-age2)', 'var(--dms-age3)', 'var(--dms-age5)'][i], act: 'mrage:' + i }; }), num); }
+  function months() { return monthList(PERIOD[0], PERIOD[1] > TODAY ? TODAY : PERIOD[1]); }
+  function byMonth(rows, val) { var m = {}; rows.forEach(function (r) { var k = String(r.transaction_date || '').slice(0, 7); if (k) { m[k] = (m[k] || 0) + (val ? val(r) : 1); } }); return m; }
+  function basisNote(mr, po) {
+    var part = function (lab, rows, open, over) { var o = rows.filter(open), d = o.filter(over).map(function (r) { return r.schedule_date; }).sort(); return lab + ': ' + num(d.length) + ' / ' + num(o.length) + tr(' open are overdue', ' مفتوحة متأخرة') + (d.length ? tr(' · oldest required-by ', ' · أقدم تاريخ احتياج ') + d[0] : '') + (o.filter(function (r) { return !r.schedule_date; }).length ? tr(' · missing required-by: ', ' · بلا تاريخ احتياج: ') + num(o.filter(function (r) { return !r.schedule_date; }).length) : ''); };
+    return note(esc(tr('Overdue means the required-by date has passed while the document is still open. ', 'التأخير يعني أن تاريخ الاحتياج مضى والمستند ما زال مفتوحًا. ') + part(tr('Material requests', 'طلبات المواد'), mr, P.mrOpen, P.mrOver) + ' | ' + part(tr('Purchase orders', 'أوامر الشراء'), po, P.poOpen, P.poOver)));
+  }
+
+  /* ============================================================ overview */
+  function tabOverview(AM) {
+    if (D.mrErr || D.poErr) { return need(['mr', 'po']) + actionsPanel(AM); }
+    if (!D.mr || !D.po) { return '<div class="dms-grid dms-kpis dms-ov-kpis" aria-busy="true">' + skel(6, 'dms-skel-kpi') + '</div><div class="dms-main2">' + actionsPanel(AM) + '<div class="dms-skel dms-skel-panel"></div></div>'; }
+    var mr = D.mr, po = D.po, cur = scopeCur(), val = po.filter(function (r) { return r.docstatus === 1; }).reduce(function (a, r) { return a + (+r.base_grand_total || 0); }, 0);
+    var mrO = mr.filter(P.mrOpen), poO = po.filter(P.poOpen), sub = po.filter(function (r) { return r.docstatus === 1; }), full = sub.filter(function (r) { return (+r.per_received || 0) >= 100; }).length;
+    var h = kpis([
+      kpi({ label: tr('Open material requests', 'طلبات مواد مفتوحة'), dot: 'var(--dms-age3)', val: num(mrO.length), sub: esc(tr('Pending or partly ordered', 'معلقة أو مطلوبة جزئيًا')), act: 'go:mr:open' }),
+      kpi({ label: tr('Overdue material requests', 'طلبات مواد متأخرة'), dot: 'var(--dms-bad)', val: num(mr.filter(P.mrOver).length), sub: esc(tr('Open, required-by date passed', 'مفتوحة وتجاوزت تاريخ الاحتياج')), act: 'go:mr:over' }),
+      kpi({ label: tr('POs awaiting receipt', 'أوامر بانتظار الاستلام'), dot: 'var(--dms-age3)', val: num(poO.length), sub: esc(tr('Submitted · to receive', 'معتمدة · بانتظار الاستلام')), act: 'go:po:open' }),
+      kpi({ label: tr('Overdue deliveries', 'تسليمات متأخرة'), dot: 'var(--dms-bad)', val: num(po.filter(P.poOver).length), sub: esc(tr('Awaiting receipt past required-by', 'بانتظار الاستلام بعد تاريخ الاحتياج')), act: 'go:po:over' }),
+      kpi({ label: tr('Purchase order value', 'قيمة أوامر الشراء'), val: cur$(val, cur), sub: esc(tr('Submitted, issued in period', 'معتمدة، صادرة في الفترة')), act: 'go:po:all' }),
+      kpi({ label: tr('Fully received', 'مستلمة بالكامل'), dot: 'var(--dms-ok)', val: num(full), top: sub.length ? tagc(esc(pct(full, sub.length, 0))) : '', sub: esc(tr('of ', 'من ') + num(sub.length) + tr(' submitted POs', ' أمر معتمد')), act: 'go:po:done' })
+    ], true);
+    h += basisNote(mr, po);
+    var mm = byMonth(mr), pm = byMonth(po), keys = months();
+    h += '<div class="dms-main2">' + actionsPanel(AM) + '<div class="dms-stackcol">' + panel(tr('Issued per month', 'الصادرة شهريًا'), barChart(keys, 'month', [{ label: tr('Material requests', 'طلبات المواد'), color: 'var(--dms-age3)', val: function (k) { return mm[k] || 0; } }, { label: tr('Purchase orders', 'أوامر الشراء'), color: 'var(--dms-royal)', val: function (k) { return pm[k] || 0; } }], num), '', esc(tr('By issue date', 'حسب تاريخ الإصدار'))) +
+      panel(tr('Open material request aging', 'أعمار طلبات المواد المفتوحة'), agingBars(mr), '', esc(tr('Days since issue', 'أيام منذ الإصدار'))) + '</div></div>';
+    h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Purchase orders by status', 'أوامر الشراء حسب الحالة'), poStatusBars(po)) + panel(tr('Top suppliers by value', 'أعلى الموردين قيمة'), topSup(po, 8), '', esc(cur)) + '</div>';
+    return h;
+  }
+  function poStatusBars(po) { var l = countBy(po, statusOf); return l.length ? hbars(l.map(function (x) { return { label: x.k, value: x.c, act: 'pos:' + x.k }; }), num) : empty(tr('No purchase orders in this period.', 'لا أوامر شراء في هذه الفترة.')); }
+  function topSup(po, n) {
+    var m = {}; po.forEach(function (r) { if (r.docstatus !== 1) { return; } var k = r.supplier, x = m[k] || (m[k] = { name: r.supplier_name || r.supplier, v: 0 }); x.v += +r.base_grand_total || 0; });
+    var l = Object.keys(m).map(function (k) { return { id: k, name: m[k].name, v: m[k].v }; }).filter(function (x) { return x.v > 0; }).sort(function (a, b) { return b.v - a.v; }).slice(0, n);
+    return l.length ? hbars(l.map(function (x) { return { label: x.name, value: x.v, act: 'sup:' + x.id }; }), money) : empty(tr('No submitted purchase orders in this period.', 'لا أوامر معتمدة في هذه الفترة.'));
+  }
+
+  /* ============================================================ material requests */
+  var MK = { mr: '', po: '', sup: '', mrs: '', pos: '', age: null };
+  var MRK = [['all', 'All purchase MRs', 'كل طلبات الشراء', null, function () { return true; }], ['draft', 'Draft', 'مسودة', 'var(--dms-age3)', function (r) { return r.docstatus === 0; }], ['open', 'Open / pending', 'مفتوحة / معلقة', 'var(--dms-age3)', P.mrOpen],
+    ['over', 'Overdue', 'متأخرة', 'var(--dms-bad)', P.mrOver], ['ordered', 'Fully ordered', 'مكتملة الطلب', 'var(--dms-ok)', function (r) { return r.status === 'Ordered'; }], ['stopped', 'Stopped', 'موقوفة', 'var(--dms-bad)', function (r) { return r.status === 'Stopped'; }]];
+  function tabMr() {
+    var n = need(['mr']); if (n) { return n; }
+    var mr = D.mr, rows = mr, k = MRK.filter(function (x) { return x[0] === MK.mr; })[0];
+    if (k) { rows = rows.filter(k[4]); } if (MK.mrs) { rows = rows.filter(function (r) { return statusOf(r) === MK.mrs; }); } if (MK.age != null) { var b = AGE_B[MK.age]; rows = rows.filter(function (r) { var a = ageDays(r.transaction_date); return P.mrOpen(r) && a >= b[1] && a <= b[2]; }); }
+    var h = kpis(MRK.map(function (x) { return kpi({ label: tr(x[1], x[2]), dot: x[3], val: num(mr.filter(x[4]).length), top: MK.mr === x[0] || (!MK.mr && x[0] === 'all') ? tagc(esc(tr('Shown', 'معروضة'))) : '', act: 'mrk:' + x[0] }); }));
+    var st = countBy(mr, statusOf);
+    h += '<div class="dms-cols-2 dms-grid">' + panel(tr('By status', 'حسب الحالة'), st.length ? hbars(st.map(function (x) { return { label: x.k, value: x.c, act: 'mrs:' + x.k }; }), num) : empty(tr('No material requests in this period.', 'لا طلبات مواد في هذه الفترة.'))) + panel(tr('Open material request aging', 'أعمار طلبات المواد المفتوحة'), agingBars(mr), '', esc(tr('Days since issue', 'أيام منذ الإصدار'))) + '</div>';
+    var chips = [MK.mrs ? tr('Status: ', 'الحالة: ') + MK.mrs : '', MK.age != null ? tr('Open, aged ', 'مفتوحة بعمر ') + AGE_B[MK.age][0] + tr(' days', ' يوم') : ''].filter(Boolean);
+    return h + panel(tr('Purchase material requests', 'طلبات مواد الشراء'), (chips.length ? '<div class="pp-chips">' + chips.map(function (c) { return '<span class="dms-stat dms-stat-n">' + esc(c) + '</span>'; }).join('') + '<button type="button" class="dms-linkbtn" data-act="clrmr">' + esc(tr('Clear', 'مسح')) + '</button></div>' : '') +
+      regTable({ id: 't_mr', rows: rows, sk: 'date', dir: -1, file: 'material_requests', text: function (r) { return [r.name, r.company, r.status, userName(r.owner)].join(' '); }, empty: tr('No material requests match.', 'لا طلبات مطابقة.'), cols: [
+        { k: 'name', h: tr('Document', 'المستند'), s: function (r) { return r.name; }, r: function (r) { return docBtn(MR, r) + '<span class="dms-sm pp-sub">' + esc(r.company || '') + '</span>'; }, c: function (r) { return r.name; } },
+        { k: 'date', h: tr('Date', 'التاريخ'), s: function (r) { return r.transaction_date || ''; }, r: function (r) { return r.transaction_date ? dtc(r.transaction_date) : '—'; }, c: function (r) { return r.transaction_date; } },
+        { k: 'req', h: tr('Required by', 'مطلوب بتاريخ'), s: function (r) { return r.schedule_date || ''; }, r: function (r) { return r.schedule_date ? dtc(r.schedule_date) + (P.mrOver(r) ? ' ' + stat('bad', tr(daysTxt(diffDays(r.schedule_date, TODAY)) + ' late', 'متأخر ' + daysTxt(diffDays(r.schedule_date, TODAY)))) : '') : '<span class="dms-sm">—</span>'; }, c: function (r) { return r.schedule_date; } },
+        { k: 'status', h: tr('Status', 'الحالة'), s: statusOf, r: function (r) { return stat(stTone(statusOf(r)), statusOf(r)) + (r.workflow_state && r.workflow_state !== r.status ? '<span class="dms-sm pp-sub">' + esc(r.workflow_state) + '</span>' : ''); }, c: statusOf },
+        { k: 'ord', h: tr('Ordered', 'المطلوب'), s: function (r) { return +r.per_ordered || 0; }, r: function (r) { return pctBar(r.per_ordered); }, c: function (r) { return r.per_ordered; } },
+        { k: 'rec', h: tr('Received', 'المستلم'), s: function (r) { return +r.per_received || 0; }, r: function (r) { return pctBar(r.per_received); }, c: function (r) { return r.per_received; } },
+        { k: 'age', h: tr('Age', 'العمر'), num: 1, s: function (r) { return ageDays(r.transaction_date) || 0; }, r: function (r) { return '<span class="dms-num">' + esc(daysTxt(ageDays(r.transaction_date) || 0)) + '</span>'; }, c: function (r) { return ageDays(r.transaction_date); } },
+        { k: 'owner', h: tr('Raised by', 'أنشأه'), s: function (r) { return userName(r.owner); }, r: function (r) { return bdi(userName(r.owner)); }, c: function (r) { return userName(r.owner); } }] }), '', esc(num(rows.length) + ' / ' + num(mr.length) + tr(' · purpose Purchase, workflow not Closed', ' · الغرض شراء، سير العمل غير مغلق')));
+  }
+
+  /* ============================================================ purchase orders */
+  var POK = [['all', 'All POs', 'كل الأوامر', null, function () { return true; }], ['draft', 'Draft', 'مسودة', 'var(--dms-age3)', function (r) { return r.docstatus === 0; }], ['open', 'Awaiting receipt', 'بانتظار الاستلام', 'var(--dms-age3)', P.poOpen],
+    ['over', 'Overdue delivery', 'تأخر التسليم', 'var(--dms-bad)', P.poOver], ['done', 'Fully received', 'مستلمة بالكامل', 'var(--dms-ok)', function (r) { return r.docstatus === 1 && (+r.per_received || 0) >= 100; }]];
+  function tabPo() {
+    var n = need(['po']); if (n) { return n; }
+    var po = D.po, cur = scopeCur(), rows = po, k = POK.filter(function (x) { return x[0] === MK.po; })[0];
+    if (k) { rows = rows.filter(k[4]); } if (MK.pos) { rows = rows.filter(function (r) { return statusOf(r) === MK.pos; }); }
+    var subm = po.filter(function (r) { return r.docstatus === 1; }), vm = byMonth(subm, function (r) { return +r.base_grand_total || 0; });
+    var h = kpis(POK.map(function (x) { return kpi({ label: tr(x[1], x[2]), dot: x[3], val: num(po.filter(x[4]).length), top: MK.po === x[0] || (!MK.po && x[0] === 'all') ? tagc(esc(tr('Shown', 'معروضة'))) : '', act: 'pok:' + x[0] }); }).concat([kpi({ label: tr('Submitted value', 'القيمة المعتمدة'), val: cur$(subm.reduce(function (a, r) { return a + (+r.base_grand_total || 0); }, 0), cur), sub: esc(tr('Company currency', 'عملة الشركة')) })]));
+    h += '<div class="dms-cols-2 dms-grid">' + panel(tr('By status', 'حسب الحالة'), poStatusBars(po)) + panel(tr('Submitted value per month', 'القيمة المعتمدة شهريًا'), barChart(months(), 'month', [{ label: tr('Value', 'القيمة'), color: 'var(--dms-royal)', val: function (k) { return vm[k] || 0; } }], money), '', esc(cur)) + '</div>';
+    return h + panel(tr('Purchase orders', 'أوامر الشراء'), (MK.pos ? '<div class="pp-chips"><span class="dms-stat dms-stat-n">' + esc(tr('Status: ', 'الحالة: ') + MK.pos) + '</span><button type="button" class="dms-linkbtn" data-act="clrpo">' + esc(tr('Clear', 'مسح')) + '</button></div>' : '') +
+      regTable({ id: 't_po', rows: rows, sk: 'date', dir: -1, file: 'purchase_orders', text: function (r) { return [r.name, r.supplier_name, r.supplier, r.status, r.company].join(' '); }, empty: tr('No purchase orders match.', 'لا أوامر مطابقة.'), cols: [
+        { k: 'name', h: tr('Document', 'المستند'), s: function (r) { return r.name; }, r: function (r) { return docBtn(PO, r) + '<span class="dms-sm pp-sub">' + esc(r.company || '') + '</span>'; }, c: function (r) { return r.name; } },
+        { k: 'sup', h: tr('Supplier', 'المورد'), s: function (r) { return r.supplier_name || r.supplier; }, r: function (r) { return '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="sup:' + esc(r.supplier) + '">' + bdi(r.supplier_name || r.supplier) + '</button>'; }, c: function (r) { return r.supplier_name || r.supplier; } },
+        { k: 'date', h: tr('Date', 'التاريخ'), s: function (r) { return r.transaction_date || ''; }, r: function (r) { return r.transaction_date ? dtc(r.transaction_date) : '—'; }, c: function (r) { return r.transaction_date; } },
+        { k: 'req', h: tr('Required by', 'مطلوب بتاريخ'), s: function (r) { return r.schedule_date || ''; }, r: function (r) { return r.schedule_date ? dtc(r.schedule_date) + (P.poOver(r) ? ' ' + stat('bad', tr(daysTxt(diffDays(r.schedule_date, TODAY)) + ' late', 'متأخر ' + daysTxt(diffDays(r.schedule_date, TODAY)))) : '') : '<span class="dms-sm">—</span>'; }, c: function (r) { return r.schedule_date; } },
+        { k: 'status', h: tr('Status', 'الحالة'), s: statusOf, r: function (r) { return stat(stTone(statusOf(r)), statusOf(r)); }, c: statusOf },
+        { k: 'rec', h: tr('Received', 'المستلم'), s: function (r) { return +r.per_received || 0; }, r: function (r) { return pctBar(r.per_received); }, c: function (r) { return r.per_received; } },
+        { k: 'bill', h: tr('Billed', 'المفوتر'), s: function (r) { return +r.per_billed || 0; }, r: function (r) { return pctBar(r.per_billed); }, c: function (r) { return r.per_billed; } },
+        { k: 'tot', h: tr('Grand total', 'الإجمالي'), num: 1, s: function (r) { return +r.base_grand_total || 0; }, r: function (r) { var co = curOf(r.company); return '<span class="dms-num">' + moneyB(+r.grand_total || 0, r.currency || co) + '</span>' + (r.currency && r.currency !== co ? '<span class="dms-sm pp-sub">' + moneyB(+r.base_grand_total || 0, co) + '</span>' : ''); }, c: function (r) { return r.grand_total; } }] }), '', esc(num(rows.length) + ' / ' + num(po.length)));
+  }
+
+  /* ============================================================ suppliers and delays */
+  function supRows() {
+    var m = {}, blank = function (id, nm, grp, dis) { return { id: id, name: nm || id, grp: grp || '', disabled: dis, orders: 0, pv: 0, over: 0, recv: [] }; };
+    (D.sup || []).forEach(function (s) { m[s.name] = blank(s.name, s.supplier_name, s.supplier_group, s.disabled); });
+    (D.po || []).forEach(function (r) { var o = m[r.supplier] || (m[r.supplier] = blank(r.supplier, r.supplier_name, '', 0)); o.orders++; if (r.docstatus === 1) { o.pv += +r.base_grand_total || 0; o.recv.push(+r.per_received || 0); } if (P.poOver(r)) { o.over++; } });
+    return Object.keys(m).map(function (k) { var o = m[k]; o.avg = o.recv.length ? o.recv.reduce(function (a, b) { return a + b; }, 0) / o.recv.length : null; return o; });
+  }
+  var SUPK = [['engaged', 'Engaged (with PO)', 'لديهم أوامر', 'var(--dms-royal)', function (r) { return r.orders > 0; }], ['late', 'With overdue POs', 'لديهم أوامر متأخرة', 'var(--dms-bad)', function (r) { return r.over > 0; }], ['active', 'Active suppliers', 'موردون نشطون', 'var(--dms-ok)', function (r) { return !r.disabled; }]];
+  function tabSup() {
+    var n = need(['po']); if (n) { return n; }
+    var all = supRows(), cur = scopeCur(), k = SUPK.filter(function (x) { return x[0] === (MK.sup || 'engaged'); })[0], rows = all.filter(k[4]);
+    var h = kpis(SUPK.map(function (x) { var na = x[0] === 'active' && D.supErr; return kpi({ label: tr(x[1], x[2]), dot: x[3], val: na ? '—' : num(all.filter(x[4]).length), sub: na ? esc(tr('Supplier list unavailable', 'قائمة الموردين غير متاحة')) : '', top: (MK.sup || 'engaged') === x[0] ? tagc(esc(tr('Shown', 'معروضة'))) : '', act: na ? null : 'supk:' + x[0] }); }));
+    var late = all.filter(function (r) { return r.over > 0; }).sort(function (a, b) { return b.over - a.over; }).slice(0, 8);
+    h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Top suppliers by value', 'أعلى الموردين قيمة'), topSup(D.po, 8), '', esc(cur)) + panel(tr('Suppliers with overdue POs', 'موردون لديهم أوامر متأخرة'), late.length ? hbars(late.map(function (r) { return { label: r.name, value: r.over, color: 'var(--dms-bad)', act: 'sup:' + r.id }; }), num) : empty(tr('No overdue purchase orders.', 'لا أوامر متأخرة.'))) + '</div>';
+    return h + panel(tr('Suppliers', 'الموردون'), regTable({ id: 't_sup', rows: rows, sk: 'pv', dir: -1, file: 'suppliers', text: function (r) { return r.name + ' ' + r.id + ' ' + r.grp; }, empty: tr('No suppliers match.', 'لا موردين مطابقين.'), cols: [
+      { k: 'name', h: tr('Supplier', 'المورد'), s: function (r) { return r.name; }, r: function (r) { return '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="sup:' + esc(r.id) + '">' + bdi(r.name) + '</button>' + (r.disabled ? ' ' + stat('n', tr('Disabled', 'معطل')) : ''); }, c: function (r) { return r.name; } },
+      { k: 'grp', h: tr('Group', 'المجموعة'), s: function (r) { return r.grp; }, r: function (r) { return r.grp ? bdi(r.grp) : '<span class="dms-sm">—</span>'; }, c: function (r) { return r.grp; } },
+      { k: 'orders', h: tr('Orders', 'الأوامر'), num: 1, s: function (r) { return r.orders; }, r: function (r) { return num(r.orders); }, c: function (r) { return r.orders; } },
+      { k: 'pv', h: tr('Submitted value', 'القيمة المعتمدة'), num: 1, s: function (r) { return r.pv; }, r: function (r) { return r.pv ? moneyB(r.pv, cur) : '<span class="dms-sm">—</span>'; }, c: function (r) { return r.pv; } },
+      { k: 'over', h: tr('Overdue POs', 'أوامر متأخرة'), num: 1, s: function (r) { return r.over; }, r: function (r) { return r.over ? '<b class="dms-tone-bad">' + num(r.over) + '</b>' : '0'; }, c: function (r) { return r.over; } },
+      { k: 'avg', h: tr('Avg received', 'متوسط الاستلام'), s: function (r) { return r.avg == null ? -1 : r.avg; }, r: function (r) { return r.avg == null ? '<span class="dms-sm">—</span>' : pctBar(r.avg); }, c: function (r) { return r.avg == null ? '' : Math.round(r.avg); } }] }), '', esc(tr('Orders and values cover purchase orders issued in the period.', 'الأوامر والقيم تشمل الأوامر الصادرة في الفترة.')));
+  }
+  function tabActions(AM) { return actionsTab(AM, tr('All open documents in the company scope, whatever the period.', 'كل المستندات المفتوحة ضمن نطاق الشركات، بغض النظر عن الفترة.')); }
+
+  /* ============================================================ drill-downs */
+  var DOC = null;
+  function docBody() {
+    if (DOC.err) { return alertBox('err', esc(DOC.err)); }
+    var d = DOC.d; if (!d) { return skel(1, 'dms-skel-panel'); }
+    var facts = DOC.dt === PO ? [[tr('Supplier', 'المورد'), d.supplier_name || d.supplier], [tr('Company', 'الشركة'), d.company], [tr('Status', 'الحالة'), d.docstatus === 0 ? 'Draft' : d.status], [tr('Date', 'التاريخ'), d.transaction_date], [tr('Required by', 'مطلوب بتاريخ'), d.schedule_date], [tr('Grand total', 'الإجمالي'), moneyFull(+d.grand_total || 0, d.currency)], [tr('Received', 'المستلم'), Math.round(+d.per_received || 0) + '%'], [tr('Billed', 'المفوتر'), Math.round(+d.per_billed || 0) + '%']]
+      : [[tr('Company', 'الشركة'), d.company], [tr('Status', 'الحالة'), d.docstatus === 0 ? 'Draft' : d.status], [tr('Workflow', 'سير العمل'), d.workflow_state], [tr('Date', 'التاريخ'), d.transaction_date], [tr('Required by', 'مطلوب بتاريخ'), d.schedule_date], [tr('Ordered', 'المطلوب'), Math.round(+d.per_ordered || 0) + '%'], [tr('Received', 'المستلم'), Math.round(+d.per_received || 0) + '%'], [tr('Raised by', 'أنشأه'), userName(d.owner)]];
+    return '<div class="dms-facts">' + facts.map(function (f) { return '<div><span class="dms-sm">' + esc(f[0]) + '</span><b>' + esc(f[1] == null || f[1] === '' ? '—' : f[1]) + '</b></div>'; }).join('') + '</div><h4 class="pp-h">' + esc(tr('Items', 'الأصناف')) + ' (' + num((d.items || []).length) + ')</h4>';
+  }
+  function itemSpec() {
+    var d = DOC.d, cur = d && (d.currency || curOf(d.company));
+    return { rows: (d && d.items) || [], file: 'items_' + DOC.name, empty: tr('No items.', 'لا أصناف.'), text: function (r) { return (r.item_code || '') + ' ' + (r.item_name || ''); }, cols: [
+      { h: tr('Item', 'الصنف'), r: function (r) { return bdi(r.item_code || '') + '<span class="dms-sm pp-sub">' + esc(r.item_name || '') + '</span>'; }, c: function (r) { return r.item_code + ' ' + (r.item_name || ''); } },
+      { h: tr('Qty', 'الكمية'), num: 1, r: function (r) { return '<span class="dms-num">' + esc(amt(+r.qty || 0).replace(/\.00$/, '')) + '</span> <span class="dms-sm">' + esc(r.uom || r.stock_uom || '') + '</span>'; }, c: function (r) { return r.qty; } },
+      DOC.dt === PO ? { h: tr('Received', 'المستلم'), num: 1, r: function (r) { return '<span class="dms-num">' + esc(amt(+r.received_qty || 0).replace(/\.00$/, '')) + '</span>'; }, c: function (r) { return r.received_qty; } } : { h: tr('Ordered', 'المطلوب'), num: 1, r: function (r) { return '<span class="dms-num">' + esc(amt(+r.ordered_qty || 0).replace(/\.00$/, '')) + '</span>'; }, c: function (r) { return r.ordered_qty; } },
+      { h: tr('Required by', 'مطلوب بتاريخ'), r: function (r) { return r.schedule_date ? dtc(r.schedule_date) : '—'; }, c: function (r) { return r.schedule_date; } }].concat(DOC.dt === PO ? [
+      { h: tr('Rate', 'السعر'), num: 1, r: function (r) { return '<span class="dms-num">' + esc(amt(+r.rate || 0)) + '</span>'; }, c: function (r) { return r.rate; } },
+      { h: tr('Amount', 'المبلغ'), num: 1, r: function (r) { return moneyB(+r.amount || 0, cur); }, c: function (r) { return r.amount; } }] : []) };
+  }
+  function drill(id) {
+    if (id === 'doc' && DOC) { return { title: DOC.name, sub: DOC.dt === PO ? tr('Purchase order', 'أمر شراء') : tr('Material request', 'طلب مواد'), link: [DOC.dt, DOC.name, DOC.name], body: docBody(), spec: DOC.d ? itemSpec() : null, pp: 'doc' }; }
+    if (id.indexOf('sup:') === 0) {
+      var sid = id.slice(4), rows = (D.po || []).filter(function (r) { return r.supplier === sid; }), meta = (D.sup || []).filter(function (s) { return s.name === sid; })[0] || {}, cur = scopeCur();
+      var subm = rows.filter(function (r) { return r.docstatus === 1; });
+      return { title: meta.supplier_name || (rows[0] && rows[0].supplier_name) || sid, sub: tr('Purchase orders issued in the period', 'أوامر الشراء الصادرة في الفترة'), link: [SU, sid, sid],
+        body: '<div class="dms-facts"><div><span class="dms-sm">' + esc(tr('Group', 'المجموعة')) + '</span><b>' + esc(meta.supplier_group || '—') + '</b></div><div><span class="dms-sm">' + esc(tr('Orders', 'الأوامر')) + '</span><b>' + num(rows.length) + '</b></div><div><span class="dms-sm">' + esc(tr('Submitted value', 'القيمة المعتمدة')) + '</span><b>' + moneyB(subm.reduce(function (a, r) { return a + (+r.base_grand_total || 0); }, 0), cur) + '</b></div><div><span class="dms-sm">' + esc(tr('Overdue', 'متأخرة')) + '</span><b>' + num(rows.filter(P.poOver).length) + '</b></div></div>',
+        spec: { rows: rows, file: 'supplier_' + sid, text: function (r) { return r.name + ' ' + r.status; }, empty: tr('No purchase orders in this period.', 'لا أوامر في هذه الفترة.'), cols: [
+          { h: tr('Document', 'المستند'), r: function (r) { return docBtn(PO, r); }, c: function (r) { return r.name; } },
+          { h: tr('Status', 'الحالة'), r: function (r) { return stat(stTone(statusOf(r)), statusOf(r)); }, c: statusOf },
+          { h: tr('Required by', 'مطلوب بتاريخ'), r: function (r) { return r.schedule_date ? dtc(r.schedule_date) + (P.poOver(r) ? ' ' + stat('bad', tr('Late', 'متأخر')) : '') : '—'; }, c: function (r) { return r.schedule_date; } },
+          { h: tr('Received', 'المستلم'), r: function (r) { return pctBar(r.per_received); }, c: function (r) { return r.per_received; } },
+          { h: tr('Grand total', 'الإجمالي'), num: 1, r: function (r) { return moneyB(+r.grand_total || 0, r.currency); }, c: function (r) { return r.grand_total; } }] } };
     }
-  }
-  function renderTable() {
-    const v = VIEW.table; let rows = v.rows.slice();
-    if (S.sort) { const { k, dir } = S.sort; rows.sort((a, b) => ((a[k] > b[k]) - (a[k] < b[k])) * dir || String(a[k]).localeCompare(String(b[k])) * dir); }
-    $('#pcc-table-title').textContent = v.title;
-    $('#pcc-count').textContent = `${nf(rows.length)} ${t('records')}`;
-    const chip = $('#pcc-kpi-chip'); chip.hidden = !S.kpi; chip.textContent = t('clear_kpi');
-    $('#pcc-list').hidden = !v.dt;
-    const pages = Math.max(1, Math.ceil(rows.length / S.ps));
-    if (S.page > pages) S.page = pages;
-    if (S.page < 1) S.page = 1;
-    const start = (S.page - 1) * S.ps;
-    const head = '<thead><tr>' + v.cols.map((c) => `<th data-sort="${c.k}" class="${['num', 'money', 'money2', 'pct1'].includes(c.type) ? 'num' : ''}">${esc(t(c.lk))}${S.sort && S.sort.k === c.k ? (S.sort.dir > 0 ? ' ▲' : ' ▼') : ''}</th>`).join('') + '</tr></thead>';
-    const body = rows.slice(start, start + S.ps).map((r, i) => `<tr data-i="${start + i}">` + v.cols.map((c) => `<td class="${['num', 'money', 'money2', 'pct1'].includes(c.type) ? 'num' : ''}">${cell(c, r)}</td>`).join('') + '</tr>').join('');
-    $('#pcc-table').innerHTML = rows.length ? head + '<tbody>' + body + '</tbody>' : `<tbody><tr><td class="empty">${t('none')}</td></tr></tbody>`;
-    $('#pcc-pager').innerHTML = pages > 1
-      ? `<button type="button" class="btn sm" data-pg="-1" ${S.page <= 1 ? 'disabled' : ''}>${t('pg_prev')}</button><span class="muted">${t('pg_page')} ${nf(S.page)} ${t('pg_of')} ${nf(pages)}</span><button type="button" class="btn sm" data-pg="1" ${S.page >= pages ? 'disabled' : ''}>${t('pg_next')}</button>`
-      : '';
-    VIEW._rows = rows;
-  }
-  function renderStatusFilter() {
-    const sel = $('#f-status'); const wrap = $('#wrap-status');
-    wrap.hidden = !!VIEW.noStatus;
-    if (VIEW.noStatus) return;
-    const list = [...new Set((VIEW.statusSrc || []).map((r) => r.status).filter(Boolean))].sort();
-    sel.innerHTML = `<option value="">${t('all')}</option>` + list.map((s) => `<option ${s === S.status ? 'selected' : ''}>${esc(s)}</option>`).join('');
-  }
-  function overdueBacklogSummary(kind,records){
-    const isMR=kind==='mr',open=records.filter(isMR?P.mrOpen:P.poOpen),overdue=open.filter(isMR?P.mrOver:P.poOver);
-    const dates=overdue.map(r=>r.schedule_date).filter(Boolean).sort();
-    return {open:open.length,overdue:overdue.length,oldest:dates[0]||null,missing:open.filter(r=>!r.schedule_date).length,priorYears:open.filter(r=>r.transaction_date&&r.transaction_date<TODAY.slice(0,4)+'-01-01').length};
-  }
-  function showOverdueBasis(){
-    let box=$('#pcc-overdue-basis');if(!box){box=document.createElement('div');box.id='pcc-overdue-basis';box.className='card';$('#pcc-kpis').after(box);}
-    const parts=[];
-    for(const [kind,label]of [['mr',S.lang==='ar'?'طلبات المواد':'Material requests'],['po',S.lang==='ar'?'أوامر الشراء':'Purchase orders']]){
-      if(!S.cache[kind]||S.errors[kind])continue;
-      const info=overdueBacklogSummary(kind,S.cache[kind]);
-      parts.push(label+': '+info.overdue+' / '+info.open+' '+(S.lang==='ar'?'مفتوحة متأخرة؛ أقدم استحقاق: ':'open are overdue; oldest due: ')+(info.oldest||'—')+'; '+info.priorYears+' '+(S.lang==='ar'?'صادرة في سنوات سابقة؛ استحقاق مفقود: ':'issued in earlier years; missing due date: ')+info.missing);
+    if (id.indexOf('cli:') === 0) {
+      var k = id.slice(4), cc = actClient(), x = cc && cc[k], sp = actSpecs().filter(function (y) { return y.id === k; })[0];
+      if (!x || typeof x === 'string' || !sp) { return null; }
+      return { title: sp.title, sub: sp.why + ' ' + tr('Showing the first ', 'أول ') + num(x.rows.length) + tr(' of ', ' من ') + num(x.count) + '.', body: '<div class="dms-actions-row"><button type="button" class="dms-btn dms-btn-primary" data-act="erp" data-v="' + esc(k) + '">' + esc(tr('Open all in ERPNext', 'فتح الكل في ERPNext')) + ' ↗</button></div>',
+        spec: { rows: x.rows.map(x.item), file: k, text: function (it) { return [it.title, it.desc, it.who].join(' '); }, cols: [
+          { h: tr('Document', 'المستند'), r: function (it) { return docLink(it.dt, it.name, it.title); }, c: function (it) { return it.name; } },
+          { h: tr('Details', 'التفاصيل'), r: function (it) { return '<span class="dms-sm">' + bdi(it.desc) + '</span>'; }, c: function (it) { return it.desc; } },
+          { h: tr('When', 'متى'), r: function (it) { return '<span class="dms-tone-' + it.tone + '">' + esc(it.due) + '</span>'; }, c: function (it) { return it.due; } }] } };
     }
-    const rule=S.lang==='ar'?'التأخير يعني أن تاريخ الاحتياج/التسليم المسجل مضى والمستند ما زال مفتوحاً. مرشح الفترة يتعلق بتاريخ الإصدار وليس موعد التسليم. راجع السجلات القديمة مع المشتريات قبل إغلاقها.':'Overdue means the recorded required/delivery date has passed while the document is still open. Period filters use issue date, not delivery date. Older open records need Procurement review; dates and statuses have not been changed.';
-    box.textContent=rule+(parts.length?' '+parts.join(' | '):'');
+    return null;
   }
-  function render() {
-    $('#pcc-kpis').innerHTML = VIEW.kpis.map((k) => `<button type="button" class="kpi ${k.cls || ''} ${S.kpi === k.id && !k.go ? 'on' : ''}" data-kpi="${k.id}" ${k.go ? `data-go="${k.go.join('|')}"` : ''}><div class="v">${k.value}</div><div class="l">${esc(k.label)}</div>${k.sub ? `<div class="l"${k.na ? ' style="color:var(--bad);font-weight:600"' : ''}>${esc(k.sub)}</div>` : ''}</button>`).join('');
-    $('#pcc-charts').innerHTML = VIEW.charts;
-    showOverdueBasis();
-    renderStatusFilter(); renderTable();
-    const errs = Object.values(S.errors).map((x) => (x.perm ? `${t('no_access')} ${dtn(x.dt)}` : `${t('err_load')}: ${dtn(x.dt)}${x.msg ? ' — ' + x.msg : ''}`));
-    const eb = $('#pcc-error'); eb.hidden = !errs.length;
-    const parts = Object.keys(S.partial).map((d) => `${d}: ${t('partial')}`);
-    eb.hidden = !errs.length && !parts.length;
-    eb.textContent = parts.concat(errs).join('\n');
-  }
-  async function refreshView(force) {
-    if (force) { S.cache = {}; S.partial = {}; S.page = 1; }
-    $('#pcc-loading').hidden = false;
-    try {
-      VIEW = S.tab === 'overview' ? await viewOverview() : S.tab === 'sup' ? await viewSup() : await viewGeneric(S.tab);
-      render();
-      $('#pcc-updated').textContent = new Date().toLocaleString(S.lang === 'ar' ? 'ar-SA-u-nu-latn' : 'en-GB');
-    } catch (e) {
-      console.error(e); const eb = $('#pcc-error'); eb.hidden = false; eb.textContent = String(e && e.message || e);
+  function erpUrl(dt, f) { var q = {}; f.forEach(function (x) { q[x[1]] = x[2] === '=' ? x[3] : [x[2], x[3]]; }); return '/app/' + dt.toLowerCase().replace(/ /g, '-') + '?' + Object.keys(q).map(function (k) { var v = q[k]; return encodeURIComponent(k) + '=' + encodeURIComponent(typeof v === 'object' ? JSON.stringify(v) : String(v)); }).join('&'); }
+  function onAct(a, v) {
+    if (a === 'kpi' && v.indexOf('go:') === 0) { var p = v.split(':'); if (p[1] === 'mr') { MK.mr = p[2] === 'all' ? '' : p[2]; MK.mrs = ''; MK.age = null; } else { MK.po = p[2] === 'all' ? '' : p[2]; MK.pos = ''; } goTab(p[1], false, true); return true; }
+    if (a === 'kpi' && v.indexOf('mrk:') === 0) { var m = v.slice(4); MK.mr = m === 'all' || MK.mr === m ? '' : m; renderSoft(); return true; }
+    if (a === 'kpi' && v.indexOf('pok:') === 0) { var q = v.slice(4); MK.po = q === 'all' || MK.po === q ? '' : q; renderSoft(); return true; }
+    if (a === 'kpi' && v.indexOf('supk:') === 0) { MK.sup = v.slice(5); renderSoft(); return true; }
+    if (a === 'kpi' && v.indexOf('mrs:') === 0) { MK.mrs = MK.mrs === v.slice(4) ? '' : v.slice(4); MK.mr = ''; MK.age = null; if (tab !== 'mr') { goTab('mr', false, true); } else { renderSoft(); } return true; }
+    if (a === 'kpi' && v.indexOf('mrage:') === 0) { MK.age = +v.slice(6); MK.mr = ''; MK.mrs = ''; if (tab !== 'mr') { goTab('mr', false, true); } else { renderSoft(); } return true; }
+    if (a === 'kpi' && v.indexOf('pos:') === 0) { MK.pos = MK.pos === v.slice(4) ? '' : v.slice(4); MK.po = ''; if (tab !== 'po') { goTab('po', false, true); } else { renderSoft(); } return true; }
+    if (a === 'clrmr') { MK.mr = ''; MK.mrs = ''; MK.age = null; renderSoft(); return true; }
+    if (a === 'clrpo') { MK.pos = ''; renderSoft(); return true; }
+    if (a === 'doc') {
+      var i = v.indexOf('|'), dt = v.slice(0, i), nm = v.slice(i + 1); DOC = { dt: dt, name: nm, d: null }; openDrill('doc');
+      guarded(null, 'frappe.client.get', { doctype: dt, name: nm }).then(function (d) { if (DOC && DOC.name === nm) { DOC.d = d; if (OVL && OVL.pp === 'doc') { var o = drill('doc'); OVL.body = o.body; if (o.spec) { o.spec.id = 'drill'; o.spec.pageSize = CFG.modalPage; } OVL.spec = o.spec; delete TS.drill; renderOverlay(); } } }, function (e) { if (DOC && DOC.name === nm) { DOC.err = errKind(e) === 'perm' ? tr('You do not have permission to read this document.', 'ليست لديك صلاحية قراءة هذا المستند.') : tr('Could not load the document.', 'تعذر تحميل المستند.'); if (OVL && OVL.pp === 'doc') { OVL.body = docBody(); renderOverlay(); } } });
+      return true;
     }
-    $('#pcc-loading').hidden = true;
-  }
-  const rerender = () => { if (VIEW) { S.page = 1; return refreshView(false); } return Promise.resolve(); };
-  const scrollToTable = () => { const h = $('#pcc-table-title'); if (h && h.scrollIntoView) h.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
-
-  /* ---------- language ---------- */
-  function applyLang() {
-    root.setAttribute('dir', S.lang === 'ar' ? 'rtl' : 'ltr');
-    $$('[data-i18n]').forEach((el) => (el.textContent = t(el.dataset.i18n)));
-    $$('[data-i18n-ph]').forEach((el) => (el.placeholder = t(el.dataset.i18nPh)));
-    $('#pcc-lang').textContent = S.lang === 'ar' ? 'English' : 'العربية';
-    try { localStorage.setItem('pcc_lang', S.lang); } catch (e) {}
+    if (a === 'erp') { var s = actSpecs().filter(function (y) { return y.id === v; })[0]; if (s) { G.open(erpUrl(s.dt, s.f()), '_blank', 'noopener'); } return true; }
+    return false;
   }
 
-  /* ---------- drawer / drill-downs ---------- */
-  /* keep the drawer inside the visible screen even when the page is scrolled
-     or an ancestor changes the meaning of position:fixed */
-  const placeDrawer = () => {
-    const d = $('#pcc-drawer'), o = $('#pcc-overlay');
-    if (!d || d.hidden) return;
-    [d, o].forEach((el) => { el.style.top = '0px'; el.style.bottom = 'auto'; el.style.height = window.innerHeight + 'px'; });
-    const top = d.getBoundingClientRect().top;
-    if (top) [d, o].forEach((el) => { el.style.top = (-top) + 'px'; });
-  };
-  const open = (title, html, doc) => {
-    $('#pcc-drawer-title').textContent = title; $('#pcc-drawer-body').innerHTML = html;
-    const ob = $('#pcc-drawer-open'); ob.hidden = !doc; ob._doc = doc || null;
-    $('#pcc-drawer').hidden = false; $('#pcc-overlay').hidden = false;
-    placeDrawer();
-    const b = $('#pcc-drawer-body'); if (b) b.scrollTop = 0;
-  };
-  const closeDrawer = () => { $('#pcc-drawer').hidden = true; $('#pcc-overlay').hidden = true; };
-  const miniTable = (cols, rows, rowAttr) => rows.length ? `<table><thead><tr>${cols.map((c) => `<th>${esc(c[0])}</th>`).join('')}</tr></thead><tbody>${rows.map((r) =>
-    `<tr ${rowAttr ? rowAttr(r) : ''}>${cols.map((c) => `<td>${c[1](r)}</td>`).join('')}</tr>`).join('')}</tbody></table>` : `<div class="empty">${t('none')}</div>`;
-
-  async function openDoc(dt, name) {
-    open(`${dtn(dt)} · ${name}`, `<div class="empty"><span class="spin"></span></div>`, [dt, name]);
-    try {
-      const d = await call('frappe.client.get', { doctype: dt, name });
-      const skip = new Set(['doctype', 'owner', 'creation', 'modified', 'modified_by', 'idx', 'docstatus', 'naming_series', 'amended_from']);
-      const kv = Object.entries(d).filter(([k, v]) => v !== null && v !== '' && typeof v !== 'object' && !skip.has(k) && !k.startsWith('_')).slice(0, 24)
-        .map(([k, v]) => `<dt>${esc(k.replace(/_/g, ' '))}</dt><dd>${esc(v)}</dd>`).join('');
-      const items = d.items || [];
-      const it = items.length ? `<h4>${t('items')} (${items.length})</h4>` + miniTable([[t('item'), (r) => esc(r.item_code)], [t('item_name'), (r) => esc(r.item_name)], [t('qty'), (r) => nf(r.qty, 2)], [t('uom'), (r) => esc(r.uom)], [t('rate'), (r) => nf(r.rate, 2)], [t('amount'), (r) => nf(r.amount)]], items) : '';
-      $('#pcc-drawer-body').innerHTML = `<dl class="kv">${kv}</dl>${it}`;
-      placeDrawer();
-    } catch (e) { $('#pcc-drawer-body').innerHTML = `<div class="pcc-error">${esc(e && e.message || e)}</div>`; }
-  }
-  async function openSupplier(name) {
-    const po = await load('po');
-    const b = po.filter((r) => r.supplier === name);
-    const attr = (r) => `data-dt="${esc(r._dt)}" data-name="${esc(r.name)}"`;
-    open(`${dtn('Supplier')} · ${name}`,
-      `<h4>${t('t_orders')} (${b.length})</h4>` + miniTable([[t('doc'), (r) => `<a class="lnk">${esc(r.name)}</a>`], [t('status'), (r) => `<span class="badge ${badgeCls(r.status)}">${esc(r.status)}</span>`], [t('required_by'), (r) => esc(r.schedule_date)], [t('received'), (r) => nf(r.per_received) + '%'], [t('total'), (r) => nf(r.base_grand_total)]], b, attr),
-      ['Supplier', name]);
-  }
-
-  /* ---------- events ---------- */
-  function switchTab(tab, kpi) {
-    S.tab = tab; S.kpi = kpi || ''; S.status = ''; S.sort = null; S.page = 1;
-    $$('#pcc-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
-    return refreshView(false);
-  }
-  root.addEventListener('click', (e) => {
-    const el = e.target.closest('#pcc-kpi-chip,button,th,tr,span[data-status],circle[data-status],.hb,[data-nav-po],[data-q],[data-dt]');
-    if (!el) return;
-    if (el.matches('#pcc-tabs button')) return switchTab(el.dataset.tab);
-    if (el.id === 'pcc-refresh') return refreshView(true);
-    if (el.id === 'pcc-lang') { S.lang = S.lang === 'ar' ? 'en' : 'ar'; applyLang(); return rerender(); }
-    if (el.id === 'f-reset') { S.company = S.q = S.status = S.kpi = ''; S.from = S.to = ''; initDates(); $('#f-company').value = ''; $('#f-q').value = ''; return refreshView(true); }
-    if (el.dataset.pg) { S.page += parseInt(el.dataset.pg, 10); return renderTable(); }
-    if (el.id === 'pcc-kpi-chip') { S.kpi = ''; return rerender(); }
-    if (el.id === 'pcc-list') { const x = VIEW && VIEW.erp ? VIEW.erp() : null; if (x) openErp(x.dt, x.f); return; }
-    if (el.id === 'pcc-csv') return exportCsv();
-    if (el.id === 'pcc-drawer-close') return closeDrawer();
-    if (el.id === 'pcc-drawer-open') { const d = el._doc; closeDrawer(); if (d) route('Form', d[0], d[1]); return; }
-    if (el.classList.contains('kpi')) {
-      if (el.dataset.go) { const [tb, k] = el.dataset.go.split('|'); return switchTab(tb, k).then(scrollToTable); }
-      S.kpi = S.kpi === el.dataset.kpi ? '' : el.dataset.kpi; return rerender().then(scrollToTable);
-    }
-    if (el.dataset.status) { S.status = S.status === el.dataset.status ? '' : el.dataset.status; S.kpi = ''; return rerender(); }
-    if (el.hasAttribute('data-nav-po')) return switchTab('po', '');
-    if (el.dataset.q) { S.q = el.dataset.q; $('#f-q').value = S.q; return rerender(); }
-    if (el.tagName === 'TH' && el.dataset.sort) { const k = el.dataset.sort; S.sort = S.sort && S.sort.k === k ? { k, dir: -S.sort.dir } : { k, dir: 1 }; S.page = 1; return renderTable(); }
-    if (el.dataset.dt && el.dataset.name) return openDoc(el.dataset.dt, el.dataset.name);
-    if (el.tagName === 'TR' && el.dataset.i != null && el.closest('#pcc-table')) {
-      const r = VIEW._rows[+el.dataset.i]; if (!r) return;
-      if (r._dt === 'Supplier') return openSupplier(r.name);
-      return openDoc(r._dt, r.name);
-    }
-  });
-  $('#pcc-overlay').addEventListener('click', closeDrawer);
-  window.addEventListener('scroll', placeDrawer, true);
-  window.addEventListener('resize', placeDrawer);
-  $('#f-company').addEventListener('change', (e) => { S.company = e.target.value; refreshView(true); });
-  $('#f-from').addEventListener('change', (e) => { S.from = e.target.value; refreshView(true); });
-  $('#f-to').addEventListener('change', (e) => { S.to = e.target.value; refreshView(true); });
-  $('#f-status').addEventListener('change', (e) => { S.status = e.target.value; rerender(); });
-  let tm; $('#f-q').addEventListener('input', (e) => { clearTimeout(tm); tm = setTimeout(() => { S.q = ($('#f-q').value || '').trim(); rerender(); }, 250); });
-
-  function exportCsv() {
-    const v = VIEW.table, rows = VIEW._rows || [];
-    const q = (x) => '"' + String(x == null ? '' : x).replace(/"/g, '""') + '"';
-    const csv = '﻿' + [v.cols.map((c) => q(t(c.lk))).join(',')].concat(rows.map((r) => v.cols.map((c) => q(r[c.k])).join(','))).join('\n');
-    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-    a.download = `pre-procurement-${S.tab}-${TODAY}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-  }
-
-  function initDates() { S.from = `${now.getFullYear()}-01-01`; S.to = TODAY; $('#f-from').value = S.from; $('#f-to').value = S.to; }
-
-  /* ---------- boot ---------- */
-  (async function init() {
-    applyLang(); initDates();
-    try {
-      const cs = await getList('Company', ['name'], [], { order_by: 'name asc' });
-      $('#f-company').innerHTML = `<option value="">${t('all')}</option>` + cs.map((c) => `<option>${esc(c.name)}</option>`).join('');
-    } catch (e) {}
-    refreshView(true);
-  })();
+  start();
 })();
 
-/* ==== DM theme sync v1 · generated by tools/erp/shell/dark_theme.py ==== */
+/* ==== DM theme sync (same as tools/erp/shell/dark_theme.py output; maintained here since this block left the generated shell) ==== */
 ;(function () {
   var r = typeof root_element !== 'undefined' ? root_element : null, h = r && r.host;
   if (!h || h.__dmsTheme) return; h.__dmsTheme = 1;
   var s = function () { h.setAttribute('data-dms-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'); };
   s(); new MutationObserver(s).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 })();
-/* ==== end DM theme sync v1 ==== */

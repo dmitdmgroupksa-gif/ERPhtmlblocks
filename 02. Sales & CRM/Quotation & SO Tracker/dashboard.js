@@ -52,7 +52,7 @@
   var NAtxt = function () { return tr('Not Assigned', 'غير مُعيَّن'); };
   var NAvail = function () { return tr('Not Available', 'غير متوفر'); };
   var NCfg = function () { return tr('Not Configured', 'غير مهيأ'); };
-  var PAL = ['#1d4ed8', '#0f9d8a', '#f59e0b', '#c62828', '#7c3aed', '#64748b', '#ec4899', '#14b8a6', '#8b5cf6', '#84cc16'];
+  var PAL = ['#2b4fc1', '#6b8be0', '#1f8a5b', '#d97a1e', '#8a97a8', '#a3b4ef', '#c2412d', '#d6a419', '#4b5a6e', '#b6bfca'];
 
   /* ---------- dates (ERP site time zone, calendar arithmetic) ---------- */
   function siteTz() {
@@ -85,17 +85,38 @@
   function monthStart(iso) { return iso.slice(0, 8) + '01'; }
   function monthEnd(iso) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7); return isoOf(Date.UTC(y, m, 0)); }
   function addMonths(iso, n) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n; return isoOf(Date.UTC(y, m, 1)); }
+  function weekStartOf(iso) { var dow = new Date(parseISO(iso)).getUTCDay(); return addDays(iso, -((dow - CFG.weekStart + 7) % 7)); }
+  function quarterStart(iso) { var m = +iso.slice(5, 7); return iso.slice(0, 5) + ('0' + (Math.floor((m - 1) / 3) * 3 + 1)).slice(-2) + '-01'; }
+  function shiftMonths(iso, n) {   // same day-of-month n months away, clipped to that month's last day
+    var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n, d = +iso.slice(8, 10), last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    return isoOf(Date.UTC(y, m, Math.min(d, last)));
+  }
   function periodRange(key, cf, ct) {
-    var t = TODAY, y = t.slice(0, 4);
+    var t = TODAY, y = t.slice(0, 4), ws = weekStartOf(t), qs = quarterStart(t), lm = addMonths(monthStart(t), -1);
     switch (key) {
       case 'today': return [t, t];
-      case 'week': var dow = new Date(parseISO(t)).getUTCDay(), st = addDays(t, -((dow - CFG.weekStart + 7) % 7)); return [st, addDays(st, 6)];
+      case 'yesterday': return [addDays(t, -1), addDays(t, -1)];
+      case 'week': return [ws, addDays(ws, 6)];
+      case 'lastWeek': return [addDays(ws, -7), addDays(ws, -1)];
       case 'month': return [monthStart(t), monthEnd(t)];
-      case 'lastMonth': var lm = addMonths(monthStart(t), -1); return [lm, monthEnd(lm)];
+      case 'lastMonth': return [lm, monthEnd(lm)];
+      case 'quarter': return [qs, monthEnd(addMonths(qs, 2))];
       case 'year': return [y + '-01-01', y + '-12-31'];
       case 'prevYear': return [(y - 1) + '-01-01', (y - 1) + '-12-31'];
       case 'custom': return [cf, ct];
       default: return [y + '-01-01', t];   // ytd
+    }
+  }
+  /* KPI comparison window: the same span one preset unit earlier (month-to-date vs the same days last month, etc.);
+     custom ranges compare with the equally long range just before them. */
+  function prevRange(key, from, to) {
+    switch (key) {
+      case 'today': case 'yesterday': return [addDays(from, -1), addDays(to, -1)];
+      case 'week': case 'lastWeek': return [addDays(from, -7), addDays(to, -7)];
+      case 'month': case 'lastMonth': return [shiftMonths(from, -1), shiftMonths(to, -1)];
+      case 'quarter': return [shiftMonths(from, -3), shiftMonths(to, -3)];
+      case 'ytd': case 'year': case 'prevYear': return [shiftMonths(from, -12), shiftMonths(to, -12)];
+      default: var n = diffDays(from, to) + 1; return [addDays(from, -n), addDays(from, -1)];
     }
   }
   function monthsInPeriod(from, to) {   // fractional calendar months covered (for prorating monthly targets)
@@ -186,14 +207,14 @@
     review: ['Review With Sales Manager', 'Review With CEO', 'Pending', 'Approval Pending With Sales Supervisor']
   };
   var QCLS = {
-    awaiting: { c: '#1e88e5', en: 'Awaiting customer (Approved)', ar: 'بانتظار العميل (معتمد)' },
-    accepted: { c: '#2e7d32', en: 'Accepted by customer', ar: 'مقبول من العميل' },
-    rejected: { c: '#c62828', en: 'Rejected by customer', ar: 'مرفوض من العميل' },
-    lost: { c: '#e65100', en: 'Lost', ar: 'مفقود' },
-    closed: { c: '#78909c', en: 'Closed', ar: 'مغلق' },
-    review: { c: '#f9a825', en: 'Internal review / approval', ar: 'مراجعة / اعتماد داخلي' },
-    cancelled: { c: '#9e9e9e', en: 'Cancelled', ar: 'ملغى' },
-    other: { c: '#b0bec5', en: 'Other', ar: 'أخرى' }
+    awaiting: { c: '#2b4fc1', en: 'Awaiting customer (Approved)', ar: 'بانتظار العميل (معتمد)' },
+    accepted: { c: '#1f8a5b', en: 'Accepted by customer', ar: 'مقبول من العميل' },
+    rejected: { c: '#c2412d', en: 'Rejected by customer', ar: 'مرفوض من العميل' },
+    lost: { c: '#d97a1e', en: 'Lost', ar: 'مفقود' },
+    closed: { c: '#8a97a8', en: 'Closed', ar: 'مغلق' },
+    review: { c: '#d6a419', en: 'Internal review / approval', ar: 'مراجعة / اعتماد داخلي' },
+    cancelled: { c: '#b6bfca', en: 'Cancelled', ar: 'ملغى' },
+    other: { c: '#cfd6df', en: 'Other', ar: 'أخرى' }
   };
   function qcLabel(k) { return tr(QCLS[k].en, QCLS[k].ar); }
   function qClass(q) {
@@ -204,9 +225,9 @@
   }
   var ISSUED = ['awaiting', 'accepted', 'rejected', 'lost'];   // quotations actually put to the customer
   var SOSTAT = {
-    'Completed': { c: '#2e7d32', ar: 'مكتمل' }, 'Closed': { c: '#78909c', ar: 'مغلق' }, 'To Bill': { c: '#f59e0b', ar: 'للفوترة' },
-    'To Deliver and Bill': { c: '#1e88e5', ar: 'للتسليم والفوترة' }, 'To Deliver': { c: '#7c3aed', ar: 'للتسليم' }, 'On Hold': { c: '#e65100', ar: 'معلق' },
-    'Draft': { c: '#b0bec5', ar: 'مسودة' }, 'Cancelled': { c: '#9e9e9e', ar: 'ملغى' }
+    'Completed': { c: '#1f8a5b', ar: 'مكتمل' }, 'Closed': { c: '#8a97a8', ar: 'مغلق' }, 'To Bill': { c: '#d6a419', ar: 'للفوترة' },
+    'To Deliver and Bill': { c: '#2b4fc1', ar: 'للتسليم والفوترة' }, 'To Deliver': { c: '#6b8be0', ar: 'للتسليم' }, 'On Hold': { c: '#d97a1e', ar: 'معلق' },
+    'Draft': { c: '#cfd6df', ar: 'مسودة' }, 'Cancelled': { c: '#b6bfca', ar: 'ملغى' }
   };
   function soStatLabel(s) { return LANG === 'ar' && SOSTAT[s] ? SOSTAT[s].ar : s; }
 
@@ -251,11 +272,11 @@
     var key = from + '|' + to;
     if (!force && CACHE[key]) { DATA = CACHE[key]; loading = false; renderAll(); loadAgedLater(); return; }
     if (force) { CACHE = {}; }
-    DATA = freshData(); loading = true; setToday(); renderAll();
+    var D = freshData(); DATA = D; loading = true; setToday(); renderAll();
     var qf = [['transaction_date', 'between', [from, to]]];
     Promise.all([
-      fetchAll('Quotation', QF, qf, chk).then(function (r) { DATA.status.quote = { ok: true, n: r.rows.length, expected: r.expected }; return r.rows; }, function (e) { DATA.status.quote = e && e.tooLarge ? { ok: false, kind: 'large', n: e.tooLarge } : { ok: false, kind: errKind(e) }; return []; }),
-      fetchAll('Sales Order', SF, qf, chk).then(function (r) { DATA.status.so = { ok: true, n: r.rows.length, expected: r.expected }; return r.rows; }, function (e) { DATA.status.so = e && e.tooLarge ? { ok: false, kind: 'large', n: e.tooLarge } : { ok: false, kind: errKind(e) }; return []; }),
+      fetchAll('Quotation', QF, qf, chk).then(function (r) { if (!chk()) { return []; } D.status.quote = { ok: true, n: r.rows.length, expected: r.expected }; return r.rows; }, function (e) { if (chk()) { D.status.quote = e && e.tooLarge ? { ok: false, kind: 'large', n: e.tooLarge } : { ok: false, kind: errKind(e) }; } return []; }),
+      fetchAll('Sales Order', SF, qf, chk).then(function (r) { if (!chk()) { return []; } D.status.so = { ok: true, n: r.rows.length, expected: r.expected }; return r.rows; }, function (e) { if (chk()) { D.status.so = e && e.tooLarge ? { ok: false, kind: 'large', n: e.tooLarge } : { ok: false, kind: errKind(e) }; } return []; }),
       loadRef(chk)
     ]).then(function (res) {
       if (!chk()) { return; }
@@ -334,7 +355,7 @@
     if (b.from) { f.push(['transaction_date', 'between', [b.from, b.to]]); } else { f.push(['transaction_date', '<=', b.to]); }
     return f;
   }
-  function loadAgedLater() { later(loadAged, 200); later(loadRecon, 900); }
+  function loadAgedLater() { later(loadCompare, 120); later(loadAged, 200); later(loadRecon, 900); }   // period/filter-dependent side queries
   function loadAged() {
     var tok = ++AGTOK, chk = function () { return tok === AGTOK && !destroyed; };
     setToday(); AGED.loading = true; AGED.err = null;
@@ -375,33 +396,99 @@
     }).catch(function (e) { CUST.loading = false; CUST.err = e && e.tooLarge ? 'large' : errKind(e); renderAll(true); });
   }
 
-  /* Action Center sources (server-side paginated lists, as of today; not tied to the date filter) */
+  /* Action Center sources (server-side paginated lists, as of today; not tied to the date filter).
+     Each spec's `it` maps one of its most urgent rows to a ranked pending action for the overview panel
+     (priority, responsible person, due date or age). */
+  function soServerFilters() {
+    var f = [];
+    if (F.company) { f.push(['company', '=', F.company]); }
+    if (F.division) { f.push(sfilter('custom_division', F.division)); }
+    if (F.location) { f.push(sfilter('location_', F.location)); }
+    return f;
+  }
+  function plain(s, n) { return clean(String(s || '').replace(/<[^>]*>/g, ' ')).slice(0, n || 90); }
   function actSpecs() {
-    var t = TODAY, sf = qServerFilters(), cf = F.company ? [['company', '=', F.company]] : [];
+    var t = TODAY, sf = qServerFilters(), of = soServerFilters();
+    if (F.sp && F.sp !== NA) { of = of.concat([['Sales Team', 'sales_person', '=', F.sp]]); }   // child-table filter on the order's Sales Team
+    if (F.sp === NA) { of = of.concat([['Sales Team', 'name', 'is', 'not set']]); }
+    function party(r) { return r.customer_name || r.party_name || ''; }
     return [
-      { id: 'a_acc', dt: 'Quotation', title: tr('Accepted quotations without a Sales Order', 'عروض مقبولة بدون أمر بيع'), why: tr('Customer accepted, but no order was created (status Open or Expired).', 'قبل العميل العرض ولم يُنشأ أمر بيع (الحالة مفتوح أو منتهي).'),
-        filters: [['docstatus', '=', 1], ['status', 'in', ['Open', 'Expired']], ['workflow_state', 'in', WF.accepted]].concat(sf), order: 'transaction_date desc', kind: 'q' },
-      { id: 'a_valid', dt: 'Quotation', title: tr('Active quotations nearing or past validity', 'عروض نشطة قاربت أو تجاوزت الصلاحية'), why: tr('Approved, awaiting customer, ≤ ' + CFG.activeMaxAge + ' days old, valid-till within 14 days or already passed.', 'معتمدة وبانتظار العميل، عمرها ≤ ' + CFG.activeMaxAge + ' يومًا، وتنتهي صلاحيتها خلال 14 يومًا أو انتهت.'),
-        filters: [['docstatus', '=', 0], ['workflow_state', '=', 'Approved'], ['transaction_date', '>=', addDays(t, -CFG.activeMaxAge)], ['valid_till', '<=', addDays(t, 14)]].concat(sf), order: 'valid_till asc', kind: 'q' },
-      { id: 'a_deliv', dt: 'Sales Order', title: tr('Sales Orders past delivery date', 'أوامر بيع تجاوزت تاريخ التسليم'), why: tr('Submitted, still to deliver, delivery date before today.', 'مُعتمدة وما زالت للتسليم وتاريخ التسليم قبل اليوم.'),
-        filters: [['docstatus', '=', 1], ['status', 'in', ['To Deliver', 'To Deliver and Bill']], ['delivery_date', '<', t]].concat(cf), order: 'delivery_date asc', kind: 's' },
-      { id: 'a_bill', dt: 'Sales Order', title: tr('Sales Orders delivered but not fully billed', 'أوامر بيع سُلّمت ولم تُفوتر بالكامل'), why: tr('Status To Bill.', 'الحالة: للفوترة.'),
-        filters: [['docstatus', '=', 1], ['status', '=', 'To Bill']].concat(cf), order: 'transaction_date desc', kind: 's' },
-      { id: 'a_lead', dt: 'Lead', title: tr('Leads needing allocation', 'عملاء محتملون بحاجة للتخصيص'), why: tr('Allocation status is empty or Non Allocated (excluding Do Not Contact).', 'حالة التخصيص فارغة أو غير مخصص (باستثناء عدم الاتصال).'),
-        filters: [['status', '!=', 'Do Not Contact'], ['custom_allocation_status', 'in', ['', 'Non Allocated']]], order: 'creation desc', kind: 'l' },
-      { id: 'a_coll', dt: 'Customer', title: tr('Customers flagged for collection follow-up', 'عملاء بحاجة لمتابعة التحصيل'), why: tr('Collection status Follow up, Critical or Escalated.', 'حالة التحصيل: متابعة أو حرج أو مُصعَّد.'),
-        filters: [['custom_collection_status', 'in', ['Follow up', 'Critical', 'Escalated']]], order: 'modified desc', kind: 'c' },
-      { id: 'a_opp', dt: 'Opportunity', title: tr('Open opportunities', 'فرص مفتوحة'), why: tr('Opportunity status Open.', 'حالة الفرصة: مفتوحة.'), filters: [['status', '=', 'Open']], order: 'modified desc', kind: 'o' },
-      { id: 'a_todo', dt: 'ToDo', title: tr('Open ToDo follow-ups', 'مهام متابعة مفتوحة'), why: tr('ToDo status Open (only a few are used in ERP).', 'مهام بحالة مفتوحة (يُستخدم عدد قليل منها في النظام).'), filters: [['status', '=', 'Open']], order: 'modified desc', kind: 't' }
+      { id: 'a_acc', dt: 'Quotation', short: tr('Accepted, no sales order', 'مقبولة بدون أمر بيع'), title: tr('Accepted quotations without a Sales Order', 'عروض مقبولة بدون أمر بيع'), why: tr('Customer accepted, but no order was created (status Open or Expired).', 'قبل العميل العرض ولم يُنشأ أمر بيع (الحالة مفتوح أو منتهي).'),
+        filters: [['docstatus', '=', 1], ['status', 'in', ['Open', 'Expired']], ['workflow_state', 'in', WF.accepted]].concat(sf), order: 'transaction_date asc', kind: 'q',
+        fields: ['name', 'customer_name', 'party_name', 'sales_person', 'transaction_date'],
+        it: function (r) { var a = ageOf(r.transaction_date); return { p: 'high', score: 300 + a / 10, who: r.sales_person, desc: tr('Accepted, no sales order', 'مقبول بدون أمر بيع') + ' · ' + party(r), due: a ? tr('Quoted ' + daysTxt(a) + ' ago', 'عُرض قبل ' + daysTxt(a)) : tr('Quoted today', 'عُرض اليوم'), tone: 'bad' }; } },
+      { id: 'a_valid', dt: 'Quotation', short: tr('Validity ending', 'صلاحية تنتهي'), title: tr('Active quotations nearing or past validity', 'عروض نشطة قاربت أو تجاوزت الصلاحية'), why: tr('Approved, awaiting customer, ≤ ' + CFG.activeMaxAge + ' days old, valid-till within 14 days or already passed.', 'معتمدة وبانتظار العميل، عمرها ≤ ' + CFG.activeMaxAge + ' يومًا، وتنتهي صلاحيتها خلال 14 يومًا أو انتهت.'),
+        filters: [['docstatus', '=', 0], ['workflow_state', '=', 'Approved'], ['transaction_date', '>=', addDays(t, -CFG.activeMaxAge)], ['valid_till', '<=', addDays(t, 14)]].concat(sf), order: 'valid_till asc', kind: 'q',
+        fields: ['name', 'customer_name', 'party_name', 'sales_person', 'valid_till'],
+        it: function (r) {
+          var d = diffDays(String(r.valid_till || t).slice(0, 10), t), past = d > 0;
+          return { p: past ? 'high' : 'med', score: past ? 240 + Math.min(d, 60) : 160 + d, who: r.sales_person, desc: tr('Awaiting customer', 'بانتظار العميل') + ' · ' + party(r), tone: past ? 'bad' : 'warn',
+            due: past ? tr('Expired ' + daysTxt(d) + ' ago', 'انتهت قبل ' + daysTxt(d)) : d === 0 ? tr('Expires today', 'تنتهي اليوم') : tr('Expires in ' + daysTxt(-d), 'تنتهي خلال ' + daysTxt(-d)) };
+        } },
+      { id: 'a_deliv', dt: 'Sales Order', short: tr('Past delivery date', 'تجاوزت التسليم'), title: tr('Sales Orders past delivery date', 'أوامر بيع تجاوزت تاريخ التسليم'), why: tr('Submitted, still to deliver, delivery date before today.', 'مُعتمدة وما زالت للتسليم وتاريخ التسليم قبل اليوم.'),
+        filters: [['docstatus', '=', 1], ['status', 'in', ['To Deliver', 'To Deliver and Bill']], ['delivery_date', '<', t]].concat(of), order: 'delivery_date asc', kind: 's',
+        fields: ['name', 'customer_name', 'delivery_date', 'sales_persons'],
+        it: function (r) { return { p: 'high', score: 280 + Math.min(ageOf(r.delivery_date), 60), who: r.sales_persons, desc: tr('Delivery overdue', 'تسليم متأخر') + ' · ' + (r.customer_name || ''), due: lateTxt(r.delivery_date), tone: 'bad' }; } },
+      { id: 'a_bill', dt: 'Sales Order', short: tr('Delivered, to bill', 'سُلّمت للفوترة'), title: tr('Sales Orders delivered but not fully billed', 'أوامر بيع سُلّمت ولم تُفوتر بالكامل'), why: tr('Status To Bill.', 'الحالة: للفوترة.'),
+        filters: [['docstatus', '=', 1], ['status', '=', 'To Bill']].concat(of), order: 'transaction_date asc', kind: 's',
+        fields: ['name', 'customer_name', 'transaction_date', 'sales_persons'],
+        it: function (r) { var a = ageOf(r.transaction_date); return { p: 'med', score: 120 + Math.min(a, 90) / 3, who: r.sales_persons, desc: tr('Not fully billed', 'غير مفوتر بالكامل') + ' · ' + (r.customer_name || ''), due: a ? tr('Ordered ' + daysTxt(a) + ' ago', 'طُلب قبل ' + daysTxt(a)) : tr('Ordered today', 'طُلب اليوم'), tone: 'warn' }; } },
+      { id: 'a_coll', dt: 'Customer', short: tr('Collection follow-up', 'متابعة التحصيل'), title: tr('Customers flagged for collection follow-up', 'عملاء بحاجة لمتابعة التحصيل'), why: tr('Collection status Follow up, Critical or Escalated.', 'حالة التحصيل: متابعة أو حرج أو مُصعَّد.'),
+        filters: [['custom_collection_status', 'in', ['Follow up', 'Critical', 'Escalated']]], order: 'custom_collection_status asc', kind: 'c',
+        fields: ['name', 'customer_name', 'custom_collection_status', 'custom_sales_person'],
+        it: function (r) { var hi = r.custom_collection_status !== 'Follow up'; return { p: hi ? 'high' : 'med', score: hi ? 260 : 130, who: r.custom_sales_person, title: r.customer_name || r.name, desc: tr('Collection', 'التحصيل') + ' · ' + (r.custom_collection_status || ''), due: r.custom_collection_status || '', tone: hi ? 'bad' : 'warn' }; } },
+      { id: 'a_todo', dt: 'ToDo', short: tr('Open ToDos', 'مهام مفتوحة'), title: tr('Open ToDo follow-ups', 'مهام متابعة مفتوحة'), why: tr('ToDo status Open (only a few are used in ERP).', 'مهام بحالة مفتوحة (يُستخدم عدد قليل منها في النظام).'), filters: [['status', '=', 'Open']], order: 'modified desc', kind: 't',
+        fields: ['name', 'description', 'allocated_to', 'date', 'priority', 'reference_type', 'reference_name'],
+        it: function (r) {
+          var p = r.priority === 'High' ? 'high' : r.priority === 'Low' ? 'low' : 'med', late = r.date && ageOf(r.date) > 0;
+          return { p: p, score: (p === 'high' ? 200 : p === 'med' ? 110 : 50) + (late ? 40 : 0), who: r.allocated_to, title: r.reference_name || plain(r.description, 40) || r.name, desc: plain(r.description) || (r.reference_type || ''), due: r.date ? lateTxt(r.date) : '', tone: late ? 'bad' : 'n' };
+        } },
+      { id: 'a_lead', dt: 'Lead', short: tr('Leads to allocate', 'عملاء للتخصيص'), title: tr('Leads needing allocation', 'عملاء محتملون بحاجة للتخصيص'), why: tr('Allocation status is empty or Non Allocated (excluding Do Not Contact).', 'حالة التخصيص فارغة أو غير مخصص (باستثناء عدم الاتصال).'),
+        filters: [['status', '!=', 'Do Not Contact'], ['custom_allocation_status', 'in', ['', 'Non Allocated']]], order: 'creation desc', kind: 'l',
+        fields: ['name', 'lead_name', 'company_name', 'lead_owner', 'creation'],
+        it: function (r) { var a = ageOf(r.creation); return { p: 'low', score: 40 - Math.min(a, 30) / 10, who: r.lead_owner, desc: tr('Needs allocation', 'بحاجة للتخصيص') + ' · ' + (r.lead_name || r.company_name || ''), due: a ? tr('Created ' + daysTxt(a) + ' ago', 'أُنشئ قبل ' + daysTxt(a)) : tr('Created today', 'أُنشئ اليوم'), tone: 'n' }; } },
+      { id: 'a_opp', dt: 'Opportunity', short: tr('Open opportunities', 'فرص مفتوحة'), title: tr('Open opportunities', 'فرص مفتوحة'), why: tr('Opportunity status Open.', 'حالة الفرصة: مفتوحة.'), filters: [['status', '=', 'Open']], order: 'modified desc', kind: 'o',
+        fields: ['name', 'party_name', 'opportunity_from', 'transaction_date'],
+        it: function (r) { var a = ageOf(r.transaction_date); return { p: 'low', score: 30, who: '', desc: (r.opportunity_from || '') + ' · ' + (r.party_name || ''), due: tr('Open ' + daysTxt(a), 'مفتوحة منذ ' + daysTxt(a)), tone: 'n' }; } }
     ];
   }
-  function loadActionCounts() {
-    if (ACT.loading) { return; }
-    ACT.loading = true; setToday();
-    var specs = actSpecs(), chk = function () { return !destroyed; };
+  var ACTTOK = 0;
+  function loadActions() {
+    var tok = ++ACTTOK, chk = function () { return tok === ACTTOK && !destroyed; }, specs;
+    setToday(); specs = actSpecs(); ACT.loading = true;
     Promise.all(specs.map(function (s) {
-      return getList({ doctype: s.dt, fields: ['count(name) as n'], filters: s.filters, limit_page_length: 1 }, chk).then(function (r) { return (r && r[0]) ? +r[0].n : (r ? 0 : null); }, function (e) { return 'ERR:' + errKind(e); });
-    })).then(function (res) { ACT.counts = {}; specs.forEach(function (s, i) { ACT.counts[s.id] = res[i]; }); ACT.loading = false; renderAll(true); });
+      var c = getList({ doctype: s.dt, fields: ['count(name) as n'], filters: s.filters, limit_page_length: 1 }, chk).then(function (r) { return (r && r[0]) ? +r[0].n : (r ? 0 : null); }, function (e) { return 'ERR:' + errKind(e); });
+      // ToDo urgency combines priority and overdue state; rank its complete bounded set before sampling.
+      var candidates = s.dt === 'ToDo' ? fetchAll(s.dt, s.fields, s.filters, chk).then(function (r) { return r.rows; })
+        : getList({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order, limit_page_length: 6 }, chk);
+      var l = candidates.then(function (r) {
+        return (r || []).map(function (x) { var it = s.it(x); it.name = x.name; it.dt = s.dt; return it; }).sort(function (a, b) { return b.score - a.score; }).slice(0, 6);
+      }, function (e) { return 'ERR:' + errKind(e); });
+      return Promise.all([c, l]);
+    })).then(function (res) {
+      if (!chk()) { return; }
+      var items = []; ACT.counts = {};
+      specs.forEach(function (s, i) { ACT.counts[s.id] = typeof res[i][1] === 'string' ? res[i][1] : res[i][0]; if (Array.isArray(res[i][1])) { items = items.concat(res[i][1]); } });
+      ACT.items = items.sort(function (a, b) { return b.score - a.score; }); ACT.loading = false; renderAll(true);
+    });
+  }
+
+  /* Time series for the trend chart and KPI sparklines (same window for both). Daily up to 45 days, weekly up to
+     120 days, monthly beyond. An in-progress period stops at today so the tail is not an artificial drop to zero. */
+  function series(qs, so1, s2) {
+    var from = PERIOD[0] || TODAY, to = PERIOD[1] || TODAY;
+    if (from <= TODAY && to > TODAY) { to = TODAY; }
+    var span = diffDays(from, to) + 1, g = span <= 45 ? 'day' : span <= 120 ? 'week' : 'month', keys = [], d = {}, cur, i;
+    function keyOf(iso) { return g === 'day' ? iso : g === 'week' ? weekStartOf(iso) : iso.slice(0, 7); }
+    if (g === 'month') { keys = monthList(from, to); } else { cur = keyOf(from); for (i = 0; i < 200 && cur <= to; i++) { keys.push(cur); cur = addDays(cur, g === 'day' ? 1 : 7); } }
+    keys.forEach(function (k) { d[k] = { qn: 0, qv: 0, sn: 0, sv: 0, iN: 0, acc: 0, iv: 0, cv: 0 }; });
+    qs.forEach(function (q) {
+      var o = q.date && q.cls !== 'cancelled' && d[keyOf(q.date)]; if (!o) { return; }
+      o.qn++; o.qv += q.val;
+      if (ISSUED.indexOf(q.cls) >= 0) { o.iN++; o.iv += q.val; if (q.cls === 'accepted') { o.acc++; } if (s2) { o.cv += q.linkVal; } }
+    });
+    so1.forEach(function (s) { var o = s.date && d[keyOf(s.date)]; if (o) { o.sn++; o.sv += soShare(s); } });
+    return { gran: g, keys: keys, d: d };
   }
 
   /* ---------- model (recomputed from loaded rows whenever data or global filters change) ---------- */
@@ -466,68 +553,144 @@
       });
     }
     M.persons = P; M.unalloc = unalloc; M.overAlloc = over;
-    /* monthly series */
-    var mm = {}; M.months.forEach(function (m) { mm[m] = { qn: 0, qv: 0, sn: 0, sv: 0 }; });
-    qs.forEach(function (q) { if (q.cls !== 'cancelled' && mm[q.date.slice(0, 7)]) { var o = mm[q.date.slice(0, 7)]; o.qn++; o.qv += q.val; } });
-    so1.forEach(function (s) { var o = mm[s.date.slice(0, 7)]; if (o) { o.sn++; o.sv += soShare(s); } });
-    M.monthly = mm;
+    M.S = series(qs, so1, M.s2);
     M.targetMonths = monthsInPeriod(PERIOD[0] || TODAY, PERIOD[1] || TODAY);
     return M;
   }
 
-  /* ---------- UI primitives ---------- */
+  /* ---------- UI state & primitives ---------- */
   var tab = 'overview', OVL = null, TBL = {}, TS = {}, SS = {}, LF = { cls: '', lsrc: '', lstat: '' }, MM = null;
+  var POP = null, FD = null, FS = {}, CAL = null, ANIM = false, RECON_OPEN = false, built = false;   // open popover, filter draft, filter searches, calendar
   var TABS = [
     { id: 'overview', en: 'Overview', ar: 'نظرة عامة' }, { id: 'leads', en: 'Lead Tracker', ar: 'متابعة العملاء المحتملين' },
     { id: 'customers', en: 'Customer Analysis', ar: 'تحليل العملاء' }, { id: 'quotes', en: 'Quotation Tracker', ar: 'متابعة عروض الأسعار' },
     { id: 'orders', en: 'Sales Order Tracker', ar: 'متابعة أوامر البيع' }, { id: 'conv', en: 'Conversion Analysis', ar: 'تحليل التحويل' },
     { id: 'team', en: 'Sales Team & BDM', ar: 'فريق المبيعات و BDM' }, { id: 'actions', en: 'Follow-ups & Actions', ar: 'المتابعة والإجراءات' }
   ];
-  var PERIODS = [['ytd', 'Current Year to Date', 'السنة الحالية حتى اليوم'], ['today', 'Today', 'اليوم'], ['week', 'This Week', 'هذا الأسبوع'], ['month', 'This Month', 'هذا الشهر'],
-    ['lastMonth', 'Last Month', 'الشهر الماضي'], ['year', 'This Year', 'هذه السنة'], ['prevYear', 'Previous Year', 'السنة الماضية'], ['custom', 'Custom Date Range', 'نطاق تاريخ مخصص']];
-
-  function badge(txt, color, dark) { return '<span class="dms-badge' + (dark ? ' dms-dark' : '') + '" style="--dms-c:' + color + '">' + esc(txt) + '</span>'; }
-  function clsBadge(k) { return badge(qcLabel(k), QCLS[k].c, k === 'review'); }
-  function soBadge(s) { var c = (SOSTAT[s] || { c: '#78909c' }).c; return badge(soStatLabel(s), c); }
-  function kpi(o) {
-    var inner = '<div class="dms-kpi-n">' + o.val + '</div><div class="dms-kpi-l">' + esc(o.label) + (o.warn ? '<span class="dms-warn">' + esc(o.warn) + '</span>' : '') + '</div>' + (o.sub ? '<div class="dms-kpi-s">' + o.sub + '</div>' : '');
-    return o.act ? '<button type="button" class="dms-kpi" data-act="kpi" data-v="' + esc(o.act) + '" style="--dms-c:' + (o.c || '#0f2547') + '">' + inner + '</button>'
-      : '<div class="dms-kpi" style="--dms-c:' + (o.c || '#0f2547') + ';cursor:default">' + inner + '</div>';
+  var PERIODS = [['today', 'Today', 'اليوم'], ['yesterday', 'Yesterday', 'أمس'], ['week', 'This week', 'هذا الأسبوع'], ['lastWeek', 'Last week', 'الأسبوع الماضي'],
+    ['month', 'This month', 'هذا الشهر'], ['lastMonth', 'Last month', 'الشهر الماضي'], ['quarter', 'This quarter', 'هذا الربع'], ['ytd', 'Year to date', 'السنة حتى اليوم'],
+    ['year', 'This year', 'هذه السنة'], ['prevYear', 'Previous year', 'السنة الماضية'], ['custom', 'Custom range', 'نطاق مخصص']];
+  var PGROUPS = [['today', 'yesterday'], ['week', 'lastWeek'], ['month', 'lastMonth'], ['quarter', 'ytd', 'year', 'prevYear'], ['custom']];
+  var FLD = [['company', 'Company', 'الشركة'], ['division', 'Division', 'القسم'], ['location', 'Location', 'الموقع'], ['sp', 'Salesperson', 'المندوب']];
+  function periodName(k) { var p = PERIODS.filter(function (x) { return x[0] === k; })[0]; return p ? tr(p[1], p[2]) : k; }
+  function locale() { return LANG === 'ar' ? 'ar-SA-u-nu-latn-ca-gregory' : 'en-GB'; }
+  function fmtDate(iso, yr) {
+    try { var o = { day: 'numeric', month: 'short', timeZone: 'UTC' }; if (yr) { o.year = 'numeric'; } return new Intl.DateTimeFormat(locale(), o).format(new Date(parseISO(iso))); } catch (e) { return iso; }
   }
-  function panel(title, body, extra) { return '<div class="dms-panelbox ' + (extra || '') + '"><h3 class="dms-h3">' + esc(title) + '</h3>' + body + '</div>'; }
+  function rangeLabel(r) {
+    if (!r || !r[0] || !r[1]) { return ''; }
+    return r[0] === r[1] ? fmtDate(r[0], true) : fmtDate(r[0], r[0].slice(0, 4) !== r[1].slice(0, 4)) + ' – ' + fmtDate(r[1], true);
+  }
+  var PLR = null;
+  function daysTxt(n) {
+    if (LANG !== 'ar') { return num(n) + (n === 1 ? ' day' : ' days'); }
+    var c = 'other'; try { c = (PLR || (PLR = new Intl.PluralRules('ar'))).select(n); } catch (e) { /* older browsers: generic form */ }
+    return c === 'one' ? 'يوم واحد' : c === 'two' ? 'يومان' : c === 'few' ? n + ' أيام' : c === 'many' ? n + ' يومًا' : n + ' يوم';
+  }
+  function ageOf(iso) { var d = iso ? diffDays(String(iso).slice(0, 10), TODAY) : 0; return isNaN(d) ? 0 : Math.max(0, d); }
+  function lateTxt(iso) {
+    var d = diffDays(String(iso).slice(0, 10), TODAY); if (isNaN(d)) { return ''; }
+    return d > 0 ? tr(daysTxt(d) + ' overdue', 'متأخر ' + daysTxt(d)) : d === 0 ? tr('Due today', 'مستحق اليوم') : tr('Due in ' + daysTxt(-d), 'مستحق خلال ' + daysTxt(-d));
+  }
+  function rep(s, n) { var o = ''; for (var i = 0; i < n; i++) { o += s; } return o; }
+  var ICO = {
+    refresh: '<path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/>', filter: '<path d="M4 5h16l-6.2 7.6V19l-3.6 1.6v-8z"/>',
+    cal: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/>', down: '<path d="m6 9 6 6 6-6"/>',
+    prev: '<path d="m15 6-6 6 6 6"/>', next: '<path d="m9 6 6 6-6 6"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
+    up: '<path d="M12 19V6M6.5 11.5 12 6l5.5 5.5"/>', dn: '<path d="M12 5v13M6.5 12.5 12 18l5.5-5.5"/>'
+  };
+  function ico(n, cls) { return '<svg class="dms-ico' + (cls ? ' ' + cls : '') + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + ICO[n] + '</svg>'; }
+  function badge(txt, color) { return '<span class="dms-badge" style="--dms-c:' + color + '">' + esc(txt) + '</span>'; }
+  function clsBadge(k) { return badge(qcLabel(k), QCLS[k].c); }
+  function soBadge(s) { return badge(soStatLabel(s), (SOSTAT[s] || { c: '#8a97a8' }).c); }
+  /* KPI card: label (top start) · delta or status (top end) · value · one context line · optional sparkline / context footer.
+     o.dot (a status-category colour shared with the charts) renders as a small dot; definitions go in the tooltip (o.tip), not on the card. */
+  function kpi(o) {
+    var inner = '<span class="dms-kpi-h"><span class="dms-kpi-l">' + (o.dot ? '<i class="dms-dot" style="--dms-c:' + o.dot + '"></i>' : '') + esc(o.label) + (o.warn ? '<span class="dms-warn">' + esc(o.warn) + '</span>' : '') + '</span>' + (o.top || '') + '</span>' +
+      '<span class="dms-kpi-n">' + o.val + '</span>' + (o.sub ? '<span class="dms-kpi-s">' + o.sub + '</span>' : '') + (o.foot != null ? '<span class="dms-kpi-f">' + o.foot + '</span>' : '');
+    var t = o.tip ? ' title="' + esc(o.tip) + '"' : '';
+    return o.act ? '<button type="button" class="dms-kpi" data-act="kpi" data-v="' + esc(o.act) + '"' + t + '>' + inner + '</button>' : '<div class="dms-kpi"' + t + '>' + inner + '</div>';
+  }
+  function tagc(txt) { return '<span class="dms-tag">' + txt + '</span>'; }
+  function stat(k, txt) { return '<span class="dms-stat dms-stat-' + k + '">' + esc(txt) + '</span>'; }
+  function ctx(html) { return '<span class="dms-kpi-ctx">' + html + '</span>'; }
+  function moneyS(v) { return 'SAR ' + money(v); }
+  /* Sparkline from a real series (nulls = no data in that bucket). Needs ≥ 3 points with data, else nothing is drawn. */
+  function spark(vals) {
+    var n = vals.length, real = vals.filter(function (v) { return v != null; }), pts = [];
+    if (n < 3 || real.length < 3 || !real.some(function (v) { return v > 0; })) { return ''; }
+    var max = Math.max.apply(null, real), min = Math.min(0, Math.min.apply(null, real)), rng = (max - min) || 1;
+    vals.forEach(function (v, i) { if (v != null) { pts.push([(i / (n - 1) * 100).toFixed(2), (26 - (v - min) / rng * 23).toFixed(2)]); } });
+    var line = pts.map(function (p) { return p.join(','); }).join(' L');
+    return '<svg class="dms-spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path class="dms-spark-a" d="M' + pts[0][0] + ',28 L' + line + ' L' + pts[pts.length - 1][0] + ',28 Z"/><path class="dms-spark-l" d="M' + line + '"/></svg>';
+  }
+  /* Change vs the comparison window (server aggregates for both windows, same filters and definition).
+     Small bases show "was N" instead of a misleading percentage. */
+  function deltaChip(cur, prev, fmt, isCount) {
+    var R = CMP.ranges; if (!R || cur == null || prev == null) { return ''; }
+    var tip = tr('This period', 'هذه الفترة') + ' (' + rangeLabel(R.cur) + '): ' + fmt(cur) + '\n' + tr('Previous', 'السابقة') + ' (' + rangeLabel(R.prev) + '): ' + fmt(prev);
+    var sr = '<span class="dms-sr"> ' + esc(tr('vs previous period', 'مقارنة بالفترة السابقة')) + '</span>';
+    if (prev === 0 || (isCount && prev < 5)) { return '<span class="dms-delta dms-flat" data-tip="' + esc(tip) + '">' + esc(tr('was', 'كان')) + ' <bdi>' + esc(fmt(prev)) + '</bdi>' + sr + '</span>'; }
+    var p = (cur - prev) / prev * 100, a = Math.abs(p), k = a < 0.05 ? 'flat' : p > 0 ? 'up' : 'down';
+    var txt = a > 999 ? '10×+' : (a < 10 ? a.toFixed(1) : Math.round(a)) + '%';
+    return '<span class="dms-delta dms-' + k + '" data-tip="' + esc(tip) + '">' + (k === 'flat' ? '' : ico(k === 'up' ? 'up' : 'dn')) + '<bdi>' + (k === 'down' ? '−' : '') + txt + '</bdi>' + sr + '</span>';
+  }
+  function panel(title, body, extra, meta) {
+    return '<section class="dms-panelbox ' + (extra || '') + '"><div class="dms-ph"><h3 class="dms-h3">' + esc(title) + '</h3>' + (meta ? '<span class="dms-ph-meta">' + meta + '</span>' : '') + '</div>' + body + '</section>';
+  }
   function note(txt) { return '<p class="dms-note">' + txt + '</p>'; }
-  function alertBox(kind, html) { return '<div class="dms-alert dms-alert-' + kind + '">' + html + '</div>'; }
+  function alertBox(kind, html) { return '<div class="dms-alert dms-alert-' + kind + '" role="' + (kind === 'err' ? 'alert' : 'status') + '">' + html + '</div>'; }
   function empty(txt) { return '<div class="dms-empty">' + esc(txt || tr('No data for the current period and filters.', 'لا توجد بيانات للفترة والمرشحات الحالية.')) + '</div>'; }
   function calc() { return '<span class="dms-sm">' + esc(tr('Calculating…', 'جارٍ الحساب…')) + '</span>'; }
 
-  /* charts */
-  function donut(segs, top, bottom) {
-    var tot = sum(segs, function (s) { return s.value; }), R = 70, C = 2 * Math.PI * R, off = 0, h = '';
-    if (!tot) { return empty(); }
-    segs.forEach(function (s) { if (!s.value) { return; } var len = s.value / tot * C; h += '<circle cx="90" cy="90" r="' + R + '" fill="none" stroke="' + s.color + '" stroke-width="26" stroke-dasharray="' + len.toFixed(2) + ' ' + (C - len).toFixed(2) + '" stroke-dashoffset="' + (-off).toFixed(2) + '" transform="rotate(-90 90 90)"><title>' + esc(s.label) + ': ' + num(s.value) + '</title></circle>'; off += len; });
-    var leg = segs.map(function (s) { return '<div><span><i style="--dms-c:' + s.color + '"></i>' + esc(s.label) + '</span><b>' + (s.fmt || num)(s.value) + '</b></div>'; }).join('');
-    return '<div class="dms-chartwrap"><svg class="dms-donut" viewBox="0 0 180 180" role="img"><g>' + h + '</g><text x="90" y="88" text-anchor="middle" font-size="22" font-weight="800" fill="#0f2547">' + esc(top) + '</text><text x="90" y="106" text-anchor="middle" font-size="10" fill="#64748b">' + esc(bottom || '') + '</text></svg><div class="dms-donut-legend">' + leg + '</div></div>';
+  /* charts (HTML/CSS so text stays crisp at any width; hover details via the shared tooltip, data-tip) */
+  function niceMax(v) { if (!(v > 0)) { return 1; } var p = Math.pow(10, Math.floor(Math.log(v) / Math.LN10)), f = v / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
+  function axisFmt(v) { var a = Math.abs(v); return a >= 1e9 ? +(v / 1e9).toFixed(1) + 'B' : a >= 1e6 ? +(v / 1e6).toFixed(1) + 'M' : a >= 1e3 ? +(v / 1e3).toFixed(1) + 'K' : String(Math.round(v)); }
+  function bucketLabel(k, g, short) {
+    if (g === 'week' && !short) { return tr('Week of ', 'أسبوع ') + fmtDate(k, true); }
+    if (g !== 'month') { return fmtDate(k, !short); }
+    try { return new Intl.DateTimeFormat(locale(), { month: 'short', year: '2-digit', timeZone: 'UTC' }).format(new Date(parseISO(k + '-01'))); } catch (e) { return k; }
   }
-  function groupedBars(months, series, data) {
-    if (!months.length) { return empty(); }
-    var max = 1; months.forEach(function (m) { series.forEach(function (s) { max = Math.max(max, data[m][s.k]); }); });
-    var W = 700, H = 230, pl = 6, gw = (W - pl * 2) / months.length, bw = Math.max(4, Math.min(24, (gw - 8) / series.length)), h = '';
-    months.forEach(function (m, i) {
-      var gx = pl + i * gw + (gw - bw * series.length) / 2;
-      series.forEach(function (s, j) {
-        var v = data[m][s.k], bh = Math.round(v / max * 150), x = gx + j * bw, y = 180 - bh;
-        h += '<g><title>' + esc(monthLabel(m) + ' · ' + s.label + ': ' + moneyFull(v)) + '</title><rect x="' + x.toFixed(1) + '" y="' + y + '" width="' + (bw - 2).toFixed(1) + '" height="' + bh + '" rx="3" fill="' + s.color + '"/></g>';
-      });
-      h += '<text x="' + (pl + i * gw + gw / 2).toFixed(1) + '" y="198" text-anchor="middle" transform="rotate(-35 ' + (pl + i * gw + gw / 2).toFixed(1) + ' 198)">' + esc(monthLabel(m)) + '</text>';
+  function granName(g) { return g === 'day' ? tr('by day', 'يوميًا') : g === 'week' ? tr('by week', 'أسبوعيًا') : tr('by month', 'شهريًا'); }
+  function legend(series) { return '<div class="dms-legend">' + series.map(function (s) { return '<span><i style="--dms-c:' + s.color + '"></i>' + esc(s.label) + '</span>'; }).join('') + '</div>'; }
+  function barChart(S, series) {
+    var keys = S.keys, max = 0;
+    keys.forEach(function (k) { series.forEach(function (s) { max = Math.max(max, S.d[k][s.k]); }); });
+    if (!keys.length || !max) { return empty(); }
+    var top = niceMax(max), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, S.gran) + series.map(function (s) { return '\n' + s.label + ': ' + moneyFull(S.d[k][s.k]); }).join('');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '">' + series.map(function (s) { var v = S.d[k][s.k]; return '<i class="dms-bar' + (v ? '' : ' dms-bar-0') + '" style="height:' + (v / top * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i>'; }).join('') + '</div>';
+    }).join('');
+    var aria = series.map(function (s) { return s.label + ' SAR ' + money(sum(keys, function (k) { return S.d[k][s.k]; })); }).join(', ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, S.gran, true)) + '</span>'; }).join('') + '</div></div>' +
+      (series.length > 1 ? legend(series) : '');
+  }
+  function fitChartLabels() {
+    HOST.querySelectorAll('.dms-xaxis').forEach(function (axis) {
+      var labels = axis.querySelectorAll('span'), widest = 0;
+      labels.forEach(function (label) { var range = document.createRange(); range.selectNodeContents(label); widest = Math.max(widest, range.getBoundingClientRect().width); });
+      var slots = Math.max(1, Math.min(8, Math.floor(axis.clientWidth / (widest + 16)))), step = Math.max(1, Math.ceil(labels.length / slots));
+      labels.forEach(function (label, i) { label.style.visibility = i % step ? 'hidden' : 'visible'; });
     });
-    var leg = '<div class="dms-legend">' + series.map(function (s) { return '<span><i style="--dms-c:' + s.color + '"></i>' + esc(s.label) + '</span>'; }).join('') + '<span>' + esc(tr('Peak', 'الأعلى')) + ': ' + money(max) + '</span></div>';
-    return '<div style="overflow-x:auto"><svg class="dms-bars2" style="min-width:520px" viewBox="0 0 ' + W + ' ' + H + '" role="img"><line x1="0" y1="180" x2="' + W + '" y2="180" stroke="#e3e8ef"/>' + h + '</svg></div>' + leg;
+  }
+  /* Ranked share list (replaces the former donut: easier to compare, labels never collide). */
+  function shareList(segs, top, bottom) {
+    var tot = sum(segs, function (s) { return s.value; }), rows = segs.filter(function (s) { return s.value; }).sort(function (a, b) { return b.value - a.value; });
+    if (!tot) { return empty(); }
+    return '<div class="dms-share-t"><b class="dms-num">' + esc(top) + '</b> ' + esc(bottom || '') + '</div>' + rows.map(function (s) {
+      var f = (s.fmt || num)(s.value);
+      return '<div class="dms-share" data-tip="' + esc(s.label + ': ' + f + ' (' + pct(s.value, tot) + ')') + '"><span class="dms-share-l"><i class="dms-dot" style="--dms-c:' + s.color + '"></i>' + bdi(s.label) + '</span>' +
+        '<span class="dms-share-b"><i style="width:' + (s.value / tot * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i></span><span class="dms-num">' + f + '</span><span class="dms-share-p dms-num">' + pct(s.value, tot, 0) + '</span></div>';
+    }).join('');
   }
   function hbars(items, fmt, color) {
     if (!items.length) { return empty(); }
     var max = Math.max.apply(null, items.map(function (i) { return Math.abs(i.value); }).concat([1])); fmt = fmt || num;
     return items.map(function (i) {
-      return '<div class="dms-stack-row"><span title="' + esc(i.label) + '">' + bdi(i.label) + '</span><div class="dms-stack"><i style="width:' + (Math.abs(i.value) / max * 100).toFixed(2) + '%;background:' + (i.color || color || '#1d4ed8') + '"></i></div><span>' + fmt(i.value) + '</span></div>';
+      return '<div class="dms-stack-row" data-tip="' + esc(i.label + ': ' + fmt(i.value)) + '"><span>' + bdi(i.label) + '</span><div class="dms-stack"><i style="width:' + (Math.abs(i.value) / max * 100).toFixed(2) + '%;background:' + (i.color || color || 'var(--dms-royal)') + '"></i></div><span class="dms-num">' + fmt(i.value) + '</span></div>';
     }).join('');
   }
   function stackByClass(list, groupFn, labelFn, limit) {
@@ -536,21 +699,24 @@
     if (!keys.length) { return empty(); }
     var rows = keys.map(function (k) {
       var arr = g[k], c = {}; arr.forEach(function (q) { c[q.cls] = (c[q.cls] || 0) + 1; });
-      var segs = Object.keys(QCLS).map(function (cl) { return c[cl] ? '<i style="width:' + (c[cl] / arr.length * 100).toFixed(2) + '%;background:' + QCLS[cl].c + '" title="' + esc(qcLabel(cl)) + ': ' + c[cl] + '"></i>' : ''; }).join('');
-      return '<div class="dms-stack-row"><span title="' + esc(labelFn(k)) + '">' + bdi(labelFn(k)) + '</span><div class="dms-stack">' + segs + '</div><span>' + num(arr.length) + '</span></div>';
+      var segs = Object.keys(QCLS).map(function (cl) { return c[cl] ? '<i style="width:' + (c[cl] / arr.length * 100).toFixed(2) + '%;background:' + QCLS[cl].c + '" data-tip="' + esc(labelFn(k) + ' · ' + qcLabel(cl) + ': ' + c[cl]) + '"></i>' : ''; }).join('');
+      return '<div class="dms-stack-row"><span title="' + esc(labelFn(k)) + '">' + bdi(labelFn(k)) + '</span><div class="dms-stack">' + segs + '</div><span class="dms-num">' + num(arr.length) + '</span></div>';
     }).join('');
-    return rows + '<div class="dms-legend">' + Object.keys(QCLS).map(function (cl) { return '<span><i style="--dms-c:' + QCLS[cl].c + '"></i>' + esc(qcLabel(cl)) + '</span>'; }).join('') + '</div>';
+    var used = {}; list.forEach(function (q) { used[q.cls] = 1; });
+    return rows + legend(Object.keys(QCLS).filter(function (cl) { return used[cl]; }).map(function (cl) { return { label: qcLabel(cl), color: QCLS[cl].c }; }));
   }
+  /* Funnel: one accent; each step also shows its share of the previous step. */
   function funnel(steps) {
     var max = Math.max.apply(null, steps.map(function (s) { return s.n || 0; }).concat([1]));
-    return '<div class="dms-fun">' + steps.map(function (s) {
-      return '<div><span>' + esc(s.label) + '</span><i style="--dms-c:' + s.c + ';width:' + (s.n == null ? 0 : Math.max(0.5, s.n / max * 100)).toFixed(1) + '%"></i><b>' + (s.n == null ? '…' : num(s.n)) + '</b></div>';
+    return '<div class="dms-fun">' + steps.map(function (s, i) {
+      var prev = i ? steps[i - 1].n : null, share = (i && s.n != null && prev) ? pct(s.n, prev, 0) : '';
+      return '<div><span>' + esc(s.label) + '</span><span class="dms-fun-b"><i style="width:' + (s.n == null ? 0 : Math.max(0.5, s.n / max * 100)).toFixed(1) + '%"></i></span><b class="dms-num">' + (s.n == null ? '…' : num(s.n)) + '</b><small class="dms-num">' + share + '</small></div>';
     }).join('') + '</div>';
   }
 
   /* ---------- tables: client-side (search / sort / pagination) and server-side (paginated) ---------- */
   function regTable(spec) { TBL[spec.id] = spec; return '<div class="dms-tbl" data-tbl="' + esc(spec.id) + '"></div>'; }
-  function fillTables() { var els = HOST.querySelectorAll('[data-tbl]'); for (var i = 0; i < els.length; i++) { fillTable(els[i].getAttribute('data-tbl'), els[i]); } }
+  function fillTables(scope) { var els = (scope || HOST).querySelectorAll('[data-tbl]'); for (var i = 0; i < els.length; i++) { fillTable(els[i].getAttribute('data-tbl'), els[i]); } }
   function fillTable(id, el) {
     var sp = TBL[id]; el = el || HOST.querySelector('[data-tbl="' + id + '"]'); if (!sp || !el) { return; }
     if (sp.server) { return fillServer(id, el); }
@@ -659,51 +825,75 @@
   }
 
   /* ---------- reconciliation (server aggregates vs loaded rows) ---------- */
+  var RECTOK = 0;
+  function reconKey() { return PERIOD.join('|') + '|' + [F.company, F.division, F.location, F.sp].join('|'); }
   function loadRecon() {
     if (!DATA.quotes) { return; }
-    var tok = TOK, chk = function () { return tok === TOK && !destroyed; }, key = PERIOD.join('|') + '|' + [F.company, F.division, F.location, F.sp].join('|');
+    var tok = ++RECTOK, t0 = TOK, chk = function () { return tok === RECTOK && t0 === TOK && !destroyed; }, key = reconKey(), D = DATA;
     var qf = [['transaction_date', 'between', PERIOD], ['docstatus', '!=', 2]].concat(qServerFilters()), qraw = [['transaction_date', 'between', PERIOD]].concat(qServerFilters());
-    var sf = [['transaction_date', 'between', PERIOD], ['docstatus', '=', 1]]; if (F.company) { sf.push(['company', '=', F.company]); } if (F.division) { sf.push(sfilter('custom_division', F.division)); } if (F.location) { sf.push(sfilter('location_', F.location)); }
+    var sf = [['transaction_date', 'between', PERIOD], ['docstatus', '=', 1]].concat(soServerFilters());
     Promise.all([
       getList({ doctype: 'Quotation', fields: ['count(name) as n', 'sum(base_net_total) as v'], filters: qf, limit_page_length: 1 }, chk),
       getList({ doctype: 'Quotation', fields: ['count(name) as n'], filters: qraw, limit_page_length: 1 }, chk),
       F.sp ? Promise.resolve(null) : getList({ doctype: 'Sales Order', fields: ['count(name) as n', 'sum(base_net_total) as v'], filters: sf, limit_page_length: 1 }, chk)
     ]).then(function (r) {
       if (!chk()) { return; }
-      DATA.recon = { key: key, q: r[0] ? { n: r[0][0] ? +r[0][0].n : 0, v: r[0][0] ? +r[0][0].v || 0 : 0 } : null, raw: r[1] && r[1][0] ? +r[1][0].n : null, s: r[2] ? { n: r[2][0] ? +r[2][0].n : 0, v: r[2][0] ? +r[2][0].v || 0 : 0 } : null };
-      if (tab === 'overview') { renderContentOnly(); }
-    }).catch(function () { DATA.recon = { key: key, err: true }; });
+      D.recon = { key: key, q: r[0] ? { n: r[0][0] ? +r[0][0].n : 0, v: r[0][0] ? +r[0][0].v || 0 : 0 } : null, raw: r[1] && r[1][0] ? +r[1][0].n : null, s: r[2] ? { n: r[2][0] ? +r[2][0].n : 0, v: r[2][0] ? +r[2][0].v || 0 : 0 } : null };
+      if (tab === 'overview') { renderSoft(); }
+    }).catch(function () { if (chk()) { D.recon = { key: key, err: true }; if (tab === 'overview') { renderSoft(); } } });
   }
   function reconHTML(M) {
-    var R = DATA.recon, h = '';
-    if (!R || R.err || !loadedQS()) { return panel(tr('Data reconciliation', 'مطابقة البيانات'), R && R.err ? esc(tr('Server totals unavailable.', 'تعذر جلب إجماليات الخادم.')) : calc()); }
-    var lq = M.qs.filter(function (q) { return q.docstatus !== 2; }), ln = lq.length, lv = sum(lq, function (q) { return q.val; });
-    function row(label, dn, dv, sn, sv) {
-      var ok = dn === sn && Math.abs(dv - sv) < 1;
-      return '<tr><td>' + esc(label) + '</td><td class="dms-num">' + num(dn) + '</td><td class="dms-num">' + num(sn) + '</td><td class="dms-num">' + money(dv) + '</td><td class="dms-num">' + money(sv) + '</td><td class="' + (ok ? 'dms-ok' : 'dms-bad') + '">' + (ok ? '✓ ' + esc(tr('Matches', 'مطابق')) : 'Δ ' + num(dn - sn) + ' / ' + money(dv - sv)) + '</td></tr>';
+    var R = DATA.recon, st, kind = 'n', inner;
+    if (R && R.key !== reconKey()) { R = null; }   // result for an earlier filter selection
+    if (!R || !loadedQS()) { st = tr('Checking…', 'جارٍ التحقق…'); inner = calc(); }
+    else if (R.err || !R.q) { st = tr('Server totals unavailable', 'تعذر جلب إجماليات الخادم'); kind = 'warn'; inner = esc(st); }
+    else {
+      var allOk = true, h = '', lq = M.qs.filter(function (q) { return q.docstatus !== 2; }), ln = lq.length, lv = sum(lq, function (q) { return q.val; });
+      var row = function (label, dn, dv, sn, sv) {
+        var ok = dn === sn && Math.abs(dv - sv) < 1; if (!ok) { allOk = false; }
+        return '<tr><td>' + esc(label) + '</td><td class="dms-num">' + num(dn) + '</td><td class="dms-num">' + num(sn) + '</td><td class="dms-num">' + money(dv) + '</td><td class="dms-num">' + money(sv) + '</td><td class="' + (ok ? 'dms-ok' : 'dms-bad') + '">' + (ok ? esc(tr('Matches', 'مطابق')) : 'Δ ' + num(dn - sn) + ' / ' + money(dv - sv)) + '</td></tr>';
+      };
+      h += '<div class="dms-tablewrap"><table class="dms-table" style="min-width:520px"><thead><tr><th>' + esc(tr('Source', 'المصدر')) + '</th><th>' + esc(tr('Dashboard count', 'عدد اللوحة')) + '</th><th>' + esc(tr('ERP count', 'عدد النظام')) + '</th><th>' + esc(tr('Dashboard value', 'قيمة اللوحة')) + '</th><th>' + esc(tr('ERP value', 'قيمة النظام')) + '</th><th></th></tr></thead><tbody>';
+      h += row(tr('Quotations (document not cancelled)', 'عروض الأسعار (المستند غير ملغى)'), ln, lv, R.q.n, R.q.v);
+      if (R.s) { var so = DATA.so.filter(passSO).filter(function (s) { return s.docstatus === 1; }); h += row(tr('Sales Orders (submitted)', 'أوامر البيع (معتمدة)'), so.length, sum(so, function (s) { return s.val; }), R.s.n, R.s.v); }
+      h += '</tbody></table></div>' + note(esc(tr('ERP figures are server-side aggregates for the same date range and filters; dashboard figures are computed from the loaded rows.', 'أرقام النظام تجميعات من الخادم لنفس النطاق والمرشحات؛ وأرقام اللوحة محسوبة من الصفوف المحمّلة.')));
+      var dsC = M.qs.filter(function (q) { return q.docstatus === 2; }).length, wfC = M.qs.filter(function (q) { return q.docstatus !== 2 && q.cls === 'cancelled'; }).length;
+      h += '<div class="dms-sec" style="margin-top:10px">' + esc(tr('From raw quotations to the KPI base', 'من إجمالي العروض الخام إلى قاعدة المؤشرات')) + '</div><div class="dms-tablewrap"><table class="dms-table" style="min-width:420px"><tbody>' +
+        '<tr><td>' + esc(tr('Raw quotations in period (any document status)', 'إجمالي العروض في الفترة (أي حالة مستند)')) + '</td><td class="dms-num"><b>' + num(M.qs.length) + '</b></td><td class="dms-num">' + (R.raw != null ? num(R.raw) + ' ERP' : '') + '</td></tr>' +
+        '<tr><td>− ' + esc(tr('Cancelled documents (docstatus = Cancelled)', 'مستندات ملغاة (docstatus = ملغى)')) + '</td><td class="dms-num">' + num(dsC) + '</td><td></td></tr>' +
+        '<tr><td>= ' + esc(tr('Quotations whose document is not cancelled', 'عروض مستندها غير ملغى')) + '</td><td class="dms-num"><b>' + num(ln) + '</b></td><td></td></tr>' +
+        '<tr><td>− ' + esc(tr('Submitted but workflow state "cancelled"', 'معتمدة لكن حالة سير العمل "ملغى"')) + '</td><td class="dms-num">' + num(wfC) + '</td><td></td></tr>' +
+        '<tr><td>= ' + esc(tr('KPI base: "Quotations (not cancelled)"', 'قاعدة المؤشرات: "عروض الأسعار (غير الملغاة)"')) + '</td><td class="dms-num"><b>' + num(ln - wfC) + '</b></td><td></td></tr></tbody></table></div>';
+      if (M.s2) { h += note(esc(tr('Sales Orders with Sales Team rows: ', 'أوامر البيع التي لها فريق مبيعات: ') + num(M.so.length - (M.soNoTeam || []).length) + ' / ' + num(M.so.length))); }
+      st = allOk ? tr('Matches ERP', 'مطابق للنظام') : tr('Differences found', 'توجد فروقات'); kind = allOk ? 'ok' : 'warn'; inner = h;
     }
-    h += '<div class="dms-tablewrap"><table class="dms-table" style="min-width:520px"><thead><tr><th>' + esc(tr('Source', 'المصدر')) + '</th><th>' + esc(tr('Dashboard count', 'عدد اللوحة')) + '</th><th>' + esc(tr('ERP count', 'عدد النظام')) + '</th><th>' + esc(tr('Dashboard value', 'قيمة اللوحة')) + '</th><th>' + esc(tr('ERP value', 'قيمة النظام')) + '</th><th></th></tr></thead><tbody>';
-    h += row(tr('Quotations (document not cancelled)', 'عروض الأسعار (المستند غير ملغى)'), ln, lv, R.q.n, R.q.v);
-    if (R.s) { var so = DATA.so.filter(passSO).filter(function (s) { return s.docstatus === 1; }); h += row(tr('Sales Orders (submitted)', 'أوامر البيع (معتمدة)'), so.length, sum(so, function (s) { return s.val; }), R.s.n, R.s.v); }
-    h += '</tbody></table></div>' + note(esc(tr('ERP figures are server-side aggregates for the same date range and filters; dashboard figures are computed from the loaded rows.', 'أرقام النظام تجميعات من الخادم لنفس النطاق والمرشحات؛ وأرقام اللوحة محسوبة من الصفوف المحمّلة.')));
-    var dsC = M.qs.filter(function (q) { return q.docstatus === 2; }).length, wfC = M.qs.filter(function (q) { return q.docstatus !== 2 && q.cls === 'cancelled'; }).length;
-    h += '<div class="dms-sec" style="margin-top:10px">' + esc(tr('From raw quotations to the KPI base', 'من إجمالي العروض الخام إلى قاعدة المؤشرات')) + '</div><div class="dms-tablewrap"><table class="dms-table" style="min-width:420px"><tbody>' +
-      '<tr><td>' + esc(tr('Raw quotations in period (any document status)', 'إجمالي العروض في الفترة (أي حالة مستند)')) + '</td><td class="dms-num"><b>' + num(M.qs.length) + '</b></td><td class="dms-num">' + (R.raw != null ? num(R.raw) + ' ERP' : '') + '</td></tr>' +
-      '<tr><td>− ' + esc(tr('Cancelled documents (docstatus = Cancelled)', 'مستندات ملغاة (docstatus = ملغى)')) + '</td><td class="dms-num">' + num(dsC) + '</td><td></td></tr>' +
-      '<tr><td>= ' + esc(tr('Quotations whose document is not cancelled', 'عروض مستندها غير ملغى')) + '</td><td class="dms-num"><b>' + num(ln) + '</b></td><td></td></tr>' +
-      '<tr><td>− ' + esc(tr('Submitted but workflow state "cancelled"', 'معتمدة لكن حالة سير العمل "ملغى"')) + '</td><td class="dms-num">' + num(wfC) + '</td><td></td></tr>' +
-      '<tr><td>= ' + esc(tr('KPI base: "Quotations (not cancelled)"', 'قاعدة المؤشرات: "عروض الأسعار (غير الملغاة)"')) + '</td><td class="dms-num"><b>' + num(ln - wfC) + '</b></td><td></td></tr></tbody></table></div>';
-    if (M.s2) { h += note(esc(tr('Sales Orders with Sales Team rows: ', 'أوامر البيع التي لها فريق مبيعات: ') + num(M.so.length - (M.soNoTeam || []).length) + ' / ' + num(M.so.length))); }
-    return panel(tr('Data reconciliation', 'مطابقة البيانات'), h);
+    return '<section class="dms-panelbox dms-recon"><button type="button" class="dms-disclose" data-act="recon" data-fk="recon" aria-expanded="' + RECON_OPEN + '">' + ico('down', 'dms-chev') +
+      '<span class="dms-h3">' + esc(tr('Data reconciliation', 'مطابقة البيانات')) + '</span>' + stat(kind, st) + '</button>' + (RECON_OPEN ? '<div class="dms-recon-b">' + inner + '</div>' : '') + '</section>';
   }
   function loadedQS() { return DATA.status.quote && DATA.status.quote.ok; }
+
+  /* ---------- KPI comparison (server aggregates for the current window to date and the previous window) ---------- */
+  var CMP = { ranges: null, cur: null, prev: null }, CMPTOK = 0;
+  function loadCompare() {
+    var tok = ++CMPTOK, chk = function () { return tok === CMPTOK && !destroyed; }, from = PERIOD[0], to;
+    CMP = { ranges: null, cur: null, prev: null };
+    if (!from || !PERIOD[1] || from > TODAY) { return; }
+    to = PERIOD[1] < TODAY ? PERIOD[1] : TODAY;
+    var R = { cur: [from, to], prev: prevRange(F.period, from, to) };
+    function agg(dt, r, extra) { return getList({ doctype: dt, fields: ['count(name) as n', 'sum(base_net_total) as v'], filters: [['transaction_date', 'between', r]].concat(extra), limit_page_length: 1 }, chk).then(function (x) { return x && x[0] ? { n: +x[0].n || 0, v: +x[0].v || 0 } : null; }); }
+    var qx = [['docstatus', '!=', 2], ['workflow_state', '!=', 'cancelled']].concat(qServerFilters()), sx = [['docstatus', '=', 1]].concat(soServerFilters());
+    Promise.all([agg('Quotation', R.cur, qx), agg('Quotation', R.prev, qx), F.sp ? null : agg('Sales Order', R.cur, sx), F.sp ? null : agg('Sales Order', R.prev, sx)]).then(function (r) {
+      if (!chk()) { return; }
+      CMP = { ranges: R, cur: { q: r[0], s: r[2] }, prev: { q: r[1], s: r[3] } }; renderSoft();
+    }).catch(function () { /* deltas are optional: cards simply show no change chip */ });
+  }
 
   /* ---------- drill-down specs ---------- */
   function openDrill(id) {
     var M = MM, spec = null, title = id;
     function qlist(arr, t, sid) { title = t; spec = specQ('drill', sortQ(arr), { pageSize: CFG.modalPage }); }
     function slist(arr, t) { title = t; spec = specS('drill', arr.slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; }), { pageSize: CFG.modalPage }); }
-    if (id.indexOf('goto:') === 0) { tab = id.slice(5); OVL = null; resetTables(); renderAll(); window.scrollTo && 0; return; }
+    if (id.indexOf('goto:') === 0) { goTab(id.slice(5)); return; }
     if (id === 'q_all') { qlist(M.qs.filter(function (q) { return q.cls !== 'cancelled'; }), tr('Quotations in period (not cancelled)', 'عروض الفترة (غير الملغاة)')); }
     else if (id.indexOf('q_cls_') === 0) { var k = id.slice(6); qlist(M.qs.filter(function (q) { return q.cls === k; }), qcLabel(k)); }
     else if (id === 'q_issued') { qlist(M.issued, tr('Issued quotations (Approved + Accepted + Rejected + Lost)', 'العروض المُصدرة (معتمد + مقبول + مرفوض + مفقود)')); }
@@ -724,14 +914,22 @@
       spec = { id: 'drill', server: true, dt: sp.dt, fields: k2.fields, filters: sp.filters, order: sp.order, cols: k2.cols, sf: k2.sf, pageSize: CFG.modalPage };
     }
     if (!spec) { return; }
-    delete TS.drill; OVL = { title: title, spec: spec }; renderOverlay();
+    var opener = activeEl();
+    delete TS.drill; OVL = { title: title, spec: spec, opener: opener, openerKey: opener && opener.getAttribute('data-v') }; renderOverlay();
   }
   function sortQ(arr) { return arr.slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; }); }
   function overlayHTML() {
     if (!OVL) { return ''; }
-    return '<div class="dms-overlay dms-center" data-act="ovbg"><div class="dms-modal" role="dialog" aria-modal="true"><div class="dms-dhead"><h3>' + esc(OVL.title) + '</h3><button type="button" class="dms-x" data-act="closeov" aria-label="' + esc(tr('Close', 'إغلاق')) + '">×</button></div>' + regTable(OVL.spec) + '</div></div>';
+    return '<div class="dms-overlay dms-center" data-act="ovbg"><div class="dms-modal" role="dialog" aria-modal="true" aria-labelledby="dms-dialog-title"><div class="dms-dhead"><h3 id="dms-dialog-title">' + esc(OVL.title) + '</h3><button type="button" class="dms-x" data-act="closeov" aria-label="' + esc(tr('Close', 'إغلاق')) + '">×</button></div>' + regTable(OVL.spec) + '</div></div>';
   }
-  function renderOverlay() { var el = $('[data-ref="overlay"]'); if (!el) { return; } delete TBL.drill; el.innerHTML = overlayHTML(); fillTables(); var x = el.querySelector('.dms-x'); if (x) { x.focus(); } }
+  function renderOverlay() { var el = $('[data-ref="overlay"]'); if (!el) { return; } $('.dms-app').inert = !!OVL; delete TBL.drill; el.innerHTML = overlayHTML(); fillTables(); var x = el.querySelector('.dms-x'); if (x) { x.focus(); } }
+  function closeOverlay() {
+    var previous = OVL; OVL = null; renderOverlay();
+    if (!previous) { return; }
+    var opener = previous.opener;
+    if (!opener || !opener.isConnected) { opener = Array.prototype.find.call(HOST.querySelectorAll('[data-act="kpi"]'), function (el) { return el.getAttribute('data-v') === previous.openerKey; }); }
+    if (opener) { opener.focus({ preventScroll: true }); }
+  }
   function resetTables() { Object.keys(TS).forEach(function (k) { TS[k].page = 1; }); }
 
   /* ---------- tabs ---------- */
@@ -750,35 +948,89 @@
     if (!AGED.rows) { return { val: AGED.err ? '—' : '…', sub: AGED.err ? esc(tr('Unavailable', 'غير متاح')) : esc(tr('Calculating…', 'جارٍ الحساب…')) }; }
     var act = AGED.rows.slice(0, 3); return { n: sum(act, function (r) { return r.n; }), v: sum(act, function (r) { return r.v; }) };
   }
+  /* Aged-pipeline mix (actual bucket counts) for the pipeline card footer: active buckets in blues, aged in amber/red. */
+  function agedMix() {
+    if (!AGED.rows) { return ''; }
+    var tot = sum(AGED.rows, function (r) { return r.n; }); if (!tot) { return ''; }
+    var cols = ['var(--dms-s-q)', '#6b8be0', 'var(--dms-royal)', '#e0a24a', '#c2412d'], old = sum(AGED.rows.slice(3), function (r) { return r.n; });
+    return '<span class="dms-mix"><span class="dms-mix-b">' + AGED.rows.map(function (r, i) {
+      return r.n ? '<i style="width:' + (r.n / tot * 100).toFixed(2) + '%;background:' + cols[i] + '" data-tip="' + esc(tr(r.b.en, r.b.ar) + ': ' + num(r.n) + ' · ' + moneyS(r.v)) + '"></i>' : '';
+    }).join('') + '</span>' + ctx(num(old) + ' ' + esc(tr('aged over ' + CFG.activeMaxAge + ' days', 'متقادمة أكثر من ' + CFG.activeMaxAge + ' يومًا'))) + '</span>';
+  }
+  var PRIO = { high: ['High', 'عالية'], med: ['Medium', 'متوسطة'], low: ['Low', 'منخفضة'] };
+  function dtLabel(dt) { return { 'Quotation': tr('Quotation', 'عرض سعر'), 'Sales Order': tr('Sales order', 'أمر بيع'), 'Lead': tr('Lead', 'عميل محتمل'), 'Customer': tr('Customer', 'عميل'), 'Opportunity': tr('Opportunity', 'فرصة'), 'ToDo': tr('ToDo', 'مهمة') }[dt] || dt; }
+  function arow(it) {
+    return '<a class="dms-arow" href="' + esc(docUrl(it.dt, it.name)) + '" target="_blank" rel="noopener noreferrer">' +
+      '<span class="dms-prio dms-prio-' + it.p + '">' + esc(tr(PRIO[it.p][0], PRIO[it.p][1])) + '</span>' +
+      '<span class="dms-arow-main"><span class="dms-arow-t"><bdi>' + esc(it.title || it.name) + '</bdi><span class="dms-arow-dt">' + esc(dtLabel(it.dt)) + '</span></span><span class="dms-arow-d">' + bdi(it.desc) + '</span></span>' +
+      '<span class="dms-arow-who">' + (it.who ? bdi(it.who) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>') + '</span>' +
+      '<span class="dms-arow-due dms-tone-' + (it.tone || 'n') + '">' + esc(it.due || '') + '</span><span class="dms-sr"> (' + esc(tr('opens in a new tab', 'يفتح في علامة تبويب جديدة')) + ')</span></a>';
+  }
+  function actionsPanel() {
+    var specs = actSpecs(), tot = pendingTotal();
+    var h = '<section class="dms-panelbox dms-actpanel" id="dms-pending" tabindex="-1" aria-labelledby="dms-pending-h"><div class="dms-ph"><h3 class="dms-h3" id="dms-pending-h">' + esc(tr('Actions pending', 'الإجراءات المعلقة')) +
+      (tot != null ? ' <span class="dms-h3-n dms-num">' + num(tot) + '</span>' : '') + '</h3><span class="dms-ph-meta">' + esc(tr('As of today · most urgent first', 'حتى اليوم · الأكثر إلحاحًا أولًا')) + '</span>' +
+      '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="goto:actions">' + esc(tr('View all', 'عرض الكل')) + '</button></div>';
+    if (!ACT.counts) { return h + '<div class="dms-arows" aria-busy="true">' + rep('<div class="dms-skel dms-skel-row"></div>', 6) + '</div></section>'; }
+    var errs = specs.filter(function (s) { return typeof ACT.counts[s.id] === 'string'; });
+    if (errs.length === specs.length) {
+      return h + alertBox('err', esc(tr('Pending actions could not be loaded.', 'تعذر تحميل الإجراءات المعلقة.')) + ' <button type="button" class="dms-linkbtn" data-act="actretry">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>') + '</section>';
+    }
+    var items = (ACT.items || []).slice(0, 6);
+    h += items.length ? '<div class="dms-arows">' + items.map(arow).join('') + '</div>' : '<div class="dms-empty dms-empty-sm">' + esc(tr('Nothing pending for this selection.', 'لا توجد إجراءات معلقة لهذا الاختيار.')) + '</div>';
+    h += '<div class="dms-acats">' + specs.map(function (s) {
+      var c = ACT.counts[s.id], err = typeof c === 'string', inner = '<span class="dms-acat-t">' + esc(s.short) + '</span><b class="dms-num">' + (err || c == null ? '—' : num(c)) + '</b>';
+      return (!err && c) ? '<button type="button" class="dms-acat" data-act="kpi" data-v="srv:' + s.id + '" title="' + esc(s.title + ' — ' + tr('view all', 'عرض الكل')) + '">' + inner + '</button>'
+        : '<div class="dms-acat dms-acat-off" title="' + esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.title) + '">' + inner + '</div>';
+    }).join('') + '</div>';
+    if (errs.length) { h += note(esc(tr('Could not load: ', 'تعذر التحميل: ') + errs.map(function (s) { return s.short; }).join(', '))); }
+    return h + '</section>';
+  }
   function tabOverview(M) {
-    var nonCan = M.qs.filter(function (q) { return q.cls !== 'cancelled'; }), h = '', acc = M.qc.accepted.n, pk = pipelineKpi();
-    var lp = LEADS.rows ? LEADS.rows.filter(function (l) { return l.date >= PERIOD[0] && l.date <= PERIOD[1]; }).length : null;
-    var buyers = {}; M.so.forEach(function (s) { buyers[s.customer] = 1; });
-    h += '<div class="dms-grid dms-kpis">' +
-      kpi({ label: tr('Quotations (not cancelled)', 'عروض الأسعار (غير الملغاة)'), val: num(nonCan.length), sub: money(sum(nonCan, function (q) { return q.val; })) + ' SAR', act: 'q_all', c: '#0f2547' }) +
-      kpi({ label: tr('Active pipeline (as of today)', 'خط المبيعات النشط (حتى اليوم)'), val: pk.n == null ? pk.val : num(pk.n), sub: pk.n == null ? pk.sub : money(pk.v) + ' SAR · ' + esc(tr('Approved, ≤ ' + CFG.activeMaxAge + ' days', 'معتمد، ≤ ' + CFG.activeMaxAge + ' يومًا')), act: 'goto:quotes', c: '#1e88e5' }) +
-      kpi({ label: tr('Customer acceptance rate', 'نسبة قبول العملاء'), val: pct(acc, M.issuedN), sub: num(acc) + ' ' + esc(tr('of', 'من')) + ' ' + num(M.issuedN) + ' ' + esc(tr('issued (excl. Closed)', 'مُصدرة (دون المغلقة)')), act: 'q_acc', c: '#2e7d32' }) +
-      kpi({ label: tr('Acceptance incl. Closed in base', 'نسبة القبول مع احتساب المغلقة'), val: pct(acc, M.issuedN + M.qc.closed.n), sub: num(acc) + ' ' + esc(tr('of', 'من')) + ' ' + num(M.issuedN + M.qc.closed.n) + ' (' + esc(tr('issued + Closed', 'مُصدرة + مغلقة')) + ')', act: M.qc.closed.n ? 'q_cls_closed' : null, c: '#78909c' }) +
-      kpi({ label: tr('Quotation → SO conversion (count)', 'تحويل العرض → أمر بيع (العدد)'), val: M.s2 ? pct(M.conv.n, M.issuedN) : '…', sub: M.s2 ? num(M.conv.n) + ' ' + esc(tr('of', 'من')) + ' ' + num(M.issuedN) : esc(tr('Calculating…', 'جارٍ الحساب…')), act: M.s2 ? 'q_conv' : null, c: '#7c3aed' }) +
-      kpi({ label: tr('Quotation → SO conversion (value)', 'تحويل العرض → أمر بيع (القيمة)'), val: M.s2 ? pct(M.conv.v, M.issuedV) : '…', sub: M.s2 ? money(M.conv.v) + ' / ' + money(M.issuedV) + ' SAR' : esc(tr('Calculating…', 'جارٍ الحساب…')), c: '#7c3aed' }) +
-      kpi({ label: tr('Sales Orders (submitted)', 'أوامر البيع (معتمدة)'), val: M.soWait ? '…' : num(M.so.length), sub: M.soWait ? esc(tr('Waiting for Sales Team data', 'بانتظار بيانات فريق المبيعات')) : money(M.soV) + ' SAR' + (F.sp ? ' (' + esc(tr('attributed share', 'الحصة المنسوبة')) + ')' : ''), act: M.soWait ? null : 's_all', c: '#0f9d8a' }) +
-      kpi({ label: tr('Billed / Delivered (value-weighted)', 'مفوتر / مُسلَّم (موزون بالقيمة)'), val: pct(M.soBilledV, M.soV, 0), sub: esc(tr('Delivered', 'مُسلَّم')) + ' ' + pct(M.soDelivV, M.soV, 0), c: '#f59e0b' }) +
-      kpi({ label: tr('Overdue deliveries', 'تسليمات متأخرة'), val: num(M.soOverdue.length), sub: money(sum(M.soOverdue, soShare)) + ' SAR', act: M.soOverdue.length ? 's_overdue' : null, c: '#e65100' }) +
-      kpi({ label: tr('Leads created in period', 'عملاء محتملون في الفترة'), val: lp == null ? (LEADS.err ? '—' : '…') : num(lp), sub: esc(tr('Lead→Customer links incomplete', 'روابط العميل المحتمل→عميل ناقصة')), warn: tr('data quality', 'جودة البيانات'), act: 'goto:leads', c: '#64748b' }) +
-      kpi({ label: tr('Active buyers (≥1 Sales Order)', 'مشترون نشطون (أمر بيع ≥ 1)'), val: M.soWait ? '…' : num(Object.keys(buyers).length), sub: esc(tr('distinct customers in period', 'عملاء مميزون في الفترة')), act: 'goto:customers', c: '#14b8a6' }) +
+    var nonCan = M.qs.filter(function (q) { return q.cls !== 'cancelled'; }), qv = sum(nonCan, function (q) { return q.val; }), acc = M.qc.accepted.n, pk = pipelineKpi(), S = M.S, h = '';
+    var rateOK = S.gran !== 'day', cq = CMP.cur, cp = CMP.prev, wait = esc(tr('Calculating…', 'جارٍ الحساب…'));
+    function ser(f) { return S.keys.map(function (k) { return f(S.d[k]); }); }
+    var oldest = M.soOverdue.reduce(function (m, s) { return Math.max(m, ageOf(s.delivery_date)); }, 0);
+    h += '<div class="dms-grid dms-kpis dms-ov-kpis">' +
+      kpi({ label: tr('Quotations', 'عروض الأسعار'), val: num(nonCan.length), sub: moneyS(qv) + ' ' + esc(tr('quoted', 'معروضة')), act: 'q_all',
+        top: cq && cp && cq.q && cp.q ? deltaChip(cq.q.n, cp.q.n, num, true) : '',
+        foot: spark(ser(function (d) { return d.qn; })) || ctx(esc(tr('Average', 'المتوسط')) + ' ' + (nonCan.length ? moneyS(qv / nonCan.length) : '—')),
+        tip: tr('Quotations dated in the period, excluding cancelled documents and the cancelled workflow state.', 'عروض بتاريخ ضمن الفترة، باستثناء المستندات الملغاة وحالة سير العمل الملغاة.') }) +
+      kpi({ label: tr('Sales order value', 'قيمة أوامر البيع'), val: M.soWait ? '…' : '<bdi>' + esc(money(M.soV)) + '<small>SAR</small></bdi>', act: M.soWait ? null : 's_all',
+        sub: M.soWait ? esc(tr('Waiting for Sales Team data', 'بانتظار بيانات فريق المبيعات')) : num(M.so.length) + ' ' + esc(tr('submitted orders', 'أمر معتمد')) + (F.sp ? ' · ' + esc(tr('attributed share', 'الحصة المنسوبة')) : ''),
+        top: !F.sp && cq && cp && cq.s && cp.s ? deltaChip(cq.s.v, cp.s.v, moneyS, false) : '',
+        foot: M.soWait ? '' : (spark(ser(function (d) { return d.sv; })) || ctx(esc(tr('Average order', 'متوسط الأمر')) + ' ' + (M.so.length ? moneyS(M.soV / M.so.length) : '—'))),
+        tip: tr('Submitted Sales Orders dated in the period (base net total). With a salesperson filter, only that person\'s Sales Team share.', 'أوامر البيع المعتمدة بتاريخ ضمن الفترة (صافي العملة الأساسية). مع مرشح المندوب: حصته من فريق المبيعات فقط.') }) +
+      kpi({ label: tr('Conversion to SO', 'التحويل لأمر بيع'), val: M.s2 ? pct(M.conv.v, M.issuedV) : '…', act: M.s2 ? 'q_conv' : null,
+        sub: M.s2 ? pct(M.conv.n, M.issuedN, 0) + ' ' + esc(tr('by count', 'بالعدد')) + ' · ' + moneyS(M.conv.v) + ' ' + esc(tr('of', 'من')) + ' ' + money(M.issuedV) : wait,
+        foot: !M.s2 ? '' : (rateOK && spark(ser(function (d) { return d.iv ? d.cv / d.iv * 100 : null; }))) || ctx(esc(tr('Accepted → ordered', 'المقبولة → أمر بيع')) + ' ' + pct(M.conv.accN, acc, 0)),
+        tip: tr('Sales Order line value linked to issued quotations ÷ quoted value of issued quotations (Approved, Accepted, Rejected, Lost).', 'قيمة بنود أوامر البيع المرتبطة بالعروض المُصدرة ÷ قيمة العروض المُصدرة (معتمد، مقبول، مرفوض، مفقود).') }) +
+      kpi({ label: tr('Acceptance rate', 'نسبة القبول'), val: pct(acc, M.issuedN), act: 'q_acc',
+        sub: num(acc) + ' ' + esc(tr('of', 'من')) + ' ' + num(M.issuedN) + ' ' + esc(tr('issued', 'مُصدرة')) + ' · ' + pct(acc, M.issuedN + M.qc.closed.n, 0) + ' ' + esc(tr('incl. closed', 'مع المغلقة')),
+        foot: (rateOK && spark(ser(function (d) { return d.iN ? d.acc / d.iN * 100 : null; }))) || ctx(esc(tr('Rejected', 'مرفوض')) + ' ' + num(M.qc.rejected.n) + ' · ' + esc(tr('Lost', 'مفقود')) + ' ' + num(M.qc.lost.n)),
+        tip: tr('Quotations in workflow state Accepted By Customer ÷ issued quotations. "Incl. closed" adds Closed quotations to the base.', 'العروض بحالة مقبول من العميل ÷ العروض المُصدرة. "مع المغلقة" تضيف العروض المغلقة للمقام.') }) +
+      kpi({ label: tr('Active pipeline', 'خط المبيعات النشط'), val: pk.n == null ? pk.val : num(pk.n), act: 'goto:quotes',
+        sub: pk.n == null ? pk.sub : moneyS(pk.v) + ' · ' + esc(tr('approved ≤ ' + CFG.activeMaxAge + ' days', 'معتمدة ≤ ' + CFG.activeMaxAge + ' يومًا')),
+        top: tagc(esc(tr('As of today', 'حتى اليوم'))), foot: agedMix(),
+        tip: tr('Approved quotations awaiting the customer, up to ' + CFG.activeMaxAge + ' days old. Independent of the period filter.', 'عروض معتمدة بانتظار العميل بعمر حتى ' + CFG.activeMaxAge + ' يومًا. مستقلة عن مرشح الفترة.') }) +
+      kpi({ label: tr('Overdue deliveries', 'تسليمات متأخرة'), val: num(M.soOverdue.length), sub: moneyS(sum(M.soOverdue, soShare)), act: M.soOverdue.length ? 's_overdue' : null,
+        top: M.soOverdue.length ? stat('warn', tr('Late', 'متأخرة')) : stat('ok', tr('On track', 'منتظم')),
+        foot: M.soOverdue.length ? ctx(esc(tr('Oldest', 'الأقدم')) + ' ' + esc(lateTxt(addDays(TODAY, -oldest)))) : ctx(esc(tr('No order past its delivery date', 'لا أوامر تجاوزت تاريخ التسليم'))),
+        tip: tr('Submitted orders in the period, still to deliver, with a delivery date before today.', 'أوامر معتمدة في الفترة ما زالت للتسليم وتاريخ تسليمها قبل اليوم.') }) +
       '</div>';
-    var cls = Object.keys(QCLS).map(function (k) { return { label: qcLabel(k), value: M.qc[k].n, color: QCLS[k].c }; }).filter(function (s) { return s.value; });
-    var sos = Object.keys(M.soStat).map(function (k) { return { label: soStatLabel(k), value: M.soStat[k].n, color: (SOSTAT[k] || { c: '#78909c' }).c }; });
-    h += '<div class="dms-grid dms-cols-2">' + panel(tr('Quotations vs Sales Orders by month (SAR)', 'العروض مقابل أوامر البيع شهريًا (ريال)'), groupedBars(M.months, [{ k: 'qv', label: tr('Quotations', 'عروض الأسعار'), color: '#1d4ed8' }, { k: 'sv', label: tr('Sales Orders', 'أوامر البيع'), color: '#0f9d8a' }], M.monthly)) +
-      panel(tr('Quotation workflow distribution', 'توزيع حالات سير العمل للعروض'), donut(cls, num(M.qs.length), tr('quotations', 'عرض'))) + '</div>';
-    var steps = [{ label: tr('Quotations (not cancelled)', 'عروض الأسعار'), n: nonCan.length, c: '#0f2547' }, { label: tr('Issued to customer', 'مُصدرة للعميل'), n: M.issuedN, c: '#1d4ed8' }, { label: tr('Accepted by customer', 'مقبولة'), n: acc, c: '#2e7d32' }, { label: tr('Converted to Sales Order', 'تحوّلت لأمر بيع'), n: M.s2 ? M.conv.n : null, c: '#7c3aed' }];
+    var steps = [{ label: tr('Quotations (not cancelled)', 'عروض الأسعار'), n: nonCan.length }, { label: tr('Issued to customer', 'مُصدرة للعميل'), n: M.issuedN }, { label: tr('Accepted by customer', 'مقبولة'), n: acc }, { label: tr('Converted to sales order', 'تحوّلت لأمر بيع'), n: M.s2 ? M.conv.n : null }];
+    h += '<div class="dms-main2">' + actionsPanel() + '<div class="dms-stackcol">' +
+      panel(tr('Quotations vs sales orders', 'العروض مقابل أوامر البيع'), barChart(S, [{ k: 'qv', label: tr('Quoted value', 'قيمة العروض'), color: 'var(--dms-s-q)' }, { k: 'sv', label: tr('Sales order value', 'قيمة أوامر البيع'), color: 'var(--dms-s-so)' }]), '', 'SAR · ' + esc(granName(S.gran))) +
+      panel(tr('Conversion funnel', 'قمع التحويل'), funnel(steps), '', esc(tr('Closed quotations are not issued', 'العروض المغلقة غير مُصدرة'))) + '</div></div>';
+    var cls = Object.keys(QCLS).map(function (k) { return { label: qcLabel(k), value: M.qc[k].n, color: QCLS[k].c }; });
+    var sos = Object.keys(M.soStat).map(function (k) { return { label: soStatLabel(k), value: M.soStat[k].n, color: (SOSTAT[k] || { c: '#8a97a8' }).c }; });
     var top = Object.keys(M.persons).filter(function (k) { return k !== NA && M.persons[k].contrib > 0; }).sort(function (a, b) { return M.persons[b].contrib - M.persons[a].contrib; }).slice(0, 8).map(function (k) { return { label: k, value: M.persons[k].contrib }; });
-    h += '<div class="dms-grid dms-cols-2">' + panel(tr('Conversion funnel', 'قمع التحويل'), funnel(steps) + note(esc(tr('Closed quotations are excluded from "issued". Acceptance and Sales Order conversion are separate events.', 'العروض المغلقة مستبعدة من "المُصدرة". القبول والتحويل لأمر بيع حدثان منفصلان.')))) +
-      panel(tr('Top salespeople by Sales Order contribution (SAR)', 'أعلى المندوبين بمساهمة أوامر البيع (ريال)'), M.s2 ? hbars(top, money) : calc()) + '</div>';
-    h += '<div class="dms-grid dms-cols-2">' + panel(tr('Quotations by division', 'العروض حسب القسم'), stackByClass(M.qs, function (q) { return q.div; }, function (k) { return k === NA ? tr('Not Assigned', 'غير مُعيَّن') : k; })) +
-      panel(tr('Sales Orders by status', 'أوامر البيع حسب الحالة'), donut(sos, num(M.so.length), tr('orders', 'أمر'))) + '</div>';
-    h += reconHTML(M);
-    return h;
+    h += '<div class="dms-breakdowns">' +
+      panel(tr('Quotation workflow', 'حالات سير العمل للعروض'), shareList(cls, num(M.qs.length), tr('quotations', 'عرض'))) +
+      panel(tr('Sales orders by status', 'أوامر البيع حسب الحالة'), shareList(sos, num(M.so.length), tr('orders', 'أمر'))) +
+      panel(tr('Top salespeople', 'أعلى المندوبين'), M.s2 ? hbars(top, money) : calc(), '', esc(tr('SO contribution · SAR', 'مساهمة أوامر البيع · ريال'))) +
+      panel(tr('Quotations by division', 'العروض حسب القسم'), stackByClass(M.qs, function (q) { return q.div; }, function (k) { return k === NA ? NAtxt() : k; })) + '</div>';
+    return h + reconHTML(M);
   }
   function agedSection() {
     var h = '<div class="dms-sec">' + esc(tr('Aged Quotations', 'العروض المتقادمة')) + '<small>' + esc(tr('Approved, awaiting customer response — as of today, independent of the period filter', 'معتمدة وبانتظار رد العميل — حتى اليوم ومستقلة عن مرشح الفترة')) + '</small></div>';
@@ -802,9 +1054,9 @@
   }
   function tabQuotes(M) {
     var h = '<div class="dms-grid dms-kpis">' + Object.keys(QCLS).filter(function (k) { return M.qc[k].n || ISSUED.indexOf(k) >= 0; }).map(function (k) {
-      return kpi({ label: qcLabel(k), val: num(M.qc[k].n), sub: money(M.qc[k].v) + ' SAR', act: M.qc[k].n ? 'q_cls_' + k : null, c: QCLS[k].c });
+      return kpi({ label: qcLabel(k), val: num(M.qc[k].n), sub: money(M.qc[k].v) + ' SAR', act: M.qc[k].n ? 'q_cls_' + k : null, dot: QCLS[k].c });
     }).join('') + '</div>';
-    h += '<div class="dms-grid dms-cols-2">' + panel(tr('Quotations by month (SAR)', 'العروض شهريًا (ريال)'), groupedBars(M.months, [{ k: 'qv', label: tr('Quoted value', 'قيمة العروض'), color: '#1d4ed8' }], M.monthly)) +
+    h += '<div class="dms-grid dms-cols-2">' + panel(tr('Quoted value', 'قيمة العروض'), barChart(M.S, [{ k: 'qv', label: tr('Quoted value', 'قيمة العروض'), color: 'var(--dms-s-so)' }]), '', 'SAR · ' + esc(granName(M.S.gran))) +
       panel(tr('Workflow state by division', 'حالة سير العمل حسب القسم'), stackByClass(M.qs, function (q) { return q.div; }, function (k) { return k === NA ? tr('Not Assigned', 'غير مُعيَّن') : k; })) + '</div>';
     h += '<div class="dms-grid dms-cols-2">' + panel(tr('Workflow state by location', 'حالة سير العمل حسب الموقع'), stackByClass(M.qs, function (q) { return q.loc; }, function (k) { return k === NA ? tr('Not Assigned', 'غير مُعيَّن') : k; }, 10)) +
       panel(tr('Workflow state by salesperson (header)', 'حالة سير العمل حسب المندوب'), stackByClass(M.qs, function (q) { return q.sp; }, function (k) { return k === NA ? tr('Not Assigned', 'غير مُعيَّن') : k; }, 10)) + '</div>';
@@ -819,7 +1071,7 @@
     if (M.soWait) { h += alertBox('info', esc(tr('The salesperson filter needs Sales Team data (still loading).', 'مرشح المندوب يحتاج بيانات فريق المبيعات (قيد التحميل).'))); }
     h += '<div class="dms-grid dms-kpis">' +
       kpi({ label: tr('Submitted Sales Orders', 'أوامر البيع المعتمدة'), val: num(M.so.length), sub: money(M.soV) + ' SAR' + (F.sp ? ' (' + esc(tr('attributed share', 'الحصة المنسوبة')) + ')' : ''), act: 's_all', c: '#0f9d8a' }) +
-      Object.keys(M.soStat).sort(function (a, b) { return M.soStat[b].n - M.soStat[a].n; }).map(function (k) { return kpi({ label: soStatLabel(k), val: num(M.soStat[k].n), sub: money(M.soStat[k].v) + ' SAR', act: 's_st_' + k, c: (SOSTAT[k] || { c: '#78909c' }).c }); }).join('') +
+      Object.keys(M.soStat).sort(function (a, b) { return M.soStat[b].n - M.soStat[a].n; }).map(function (k) { return kpi({ label: soStatLabel(k), val: num(M.soStat[k].n), sub: money(M.soStat[k].v) + ' SAR', act: 's_st_' + k, dot: (SOSTAT[k] || { c: '#8a97a8' }).c }); }).join('') +
       kpi({ label: tr('Billed (value-weighted)', 'مفوتر (موزون)'), val: pct(M.soBilledV, M.soV, 0), sub: money(M.soBilledV) + ' SAR', c: '#f59e0b' }) +
       kpi({ label: tr('Delivered (value-weighted)', 'مُسلَّم (موزون)'), val: pct(M.soDelivV, M.soV, 0), sub: money(M.soDelivV) + ' SAR', c: '#1e88e5' }) +
       kpi({ label: tr('Past delivery date', 'تجاوزت تاريخ التسليم'), val: num(M.soOverdue.length), sub: money(sum(M.soOverdue, soShare)) + ' SAR', act: M.soOverdue.length ? 's_overdue' : null, c: '#e65100' }) +
@@ -828,10 +1080,10 @@
     var byDiv = {}; M.so.forEach(function (s) { var k = s.div || NA; byDiv[k] = (byDiv[k] || 0) + soShare(s); });
     var byLoc = {}; M.so.forEach(function (s) { var k = s.loc || NA; byLoc[k] = (byLoc[k] || 0) + soShare(s); });
     function toItems(o) { return Object.keys(o).sort(function (a, b) { return o[b] - o[a]; }).slice(0, 10).map(function (k) { return { label: k === NA ? tr('Not Assigned', 'غير مُعيَّن') : k, value: o[k] }; }); }
-    h += '<div class="dms-grid dms-cols-2">' + panel(tr('Sales Orders by month (SAR)', 'أوامر البيع شهريًا (ريال)'), groupedBars(M.months, [{ k: 'sv', label: tr('Sales Orders', 'أوامر البيع'), color: '#0f9d8a' }], M.monthly)) +
+    h += '<div class="dms-grid dms-cols-2">' + panel(tr('Sales order value', 'قيمة أوامر البيع'), barChart(M.S, [{ k: 'sv', label: tr('Sales order value', 'قيمة أوامر البيع'), color: 'var(--dms-s-so)' }]), '', 'SAR · ' + esc(granName(M.S.gran))) +
       panel(tr('Order value by division (SAR)', 'قيمة الأوامر حسب القسم (ريال)'), hbars(toItems(byDiv), money)) + '</div>';
     h += '<div class="dms-grid dms-cols-2">' + panel(tr('Order value by location (SAR)', 'قيمة الأوامر حسب الموقع (ريال)'), hbars(toItems(byLoc), money)) +
-      panel(tr('Order status', 'حالة الأوامر'), donut(Object.keys(M.soStat).map(function (k) { return { label: soStatLabel(k), value: M.soStat[k].n, color: (SOSTAT[k] || { c: '#78909c' }).c }; }), num(M.so.length), tr('orders', 'أمر'))) + '</div>';
+      panel(tr('Order status', 'حالة الأوامر'), shareList(Object.keys(M.soStat).map(function (k) { return { label: soStatLabel(k), value: M.soStat[k].n, color: (SOSTAT[k] || { c: '#8a97a8' }).c }; }), num(M.so.length), tr('orders', 'أمر'))) + '</div>';
     h += '<div class="dms-panelbox dms-mb">' + regTable(specS('t_so', M.so.slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; }))) + '</div>';
     return h;
   }
@@ -918,7 +1170,7 @@
       kpi({ label: tr('Irrelevant', 'غير ذي صلة'), val: num(irr), c: '#78909c' }) + kpi({ label: tr('Closed', 'مغلق'), val: num(clo), c: '#9e9e9e' }) +
       kpi({ label: tr('With a Customer link', 'لديه رابط عميل'), val: num(cnt(function (l) { return l.customer; })), warn: tr('incomplete', 'ناقص'), sub: esc(tr('indicative only', 'إرشادي فقط')), c: '#64748b' }) + '</div>';
     function grp(f) { var m = {}; ls.forEach(function (l) { var k = f(l) || NA; m[k] = (m[k] || 0) + 1; }); return Object.keys(m).sort(function (a, b) { return m[b] - m[a]; }).map(function (k, i) { return { label: k === NA ? tr('Not Available', 'غير متوفر') : k, value: m[k], color: PAL[i % PAL.length] }; }); }
-    h += '<div class="dms-grid dms-three">' + panel(tr('Lead sources', 'مصادر العملاء المحتملين'), hbars(grp(function (l) { return l.src; }))) + panel(tr('Lead qualification', 'تأهيل العملاء المحتملين'), donut(grp(function (l) { return l.qual; }), num(ls.length), tr('leads', 'عميل'))) + panel(tr('Lead status', 'حالة العميل المحتمل'), hbars(grp(function (l) { return l.status; }))) + '</div>';
+    h += '<div class="dms-grid dms-three">' + panel(tr('Lead sources', 'مصادر العملاء المحتملين'), hbars(grp(function (l) { return l.src; }))) + panel(tr('Lead qualification', 'تأهيل العملاء المحتملين'), shareList(grp(function (l) { return l.qual; }), num(ls.length), tr('leads', 'عميل'))) + panel(tr('Lead status', 'حالة العميل المحتمل'), hbars(grp(function (l) { return l.status; }))) + '</div>';
     var rows = ls; if (LF.lsrc) { rows = rows.filter(function (l) { return (l.src || NA) === LF.lsrc; }); } if (LF.lstat) { rows = rows.filter(function (l) { return l.status === LF.lstat; }); }
     h += '<div class="dms-toolbar"><span class="dms-field" style="flex-direction:row;gap:8px;align-items:center"><label>' + esc(tr('Source', 'المصدر')) + '</label><select class="dms-input" data-lf="lsrc"><option value="">' + esc(tr('All', 'الكل')) + '</option>' + uniq(ls.map(function (l) { return l.src; })).map(function (s) { return '<option' + (LF.lsrc === s ? ' selected' : '') + '>' + esc(s) + '</option>'; }).join('') + '</select><label>' + esc(tr('Status', 'الحالة')) + '</label><select class="dms-input" data-lf="lstat"><option value="">' + esc(tr('All', 'الكل')) + '</option>' + uniq(ls.map(function (l) { return l.status; })).map(function (s) { return '<option' + (LF.lstat === s ? ' selected' : '') + '>' + esc(s) + '</option>'; }).join('') + '</select></span></div>';
     h += '<div class="dms-panelbox dms-mb">' + regTable({ id: 't_leads', rows: rows.slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; }), text: function (l) { return [l.name, l.lead_name, l.company_name, l.src, l.status, l.lead_owner, l.custom_sales_person_].join(' '); }, cols: [
@@ -956,7 +1208,7 @@
   }
   function tabActions() {
     var specs = actSpecs(), h = alertBox('info', esc(tr('Action lists are as of today and are not filtered by the period. They respect the company, division, location and salesperson filters where the source supports them.', 'قوائم الإجراءات حتى اليوم وغير مرتبطة بالفترة، وتراعي مرشحات الشركة والقسم والموقع والمندوب حيثما يدعمها المصدر.')));
-    if (!ACT.counts) { loadActionCounts(); }
+    if (!ACT.counts && !ACT.loading) { loadActions(); }
     h += '<div class="dms-grid dms-kpis">' + specs.map(function (s) {
       var c = ACT.counts ? ACT.counts[s.id] : undefined, err = typeof c === 'string';
       return kpi({ label: s.title, val: c === undefined ? '…' : err ? '—' : num(c), sub: esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.why), act: (!err && c) ? 'srv:' + s.id : null, c: '#1d4ed8' });
@@ -964,59 +1216,242 @@
     return h;
   }
 
-  /* ---------- header / controls / banners ---------- */
-  function headerHTML() {
-    return '<div class="dms-header"><div class="dms-brand"><div class="dms-logo">DM</div><div style="min-width:0"><h2 class="dms-title">' + esc(tr('Quotation & SO tracker', 'لوحة المبيعات CRM ومتابعة التحويل')) + '</h2><p class="dms-sub">DM Group KSA · ' + esc(tr('Read-only view of ERP data under your permissions. Amounts in SAR (company base currency).', 'عرض للقراءة فقط لبيانات النظام وفق صلاحياتك. المبالغ بالريال (عملة الشركة الأساسية).')) + '</p></div></div>' +
-      '<div class="dms-actions"><span class="dms-stamp" data-ref="stamp"></span><button class="dms-btn dms-btn-primary" data-act="refresh" data-ref="refresh" type="button"></button>' +
-      '<div class="dms-lang" role="group" aria-label="Language"><button type="button" data-act="lang" data-v="en" class="' + (LANG === 'en' ? 'dms-on' : '') + '">EN</button><button type="button" data-act="lang" data-v="ar" class="' + (LANG === 'ar' ? 'dms-on' : '') + '">عربي</button></div></div></div>';
+  /* ---------- toolbar (pending · period · filters · refresh · language), tabs, popovers ---------- */
+  function filterCount() { return FLD.filter(function (f) { return F[f[0]]; }).length; }
+  function pendingTotal() {
+    if (!ACT.counts) { return null; }
+    var t = 0, any = false; Object.keys(ACT.counts).forEach(function (k) { var c = ACT.counts[k]; if (typeof c === 'number') { t += c; any = true; } });
+    return any ? t : null;
+  }
+  function pendingBtnHTML() {
+    var n = pendingTotal(), lbl = n == null ? (ACT.counts ? '—' : '…') : num(n);
+    return '<button type="button" class="dms-pend' + (n ? ' dms-pend-on' : '') + '" data-act="pending" data-fk="pending" title="' + esc(tr('Pending actions as of today — show the list', 'الإجراءات المعلقة حتى اليوم — عرض القائمة')) + '">' +
+      '<i class="dms-pend-dot" aria-hidden="true"></i><b class="dms-num">' + lbl + '</b><span class="dms-pend-l">' + esc(tr('pending', 'معلّقة')) + '</span></button>';
   }
   function opt(v, label, cur) { return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(label) + '</option>'; }
-  function controlsHTML() {
-    var cos = uniq(DATA.quotes.map(function (q) { return q.company; }).concat(DATA.so.map(function (s) { return s.company; })));
-    var divs = uniq(DATA.divisions.concat(DATA.quotes.map(function (q) { return q.div; })).concat(DATA.so.map(function (s) { return s.div; })));
-    var locs = uniq(DATA.quotes.map(function (q) { return q.loc; }).concat(DATA.so.map(function (s) { return s.loc; })));
-    var sps = uniq(DATA.sp.map(function (s) { return s.name; }).concat(DATA.quotes.map(function (q) { return q.sp; })));
-    function sel(f, label, list, withNA) { return '<div class="dms-field"><label>' + esc(label) + '</label><select class="dms-input" data-g="' + f + '">' + opt('', tr('All', 'الكل'), F[f]) + (withNA ? opt(NA, NAtxt(), F[f]) : '') + list.map(function (x) { return opt(x, x, F[f]); }).join('') + '</select></div>'; }
-    var h = '<div class="dms-field"><label>' + esc(tr('Period', 'الفترة')) + '</label><select class="dms-input" data-g="period">' + PERIODS.map(function (p) { return opt(p[0], tr(p[1], p[2]), F.period); }).join('') + '</select></div>';
-    if (F.period === 'custom') { h += '<div class="dms-field"><label>' + esc(tr('From', 'من')) + '</label><input type="date" class="dms-input" data-g="from" value="' + esc(F.from) + '"></div><div class="dms-field"><label>' + esc(tr('To', 'إلى')) + '</label><input type="date" class="dms-input" data-g="to" value="' + esc(F.to) + '"></div>'; }
-    h += sel('company', tr('Company', 'الشركة'), cos, false) + sel('division', tr('Division', 'القسم'), divs, true) + sel('location', tr('Location', 'الموقع'), locs, true) + sel('sp', tr('Salesperson', 'المندوب'), sps, true);
-    h += '<div class="dms-field"><label>' + esc(tr('Selected range', 'النطاق المحدد')) + '</label><div class="dms-sm" style="font-size:12px;color:var(--dms-ink)">' + esc(PERIOD[0] || '—') + ' → ' + esc(PERIOD[1] || '—') + '</div></div>';
-    return h;
+  /* Filter choices come from the loaded rows. Once a company is chosen, division / location / salesperson
+     narrow to the values that occur with that company (the ERP has no explicit company → division hierarchy). */
+  function filterOptions(co) {
+    var qs = DATA.quotes.filter(function (q) { return !co || q.company === co; }), ss = DATA.so.filter(function (s) { return !co || s.company === co; }), team = [];
+    if (co && DATA.soTeam) { ss.forEach(function (s) { (DATA.soTeam[s.name] || []).forEach(function (r) { team.push(r.sales_person); }); }); }
+    return {
+      company: uniq(DATA.quotes.map(function (q) { return q.company; }).concat(DATA.so.map(function (s) { return s.company; }))),
+      division: uniq((co ? [] : DATA.divisions).concat(qs.map(function (q) { return q.div; }), ss.map(function (s) { return s.div; }))),
+      location: uniq(qs.map(function (q) { return q.loc; }).concat(ss.map(function (s) { return s.loc; }))),
+      sp: uniq((co ? team : DATA.sp.map(function (s) { return s.name; })).concat(qs.map(function (q) { return q.sp; })))
+    };
   }
-  function tabsHTML() { return '<div class="dms-tabs" role="tablist">' + TABS.map(function (x) { return '<button class="dms-tab' + (x.id === tab ? ' dms-on' : '') + '" role="tab" aria-selected="' + (x.id === tab) + '" data-act="tab" data-v="' + x.id + '" type="button">' + esc(tr(x.en, x.ar)) + '</button>'; }).join('') + '</div>'; }
+  function pruneDraft() {
+    var o = filterOptions(FD.company);
+    ['division', 'location', 'sp'].forEach(function (f) { if (FD[f] && FD[f] !== NA && o[f].indexOf(FD[f]) < 0) { FD[f] = ''; } });
+  }
+  function ffield(f, label, list, withNA) {
+    var q = clean(FS[f]).toLowerCase(), cur = FD[f], shown = list.filter(function (x) { return !q || x.toLowerCase().indexOf(q) >= 0; });
+    if (cur && cur !== NA && shown.indexOf(cur) < 0) { shown.unshift(cur); }
+    var h = '<div class="dms-ff"><label for="dms-fd-' + f + '">' + esc(label) + '</label>';
+    if (list.length > 8) { h += '<input type="search" class="dms-input" data-fs="' + f + '" data-fk="fs:' + f + '" value="' + esc(FS[f] || '') + '" placeholder="' + esc(tr('Search ' + num(list.length) + ' options', 'ابحث في ' + num(list.length) + ' خيار')) + '" aria-label="' + esc(tr('Search', 'بحث') + ' — ' + label) + '" autocomplete="off">'; }
+    h += '<select id="dms-fd-' + f + '" class="dms-input" data-fd="' + f + '" data-fk="fd:' + f + '">' + opt('', tr('All', 'الكل'), cur) + (withNA ? opt(NA, NAtxt(), cur) : '') + shown.map(function (x) { return opt(x, x, cur); }).join('') + '</select>';
+    if (q && !shown.length) { h += '<span class="dms-ff-hint">' + esc(tr('No matches', 'لا نتائج')) + '</span>'; }
+    return h + '</div>';
+  }
+  function filtersPopHTML() {
+    var o = filterOptions(FD.company);
+    return '<div class="dms-pop dms-pop-filters" role="dialog" aria-label="' + esc(tr('Filters', 'المرشحات')) + '"><div class="dms-pop-b">' +
+      ffield('company', tr('Company', 'الشركة'), o.company, false) + ffield('division', tr('Division', 'القسم'), o.division, true) +
+      ffield('location', tr('Location', 'الموقع'), o.location, true) + ffield('sp', tr('Salesperson', 'المندوب'), o.sp, true) + '</div>' +
+      '<p class="dms-pop-note">' + esc(tr('Lists narrow to the chosen company. Lead, customer, opportunity and ToDo actions are not filtered.', 'تُضيَّق القوائم حسب الشركة المختارة. لا تتأثر إجراءات العملاء المحتملين والعملاء والفرص والمهام.')) + '</p>' +
+      '<div class="dms-pop-f"><button type="button" class="dms-btn" data-act="fclear" data-fk="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button><button type="button" class="dms-btn dms-btn-primary" data-act="fapply" data-fk="fapply">' + esc(tr('Apply', 'تطبيق')) + '</button></div></div>';
+  }
+  function calendarHTML() {
+    var v = CAL.view, first = weekStartOf(v), mon = v.slice(0, 7), fdy = CAL.focus && CAL.focus.slice(0, 7) === mon ? CAL.focus : (CAL.from && CAL.from.slice(0, 7) === mon ? CAL.from : v), wd = '', rows = '', r, c, d;
+    for (c = 0; c < 7; c++) { try { wd += '<span role="columnheader">' + esc(new Intl.DateTimeFormat(locale(), { weekday: 'narrow', timeZone: 'UTC' }).format(new Date(parseISO(addDays(first, c))))) + '</span>'; } catch (e) { wd += '<span></span>'; } }
+    for (r = 0; r < 6; r++) {
+      rows += '<div role="row" class="dms-cal-row">';
+      for (c = 0; c < 7; c++) {
+        d = addDays(first, r * 7 + c);
+        var end = d === CAL.from || d === CAL.to, inR = CAL.from && CAL.to && d > CAL.from && d < CAL.to;
+        rows += '<button type="button" role="gridcell" class="dms-day' + (d.slice(0, 7) !== mon ? ' dms-out' : '') + (d === TODAY ? ' dms-today' : '') + (inR ? ' dms-in' : '') + (end ? ' dms-end' : '') +
+          (CAL.from && CAL.to && d === CAL.from && d !== CAL.to ? ' dms-s' : '') + (CAL.from && CAL.to && d === CAL.to && d !== CAL.from ? ' dms-e' : '') + '" data-act="calday" data-v="' + d + '" data-fk="day:' + d + '" tabindex="' + (d === fdy ? 0 : -1) +
+          '" aria-pressed="' + end + '" aria-label="' + esc(fmtDate(d, true)) + '"><bdi>' + (+d.slice(8, 10)) + '</bdi></button>';
+      }
+      rows += '</div>';
+    }
+    var ok = CAL.from && CAL.to, msg = ok ? '<bdi>' + esc(rangeLabel([CAL.from, CAL.to])) + '</bdi> · ' + esc(daysTxt(diffDays(CAL.from, CAL.to) + 1)) : esc(CAL.from ? tr('Select an end date', 'اختر تاريخ النهاية') : tr('Select a start date', 'اختر تاريخ البداية'));
+    var title = v; try { title = new Intl.DateTimeFormat(locale(), { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(parseISO(v))); } catch (e) { /* ISO fallback */ }
+    return '<div class="dms-cal"><div class="dms-cal-h"><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="-1" data-fk="calprev" aria-label="' + esc(tr('Previous month', 'الشهر السابق')) + '">' + ico('prev', 'dms-flip') + '</button>' +
+      '<b aria-live="polite">' + esc(title) + '</b><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="1" data-fk="calnext" aria-label="' + esc(tr('Next month', 'الشهر التالي')) + '">' + ico('next', 'dms-flip') + '</button></div>' +
+      '<div class="dms-cal-g" role="grid" aria-label="' + esc(title) + '"><div class="dms-cal-wd" role="row">' + wd + '</div>' + rows + '</div>' +
+      '<div class="dms-cal-f"><span class="dms-cal-msg" aria-live="polite">' + msg + '</span><span class="dms-cal-btns"><button type="button" class="dms-btn" data-act="popclose" data-fk="calcancel">' + esc(tr('Cancel', 'إلغاء')) + '</button>' +
+      '<button type="button" class="dms-btn dms-btn-primary" data-act="calapply" data-fk="calapply"' + (ok ? '' : ' disabled') + '>' + esc(tr('Apply', 'تطبيق')) + '</button></span></div></div>';
+  }
+  function periodPopHTML() {
+    return '<div class="dms-pop dms-pop-period' + (CAL ? ' dms-has-cal' : '') + '" role="dialog" aria-label="' + esc(tr('Select period', 'اختر الفترة')) + '"><div class="dms-presets">' +
+      PGROUPS.map(function (g) {
+        return '<div class="dms-pgroup">' + g.map(function (k) {
+          var on = CAL ? k === 'custom' : F.period === k;
+          return '<button type="button" class="dms-preset' + (on ? ' dms-on' : '') + '" aria-pressed="' + on + '" data-act="preset" data-v="' + k + '" data-fk="preset:' + k + '"><span>' + esc(periodName(k)) + '</span>' +
+            (k !== 'custom' ? '<small><bdi>' + esc(rangeLabel(periodRange(k))) + '</bdi></small>' : '') + '</button>';
+        }).join('') + '</div>';
+      }).join('') + '</div>' + (CAL ? calendarHTML() : '') + '</div>';
+  }
+  function toolbarHTML() {
+    var ac = filterCount(), R = PERIOD;
+    return '<div class="dms-topbar"><div class="dms-tb-title"><h2 class="dms-title">' + esc(tr('Quotation & SO tracker', 'متابعة عروض الأسعار وأوامر البيع')) + '</h2><p class="dms-sub" data-ref="stamp"></p></div>' +
+      '<div class="dms-tb-ctrls"><div class="dms-pendwrap" data-ref="pendwrap">' + pendingBtnHTML() + '</div>' +
+      '<div class="dms-anchor"><button type="button" class="dms-btn dms-period" data-act="pop" data-v="period" data-fk="pop:period" aria-haspopup="dialog" aria-expanded="' + (POP === 'period') + '" aria-label="' + esc(tr('Period', 'الفترة') + ': ' + periodName(F.period) + ' ' + rangeLabel(R)) + '">' + ico('cal') +
+        '<span class="dms-period-t"><b>' + esc(periodName(F.period)) + '</b><span class="dms-period-r"><bdi>' + esc(rangeLabel(R)) + '</bdi></span></span>' + ico('down', 'dms-chev') + '</button>' + (POP === 'period' ? periodPopHTML() : '') + '</div>' +
+      '<div class="dms-anchor"><button type="button" class="dms-btn' + (ac ? ' dms-btn-on' : '') + '" data-act="pop" data-v="filters" data-fk="pop:filters" aria-haspopup="dialog" aria-expanded="' + (POP === 'filters') + '">' + ico('filter') +
+        '<span class="dms-btn-t">' + esc(tr('Filters', 'المرشحات')) + '</span>' + (ac ? '<span class="dms-count" aria-label="' + esc(ac + ' ' + tr('active', 'نشط')) + '">' + ac + '</span>' : '') + '</button>' + (POP === 'filters' ? filtersPopHTML() : '') + '</div>' +
+      '<button type="button" class="dms-btn dms-icobtn" data-act="refresh" data-ref="refresh" data-fk="refresh" aria-label="' + esc(tr('Refresh data', 'تحديث البيانات')) + '" title="' + esc(tr('Refresh data (keeps filters)', 'تحديث البيانات (مع الإبقاء على المرشحات)')) + '">' + ico('refresh') + '</button></div>' +
+      '<div class="dms-lang" role="group" aria-label="Language / اللغة"><button type="button" data-act="lang" data-v="en" data-fk="lang:en" lang="en" aria-pressed="' + (LANG === 'en') + '"' + (LANG === 'en' ? ' class="dms-on"' : '') + '>English</button>' +
+        '<button type="button" data-act="lang" data-v="ar" data-fk="lang:ar" lang="ar" aria-pressed="' + (LANG === 'ar') + '"' + (LANG === 'ar' ? ' class="dms-on"' : '') + '>العربية</button></div></div>';
+  }
+  function chipsHTML() {
+    var a = FLD.filter(function (f) { return F[f[0]]; }); if (!a.length) { return ''; }
+    return '<div class="dms-chips">' + a.map(function (f) {
+      var v = F[f[0]] === NA ? NAtxt() : F[f[0]];
+      return '<span class="dms-chip"><span class="dms-chip-k">' + esc(tr(f[1], f[2])) + '</span><bdi>' + esc(v) + '</bdi><button type="button" class="dms-chip-x" data-act="rmf" data-v="' + f[0] + '" data-fk="rmf:' + f[0] + '" aria-label="' + esc(tr('Remove filter', 'إزالة المرشح') + ' ' + tr(f[1], f[2]) + ': ' + v) + '">' + ico('x') + '</button></span>';
+    }).join('') + (a.length > 1 ? '<button type="button" class="dms-linkbtn" data-act="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button>' : '') + '</div>';
+  }
+  function tabsHTML() {
+    var pend = pendingTotal();
+    return '<div class="dms-tabs" role="tablist" aria-label="' + esc(tr('Sections', 'الأقسام')) + '">' + TABS.map(function (x) {
+      var on = x.id === tab, lbl = tr(x.en, x.ar), b = x.id === 'actions' && pend ? '<span class="dms-tab-n dms-num" title="' + esc(tr('Pending actions as of today', 'الإجراءات المعلقة حتى اليوم')) + '">' + num(pend) + '</span>' : '';
+      return '<button class="dms-tab' + (on ? ' dms-on' : '') + '" role="tab" id="dms-tab-' + x.id + '" aria-selected="' + on + '" aria-controls="dms-panel" tabindex="' + (on ? 0 : -1) + '" data-act="tab" data-v="' + x.id + '" data-fk="tab:' + x.id + '" title="' + esc(lbl) + '" type="button"><span>' + esc(lbl) + '</span>' + b + '</button>';
+    }).join('') + '</div>';
+  }
+
+  /* ---------- rendering: a fixed skeleton whose regions repaint independently (focus kept via data-fk) ---------- */
+  function activeEl() { try { return ROOT.activeElement || null; } catch (e) { return null; } }
+  function paint(el, html) {
+    if (!el) { return; }
+    var a = activeEl(), fk = a && el.contains(a) && a.getAttribute ? a.getAttribute('data-fk') : null, ss = null;
+    if (fk && typeof a.selectionStart === 'number') { try { ss = [a.selectionStart, a.selectionEnd]; } catch (e) { /* not a text input */ } }
+    el.innerHTML = html;
+    if (fk) { focusFk(fk); if (ss) { var n = activeEl(); try { n.setSelectionRange(ss[0], ss[1]); } catch (e) { /* ignore */ } } }
+  }
+  function focusFk(k) { var n = HOST.querySelector('[data-fk="' + k + '"]'); if (n) { try { n.focus({ preventScroll: true }); } catch (e) { n.focus(); } } }
+  function skeleton() {
+    HOST.innerHTML = '<div class="dms-app"><div data-ref="tb"></div><div data-ref="chips"></div><div data-ref="tabs"></div><div class="dms-sheet" role="tabpanel" id="dms-panel" data-ref="sheet"><div data-ref="banner"></div><div class="dms-content" data-ref="content"></div></div>' +
+      '<div class="dms-tip" data-ref="tip" role="tooltip" hidden></div></div><div data-ref="overlay"></div>';
+    built = true;
+  }
   function renderHeaderState() {
-    var b = $('[data-ref="refresh"]'), s = $('[data-ref="stamp"]'), busy = loading || DATA.s2.running;
-    if (b) { b.disabled = loading; b.innerHTML = loading ? '<span class="dms-spin"></span> ' + esc(tr('Loading…', 'جارٍ التحميل…')) : '↻ ' + esc(tr('Refresh', 'تحديث')); }
-    if (s) { s.textContent = DATA.loadedAt ? tr('Last refreshed', 'آخر تحديث') + ': ' + DATA.loadedAt + (busy ? ' · …' : '') : ''; }
+    var b = $('[data-ref="refresh"]'), s = $('[data-ref="stamp"]'), busy = loading || DATA.s2.running || ACT.loading;
+    if (b) { b.disabled = loading; b.classList.toggle('dms-busy', busy); b.setAttribute('aria-busy', String(busy)); }
+    if (s) {
+      var la = DATA.loadedAt, when = la ? (la.slice(0, 10) === TODAY ? la.slice(11) : la) : '';
+      s.textContent = tr('Read-only · SAR', 'للقراءة فقط · ريال') + (when ? ' · ' + tr('Updated ', 'آخر تحديث ') + when : '') + (busy ? ' · ' + tr('loading…', 'جارٍ التحميل…') : '');
+    }
+    paint($('[data-ref="pendwrap"]'), pendingBtnHTML());
+    paint($('[data-ref="tabs"]'), tabsHTML());
   }
-  function renderContentOnly() { MM = buildModel(); var c = $('[data-ref="content"]'); if (!c) { return; } TBL = {}; c.innerHTML = contentHTML(MM); fillTables(); }
+  function renderToolbar() { paint($('[data-ref="tb"]'), toolbarHTML()); paint($('[data-ref="chips"]'), chipsHTML()); renderHeaderState(); }
+  function renderSoft() {
+    PERIOD = curPeriod(); MM = buildModel();
+    var dr = TBL.drill; TBL = {}; if (dr) { TBL.drill = dr; }   // keep an open drill-down table registered
+    var b = $('[data-ref="banner"]'), c = $('[data-ref="content"]'), sh = $('[data-ref="sheet"]');
+    if (b) { b.innerHTML = srcAlerts(); }
+    if (c) { paint(c, contentHTML(MM)); c.classList.remove('dms-enter'); if (ANIM) { void c.offsetWidth; c.classList.add('dms-enter'); } ANIM = false; fillTables(c); fitChartLabels(); }
+    if (sh) { sh.setAttribute('aria-labelledby', 'dms-tab-' + tab); }
+    renderHeaderState(); renderProgress();
+  }
   function contentHTML(M) {
-    if (loading) { return '<div class="dms-grid dms-kpis"><div class="dms-skel"></div><div class="dms-skel"></div><div class="dms-skel"></div><div class="dms-skel"></div></div>' + note(esc(tr('Loading quotations and sales orders from ERPNext…', 'جارٍ تحميل عروض الأسعار وأوامر البيع من ERPNext…'))); }
+    if (loading) {
+      return '<div class="dms-grid dms-kpis dms-ov-kpis" aria-busy="true">' + rep('<div class="dms-skel dms-skel-kpi"></div>', 6) + '</div><div class="dms-main2"><div class="dms-skel dms-skel-panel"></div><div class="dms-skel dms-skel-panel"></div></div>' +
+        note(esc(tr('Loading quotations and sales orders from ERPNext…', 'جارٍ تحميل عروض الأسعار وأوامر البيع من ERPNext…')));
+    }
     var okAny = (DATA.status.quote && DATA.status.quote.ok) || (DATA.status.so && DATA.status.so.ok);
     if (!okAny) { return ''; }
+    var needQ = ['overview', 'quotes', 'conv', 'team'].indexOf(tab) >= 0, needSO = ['overview', 'orders', 'conv', 'team'].indexOf(tab) >= 0;
+    if ((needQ && !DATA.status.quote.ok) || (needSO && !DATA.status.so.ok)) {
+      return alertBox('err', esc(tr('Analysis unavailable while a required source cannot be read. Use Refresh to retry.', 'التحليل غير متاح لتعذر قراءة مصدر مطلوب. استخدم التحديث لإعادة المحاولة.'))) + (tab === 'overview' ? actionsPanel() : '');
+    }
     if (!PERIOD[0] || PERIOD[0] > PERIOD[1]) { return alertBox('err', esc(tr('Choose a valid date range.', 'اختر نطاق تاريخ صحيحًا.'))); }
     var body = { overview: tabOverview, leads: tabLeads, customers: tabCustomers, quotes: tabQuotes, orders: tabOrders, conv: tabConv, team: tabTeam, actions: tabActions }[tab](M);
-    return (M.s2 || tab === 'leads' || tab === 'customers' || tab === 'actions' ? '' : '<div class="dms-alert dms-alert-info"><span data-ref="prog"></span>' + progressBar() + '</div>') + body;
+    return (M.s2 || tab === 'leads' || tab === 'customers' || tab === 'actions' ? '' : '<div class="dms-alert dms-alert-info dms-alert-prog"><span data-ref="prog"></span>' + progressBar() + '</div>') + body;
+  }
+  function lazyLoads() {
+    if (tab === 'leads' || tab === 'conv') { loadLeads(); }
+    if (tab === 'customers') { loadCustomers(); }
+    if (!ACT.counts && !ACT.loading && !loading) { loadActions(); }
   }
   function renderAll(soft) {
+    if (soft && built) { renderSoft(); lazyLoads(); return; }
     HOST.setAttribute('dir', LANG === 'ar' ? 'rtl' : 'ltr'); HOST.setAttribute('lang', LANG);
-    PERIOD = curPeriod(); MM = buildModel(); TBL = {};
-    HOST.innerHTML = headerHTML() + '<div class="dms-controls" data-ref="controls">' + controlsHTML() + '</div>' + tabsHTML() + '<div data-ref="banner">' + srcAlerts() + '</div><div class="dms-content" data-ref="content">' + contentHTML(MM) + '</div><div data-ref="overlay"></div>';
-    if (OVL) { var o = $('[data-ref="overlay"]'); o.innerHTML = overlayHTML(); }
-    renderHeaderState(); fillTables(); renderProgress();
-    if (tab === 'leads' || tab === 'overview' || tab === 'conv') { loadLeads(); }
-    if (tab === 'customers') { loadCustomers(); }
+    if (!built) { skeleton(); }
+    PERIOD = curPeriod(); renderToolbar(); renderSoft(); lazyLoads();
   }
+
+  /* ---------- popover / navigation actions ---------- */
+  function goTab(id, focusTab) {
+    if (tab !== id) { tab = id; OVL = null; resetTables(); ANIM = true; renderAll(); }
+    var t = $('#dms-tab-' + id); if (!t) { return; }
+    try { t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) { /* ignore */ }
+    if (focusTab) { t.focus(); }
+  }
+  function openPop(w) {
+    POP = w; CAL = null;
+    if (w === 'filters') { FD = {}; FLD.forEach(function (f) { FD[f[0]] = F[f[0]]; }); FS = {}; }
+    else if (F.period === 'custom' && F.from && F.to) { CAL = { from: F.from, to: F.to, view: monthStart(F.from), focus: F.from }; }
+    renderToolbar(); focusFk(w === 'filters' ? 'fd:company' : CAL ? 'day:' + CAL.focus : 'preset:' + F.period);
+  }
+  function closePop(restore) { var w = POP; if (!w) { return; } POP = null; CAL = null; renderToolbar(); if (restore) { focusFk('pop:' + w); } }
+  function filtersChanged() { resetTables(); ANIM = true; renderAll(); loadAgedLater(); loadActions(); }
+  function applyFilters(next) { FLD.forEach(function (f) { F[f[0]] = (next && next[f[0]]) || ''; }); POP = null; filtersChanged(); }
+  function applyPeriod(key, from, to) {
+    F.period = key; if (key === 'custom') { F.from = from; F.to = to; }
+    POP = null; CAL = null; resetTables(); ANIM = true; startLoad(false); focusFk('pop:period');
+  }
+  function calPick(d) {
+    if (!CAL.from || CAL.to) { CAL.from = d; CAL.to = null; } else if (d < CAL.from) { CAL.to = CAL.from; CAL.from = d; } else { CAL.to = d; }
+    CAL.focus = d;
+  }
+  function calMove(d) { CAL.focus = d; if (d.slice(0, 7) !== CAL.view.slice(0, 7)) { CAL.view = monthStart(d); } renderToolbar(); focusFk('day:' + d); }
+
+  /* ---------- tooltip (one shared element; positioned against the dashboard, clamped to its width) ---------- */
+  function showTip(n) {
+    var tip = $('[data-ref="tip"]'), app = $('.dms-app'); if (!tip || !app) { return; }
+    tip.textContent = n.getAttribute('data-tip'); tip.hidden = false;
+    var a = app.getBoundingClientRect(), r = n.getBoundingClientRect(), w = tip.offsetWidth, hgt = tip.offsetHeight;
+    var x = Math.max(4, Math.min(r.left - a.left + r.width / 2 - w / 2, a.width - w - 4)), y = r.top - a.top - hgt - 8;
+    if (y < 0) { y = r.bottom - a.top + 8; }
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  }
+  function hideTip() { var tip = $('[data-ref="tip"]'); if (tip) { tip.hidden = true; } }
+  function onOver(ev) { var n = ev.target.closest ? ev.target.closest('[data-tip]') : null; if (n && HOST.contains(n)) { showTip(n); } else { hideTip(); } }
 
   /* ---------- events (single delegated set, removed on destroy) ---------- */
   function onClick(ev) {
-    var n = ev.target.closest ? ev.target.closest('[data-act]') : null; if (!n || !HOST.contains(n)) { return; }
+    var n = ev.target.closest ? ev.target.closest('[data-act]') : null;
+    if (POP && !(ev.target.closest && ev.target.closest('.dms-anchor'))) { closePop(false); }   // outside click: discard the draft
+    if (!n || !HOST.contains(n)) { return; }
     var a = n.getAttribute('data-act'), v = n.getAttribute('data-v'), id = n.getAttribute('data-id');
-    if (a === 'ovbg') { if (ev.target === n) { OVL = null; renderOverlay(); } return; }
-    if (a === 'closeov') { OVL = null; renderOverlay(); return; }
-    if (a === 'tab') { if (tab !== v) { tab = v; resetTables(); renderAll(); } return; }
-    if (a === 'lang') { LANG = v; try { G.localStorage.setItem('dms_lang', LANG); } catch (e) { /* ignore */ } OVL = null; renderAll(); return; }
-    if (a === 'refresh') { AGED.rows = null; LEADS.rows = null; CUST.rows = null; ACT.counts = null; DATA.recon = null; startLoad(true); return; }
+    if (a === 'ovbg') { if (ev.target === n) { closeOverlay(); } return; }
+    if (a === 'closeov') { closeOverlay(); return; }
+    if (a === 'tab') { goTab(v); return; }
+    if (a === 'lang') { if (LANG !== v) { LANG = v; try { G.localStorage.setItem('dms_lang', LANG); } catch (e) { /* ignore */ } OVL = null; POP = null; CAL = null; renderAll(); renderOverlay(); focusFk('lang:' + v); } return; }
+    if (a === 'refresh') { AGED.rows = null; LEADS.rows = null; CUST.rows = null; ACTTOK++; ACT.counts = null; ACT.items = null; ACT.loading = false; DATA.recon = null; startLoad(true); return; }
+    if (a === 'pop') { if (POP === v) { closePop(true); } else { openPop(v); } return; }
+    if (a === 'popclose') { closePop(true); return; }
+    if (a === 'preset') {
+      if (v !== 'custom') { applyPeriod(v); return; }
+      var r0 = PERIOD[0] || TODAY, r1 = PERIOD[1] || TODAY; CAL = { from: r0, to: r1, view: monthStart(r1 > TODAY ? TODAY : r1), focus: r1 > TODAY ? TODAY : r1 };
+      renderToolbar(); focusFk('day:' + CAL.focus); return;
+    }
+    if (a === 'calnav' && CAL) { CAL.view = addMonths(CAL.view, +v); CAL.focus = CAL.view; renderToolbar(); return; }
+    if (a === 'calday' && CAL) { calPick(v); renderToolbar(); focusFk('day:' + v); return; }
+    if (a === 'calapply' && CAL && CAL.from && CAL.to) { applyPeriod('custom', CAL.from, CAL.to); return; }
+    if (a === 'fapply') { applyFilters(FD); focusFk('pop:filters'); return; }
+    if (a === 'fclear') { applyFilters(null); focusFk('pop:filters'); return; }
+    if (a === 'rmf') { var nf = {}; FLD.forEach(function (f) { nf[f[0]] = F[f[0]]; }); nf[v] = ''; applyFilters(nf); focusFk('pop:filters'); return; }
+    if (a === 'pending') {
+      goTab('overview'); var p = $('#dms-pending');
+      if (p) { var still = G.matchMedia && G.matchMedia('(prefers-reduced-motion: reduce)').matches; try { p.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' }); } catch (e) { p.scrollIntoView(); } p.focus({ preventScroll: true }); }
+      return;
+    }
+    if (a === 'actretry') { loadActions(); renderSoft(); return; }
+    if (a === 'recon') { RECON_OPEN = !RECON_OPEN; renderSoft(); return; }
     if (a === 'kpi') { openDrill(v); return; }
     if (a === 'tpage') { TS[id].page = Math.max(1, TS[id].page + (+v)); fillTable(id); return; }
     if (a === 'tsort') { var st = TS[id]; if (st.sk === v) { st.dir = -st.dir; } else { st.sk = v; st.dir = 1; } st.page = 1; fillTable(id); return; }
@@ -1024,37 +1459,69 @@
   }
   function onInput(ev) {
     var n = ev.target; if (!n || !n.getAttribute || !HOST.contains(n)) { return; }
-    var g = n.getAttribute('data-g'), lf = n.getAttribute('data-lf'), tq = n.getAttribute('data-tq');
-    if (g) {
-      if (F[g] === n.value) { return; } F[g] = n.value; resetTables();
-      if (g === 'period' || g === 'from' || g === 'to') { if (F.period === 'custom' && (!F.from || !F.to) ) { renderAll(); return; } startLoad(false); }
-      else { renderAll(); loadAgedLater(); later(loadRecon, 300); }
-      return;
-    }
-    if (lf) { if (LF[lf] === n.value) { return; } LF[lf] = n.value; renderContentOnly(); return; }
+    var fs = n.getAttribute('data-fs'), fd = n.getAttribute('data-fd'), lf = n.getAttribute('data-lf'), tq = n.getAttribute('data-tq');
+    if (fs) { if (FS[fs] === n.value) { return; } FS[fs] = n.value; renderToolbar(); return; }
+    if (fd) { if (!FD || FD[fd] === n.value) { return; } FD[fd] = n.value; if (fd === 'company') { pruneDraft(); } renderToolbar(); return; }
+    if (lf) { if (LF[lf] === n.value) { return; } LF[lf] = n.value; renderSoft(); return; }
     if (tq) {
       focusId = tq; var spx = TBL[tq]; if (!spx) { return; }
       if (spx.server) { var s2 = SS[tq]; if (s2.q === n.value) { return; } s2.q = n.value; s2.page = 1; clearTimeout(onInput.t); onInput.t = later(function () { s2.dirty = true; fillTable(tq); }, 350); }
       else { var s1 = TS[tq] || (TS[tq] = { q: '', page: 1, sk: '', dir: 1 }); if (s1.q === n.value) { return; } s1.q = n.value; s1.page = 1; fillTable(tq); }
     }
   }
-  function onKey(ev) { if (ev.key === 'Escape' && OVL) { OVL = null; renderOverlay(); } }
+  function onKey(ev) {
+    var t = ev.target, act = t && t.getAttribute ? t.getAttribute('data-act') : null, rtl = LANG === 'ar', k = ev.key;
+    if (k === 'Escape') {
+      if (POP) { ev.preventDefault(); closePop(true); return; }
+      if (OVL) { closeOverlay(); }
+      return;
+    }
+    if (k === 'Tab' && OVL) {
+      var modal = $('.dms-modal'), controls = Array.prototype.filter.call(modal.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]'), function (el) { return el.getClientRects().length; });
+      var first = controls[0], last = controls[controls.length - 1];
+      if (ev.shiftKey && t === first) { ev.preventDefault(); last.focus(); }
+      else if (!ev.shiftKey && t === last) { ev.preventDefault(); first.focus(); }
+    }
+    if (act === 'tab' && /^(ArrowLeft|ArrowRight|Home|End)$/.test(k)) {
+      var ids = TABS.map(function (x) { return x.id; }), i = ids.indexOf(t.getAttribute('data-v')), L = ids.length;
+      var d = k === 'Home' ? -i : k === 'End' ? L - 1 - i : ((k === 'ArrowRight') !== rtl ? 1 : -1);
+      ev.preventDefault(); goTab(ids[(i + d + L) % L], true); return;
+    }
+    if (act === 'calday' && CAL) {
+      var cur = t.getAttribute('data-v'), step = { ArrowRight: rtl ? -1 : 1, ArrowLeft: rtl ? 1 : -1, ArrowUp: -7, ArrowDown: 7 }[k];
+      if (step) { ev.preventDefault(); calMove(addDays(cur, step)); return; }
+      if (k === 'PageUp' || k === 'PageDown') { ev.preventDefault(); calMove(shiftMonths(cur, k === 'PageUp' ? -1 : 1)); return; }
+      if (k === 'Home' || k === 'End') { ev.preventDefault(); calMove(k === 'Home' ? weekStartOf(cur) : addDays(weekStartOf(cur), 6)); }
+    }
+  }
   HOST.addEventListener('click', onClick, SIG);
   HOST.addEventListener('input', onInput, SIG);
   HOST.addEventListener('change', onInput, SIG);
   HOST.addEventListener('keydown', onKey, SIG);
+  HOST.addEventListener('pointerover', onOver, SIG);
+  HOST.addEventListener('pointerleave', hideTip, SIG);
+  HOST.addEventListener('focusin', function (ev) { var n = ev.target.closest && ev.target.closest('[data-tip]'); if (n) { showTip(n); } }, SIG);
+  HOST.addEventListener('focusout', hideTip, SIG);
+  document.addEventListener('pointerdown', function (ev) {   // clicks outside the block close an open popover
+    if (!POP) { return; } var p = ev.composedPath ? ev.composedPath() : [];
+    for (var i = 0; i < p.length; i++) { if (p[i] === HOST) { return; } }
+    closePop(false);
+  }, SIG);
 
   /* ---------- start ---------- */
   if (!G.frappe || !frappe.call) { HOST.innerHTML = '<div class="dms-empty">Frappe client API not available.</div>'; return; }
   setToday(); PERIOD = curPeriod();
+  var chartResize = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fitChartLabels) : null;
+  if (chartResize) { chartResize.observe(HOST); if (abort) { abort.signal.addEventListener('abort', function () { chartResize.disconnect(); }); } }
+  if (document.fonts) { document.fonts.ready.then(function () { if (!destroyed) { fitChartLabels(); } }); }
   startLoad(false);
 })();
 
-/* ==== DM theme sync v1 · generated by tools/erp/shell/dark_theme.py ==== */
+/* ==== DM theme sync (same as tools/erp/shell/dark_theme.py output; maintained here since this block left the generated shell) ==== */
 ;(function () {
   var r = typeof root_element !== 'undefined' ? root_element : null, h = r && r.host;
   if (!h || h.__dmsTheme) return; h.__dmsTheme = 1;
   var s = function () { h.setAttribute('data-dms-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'); };
   s(); new MutationObserver(s).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 })();
-/* ==== end DM theme sync v1 ==== */
+/* ==== end DM theme sync ==== */

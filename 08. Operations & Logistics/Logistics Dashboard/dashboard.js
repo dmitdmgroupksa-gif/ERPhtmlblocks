@@ -1,1451 +1,1440 @@
-/* DM Logistics Dashboard v6 (fleet + procurement). Paste into a Workspace Custom HTML Block's Script,
- * or use as the JS controller for Desk Page logistics-dashboard (see README).
- * Uses the logged-in user's native permissions. No automatic record writes. */
-(() => {
+/* ===== DM Group KSA — Logistics Dashboard — SCRIPT field · v7 =====
+   Adapts v6 (fleet + procurement) to the DM dashboard standard. Read-only; the logged-in user's own permissions.
+   Kept from v6: the trip rules (stage, issues, follow-up, proof of receipt, duplicates, utilisation, map phases), the procurement
+   rules (open / late / stale orders, PO and request flags, request-to-order delay from the Procurement Tracker report), the
+   optional-field fallbacks, and the OpenStreetMap live map with the Vehicle Arabitra Logs feed. Sources: Delivery Trip, Vehicle,
+   Driver, Delivery Note (counts), Vehicle Arabitra Logs, Purchase Order, Material Request, Purchase Receipt, Company.
+   The shared runtime between the "DMS kit" markers is generated from tools/erp/kit/dms-kit.js (edit the kit, not the copy). */
+(function () {
   'use strict';
-  const F = {
-    date: 'custom_delivery_date', type: 'custom_trip_type_', from: 'custom_source_warehouse',
-    to: 'custom_delivery_to_warehouse', report: 'custom_driver_reporting_time__at_warehouse',
-    depart: 'departure_time', arrive: 'custom_delivered_time', exit: 'custom_driver__out_of_site',
-    evidence: 'custom_signed_delivery_note'
-  };
-  const TYPES = ['Delivery Note', 'Internal Transfer', 'Materials Collection from Supplier', 'Petrol', 'Workshop'];
-  const TABS = ['Overview', 'Live map', 'Awaiting submission', 'Vehicles & drivers', 'Delivery follow-up', 'Performance'];
-  const RANGES = [['0', 'Today'], ['1', 'Tomorrow'], ['7', 'Next 7 days'], ['-30', 'Last 30 days'], ['all', 'All dates']];
-  const RECEIPT = [['custom_receiver_name', 'Receiver name'], ['custom_receiver_mob', 'Receiver mobile'], ['custom_receiver_sign', 'Signature'], ['custom_stamp', 'Stamp']];
-  const STEPS = [['Reported', F.report], ['Departed', F.depart], ['Arrived', F.arrive], ['Left site', F.exit]];
-  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const fields = [...new Set(['name', 'docstatus', 'status', 'company', 'driver', 'driver_name', 'vehicle',
-    'delivery_status', 'modified', 'custom_receiver_name', 'custom_receiver_mob', 'custom_receiver_sign', 'custom_stamp', ...Object.values(F)])];
-  const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const day = v => String(v || '').slice(0, 10);
-  const plural = (n, one, many) => `${n} ${n === 1 ? one : many || one + 's'}`;
-  // Compare site wall-clock values without applying the browser's timezone or DST.
-  const stamp = v => {
-    const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
-    return m ? Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]) : NaN;
-  };
-  const shift = (d, n) => new Date(Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10) + n)).toISOString().slice(0, 10);
-  const delta = (a, b) => Number.isFinite(stamp(a)) && stamp(b) >= stamp(a) ? (stamp(b)-stamp(a))/60000 : null;
-  const active = r => r.docstatus !== 2 && !['Cancelled','Canceled'].includes(r.status);
-  // Every submitted trip keeps status "Scheduled" in this ERP; closure shows in delivery_status and the recorded times.
-  const departed = r => Number.isFinite(stamp(r[F.depart])) && stamp(r[F.depart]) <= stamp(frappe.datetime.now_datetime());
-  const done = r => active(r) && r.docstatus === 1 && (r.status === 'Completed' || r.delivery_status === 'Delivered');
-  const executed = r => active(r) && r.docstatus === 1 && (done(r) || r.status === 'In Transit' || r.delivery_status === 'Partially Delivered' || departed(r));
-  const delivery = r => r[F.type] === 'Delivery Note';
-  // Proof of receipt: the signed-note attachment is never filled in here, and teams tick one or two of receiver name, mobile, signature and stamp. Any one counts.
-  const evidenceMissing = r => delivery(r) && RECEIPT.every(([f]) => r[f] !== 'Yes');
-  const follow = r => executed(r) && delivery(r) && (r.delivery_status !== 'Delivered' || evidenceMissing(r));
-  const stage = r => {
-    if (!active(r)) return 'Cancelled';
-    if (r.docstatus === 0 || r.status === 'Draft') return 'Awaiting submission';
-    if (done(r)) return 'Completed';
-    if (!executed(r)) return 'Scheduled';
-    const now = stamp(frappe.datetime.now_datetime());
-    if (stamp(r[F.exit]) <= now) return 'Site exit recorded';
-    if (stamp(r[F.arrive]) <= now) return 'At site (inferred)';
-    return 'In transit';
-  };
-  const issues = r => {
-    const a = [];
-    if (!active(r)) return a;
-    if (!r.driver) a.push('Assign driver');
-    if (!r.vehicle) a.push('Assign vehicle');
-    if (!r[F.date]) a.push('Delivery date missing');
-    if (executed(r)) {
-      if (!r[F.report] || !r[F.depart] || !r[F.arrive]) a.push('Trip timestamps incomplete');
-      if (done(r) && !r[F.exit]) a.push('Site exit missing');
-    }
-    if (executed(r) || (r.docstatus === 0 && r[F.depart])) {
-      const sequence = [r[F.report], r[F.depart], r[F.arrive], r[F.exit]].filter(Boolean);
-      if (sequence.some((t,i) => !Number.isFinite(stamp(t)) || (i && stamp(t) < stamp(sequence[i-1])))) a.push('Review timestamp order');
-    }
-    if (follow(r)) {
-      if (r.delivery_status !== 'Delivered') a.push(r.delivery_status || 'Delivery status unknown');
-      if (evidenceMissing(r)) a.push('No proof of receipt');
-    }
-    return a;
+  var APP = {
+    key: '__dmsLogistics',
+    period: 'custom',
+    tabs: [
+      { id: 'overview', en: 'Overview', ar: 'نظرة عامة' }, { id: 'trips', en: 'Trips', ar: 'الرحلات' }, { id: 'map', en: 'Live map', ar: 'الخريطة المباشرة' },
+      { id: 'fleet', en: 'Vehicles & drivers', ar: 'المركبات والسائقون' }, { id: 'perf', en: 'Performance', ar: 'الأداء' }, { id: 'proc', en: 'Procurement', ar: 'المشتريات' }, { id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }
+    ],
+    filters: [
+      { k: 'company', en: 'Company', ar: 'الشركة', options: function () { var m = {}; (D.trips || []).forEach(function (r) { if (r.company) { m[r.company] = 1; } }); ['po', 'mr', 'pr'].forEach(function (k) { ((D.proc || {})[k] || []).forEach(function (r) { if (r.company) { m[r.company] = 1; } }); }); return Object.keys(m).sort(); } },
+      { k: 'basis', en: 'Date basis', ar: 'أساس التاريخ', none: ['Delivery date', 'تاريخ التسليم'], options: function () { return [{ v: 'depart', l: tr('Departure time', 'وقت المغادرة') }, { v: 'all', l: tr('All dates (including undated)', 'كل التواريخ (بما فيها بلا تاريخ)') }]; } },
+      { k: 'type', en: 'Trip type', ar: 'نوع الرحلة', options: function () { return TYPES; } },
+      { k: 'wh', en: 'Source warehouse', ar: 'مستودع المصدر', options: function () { var m = {}; (D.trips || []).forEach(function (r) { if (r[TF.from]) { m[r[TF.from]] = 1; } }); return Object.keys(m).sort(); } },
+      { k: 'status', en: 'Trip status', ar: 'حالة الرحلة', options: function () { return ['Draft', 'Submitted', 'Delivered', 'Cancelled']; } },
+      { k: 'delivery', en: 'Delivery status', ar: 'حالة التسليم', options: function () { return ['Not Delivered', 'Partially Delivered', 'Delivered']; } },
+      { k: 'kind', en: 'Supplier type (procurement)', ar: 'نوع المورد (المشتريات)', options: function () { return ['Local', 'Foreign']; } },
+      { k: 'buyer', en: 'Buyer (procurement)', ar: 'المشتري (المشتريات)', options: function () { var m = {}; ((D.proc || {}).po || []).forEach(function (r) { if (r[PO.buyer]) { m[r[PO.buyer]] = 1; } }); ((D.proc || {}).pr || []).forEach(function (r) { if (r.custom_purchaser_name) { m[r.custom_purchaser_name] = 1; } }); return Object.keys(m).sort(); } },
+      { k: 'q', en: 'Search', ar: 'بحث', type: 'text', ph: ['Trip, driver, vehicle, order or supplier', 'رحلة أو سائق أو مركبة أو أمر أو مورد'] }
+    ],
+    sources: ['trips'],
+    dtLabels: { 'Delivery Trip': ['Trip', 'رحلة'], 'Purchase Order': ['Purchase order', 'أمر شراء'], 'Material Request': ['Purchase request', 'طلب شراء'], 'Purchase Receipt': ['Purchase receipt', 'استلام شراء'], 'Vehicle': ['Vehicle', 'مركبة'] },
+    title: function () { return tr('Logistics Dashboard', 'لوحة اللوجستيات'); },
+    stamp: function () { return tr('Fleet trips and procurement logistics', 'رحلات الأسطول ولوجستيات المشتريات'); },
+    periodNote: function () { return tr('Trips by delivery date (or departure time in Filters). Trips from 30 days back to 14 days ahead are always loaded for the live counts. Procurement shows open orders and requests, and receipts of the last 30 days.', 'الرحلات حسب تاريخ التسليم (أو وقت المغادرة من المرشحات). تحمّل دائمًا الرحلات من 30 يومًا مضت إلى 14 يومًا قادمة للأعداد المباشرة. المشتريات تعرض الأوامر والطلبات المفتوحة واستلامات آخر 30 يومًا.'); },
+    filterNote: function () { return tr('Supplier type and buyer apply to procurement; the trip filters apply to fleet tabs. Supplier type does not apply to receipts and buyer does not apply to requests.', 'نوع المورد والمشتري للمشتريات؛ مرشحات الرحلات لتبويبات الأسطول. نوع المورد لا ينطبق على الاستلامات والمشتري لا ينطبق على الطلبات.'); },
+    boot: function () { F.period = 'custom'; F.from = addDays(TODAY, -7); F.to = addDays(TODAY, 7); return getList({ doctype: 'Company', fields: ['name', 'default_currency'], limit_page_length: 0 }, null).then(function (r) { CO = r || []; }, function () { CO = []; }); },
+    load: function () { loadAll(); },
+    onPeriod: function () { if (needsFetch()) { reload(); } else { renderAll(); } },
+    onTab: function (id) { if (id === 'map') { loadLive(false, 'all'); } if (id === 'proc' && PT.sub === 'requests') { loadDelay(); } },
+    afterRender: function (c) { afterRender(c); },
+    actions: function () { return actModel(actSpecs(), 'act', actClient()); },
+    banner: function () { return banner(); },
+    content: function (t, AM) { return ({ overview: tabOverview, trips: tabTrips, map: tabMap, fleet: tabFleet, perf: tabPerf, proc: tabProc, actions: tabActions })[t](AM); },
+    drill: function (id) { return drill(id); },
+    onAct: function (a, v, n, id) { return onAct(a, v, n, id); }
   };
 
-  // ---- presentation helpers (no business rules below this line) ----
-  const urgent = i => /^Assign |order|Delivery date missing/.test(i);
-  const lane = r => {
-    if (!active(r)) return 'none';
-    const list = issues(r);
-    if (list.some(urgent)) return 'bad';
-    if (list.length) return 'warn';
-    if (executed(r) && !done(r)) return 'info';
-    if (done(r)) return 'good';
-    return 'none';
-  };
-  const byDeparture = (a, b) => String(a[F.depart] || '9').localeCompare(String(b[F.depart] || '9')) || a.name.localeCompare(b.name);
-  const bySeverity = (a, b) => issues(b).filter(urgent).length - issues(a).filter(urgent).length || issues(b).length - issues(a).length || byDeparture(a, b);
-  const link = (doctype, name, text) => name ? `<a href="/app/${doctype}/${encodeURIComponent(name)}">${esc(text || name)}</a>` : '';
-  const badge = (text, tone) => `<span class="fo-badge fo-${tone || 'neutral'}"><i aria-hidden="true"></i>${esc(text || 'Unknown')}</span>`;
-  const tripState = r => !active(r) ? 'Cancelled' : r.docstatus === 0 ? 'Draft' : done(r) ? 'Delivered' : 'Submitted';
-  const statusBadge = r => badge(tripState(r), {Delivered:'good',Submitted:'info'}[tripState(r)] || 'neutral');
-  const deliveryBadge = r => executed(r) && delivery(r) && !done(r)
-    ? badge(r.delivery_status || 'Not recorded', r.delivery_status === 'Delivered' ? 'good' : r.delivery_status === 'Partially Delivered' ? 'warn' : r.status === 'Completed' ? 'bad' : 'neutral') : '';
-  const dayLabel = d => {
-    const today = frappe.datetime.get_today();
-    if (d === today) return 'Today';
-    if (d === shift(today, 1)) return 'Tomorrow';
-    if (d === shift(today, -1)) return 'Yesterday';
-    return `${+d.slice(8, 10)} ${MONTHS[+d.slice(5, 7) - 1]}${d.slice(0, 4) === today.slice(0, 4) ? '' : ' ' + d.slice(0, 4)}`;
-  };
-  const when = v => {
-    if (!/^\d{4}-\d{2}-\d{2}/.test(String(v || ''))) return '';
-    return `${dayLabel(day(v))}${v.length > 10 ? ', ' + String(v).slice(11, 16) : ''}`;
-  };
-  const recorded = v => Number.isFinite(stamp(v)) && stamp(v) <= stamp(frappe.datetime.now_datetime());
-  const journey = r => {
-    const on = STEPS.filter(([, f]) => recorded(r[f])).map(([l]) => l), off = STEPS.filter(([, f]) => !recorded(r[f])).map(([l]) => l);
-    return `<span class="fo-journey" role="img" aria-label="${esc(`Recorded: ${on.join(', ') || 'none'}. Not recorded: ${off.join(', ') || 'none'}.`)}">${STEPS.map(([, f]) => `<i class="${recorded(r[f]) ? 'on' : ''}"></i>`).join('')}</span>`;
-  };
-  const icons = {
-    search: '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
-    filter: '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M2 4h12M4.5 8h7M7 12h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
-    truck: '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M2 5.5h9v7H2zM11 8h3.6l2.4 2.6v1.9H11z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="6" cy="14" r="1.6" fill="currentColor"/><circle cx="14" cy="14" r="1.6" fill="currentColor"/></svg>',
-    box: '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M3 6.5 10 3l7 3.5v7L10 17l-7-3.5zM3 6.5l7 3.5 7-3.5M10 10v7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
-    fit: '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    plus: '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>'
-  };
+  /* ==== DMS kit v1 · generated from tools/erp/kit/dms-kit.js by build_kit.py — edit the kit, not this copy ==== */
+  /* Shared runtime for DM dashboards on the standard (toolbar, period, filters, tabs, tables, drill-downs, charts,
+     actions pending). Copied into each dashboard.js by tools/erp/kit/build_kit.py; the dashboard defines `APP` before
+     this block. Read-only helpers: frappe.client.get_list / frappe.desk.query_report.run under the viewer's permissions. */
+  var G = window;
+  var ROOT = (typeof root_element !== 'undefined' && root_element) ? root_element : document;
+  var HOST = ROOT.querySelector('[data-dms-root]');
+  if (!HOST) { return; }
+  if (G[APP.key] && typeof G[APP.key].destroy === 'function') { try { G[APP.key].destroy(); } catch (e) { /* ignore */ } }
+  var abort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  var SIG = abort ? { signal: abort.signal } : false;
+  var timers = [], destroyed = false, GEN = 0, BOOTED = false, LOADED = '';
+  G[APP.key] = { destroy: function () { destroyed = true; GEN++; if (abort) { abort.abort(); } timers.forEach(clearTimeout); timers = []; } };
+  var CFG = Object.assign({ conc: 6, pageSize: 25, modalPage: 15, weekStart: 0 }, APP.cfg || {});
+  var CUR = 'SAR';
+  try { CUR = (frappe.boot.sysdefaults && frappe.boot.sysdefaults.currency) || 'SAR'; } catch (e) { /* default */ }
+  var LANG = 'en';
+  try { var sv = G.localStorage.getItem('dms_lang'); if (sv === 'ar' || sv === 'en') { LANG = sv; } } catch (e) { /* storage unavailable */ }
+  function tr(en, ar) { return LANG === 'ar' ? ar : en; }
 
-  // ---- summary helpers (pure) ----
-  const pct = (n, t) => t ? Math.round(100 * n / t) : 0;
-  const diffDays = (a, b) => Math.round((Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10)) - Date.UTC(+a.slice(0, 4), +a.slice(5, 7) - 1, +a.slice(8, 10))) / 864e5);
-  const isPlanned = r => active(r) && r.docstatus === 0; // drafts: trips logged but not yet submitted
-  const tally = (list, keyOf) => { const m = new Map(); list.forEach(r => { const k = keyOf(r); if (k != null) m.set(k, (m.get(k) || 0) + 1); }); return m; };
-  const clashes = planned => {
-    const pairs = [], assigned = new Map(), seen = new Set();
-    for (const b of planned) {
-      if (!b[F.depart]) continue;
-      for (const kind of ['vehicle', 'driver']) {
-        if (!b[kind]) continue;
-        const key = JSON.stringify([kind, b[kind], b[F.depart]]), a = assigned.get(key);
-        if (a && pairs.length < 100) {
-          const pairKey = JSON.stringify([a.name, b.name].sort());
-          if (!seen.has(pairKey)) { pairs.push([a, b, kind, b[kind]]); seen.add(pairKey); }
-        }
-        if (!a) assigned.set(key, b);
-      }
-    }
-    return pairs;
-  };
-  // Time buckets: daily up to 31 days, weekly beyond that (latest 16 weeks).
-  const buckets = (rows, today) => {
-    const dated = rows.filter(r => /^\d{4}-\d{2}-\d{2}/.test(r[F.date] || ''));
-    if (!dated.length) return { list: [], weekly: false };
-    const days = dated.map(r => day(r[F.date])).sort(), lo = days[0], hi = days[days.length - 1];
-    const weekly = diffDays(lo, hi) > 30, start = d => weekly ? shift(d, -((new Date(d + 'T00:00:00Z').getUTCDay() + 6) % 7)) : d;
-    const map = new Map();
-    for (let d = start(lo); d <= start(hi); d = shift(d, weekly ? 7 : 1)) map.set(d, { key: d, good: 0, info: 0, neutral: 0 });
-    dated.forEach(r => { const b = map.get(start(day(r[F.date]))); if (b) b[done(r) ? 'good' : 'neutral']++; });
-    const list = [...map.values()].slice(weekly ? -16 : -31).map(b => ({ ...b, total: b.good + b.info + b.neutral, today: weekly ? start(today) === b.key : b.key === today }));
-    return { list, weekly };
-  };
-  const stackHTML = (parts, label) => {
-    const total = parts.reduce((s, p) => s + p.n, 0);
-    return `<div class="fo-stack" role="img" aria-label="${esc(label + ': ' + parts.map(p => `${p.label} ${p.n}`).join(', '))}">${total ? parts.filter(p => p.n).map(p => `<i data-tone="${p.tone}" style="flex:${p.n}"></i>`).join('') : '<i data-tone="empty" style="flex:1"></i>'}</div>
-      <ul class="fo-legend">${parts.map(p => `<li><i data-tone="${p.tone}" aria-hidden="true"></i><span>${esc(p.label)}</span><strong>${p.n}</strong><em>${pct(p.n, total)}%</em></li>`).join('')}</ul>`;
-  };
-  const meterHTML = (label, n, total, goodWhenFull = true) => {
-    const p = pct(n, total), tone = total === 0 ? 'empty' : p === 100 && goodWhenFull ? 'good' : p >= 90 ? 'warn' : 'bad';
-    return `<div class="fo-meter"><div><span>${esc(label)}</span><strong>${n} of ${total}</strong></div><span class="fo-track" data-tone="${tone}" role="img" aria-label="${esc(`${label}: ${n} of ${total}`)}"><i style="width:${p}%"></i></span></div>`;
-  };
-  const ringHTML = (n, total, caption) => {
-    const C = 2 * Math.PI * 46, p = pct(n, total);
-    return `<div class="fo-ring" role="img" aria-label="${esc(total ? `${caption}: ${n} of ${total}, ${p}%` : 'No executed delivery trips')}"><svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="46" class="fo-ring-bg"/><circle cx="60" cy="60" r="46" class="fo-ring-fg" stroke-dasharray="${(C * p / 100).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 60 60)"/></svg><div><strong>${total ? p + '%' : '–'}</strong><span>${total ? 'complete' : 'no data'}</span></div></div>`;
-  };
-  const colsHTML = (b, label) => {
-    if (!b.list.length) return `<div class="fo-empty">${esc(b.empty || 'No dated trips in this range.')}</div>`;
-    const top = Math.max(1, ...b.list.map(x => x.total));
-    return `<div class="fo-cols" role="img" aria-label="${esc(label + ': ' + b.list.map(x => `${b.weekly ? 'week of ' : ''}${dayLabel(x.key)} ${x.total}`).join(', '))}">${b.list.map(x => {
-      const seg = t => x[t] ? `<i data-tone="${t}" style="height:${(100 * x[t] / top).toFixed(1)}%"></i>` : '';
-      return `<div class="fo-col${x.today ? ' is-today' : ''}" title="${esc(`${dayLabel(x.key)}: ${x.total}`)}"><span class="fo-col-n">${x.total || ''}</span><div class="fo-col-bar">${seg('good')}${seg('info')}${seg('neutral')}</div><span class="fo-col-l">${+x.key.slice(8, 10)}</span><small>${b.weekly || +x.key.slice(8, 10) === 1 || x === b.list[0] ? MONTHS[+x.key.slice(5, 7) - 1] : '&nbsp;'}</small></div>`;
-    }).join('')}</div><p class="fo-legend-line"><i data-tone="good"></i>${b.legend || `Delivered <i data-tone="neutral"></i>Draft or not delivered${b.weekly ? ' · weekly totals' : ''}`}</p>`;
-  };
-  const barsHTML = (entries, total, none = 'No data in this range.', max = 5) => {
-    if (!entries.length) return `<div class="fo-empty">${esc(none)}</div>`;
-    const top = Math.max(1, ...entries.map(e => e[1])), shown = entries.slice(0, max), rest = entries.slice(max).reduce((s, e) => s + e[1], 0);
-    if (rest) shown.push([`${entries.length - max} ${entries.length - max === 1 ? 'other' : 'others'}`, rest]);
-    return `<ul class="fo-bars">${shown.map(([k, n, tone]) => `<li><span title="${esc(k)}">${esc(k)}</span><span class="fo-track" ${tone ? `data-tone="${tone}"` : ''} role="img" aria-label="${n} of ${total}"><i style="width:${(100 * n / top).toFixed(1)}%"></i></span><strong>${n}</strong></li>`).join('')}</ul>`;
-  };
-
-
-  // ---- live map and vehicle documents (pure helpers) ----
-  // Where a vehicle is believed to be on a trip. Trips here are logged after the move with times pre-filled, so "ongoing" means
-  // departed within the last 24 hours and not yet recorded as leaving the site; the GPS fix shows whether the vehicle is really moving.
-  const DAY_MS = 864e5;
-  const tripPhase = (r, today, now) => {
-    if (!active(r) || !r.vehicle) return null;
-    const dep = stamp(r[F.depart]), ex = stamp(r[F.exit]), arr = stamp(r[F.arrive]), d = day(r[F.date] || r[F.depart]);
-    if (!done(r) && Number.isFinite(dep) && dep <= now && now - dep <= DAY_MS && !(Number.isFinite(ex) && ex <= now)) return Number.isFinite(arr) && arr <= now ? 'At destination' : 'On the road';
-    if (!done(r) && (Number.isFinite(dep) ? dep > now : !!d && d >= today)) return 'Upcoming';
-    // Trips here are usually logged after the move, so a trip dated today whose times are all in the past is shown as finished rather than dropped.
-    return d === today ? 'Finished today' : null;
-  };
-  const isOngoing = ph => ph === 'On the road' || ph === 'At destination';
-  // One trip per vehicle: an ongoing trip wins, otherwise the one leaving soonest.
-  const mapTrips = (rows, today, now) => {
-    const best = new Map();
-    rows.forEach(r => {
-      const ph = tripPhase(r, today, now); if (!ph) return;
-      const cur = best.get(r.vehicle), rank = isOngoing(ph) ? 0 : ph === 'Upcoming' ? 1 : 2;
-      if (!cur || rank < cur.rank || (rank === cur.rank && String(r[F.depart] || '9') < String(cur.trip[F.depart] || '9'))) best.set(r.vehicle, { vehicle: r.vehicle, trip: r, phase: ph, rank });
-    });
-    return [...best.values()].sort((a, b) => a.rank - b.rank || String(a.trip[F.depart] || '9').localeCompare(String(b.trip[F.depart] || '9')) || a.vehicle.localeCompare(b.vehicle));
-  };
-  const toFix = log => {
-    const lat = parseFloat(log.latitude), lng = parseFloat(log.longitude);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 85 || Math.abs(lng) > 180 || (lat === 0 && lng === 0)) return null;
-    return { lat, lng, at: log.track_date_time || '', speed: num(log.speed), ignition: /^(1|true|on|yes)$/i.test(String(log.ignition == null ? '' : log.ignition)), place: log.location || '', distance: log.distance };
-  };
-  const minutesSince = (v, now) => Number.isFinite(stamp(v)) ? Math.max(0, Math.round((now - stamp(v)) / 60000)) : null;
-  const agoText = m => m === null ? 'No fix' : m < 1 ? 'Just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.floor(m / 60)} h ${m % 60} min ago` : `${Math.floor(m / 1440)} d ago`;
-  const FRESH_MIN = 15; // a fix older than this no longer shows where the vehicle is
-  // Web Mercator, 256 px tiles.
-  const mercX = (lng, z) => (lng + 180) / 360 * Math.pow(2, z) * 256;
-  const mercY = (lat, z) => { const s = Math.sin(lat * Math.PI / 180); return (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * Math.pow(2, z) * 256; };
-  const unMercX = (x, z) => x / (Math.pow(2, z) * 256) * 360 - 180;
-  const unMercY = (y, z) => { const n = Math.PI - 2 * Math.PI * y / (Math.pow(2, z) * 256); return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n))); };
-  const fitView = (pts, w, h) => {
-    if (!pts.length) return { lat: 24.7, lng: 46.7, z: 5 };
-    const lats = pts.map(p => p.lat), lngs = pts.map(p => p.lng), la0 = Math.min(...lats), la1 = Math.max(...lats), ln0 = Math.min(...lngs), ln1 = Math.max(...lngs);
-    let z = 15;
-    for (; z > 3; z--) if (mercX(ln1, z) - mercX(ln0, z) <= w - 120 && mercY(la0, z) - mercY(la1, z) <= h - 120) break;
-    return { lat: (la0 + la1) / 2, lng: (ln0 + ln1) / 2, z };
-  };
-  const VEH_FIELDS = { core: ['name', 'license_plate'], optional: ['custom_vehicle_status', 'vehicle_service_type'] };
-  // Utilisation: goods-carriage vehicles plus anything that made a trip in the loaded window.
-  const utilisation = (vehicles, trips, today, from, to) => {
-    const inWin = trips.filter(r => active(r) && r.vehicle), usedIn = new Set(inWin.filter(r => { const d = day(r[F.date]); return d >= from && d <= to; }).map(r => r.vehicle)), everUsed = new Set(inWin.map(r => r.vehicle));
-    const scope = vehicles.filter(v => v.vehicle_service_type === 'Goods Carriage Vehicle' || everUsed.has(v.name));
-    const last = new Map(); inWin.forEach(r => { const d = day(r[F.date]); if (d && (!last.has(r.vehicle) || d > last.get(r.vehicle))) last.set(r.vehicle, d); });
-    const idle = scope.filter(v => !usedIn.has(v.name)).map(v => ({ vehicle: v.name, plate: v.license_plate || v.name, last: last.get(v.name) || '' })).sort((a, b) => String(a.last || '0').localeCompare(String(b.last || '0')) || a.vehicle.localeCompare(b.vehicle));
-    return { scope: scope.length, used: scope.length - idle.length, idle, fleet: vehicles.length };
-  };
-  // Request-to-order delay from the Procurement Tracker report (one row per item; a request counts as ordered at its first order date).
-  const median = a => { if (!a.length) return null; const s = a.slice().sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
-  const DELAY_BUCKETS = [['Same day', d => d === 0, ''], ['1 to 3 days', d => d >= 1 && d <= 3, ''], ['4 to 7 days', d => d >= 4 && d <= 7, ''], ['8 to 14 days', d => d >= 8 && d <= 14, 'warn'], ['Over 14 days', d => d > 14, 'bad']];
-  const delayStats = (rows, today) => {
-    const by = new Map();
-    rows.forEach(r => {
-      const no = r.material_request_no; if (!no) return;
-      const m = by.get(no) || { no, date: r.material_request_date, status: r.status, cc: r.cost_center || 'Not set', po: '' };
-      const pd = /^\d{4}-\d{2}-\d{2}/.test(r.purchase_order_date || '') ? day(r.purchase_order_date) : '';
-      if (pd && (!m.po || pd < m.po)) m.po = pd;
-      by.set(no, m);
-    });
-    const reqs = [...by.values()].filter(m => /^\d{4}-\d{2}-\d{2}/.test(m.date || '') && !['Cancelled', 'Stopped', 'Rejected'].includes(m.status));
-    const ordered = reqs.filter(m => m.po).map(m => ({ ...m, days: diffDays(day(m.date), m.po) })).filter(m => m.days >= 0);
-    const waiting = reqs.filter(m => !m.po).map(m => ({ ...m, age: diffDays(day(m.date), today) }));
-    const days = ordered.map(m => m.days), cc = new Map();
-    ordered.forEach(m => { const c = cc.get(m.cc) || []; c.push(m.days); cc.set(m.cc, c); });
-    return {
-      requests: reqs.length, ordered: ordered.length, waiting: waiting.length, waitingOld: waiting.filter(m => m.age > 7).length,
-      median: median(days), within3: days.length ? pct(days.filter(d => d <= 3).length, days.length) : null,
-      buckets: DELAY_BUCKETS.map(([k, f, tone]) => [k, days.filter(f).length, tone]).filter(b => b[1]),
-      slow: [...cc].filter(([, v]) => v.length >= 2).map(([k, v]) => [k, Math.round(10 * v.reduce((s, x) => s + x, 0) / v.length) / 10, v.length]).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    };
-  };
-  const rowsOf = (res) => { // report rows may be dicts or arrays
-    const m = (res && res.message) || {}, cols = m.columns || [], out = m.result || [];
-    return out.filter(r => r && !(Array.isArray(r) && r.length === 0)).map(r => Array.isArray(r) ? Object.fromEntries(cols.map((c, i) => [c.fieldname || c.fieldName, r[i]])) : r);
-  };
-  // Needs-attention counts shown on the Fleet / Procurement switch.
-  const fleetAttention = rows => rows.filter(r => active(r) && (follow(r) || !r.driver || !r.vehicle || issues(r).some(i => /timestamp/i.test(i))));
-
-  // ---- procurement logistics (read-only). Every field name below was checked against the ERP schema. ----
-  const PTABS = ['Overview', 'Orders & suppliers', 'Receiving & billing', 'Purchase requests'];
-  const PO = {
-    stage: 'custom_shipment_status', eta: 'custom_estimated_arrival_time', kind: 'custom_supplier_type', buyer: 'custom_purchaser_name',
-    docs: 'custom_clearing_document_status', customs: 'custom_customs_status', charges: 'custom_customs_charges', paid: 'custom_customs_charges_paid',
-    transit: 'custom_goods_in_transit_', toLoad: 'custom_to_be_loaded', bl: 'custom_original_bl_status', saber: 'custom_saber_status',
-    agent: 'custom_agent_soft_copy_status', material: 'custom_material_status', place: 'custom_delivery_location'
-  };
-  const CHECKS = [['Price', 'custom_price_verification'], ['HS code', 'custom_hs_code_verification'], ['BL invoice', 'custom_bl_invoice_verification'], ['BL weight', 'custom_bl_weight_varification'], ['Original BL', PO.bl]];
-  const STAGES = ['Order Received', 'Order Processing', 'Awaiting Pickup', 'Shipped Partial Qty', 'Shipped Full Qty', 'In Transit', 'In Customs', 'Out for Delivery', 'Delivered', 'Shipment Delayed', 'Not updated'];
-  const MOVING = ['Shipped Partial Qty', 'Shipped Full Qty', 'In Transit', 'In Customs', 'Out for Delivery'];
-  const PO_OPEN_STATUS = ['To Receive and Bill', 'To Receive', 'On Hold'];
-  // Core fields are filled in on live records and are read by every user who can read the doctype.
-  // Optional fields are custom fields that may be restricted for some roles; if the server refuses any of them, the dashboard retries with core fields only.
-  const PO_CORE = ['name', 'docstatus', 'status', 'company', 'supplier', 'supplier_name', 'transaction_date', 'schedule_date', 'per_received', 'per_billed', 'base_grand_total', 'currency', 'modified'];
-  const PO_FIELDS = { core: PO_CORE, optional: [PO.buyer, PO.kind, PO.place, ...new Set([PO.stage, PO.eta, PO.docs, PO.customs, PO.charges, PO.paid, PO.transit, PO.toLoad, ...CHECKS.map(c => c[1])])] };
-  const MR_FIELDS = { core: ['name', 'docstatus', 'status', 'company', 'material_request_type', 'transaction_date', 'schedule_date', 'per_ordered', 'per_received', 'modified'], optional: ['custom_priority', 'custom_purchase_type', 'custom_purpose_of_purchase'] };
-  const PR_FIELDS = { core: ['name', 'docstatus', 'status', 'company', 'supplier', 'supplier_name', 'posting_date', 'posting_time', 'per_billed', 'is_return', 'base_grand_total', 'modified'], optional: ['custom_purchaser_name'] };
-  // Native reports and lists the dashboard links to. Names were confirmed in the ERP; a Report Builder report also needs its DocType.
-  const LINKS = {
-    fleet: [['report', 'Daily Delivery Trips'], ['report', 'Delivery Trip Time Tracker'], ['report', 'Delivery Status Report'], ['report', 'Vehicle Daily Report'], ['report', 'Vehicle Idle summary Report'],
-      ['list', 'Delivery Trip'], ['list', 'Delivery Note'], ['list', 'Vehicle'], ['list', 'Driver']],
-    procurement: [['report', 'Procurement Tracker'], ['report', 'Critical PO'], ['report', 'Pending PO Analysis'], ['report', 'PO analysis - transit Report'],
-      ['report', 'PO Analysis Report - SYSS'], ['report', 'Procurement Consolidated Report'], ['report', 'Procurement and Logistic Expiry'], ['report', 'Procurement Daily Report'],
-      ['list', 'Purchase Order'], ['list', 'Material Request'], ['list', 'Purchase Receipt'], ['list', 'Landed Cost Voucher'],
-      ['list', 'Purchase Price Comparison'], ['list', 'Procurement and Logistics Renewals'], ['list', 'Procurement Daily Reports'], ['list', 'Agent Clearance']]
-  };
-  const LIST_FALLBACK = {
-    'Delivery Trip': self => ({ [F.date]: ['between', [self.value('from'), self.value('to')]] }),
-    'Purchase Order': () => ({ docstatus: 1, status: ['in', PO_OPEN_STATUS] }),
-    'Material Request': () => ({ material_request_type: 'Purchase', status: ['in', ['Pending', 'Partially Ordered']] }),
-    'Purchase Receipt': (self, today) => ({ posting_date: ['>=', shift(today, -29)] })
-  };
-  const num = v => Number(v) || 0;
-  const compact = n => { const a = Math.abs(n); return a >= 1e6 ? `${(n / 1e6).toFixed(a >= 1e7 ? 0 : 1)}M` : a >= 1e3 ? `${Math.round(n / 1e3)}K` : String(Math.round(n)); };
-  const sumOf = (list, f) => list.reduce((s, r) => s + num(r[f]), 0);
-  const poDraft = r => r.docstatus === 0;
-  const poOpen = r => r.docstatus === 1 && PO_OPEN_STATUS.includes(r.status) && num(r.per_received) < 100;
-  const poForeign = r => r[PO.kind] === 'Foreign';
-  const poStage = r => r[PO.stage] || 'Not updated';
-  const poMoving = r => MOVING.includes(r[PO.stage]);
-  const poDue = r => r[PO.eta] || r.schedule_date || '';
-  const poLate = (r, today) => { const d = poDue(r); return !!d && d < today; };
-  const etaMissing = r => poMoving(r) && !r[PO.eta];
-  const inCustoms = r => r[PO.stage] === 'In Customs' || r[PO.customs] === 'Under Inspection';
-  const chargesDue = r => num(r[PO.charges]) > 0 && !num(r[PO.paid]);
-  const docMismatch = r => CHECKS.some(([, f]) => r[f] === 'Not Matching');
-  const docsPending = r => poForeign(r) && poMoving(r) && (!r[PO.docs] || r[PO.docs] === 'Documents in courier');
-  const arrivedUnposted = r => (r[PO.stage] === 'Delivered' || r[PO.material] === 'Landed') && num(r.per_received) < 100;
-  const foreignShipment = r => poForeign(r) && (poMoving(r) || inCustoms(r) || r[PO.stage] === 'Shipment Delayed');
-  // Pipeline groups come from fields that are filled in on every order: required date and receiving progress.
-  const poBuyer = r => r[PO.buyer] || '';
-  // Most open orders in this ERP are long past their required date, so lateness is split: recent (act now) and stale (probably needs closing).
-  const STALE_DAYS = 30;
-  const lateDays = (r, today) => { const d = poDue(r); return d && d < today ? diffDays(day(d), today) : 0; };
-  const poStale = (r, today) => lateDays(r, today) > STALE_DAYS;
-  const poGroup = (r, today) => !today ? 'Awaiting delivery' : poStale(r, today) ? 'Stale' : poLate(r, today) ? 'Late' : num(r.per_received) > 0 ? 'Partly received' : 'Awaiting delivery';
-  const billedAhead = r => num(r.per_billed) > num(r.per_received) + 0.5;
-  const stageTone = s => ({ 'Shipment Delayed': 'bad', 'In Customs': 'warn', 'Out for Delivery': 'good', Delivered: 'good', 'In Transit': 'info', 'Shipped Full Qty': 'info', 'Shipped Partial Qty': 'info' }[s] || 'neutral');
-  const poIssues = (r, today) => {
-    if (poDraft(r)) return ['Awaiting approval'];
-    if (!poOpen(r)) return [];
-    const a = [];
-    if (r.status === 'On Hold') a.push('On hold');
-    if (poStale(r, today)) a.push('Stale, over 30 days late'); else if (poLate(r, today)) a.push(num(r.per_received) > 0 ? 'Past due, partly received' : 'Past due, nothing received'); else if (!poDue(r)) a.push('No required date');
-    if (billedAhead(r)) a.push('Billed ahead of receipt');
-    if (r[PO.stage] === 'Shipment Delayed') a.push('Shipment delayed');
-    if (arrivedUnposted(r)) a.push('Arrived, receipt not posted');
-    if (etaMissing(r)) a.push('ETA missing on shipped order');
-    if (docsPending(r)) a.push('Documents not received');
-    if (docMismatch(r)) a.push('Document mismatch');
-    if (r[PO.customs] === 'Under Inspection') a.push('Under customs inspection');
-    if (chargesDue(r)) a.push('Customs charges unpaid');
-    return a;
-  };
-  const urgentP = i => /^Past due|delayed|mismatch|^Arrived/.test(i);
-  const poLane = (r, today) => { const l = poIssues(r, today); return l.some(urgentP) ? 'bad' : l.length ? 'warn' : poMoving(r) ? 'info' : 'none'; };
-  const byDue = (a, b) => String(poDue(a) || '9').localeCompare(String(poDue(b) || '9')) || a.name.localeCompare(b.name);
-  const bySeverityP = today => (a, b) => poIssues(b, today).filter(urgentP).length - poIssues(a, today).filter(urgentP).length || poIssues(b, today).length - poIssues(a, today).length || byDue(a, b);
-  const mrOpen = r => r.docstatus === 1 && r.material_request_type === 'Purchase' && ['Pending', 'Partially Ordered'].includes(r.status);
-  const mrNoPO = r => num(r.per_ordered) === 0;
-  const mrAge = (r, today) => /^\d{4}-\d{2}-\d{2}/.test(r.transaction_date || '') ? diffDays(day(r.transaction_date), today) : null;
-  const mrIssues = (r, today) => {
-    const a = [], age = mrAge(r, today);
-    if (r.schedule_date && r.schedule_date < today) a.push('Past required date');
-    if (r.custom_priority === 'High' && mrNoPO(r)) a.push('High priority, no PO yet'); else if (mrNoPO(r) && age !== null && age > 7) a.push('No PO after 7 days');
-    return a;
-  };
-  const urgentM = i => /^Past|^High/.test(i);
-  const mrLane = (r, today) => { const l = mrIssues(r, today); return l.some(urgentM) ? 'bad' : l.length ? 'warn' : 'none'; };
-  const bySeverityM = today => (a, b) => mrIssues(b, today).filter(urgentM).length - mrIssues(a, today).filter(urgentM).length || mrIssues(b, today).length - mrIssues(a, today).length || String(a.transaction_date || '9').localeCompare(String(b.transaction_date || '9')) || a.name.localeCompare(b.name);
-  const dueNote = (d, today) => { if (!d) return 'No date set'; const n = diffDays(today, d); return n === 0 ? 'Due today' : n > 0 ? `In ${plural(n, 'day')}` : `${plural(-n, 'day')} late`; };
-  // Arrivals over the next N days (by ETA, else required date). Past-due orders are counted separately.
-  const dueBuckets = (rows, today, span = 14) => {
-    const list = Array.from({ length: span }, (_, i) => ({ key: shift(today, i), good: 0, info: 0, neutral: 0, total: 0, today: i === 0 })), map = new Map(list.map(b => [b.key, b]));
-    rows.forEach(r => { const b = map.get(day(poDue(r))); if (b) { b[poMoving(r) ? 'info' : num(r.per_received) > 0 ? 'good' : 'neutral']++; b.total++; } });
-    return { list, weekly: false, legend: 'Partly received <i data-tone="info"></i>Shipped <i data-tone="neutral"></i>Nothing received yet', empty: 'Nothing is due in this window.' };
-  };
-  const receiptBuckets = (rows, today, span = 14) => {
-    const list = Array.from({ length: span }, (_, i) => ({ key: shift(today, i - span + 1), good: 0, info: 0, neutral: 0, total: 0, today: i === span - 1 })), map = new Map(list.map(b => [b.key, b]));
-    rows.forEach(r => { const b = map.get(day(r.posting_date)); if (b) { b[r.is_return ? 'neutral' : 'good']++; b.total++; } });
-    return { list, weekly: false, legend: 'Receipts <i data-tone="neutral"></i>Returns', empty: 'No receipts in this window.' };
-  };
-  const issueChips = (list, urgent) => list.length ? `<div class="fo-issues">${list.map(i => `<span class="${urgent(i) ? 'fo-bad' : 'fo-warn'}">${esc(i)}</span>`).join('')}</div>` : '<span class="fo-muted">On track</span>';
-  const dueCell = (d, today, label) => d ? `<time datetime="${esc(d)}"><strong>${esc(dayLabel(d))}</strong><span>${esc(label ? label + ', ' : '')}${esc(dueNote(d, today).toLowerCase())}</span></time>` : '<span class="fo-muted">No date set</span>';
-  // One entry per capped table: its DocType, head, row cells and lane colour. Cells use the same data-slot names as the fleet table so the mobile card layout is shared.
-  const PSPEC = {
-    po: { doctype: 'Purchase Order', slug: 'purchase-order', noun: 'orders', label: 'Orders', head: ['Order', 'Supplier', 'Buyer', 'Due', 'Receiving', 'Needs action'], lane: poLane,
-      cells: (r, today) => `<td data-slot="trip">${link('purchase-order', r.name)}<small>${esc(r[PO.kind] || 'Supplier type not set')}${poDraft(r) ? ' (draft)' : ''}</small></td>
-        <td data-slot="route"><span>${esc(r.supplier_name || r.supplier)}</span><small>${esc(r.company)}</small></td>
-        <td data-slot="who" data-label="Buyer"><div class="fo-who"><span>${esc(poBuyer(r) || 'Not set')}</span><small>${esc(r[PO.place] || '')}</small></div></td>
-        <td data-slot="when" data-label="Due">${dueCell(poDue(r), today, r[PO.eta] ? 'ETA' : 'Required')}</td>
-        <td data-slot="status">${poDraft(r) ? badge('Awaiting approval', 'neutral') : r.status === 'On Hold' ? badge('On hold', 'warn') : poMoving(r) ? badge(poStage(r), stageTone(r[PO.stage])) : badge(Math.round(num(r.per_received)) + '% received', num(r.per_received) > 0 ? 'info' : 'neutral')}<small>${Math.round(num(r.per_billed))}% billed${r.base_grand_total ? ', ' + compact(num(r.base_grand_total)) : ''}</small></td>
-        <td data-slot="next" data-label="Needs action">${issueChips(poIssues(r, today), urgentP)}</td>` },
-    mr: { doctype: 'Material Request', slug: 'material-request', noun: 'requests', label: 'Purchase requests', head: ['Request', 'Type', 'Priority', 'Required', 'Status', 'Needs action'], lane: mrLane,
-      cells: (r, today) => `<td data-slot="trip">${link('material-request', r.name)}<small>${esc(r.custom_purpose_of_purchase || 'Purpose not set')}</small></td>
-        <td data-slot="route"><span>${esc(r.custom_purchase_type || 'Type not set')}</span><small>${esc(r.company)}</small></td>
-        <td data-slot="who" data-label="Priority"><div class="fo-who"><span>${esc(r.custom_priority || 'Not set')}</span><small>${Math.round(num(r.per_ordered))}% ordered</small></div></td>
-        <td data-slot="when" data-label="Required">${dueCell(r.schedule_date, today)}</td>
-        <td data-slot="status">${badge(r.status, r.status === 'Partially Ordered' ? 'info' : 'neutral')}</td>
-        <td data-slot="next" data-label="Needs action">${issueChips(mrIssues(r, today), urgentM)}</td>` },
-    pr: { doctype: 'Purchase Receipt', slug: 'purchase-receipt', noun: 'receipts', label: 'Purchase receipts', head: ['Receipt', 'Supplier', 'Buyer', 'Received', 'Status', 'Billing'], lane: r => r.is_return ? 'warn' : r.status === 'Completed' ? 'good' : 'none',
-      cells: r => `<td data-slot="trip">${link('purchase-receipt', r.name)}<small>${r.is_return ? 'Return' : 'Receipt'}</small></td>
-        <td data-slot="route"><span>${esc(r.supplier_name || r.supplier)}</span><small>${esc(r.company)}</small></td>
-        <td data-slot="who" data-label="Buyer"><div class="fo-who"><span>${esc(r.custom_purchaser_name || 'Not set')}</span></div></td>
-        <td data-slot="when" data-label="Received"><time datetime="${esc(r.posting_date)}"><strong>${esc(String(r.posting_time || '').slice(0, 5) || '–')}</strong><span>${esc(dayLabel(day(r.posting_date)))}</span></time></td>
-        <td data-slot="status">${badge(r.is_return ? 'Return' : r.status, r.is_return ? 'warn' : r.status === 'Completed' ? 'good' : ['To Bill', 'Partly Billed'].includes(r.status) ? 'info' : 'neutral')}</td>
-        <td data-slot="next" data-label="Billing"><div class="fo-prog"><span class="fo-stage">${Math.round(num(r.per_billed))}% billed</span></div></td>` }
-  };
-
-  // ---- Arabic / RTL: a display-only translation pass. Business logic keeps its English keys; text is translated after each render. ----
-  const AR = {
-    '#':'#','+':'+','−':'−','©':'©','and':'و','complete':'مكتمل','contributors':'مساهمون','executed delivery trips':'رحلات توصيل منفذة',
-    'Logistics Dashboard':'لوحة اللوجستيات','Fleet':'الأسطول','Procurement':'المشتريات','Export CSV':'تصدير CSV','Refresh':'تحديث','Reset':'إعادة ضبط','New trip':'رحلة جديدة','New purchase order':'أمر شراء جديد',
-    'Dashboard section':'قسم اللوحة','Dashboard views':'أقسام اللوحة','Date range':'الفترة الزمنية','Today':'اليوم','Tomorrow':'غداً','Yesterday':'أمس','Next # days':'الـ # أيام القادمة','Last # days':'آخر # يوماً','All dates':'كل التواريخ','Includes undated backlog':'يشمل الرحلات بلا تاريخ',
-    'From':'من','To':'إلى','Find trip, driver or vehicle':'ابحث عن رحلة أو سائق أو مركبة','Find order, supplier or request':'ابحث عن أمر أو مورد أو طلب','Filters':'تصفية','Date basis':'أساس التاريخ','Delivery date':'تاريخ التسليم','Departure time':'وقت المغادرة','All dates (including undated)':'كل التواريخ (بما فيها بلا تاريخ)',
-    'Company':'الشركة','All permitted companies':'كل الشركات المسموحة','Trip type':'نوع الرحلة','All movements':'كل الحركات','Source warehouse':'مستودع المصدر','All sources':'كل المصادر','Trip status':'حالة الرحلة','All statuses':'كل الحالات','Delivery status':'حالة التسليم','All delivery statuses':'كل حالات التسليم',
-    'Supplier type':'نوع المورد','Local and foreign':'محلي وأجنبي','Local':'محلي','Foreign':'أجنبي','Buyer':'المشتري','All buyers':'كل المشترين',
-    'Overview':'نظرة عامة','Live map':'الخريطة المباشرة','Awaiting submission':'بانتظار الاعتماد','Vehicles & drivers':'المركبات والسائقون','Delivery follow-up':'متابعة التسليم','Performance':'الأداء','Orders & suppliers':'الطلبات والموردون','Receiving & billing':'الاستلام والفوترة','Purchase requests':'طلبات الشراء',
-    'Trips':'الرحلات','Deliveries':'التوصيلات','Follow-up':'المتابعة','Time errors':'أخطاء الأوقات','Missing assignment':'نقص التعيين',
-    'Customer delivery trips':'رحلات توصيل العملاء','Customer delivery trips, # oct to # nov':'رحلات توصيل العملاء، # أكتوبر إلى # نوفمبر','Draft trips to review and submit':'رحلات مسودة للمراجعة والاعتماد',
-    'Not delivered or no proof of receipt, # oct to # nov':'لم تُسلَّم أو بلا إثبات استلام، # أكتوبر إلى # نوفمبر','Timestamps out of order, # oct to # nov':'أوقات غير مرتبة، # أكتوبر إلى # نوفمبر','Driver or vehicle not set, # oct to # nov':'السائق أو المركبة غير محددة، # أكتوبر إلى # نوفمبر',
-    '# Oct to # Nov, # submitted':'# أكتوبر إلى # نوفمبر، # معتمدة','Trips in range':'الرحلات في الفترة','Trips in range: Draft #, Submitted #, Delivered #':'الرحلات في الفترة: مسودة #، معتمدة #، مُسلَّمة #','Draft':'مسودة','Submitted':'معتمدة','Delivered':'مُسلَّمة','# trips, # deliveries.':'# رحلات، # توصيلات.',
-    'Fleet assignment':'تعيين الأسطول','Trips with a vehicle':'رحلات بمركبة','Trips with a driver':'رحلات بسائق','Trips with a vehicle: # of #':'رحلات بمركبة: # من #','Trips with a driver: # of #':'رحلات بسائق: # من #','# of #':'# من #','Vehicles used':'مركبات مستخدمة','Drivers used':'سائقون مستخدمون','Possible duplicates':'احتمال تكرار',
-    'Delivery closure':'إغلاق التسليم','Not Delivered':'لم تُسلَّم','Partially Delivered':'سُلِّمت جزئياً','No proof of receipt':'بلا إثبات استلام','Delivered with proof of receipt: # of #, #%':'مُسلَّمة مع إثبات استلام: # من #، #%',
-    'Trips per day':'الرحلات حسب اليوم','Trips per day: # Oct #, # Oct #, # Oct #, # Oct #, # Oct #, # Oct #, Yesterday #, Today #, Tomorrow #, # Oct #, # Nov #, # Nov #, # Nov #, # Nov #, # Nov #':'الرحلات حسب اليوم','Draft or not delivered':'مسودة أو غير مُسلَّمة','Needs attention':'تحتاج انتباهاً','Select a group to list its trips.':'اختر مجموعة لعرض رحلاتها.',
-    'Assign driver':'تعيين سائق','Assign vehicle':'تعيين مركبة','Delivery date missing':'تاريخ التسليم مفقود','Trip timestamps incomplete':'أوقات الرحلة غير مكتملة','Site exit missing':'وقت الخروج من الموقع مفقود','Review timestamp order':'راجع ترتيب الأوقات','Delivery status unknown':'حالة التسليم غير معروفة',
-    'Most urgent trips':'الرحلات الأكثر إلحاحاً','The most urgent trips first. Use the native list for everything else.':'الأكثر إلحاحاً أولاً. استخدم القائمة الأصلية لبقية الرحلات.','Trip':'الرحلة','Route':'المسار','Vehicle and driver':'المركبة والسائق','Departure':'المغادرة','Status':'الحالة','Needs action':'يتطلب إجراء',
-    'No vehicle':'بلا مركبة','No driver':'بلا سائق','Previous':'السابق','Next':'التالي','Previous page':'الصفحة السابقة','Next page':'الصفحة التالية','Open in Delivery Trip list':'فتح في قائمة رحلات التوصيل','Open in Material Request list':'فتح في قائمة طلبات المواد','Open in Purchase Order list':'فتح في قائمة أوامر الشراء','Open in Purchase Receipt list':'فتح في قائمة استلامات الشراء','Open in Vehicle list':'فتح في قائمة المركبات','Open list':'فتح القائمة',
-    'Delivery notes, # Oct to # Nov':'إشعارات التسليم، # أكتوبر إلى # نوفمبر','# submitted in range. # drafts, # waiting to be billed. Only DM vehicle notes need a trip.':'# معتمدة ضمن الفترة. # مسودات، # بانتظار الفوترة. إشعارات مركبات DM فقط تحتاج رحلة.','DM vehicle':'مركبة DM','Customer pickup':'استلام العميل','Rented vehicle':'مركبة مستأجرة',
-    '# vehicles on an ongoing or upcoming trip, # vehicles used today.':'# مركبات في رحلة جارية أو قادمة، # مركبات استُخدمت اليوم.','Active':'نشط','Goods carriage':'نقل بضائع','Used today':'استُخدمت اليوم','Vehicles':'المركبات','Drivers':'السائقون','# drivers on file, active and inactive.':'# سائقاً مسجلاً، نشطين وغير نشطين.','On trips today':'في رحلات اليوم','No employee linked':'بلا موظف مرتبط',
-    'Reports':'التقارير','Reports and lists':'التقارير والقوائم','Opens the native report in Desk, using your own permissions.':'يفتح التقرير الأصلي في سطح المكتب بصلاحياتك.','Opens the native report or list in Desk, using your own permissions.':'يفتح التقرير أو القائمة الأصلية في سطح المكتب بصلاحياتك.','Report':'تقرير','List':'قائمة',
-    'Daily Delivery Trips':'رحلات التوصيل اليومية','Delivery Trip Time Tracker':'متتبع أوقات رحلات التوصيل','Delivery Status Report':'تقرير حالة التسليم','Vehicle Daily Report':'التقرير اليومي للمركبات','Vehicle Idle summary Report':'ملخص توقف المركبات','Delivery Trip':'رحلة توصيل','Delivery Note':'إشعار تسليم','Vehicle':'المركبة','Driver':'السائق',
-    'Procurement Tracker':'متتبع المشتريات','Critical PO':'أوامر شراء حرجة','Pending PO Analysis':'تحليل أوامر الشراء المعلقة','PO analysis - transit Report':'تحليل أوامر الشراء - الشحن','PO Analysis Report - SYSS':'تقرير تحليل أوامر الشراء - SYSS','Procurement Consolidated Report':'التقرير الموحد للمشتريات','Procurement and Logistic Expiry':'انتهاء المشتريات واللوجستيات','Procurement Daily Report':'التقرير اليومي للمشتريات','Purchase Order':'أمر شراء','Material Request':'طلب مواد','Purchase Receipt':'استلام مشتريات','Landed Cost Voucher':'قسيمة تكلفة الاستيراد','Purchase Price Comparison':'مقارنة أسعار الشراء','Procurement and Logistics Renewals':'تجديدات المشتريات واللوجستيات','Procurement Daily Reports':'التقارير اليومية للمشتريات','Agent Clearance':'تخليص المندوب',
-    '# of # loaded trips match your filters. Progress is inferred from recorded timestamps, not live location. Cancelled trips are left out of operational counts. Full records live in the Delivery Trip list.':'# من # رحلة محمّلة تطابق التصفية. يُستنتج التقدم من الأوقات المسجلة وليس من الموقع المباشر. الرحلات الملغاة مستبعدة من الأعداد التشغيلية. السجلات الكاملة في قائمة رحلات التوصيل.',
-    '# trips loaded. Updated #:# site time.':'تم تحميل # رحلة. آخر تحديث #:# بتوقيت الموقع.','Updated #:# site time':'آخر تحديث #:# بتوقيت الموقع','# open orders and # purchase requests loaded. Updated #:# site time.':'تم تحميل # أمر مفتوح و# طلب شراء. آخر تحديث #:# بتوقيت الموقع.',
-    'Positions come from the Vehicle Arabitra Logs tracker feed. Ongoing means a trip has departed in the last # hours and has no recorded site exit, so a vehicle can be listed here while parked. Map tiles from OpenStreetMap.':'المواقع من سجلات تتبع Arabitra للمركبات. «جارية» تعني أن الرحلة غادرت خلال آخر # ساعة بلا خروج مسجل من الموقع، لذا قد تظهر مركبة متوقفة هنا. خرائط OpenStreetMap.',
-    '# orders, # requests and # receipts match your filters. Open orders are submitted Purchase Orders that are not fully received; drafts appear only under Needs attention. The supplier-type filter does not apply to receipts and the buyer filter does not apply to requests.':'# أمر و# طلب و# استلام تطابق التصفية. الأوامر المفتوحة هي أوامر شراء معتمدة لم تُستلم بالكامل؛ المسودات تظهر فقط ضمن «تحتاج انتباهاً». تصفية نوع المورد لا تنطبق على الاستلامات وتصفية المشتري لا تنطبق على الطلبات.',
-    'Where vehicles are now':'أين المركبات الآن','Vehicles tracked':'مركبات متتبَّعة','Fit all vehicles':'عرض كل المركبات','Update positions':'تحديث المواقع','Show vehicles':'عرض المركبات','All':'الكل','Zoom in':'تكبير','Zoom out':'تصغير','Map of vehicles':'خريطة المركبات','OpenStreetMap':'OpenStreetMap',
-    'On the road':'على الطريق','Upcoming':'قادمة','Parked':'متوقفة','Idle':'خاملة','No trip':'بلا رحلة','No signal':'بلا إشارة','No recent signal':'لا إشارة حديثة','Signal old':'إشارة قديمة','Last fix':'آخر تحديد موقع','Last known place':'آخر موقع معروف','# min ago':'قبل # دقيقة','# km/h':'# كم/س','# min':'# دقيقة',
-    'Selected vehicle':'المركبة المحددة','Select a vehicle on the map or in the list to see its trip.':'اختر مركبة على الخريطة أو في القائمة لعرض رحلتها.','Select a row to centre the map on that vehicle.':'اختر صفاً لتوسيط الخريطة على المركبة.','Last fix over # minutes old, or none':'آخر تحديد موقع أقدم من # دقيقة أو لا يوجد',
-    'Departed':'غادرت','Reported':'حضر','Arrived':'وصلت','Left site':'غادرت الموقع','Not recorded':'غير مسجل','Not yet departed':'لم تغادر بعد','Departed, no site exit recorded':'غادرت، بلا خروج مسجل','Site exit recorded':'تم تسجيل الخروج من الموقع','Finished today':'انتهت اليوم','Ongoing':'جارية','Ongoing trip':'رحلة جارية',
-    'Draft trips':'رحلات المسودة','Drafts by day':'المسودات حسب اليوم','Oldest drafts':'أقدم المسودات','Oldest first. Submit each trip once its times and delivery status are confirmed.':'الأقدم أولاً. اعتمد كل رحلة بعد تأكيد أوقاتها وحالة تسليمها.','Of draft trips':'من رحلات المسودة',
-    'Vehicle utilisation':'استخدام المركبات','Goods vehicles with a trip in range':'مركبات البضائع ذات رحلة في الفترة','Goods vehicles with a trip in range: # of #':'مركبات البضائع ذات رحلة في الفترة: # من #','Counts active goods-carriage vehicles, plus any vehicle that made a trip. # active vehicles in the fleet list.':'يشمل مركبات نقل البضائع النشطة وأي مركبة نفذت رحلة. # مركبة نشطة في قائمة الأسطول.','Every goods vehicle ran a trip in this range.':'كل مركبات البضائع نفذت رحلة في هذه الفترة.','Active fleet':'الأسطول النشط','Of # active vehicles':'من # مركبة نشطة','Drivers active':'سائقون نشطون','Ran trips':'نفذوا رحلات',
-    'Trips per driver':'الرحلات لكل سائق','Trips per vehicle':'الرحلات لكل مركبة','Top # drivers.':'أعلى # سائقين.','Top # vehicles.':'أعلى # مركبات.','Latest trips':'أحدث الرحلات','Most recent departure first.':'أحدث مغادرة أولاً.','Review trip':'مراجعة الرحلة',
-    'Open closures':'إغلاقات مفتوحة','# trips need follow-up':'# رحلات تحتاج متابعة','Why they are open':'سبب بقائها مفتوحة','A trip can appear under more than one reason.':'قد تظهر الرحلة تحت أكثر من سبب.','How long they have been open':'مدة بقائها مفتوحة','Days since delivery date.':'الأيام منذ تاريخ التسليم.','Oldest open closures':'أقدم الإغلاقات المفتوحة','No open closures.':'لا إغلاقات مفتوحة.','No deliveries need follow-up.':'لا توصيلات تحتاج متابعة.',
-    'Proof of receipt means at least one of receiver name, mobile, signature or stamp is Yes. The signed delivery note attachment is not required.':'إثبات الاستلام يعني أن أحد الحقول: اسم المستلم أو جواله أو التوقيع أو الختم «نعم». مرفق إشعار التسليم الموقع غير مطلوب.','No receiver name, mobile, signature or stamp':'بلا اسم مستلم أو جوال أو توقيع أو ختم',
-    'Execution measures':'مقاييس التنفيذ','Completed':'مكتملة','Completed trips':'الرحلات المكتملة','In this range':'في هذه الفترة','Warehouse wait':'الانتظار في المستودع','Travel':'السفر','Time on site':'الوقت في الموقع','Partial deliveries':'التسليمات الجزئية','Evidence complete':'الأدلة مكتملة','No data':'لا بيانات','No valid completed-trip samples':'لا عينات صالحة للرحلات المكتملة','No executed delivery trips':'لا رحلات توصيل منفذة','# of # executed delivery trips':'# من # رحلة توصيل منفذة','# samples':'# عينات','# sample':'# عينة',
-    'Intervals are differences between recorded timestamps on submitted Completed trips, not verified durations. Missing or negative pairs are excluded.':'الفترات هي الفروق بين الأوقات المسجلة في الرحلات المكتملة المعتمدة وليست مدداً مؤكدة. الأزواج المفقودة أو السالبة مستبعدة.','Completed per day':'المكتملة حسب اليوم','Completed trips per day':'الرحلات المكتملة حسب اليوم','Busiest drivers':'أكثر السائقين نشاطاً','Busiest vehicles':'أكثر المركبات نشاطاً','Top # by completed trips.':'أعلى # حسب الرحلات المكتملة.','By movement':'حسب نوع الحركة','By source warehouse':'حسب مستودع المصدر','No completed trips in this range.':'لا رحلات مكتملة في هذه الفترة.','Unknown':'غير معروف',
-    'Internal Transfer':'تحويل داخلي','Materials Collection from Supplier':'استلام مواد من المورد','Petrol':'وقود','Workshop':'ورشة','Between warehouses':'بين المستودعات','Internal transfers':'التحويلات الداخلية','Supplier collection trips':'رحلات استلام من الموردين','Supplier collection trips: Draft #, Submitted #, Delivered #':'رحلات الاستلام من الموردين: مسودة #، معتمدة #، مُسلَّمة #','Workshop, petrol and the rest':'الورشة والوقود وغيرها','Other':'أخرى','# others':'# أخرى','# more flags not shown.':'# تنبيهات أخرى غير معروضة.',
-    '# Oct to # Nov. Delivery Trips of type Materials Collection from Supplier; customer deliveries are on the Fleet side.':'# أكتوبر إلى # نوفمبر. رحلات من نوع استلام مواد من المورد؛ توصيلات العملاء في قسم الأسطول.',
-    'Scheduled':'مجدولة','Cancelled':'ملغاة','In transit':'في الطريق','At site (inferred)':'في الموقع (مستنتج)','Not delivered':'لم تُسلَّم','Partially delivered':'سُلِّمت جزئياً',
-    'Recorded journey':'الرحلة المسجلة','Recorded fields can be prefilled, so this timeline does not confirm actual movement.':'قد تكون الحقول المسجلة معبأة مسبقاً، لذا لا يؤكد هذا الجدول الحركة الفعلية.','Recorded: Reported, Departed, Arrived, Left site. Not recorded: none.':'مسجل: حضر، غادر، وصل، غادر الموقع. غير مسجل: لا يوجد.','Delivery stops':'محطات التسليم','No delivery stops recorded.':'لا محطات تسليم مسجلة.','Delivery evidence':'أدلة التسليم','Receiver name':'اسم المستلم','Receiver mobile':'جوال المستلم','Signature':'التوقيع','Stamp':'الختم','Signed delivery note':'إشعار التسليم الموقع','Open attachment':'فتح المرفق','Review in trip':'راجع في الرحلة','Missing':'مفقود','Not set':'غير محدد','Not assigned':'غير معيّن','Source unknown':'المصدر غير معروف','Customer unknown':'عميل غير معروف','Address unknown':'عنوان غير معروف','No Delivery Note linked':'لا إشعار تسليم مرتبط','Movement':'الحركة','To review':'للمراجعة','Open Delivery Trip':'فتح رحلة التوصيل','Unable to open this trip. Check record permission.':'تعذر فتح هذه الرحلة. تحقق من صلاحية السجل.','No matching trips to export.':'لا رحلات مطابقة للتصدير.','No matching purchase orders to export.':'لا أوامر شراء مطابقة للتصدير.','Trip times all recorded':'كل أوقات الرحلة مسجلة','Delivery or evidence incomplete':'التسليم أو الأدلة غير مكتمل',
-    'Open orders':'الأوامر المفتوحة','Open order value':'قيمة الأوامر المفتوحة','Open value':'القيمة المفتوحة','Past due':'متأخرة','Past due value':'قيمة المتأخرة','Past required date':'تجاوزت التاريخ المطلوب','Required date has passed':'تجاوزت التاريخ المطلوب','Draft orders':'أوامر المسودة','Pending requests':'الطلبات المعلقة','Value in motion':'قيمة قيد الشحن','Receipts posted':'الاستلامات المرحلة','Requests':'الطلبات','Receipts':'الاستلامات','Orders':'الأوامر','Order':'الأمر','Request':'الطلب','Receipt':'الاستلام',
-    'Counts for the filtered orders and requests':'أعداد للأوامر والطلبات المصفاة','Counts for the selected range':'أعداد للفترة المحددة','Order totals in company currency.':'إجماليات الأوامر بعملة الشركة.','Company currency':'عملة الشركة','Order pipeline':'مراحل الأوامر','Order pipeline: Awaiting delivery #, Partly received #, Late #, Stale #':'مراحل الأوامر: بانتظار التوريد #، مستلمة جزئياً #، متأخرة #، راكدة #','Awaiting delivery':'بانتظار التوريد','Partly received':'مستلمة جزئياً','Late':'متأخرة','Stale':'راكدة','Stale value':'قيمة الراكدة','On track':'في الموعد','Nothing received yet':'لم يُستلم شيء بعد','Nothing ordered so far':'لم يُطلب شيء بعد',
-    'Most urgent orders':'أوامر الشراء الأكثر إلحاحاً','The most urgent orders first. Use the native list for everything else.':'الأكثر إلحاحاً أولاً. استخدم القائمة الأصلية لبقية الأوامر.','Orders due per day':'الأوامر المستحقة حسب اليوم','Orders due, next # days':'الأوامر المستحقة، الـ # أيام القادمة','By required date, or ETA when set':'حسب التاريخ المطلوب أو الوصول المتوقع','Earliest first. The required date is used when no ETA is set.':'الأقرب أولاً. يُستخدم التاريخ المطلوب عند غياب الوصول المتوقع.','Due':'الاستحقاق','Next due':'الاستحقاق التالي','Due in # days':'مستحق خلال # أيام','Required':'المطلوب','Required, due today':'مطلوب، مستحق اليوم','Required, # days late':'مطلوب، متأخر # أيام','ETA, # days late':'الوصول المتوقع، متأخر # أيام','ETA, # day late':'الوصول المتوقع، متأخر # يوم','ETA, in # days':'الوصول المتوقع، خلال # أيام','# days late':'متأخر # أيام','# day late':'متأخر # يوم','in # days':'خلال # أيام','in # day':'خلال # يوم','Over # days late':'متأخر أكثر من # أيام','Over # days late, review or close':'متأخر أكثر من # أيام، راجع أو أغلق','Up to # days past required date':'حتى # أيام بعد التاريخ المطلوب','Stale, over # days late':'راكد، متأخر أكثر من # أيام','Past due, nothing received':'متأخر، لم يُستلم شيء','Past due, partly received':'متأخر، مستلم جزئياً','# past-due orders not shown here.':'# أوامر متأخرة غير معروضة هنا.','# orders past due, # purchase requests late or high priority':'# أوامر متأخرة، # طلبات شراء متأخرة أو عالية الأولوية',
-    'Open orders by buyer':'الأوامر المفتوحة حسب المشتري','Top # by open orders.':'أعلى # حسب الأوامر المفتوحة.','Purchaser, else PO in charge.':'المشتري، وإلا المسؤول عن الأمر.','Suppliers with most open orders':'الموردون الأكثر أوامر مفتوحة','Supplier':'المورد','Waiting to bill':'بانتظار الفوترة','Waiting to bill, by supplier':'بانتظار الفوترة حسب المورد','Where open orders are to be received.':'أماكن استلام الأوامر المفتوحة.','Delivery location':'موقع التسليم',
-    'Shipment tracking':'تتبع الشحنات','Orders with a shipment status, ETA or customs entry.':'أوامر لها حالة شحن أو وصول متوقع أو بيان جمركي.','Shipment delayed':'الشحنة متأخرة','Shipped':'تم الشحن','In Customs':'في الجمارك','In Transit':'في الطريق','Order Received':'تم استلام الطلب','Order Processing':'قيد المعالجة','Awaiting Pickup':'بانتظار الاستلام','Shipped Partial Qty':'شُحنت كمية جزئية','Shipped Full Qty':'شُحنت كمية كاملة','Out for Delivery':'خرجت للتسليم','Shipment Delayed':'الشحنة متأخرة','Not updated':'غير محدّث','Documents not received':'المستندات لم تصل','Awaiting approval':'بانتظار الموافقة','Needs a closing decision':'تحتاج قرار إغلاق','Stopped by the buyer':'أوقفها المشتري','Some items on a PO':'بعض بنود أمر الشراء',
-    'Receiving':'الاستلام','Billing':'الفوترة','Receiving and billing':'الاستلام والفوترة','Received':'مستلم','Billed':'مفوتر','To Bill':'للفوترة','To bill':'للفوترة','Partly Billed':'مفوتر جزئياً','Fully billed':'مفوتر بالكامل','Billed early':'فُوتر مبكراً','Billed ahead of receipt':'فُوتر قبل الاستلام','Billed more than received':'فُوتر أكثر من المستلم','Invoice progress is higher than receiving progress.':'تقدم الفوترة أعلى من تقدم الاستلام.','Waiting over # days':'بانتظار أكثر من # أيام','Receipts in the last # days':'الاستلامات خلال آخر # يوماً','Receipts of the last # days.':'استلامات آخر # يوماً.','Receipts per day':'الاستلامات حسب اليوم','Receipts fully billed':'استلامات مفوترة بالكامل','Receipts fully billed: # of #':'استلامات مفوترة بالكامل: # من #','Latest receipts':'أحدث الاستلامات','Newest first.':'الأحدث أولاً.','Returns':'المرتجعات','Return':'مرتجع','Received, # days':'مستلم، # أيام','Open orders with goods received':'أوامر مفتوحة مستلم جزء منها','Open orders with goods received: # of #':'أوامر مفتوحة مستلم جزء منها: # من #','#% billed':'#% مفوتر','#% billed, #K':'#% مفوتر، #K','#% ordered':'#% مطلوب','#% received':'#% مستلم','#K in value':'#K بالقيمة','Status To Bill or Partly Billed':'الحالة: للفوترة أو مفوتر جزئياً',
-    'Requests by priority':'الطلبات حسب الأولوية','Priority':'الأولوية','Priority set on the request.':'الأولوية المحددة في الطلب.','Priority set to High':'الأولوية عالية','High priority':'أولوية عالية','High priority, no PO yet':'أولوية عالية، بلا أمر شراء','High':'عالية','Medium':'متوسطة','Low':'منخفضة','Import':'استيراد','Import requests':'طلبات الاستيراد','Purchase type Import':'نوع الشراء: استيراد','Stock':'مخزون','Maintenance':'صيانة','Project':'مشروع','Pending':'معلق','Partially Ordered':'مطلوب جزئياً','Partly ordered':'مطلوب جزئياً','Not fully ordered':'غير مطلوب بالكامل','Purchase requests not fully ordered':'طلبات شراء غير مطلوبة بالكامل','No PO yet':'بلا أمر شراء','No PO after # days':'بلا أمر شراء بعد # أيام','Ordered in # days':'طُلب خلال # أيام','Time from request to first order':'الزمن من الطلب إلى أول أمر','How long requests have waited':'مدة انتظار الطلبات','Average':'المتوسط','Median days':'الوسيط بالأيام','Slowest cost centres':'أبطأ مراكز التكلفة','Average days to first order. Cost centres with at least # ordered requests; request count in brackets.':'متوسط الأيام إلى أول أمر. مراكز تكلفة لديها # طلبات مطلوبة على الأقل؛ عدد الطلبات بين قوسين.','Days since the request date.':'الأيام منذ تاريخ الطلب.','Urgent requests first, then the oldest.':'الطلبات العاجلة أولاً ثم الأقدم.','Oldest pending requests':'أقدم الطلبات المعلقة','No pending purchase requests.':'لا طلبات شراء معلقة.','Purchase requests, scrollable':'طلبات الشراء (قابلة للتمرير)','Orders, scrollable':'الأوامر (قابلة للتمرير)','Purchase receipts, scrollable':'استلامات المشتريات (قابلة للتمرير)','Trips, scrollable':'الرحلات (قابلة للتمرير)','Vehicles, scrollable':'المركبات (قابلة للتمرير)','Clear selection':'إلغاء التحديد','Reset filters':'إعادة ضبط التصفية',
-    'Yes':'نعم','No':'لا','On hold':'معلق','To Receive':'للاستلام','To Receive and Bill':'للاستلام والفوترة','Completed ':'مكتمل','Order Received ':'تم استلام الطلب',
-    '#–# of # trips':'عرض \u2066#–#\u2069 من # رحلة','#–# of # orders':'عرض \u2066#–#\u2069 من # أمر','#–# of # requests':'عرض \u2066#–#\u2069 من # طلب','#–# of # receipts':'عرض \u2066#–#\u2069 من # استلام','#–# of # vehicles':'عرض \u2066#–#\u2069 من # مركبة','Missing driver':'بلا سائق','Missing vehicle':'بلا مركبة','On a trip':'في رحلة','Progress':'التقدم','Type':'النوع','Timestamps out of order':'أوقات غير مرتبة','Over # days':'أكثر من # أيام','By delivery date.':'حسب تاريخ التسليم.','Last # days.':'آخر # يوماً.','Top # by receipts.':'أعلى # حسب الاستلامات.','# of # requests ordered. # still have no order. Requests from the last # days.':'# من # طلب تم طلبها. # بلا أمر شراء بعد. طلبات آخر # يوماً.','Trips with the same departure time and a shared vehicle or driver. Several delivery notes on one run can cause this legitimately.':'رحلات بنفس وقت المغادرة وتشترك في مركبة أو سائق. قد يحدث ذلك فعلاً عند وجود عدة إشعارات تسليم في جولة واحدة.','Riyadh':'الرياض','Jeddah':'جدة','Dammam':'الدمام','Submitted, not fully received':'معتمدة، لم تُستلم بالكامل','Assigned':'التعيين','Departs':'المغادرة','Needs action':'يتطلب إجراء','Due in # days':'مستحق خلال # أيام','Loading trips…':'جارٍ تحميل الرحلات…','Loading procurement data…':'جارٍ تحميل بيانات المشتريات…','Language':'اللغة','Jan':'يناير','Feb':'فبراير','Mar':'مارس','Apr':'أبريل','May':'مايو','Jun':'يونيو','Jul':'يوليو','Aug':'أغسطس','Sep':'سبتمبر','Oct':'أكتوبر','Nov':'نوفمبر','Dec':'ديسمبر',
-    'Could not load trips. Check Delivery Trip read permission and custom field access, then select Refresh.':'تعذر تحميل الرحلات. تحقق من صلاحية قراءة رحلات التوصيل والحقول المخصصة ثم اضغط تحديث.','Choose a valid date range: the start date must be on or before the end date.':'اختر فترة صحيحة: يجب أن يكون تاريخ البداية قبل تاريخ النهاية أو مساوياً له.','Loading permitted Delivery Trips…':'جارٍ تحميل رحلات التوصيل المسموحة…','Loading purchase orders, requests and receipts…':'جارٍ تحميل أوامر الشراء والطلبات والاستلامات…','Partial results: the 10,000-trip limit was reached, so counts cover loaded trips only. Narrow the date range.':'نتائج جزئية: تم بلوغ حد 10,000 رحلة، لذا تشمل الأعداد الرحلات المحمّلة فقط. ضيّق الفترة.','Partial data: narrow the date range.':'بيانات جزئية: ضيّق الفترة.','Could not load procurement data. Select Refresh to try again.':'تعذر تحميل بيانات المشتريات. اضغط تحديث للمحاولة مجدداً.','Partial results: the 5,000-record limit was reached for one list, so counts cover loaded records only. Use the native lists for the rest.':'نتائج جزئية: تم بلوغ حد 5,000 سجل لإحدى القوائم، لذا تشمل الأعداد السجلات المحمّلة فقط. استخدم القوائم الأصلية لبقية السجلات.'
-  };
-  const AR_RULES = [
-    [/^Exported (\d+) (trips?|purchase orders?)(.*)$/s, (m, a, b, c) => `تم تصدير ${a} ${/trip/.test(b) ? 'رحلة' : 'أمر شراء'}${/partial/.test(c) ? ' (بيانات جزئية)' : ''}.`],
-    [/^Could not read (.+)\. Check read permission and custom field access\. Figures that depend on it show a dash\.$/, (m, a) => `تعذرت قراءة ${a}. تحقق من صلاحية القراءة والحقول المخصصة. الأرقام المعتمدة عليه تظهر بشرطة.`],
-    [/^Could not load procurement data\..*$/, () => AR['Could not load procurement data. Select Refresh to try again.']],
-    [/^Some custom fields on (.+) are not readable for your role.*$/, (m, a) => `بعض الحقول المخصصة في ${a} غير مقروءة لدورك، لذا قد يظهر المشتري أو الموقع أو الأولوية «غير محدد».`],
-    [/^\s*leave at (\d+:\d+) on (.+) and share (driver|vehicle) (.+)\.$/, (m, t, d, k, n) => `تغادر عند ${t} يوم ${tr(d.charAt(0).toUpperCase() + d.slice(1))} وتشترك في ${k === 'driver' ? 'السائق' : 'المركبة'} ${n}.`],
-    [/^(.+) leave at (\d+:\d+) on (.+) and share (driver|vehicle) (.+)\.$/, (m, a, t, d, k, n) => `${a} تغادر عند ${t} يوم ${tr(d)} وتشترك في ${k === 'driver' ? 'السائق' : 'المركبة'} ${n}.`]
-  ];
-  const AR_PLURAL = [[/^(\d+) (loaded trips?|trips?)$/, (n, w) => `${n} رحلة`], [/^(\d+) (orders?)$/, n => `${n} أمر`], [/^(\d+) (requests?)$/, n => `${n} طلب`], [/^(\d+) (receipts?)$/, n => `${n} استلام`], [/^(\d+) (vehicles?)$/, n => `${n} مركبة`], [/^(\d+) (drivers?)$/, n => `${n} سائق`]];
-  const hasAr = s => /[؀-ۿ]/.test(s);
-  function trKey(s) {
-    const nums = s.match(/\d+(?:[.,]\d+)?/g) || [], key = s.replace(/\d+(?:[.,]\d+)?/g, '#');
-    const hit = AR[key] ?? AR[s];
-    if (hit === undefined) return null;
-    let i = 0; return hit.replace(/#/g, () => nums[i++] ?? '#');
+  /* ---------- helpers ---------- */
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function clean(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+  function plain(s, n) { return clean(String(s || '').replace(/<[^>]*>/g, ' ')).slice(0, n || 90); }
+  function $(sel) { return HOST.querySelector(sel); }
+  function later(fn, ms) { var id = setTimeout(function () { if (!destroyed) { fn(); } }, ms); timers.push(id); return id; }
+  function bdi(s) { return '<bdi>' + esc(s) + '</bdi>'; }
+  function num(n) { return (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString('en-US'); }
+  function money(v) {
+    if (v == null || isNaN(v)) { return '—'; }
+    var a = Math.abs(v), s = v < 0 ? '-' : '';
+    if (a >= 1e9) { return s + (a / 1e9).toFixed(2) + 'B'; }
+    if (a >= 1e6) { return s + (a / 1e6).toFixed(2) + 'M'; }
+    if (a >= 1e4) { return s + (a / 1e3).toFixed(1) + 'K'; }
+    return s + Math.round(a).toLocaleString('en-US');
   }
-  function tr(raw) {
-    if (!raw || hasAr(raw)) return raw;
-    const lead = raw.match(/^\s*/)[0], trail = raw.match(/\s*$/)[0], s = raw.trim();
-    if (!s || /^[\d\s.,:%#+\-–−/()]+$/.test(s)) return raw;
-    let out = trKey(s);
-    if (out === null) { const m = s.match(/^(.+) \(draft\)$/); if (m) out = `${tr(m[1])} (مسودة)`; }
-    if (out === null) for (const [re, fn] of AR_RULES) { const m = s.match(re); if (m) { out = fn(...m); break; } }
-    if (out === null) for (const [re, fn] of AR_PLURAL) { const m = s.match(re); if (m) { out = fn(m[1]); break; } }
-    if (out === null) {
-      const parts = s.split(/( · |: |, | to |، )/);
-      if (parts.length > 1) out = parts.map((p, i) => i % 2 ? ({ ' to ': ' إلى ', ', ': '، ' }[p] || p) : tr(p)).join('');
-      else {
-        const m = s.match(/^(\d+) (\w+)$/); // "5 Oct" style dates and "N noun" fallbacks
-        const w = m && (AR[m[2]] || AR[m[2].charAt(0).toUpperCase() + m[2].slice(1)]);
-        out = w ? `${m[1]} ${w}` : s;
-      }
-    }
-    return lead + out + trail;
-  }
-  const trTree = root => {
-    if (!root) return;
-    root.querySelectorAll('option:not([value])').forEach(o => o.setAttribute('value', o.textContent));
-    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    const nodes = []; let n; while ((n = w.nextNode())) { if (!['STYLE', 'SCRIPT'].includes(n.parentNode.nodeName)) nodes.push(n); }
-    nodes.forEach(t => { const v = tr(t.nodeValue); if (v !== t.nodeValue) { if (t.__en === undefined) t.__en = t.nodeValue; t.nodeValue = v; } });
-    root.querySelectorAll('[placeholder],[aria-label],[title],[data-label]').forEach(e => ['placeholder', 'aria-label', 'title', 'data-label'].forEach(k => { const v = e.getAttribute(k); if (v) { const t = tr(v); if (t !== v) { (e.__en = e.__en || {})[k] = v; e.setAttribute(k, t); } } }));
-  };
-  const trRestore = root => {
-    if (!root) return;
-    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); let n;
-    while ((n = w.nextNode())) if (n.__en !== undefined) { n.nodeValue = n.__en; n.__en = undefined; }
-    root.querySelectorAll('*').forEach(e => { if (e.__en) { Object.entries(e.__en).forEach(([k, v]) => e.setAttribute(k, v)); e.__en = null; } });
-  };
+  function amt(v) { return (v == null || isNaN(v)) ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function moneyS(v, cur) { return (cur || CUR) + ' ' + money(v); }
+  function moneyB(v, cur) { return '<bdi>' + esc(moneyS(v, cur)) + '</bdi>'; }
+  function moneyFull(v, cur) { return (v == null || isNaN(v)) ? '' : (cur || CUR) + ' ' + amt(v); }
+  function cur$(v, cur) { return '<bdi>' + esc(money(v)) + '<small>' + esc(cur || CUR) + '</small></bdi>'; }
+  function pct(n, d, dp) { return (d > 0 && n != null) ? (n / d * 100).toFixed(dp == null ? 1 : dp) + '%' : tr('N/A', 'غير متاح'); }
+  function sum(arr, f) { var t = 0; for (var i = 0; i < arr.length; i++) { t += (f ? f(arr[i]) : arr[i]) || 0; } return t; }
+  function vals(o) { return Object.keys(o).map(function (k) { return o[k]; }); }
+  function uniq(a) { var m = {}; a.forEach(function (x) { if (x) { m[x] = 1; } }); return Object.keys(m).sort(function (x, y) { return x.localeCompare(y); }); }
+  function rep(s, n) { var o = ''; for (var i = 0; i < n; i++) { o += s; } return o; }
+  function one(r) { return (r && r[0]) || {}; }
+  function groupBy(rows, f) { var m = {}; rows.forEach(function (r) { var k = f(r); (m[k] || (m[k] = [])).push(r); }); return m; }
+  var NAtxt = function () { return tr('Not assigned', 'غير مُعيَّن'); };
 
-  class LogisticsDashboard {
-    constructor(host) {
-      if (host.__logisticsDashboard) { host.__logisticsDashboard.refresh(); return; }
-      host.__logisticsDashboard = this;
-      this.host = host; this.lang = (() => { try { return localStorage.getItem('fo-lang') === 'ar' ? 'ar' : 'en'; } catch (e) { return 'en'; } })(); this.tab = TABS[0]; this.rows = []; this.version = 0; this.loading = true;
-      this.pages = {}; this.queue = null; this.issue = null; this.lists = {}; this.tableIndex = 0; this.filtersOpen = false;
-      this.section = 'fleet'; this.ptab = PTABS[0]; this.pq = null; this.pissue = null; this.msgs = {}; this.tabsFor = null;
-      this.proc = { po: [], mr: [], pr: [], loaded: false, loading: false, denied: new Set(), capped: false, at: '' };
-      this.delay = { rows: [], loaded: false, loading: false, error: '', at: '' };
-      this.veh = { rows: [], loaded: false, loading: false, denied: false, reduced: false };
-      this.recs = { dn: null, drv: null, loading: false, loaded: false };
-      this.live = { pos: new Map(), loading: false, filter: 'all', tick: 0, tried: new Set(), at: '', error: '', view: null, refit: true, sel: '', token: 0 };
-      this.draw(); this.refresh();
-      // Refresh vehicle positions every minute while the map is the visible view.
-      if (typeof setInterval === 'function') this.timer = setInterval(() => {
-        if (!this.host.isConnected) { clearInterval(this.timer); return; }
-        if (this.section === 'fleet' && this.tab === 'Live map' && !this.loading && !(typeof document !== 'undefined' && document.hidden)) this.loadLive(true, ++this.live.tick % 5 ? 'trips' : 'all');
-      }, 60000);
-    }
-    draw() {
-      // A Custom HTML Block host may already hold the block's <style>; keep it when the markup is replaced.
-      this.styles = [...(this.host.children || [])].filter(n => n.tagName === 'STYLE');
-      this.host.innerHTML = `<section class="fo" aria-label="Logistics dashboard">
-        <header class="fo-header"><div class="fo-title"><h2>Logistics Dashboard</h2><p class="fo-state" role="status" aria-live="polite"></p></div>
-          <nav class="fo-switch" aria-label="Dashboard section"><button type="button" data-section="fleet" aria-pressed="true">${icons.truck}<span>Fleet</span><b class="fo-count" hidden></b></button><button type="button" data-section="procurement" aria-pressed="false">${icons.box}<span>Procurement</span><b class="fo-count" hidden></b></button></nav>
-          <div class="fo-actions"><button type="button" class="fo-lang" data-action="lang" aria-label="Language">العربية</button><button type="button" data-action="export">Export CSV</button><button type="button" data-action="refresh">Refresh</button><button type="button" class="fo-primary" data-action="new">${icons.plus}<span>New trip</span></button></div></header>
-        <div class="fo-alert" role="alert" hidden></div>
-        <div class="fo-bar fo-bar-fleet">
-          <div class="fo-range" role="group" aria-label="Date range">${RANGES.map(([v, l]) => `<button type="button" data-period="${v}" aria-pressed="false"${v === 'all' ? ' title="Includes undated backlog"' : ''}>${l}</button>`).join('')}</div>
-          <div class="fo-dates"><label><span>From</span><input type="date" data-filter="from"></label><label><span>To</span><input type="date" data-filter="to"></label></div>
-          <label class="fo-search"><span class="fo-sr">Find trip, driver or vehicle</span>${icons.search}<input type="search" data-filter="search" placeholder="Find trip, driver or vehicle" autocomplete="off"></label>
-          <div class="fo-bar-end"><button type="button" class="fo-toggle" data-action="filters" aria-expanded="false" aria-controls="fo-more">${icons.filter}<span>Filters</span><b class="fo-count" hidden></b></button><button type="button" class="fo-quiet" data-action="reset">Reset</button></div>
-        </div>
-        <div class="fo-bar fo-bar-proc" hidden>
-          <label class="fo-search"><span class="fo-sr">Find order, supplier or request</span>${icons.search}<input type="search" data-pfilter="search" placeholder="Find order, supplier or request" autocomplete="off"></label>
-          <label class="fo-sel"><span class="fo-sr">Company</span><select data-pfilter="company"><option value="">All permitted companies</option></select></label>
-          <label class="fo-sel"><span class="fo-sr">Supplier type</span><select data-pfilter="kind"><option value="">Local and foreign</option><option>Local</option><option>Foreign</option></select></label>
-          <label class="fo-sel"><span class="fo-sr">Buyer</span><select data-pfilter="buyer"><option value="">All buyers</option></select></label>
-          <div class="fo-bar-end"><button type="button" class="fo-quiet" data-action="preset">Reset</button></div>
-        </div>
-        <div class="fo-more" id="fo-more" hidden>
-          <label>Date basis<select data-filter="basis"><option value="${F.date}">Delivery date</option><option value="${F.depart}">Departure time</option><option value="all">All dates (including undated)</option></select></label>
-          <label>Company<select data-filter="company"><option value="">All permitted companies</option></select></label>
-          <label>Trip type<select data-filter="type"><option value="">All movements</option>${TYPES.map(t => `<option>${esc(t)}</option>`).join('')}</select></label>
-          <label>Source warehouse<select data-filter="warehouse"><option value="">All sources</option></select></label>
-          <label>Trip status<select data-filter="status"><option value="">All statuses</option>${['Draft','Submitted','Delivered','Cancelled'].map(s => `<option>${s}</option>`).join('')}</select></label>
-          <label>Delivery status<select data-filter="delivery"><option value="">All delivery statuses</option>${['Not Delivered','Partially Delivered','Delivered'].map(s => `<option>${s}</option>`).join('')}</select></label>
-        </div>
-        <nav class="fo-tabs" aria-label="Dashboard views"></nav>
-        <div class="fo-body"></div>
-        <footer class="fo-footer"></footer></section>`;
-      this.styles.forEach(n => this.host.prepend(n));
-      this.el = this.host.querySelector('.fo');
-      this.syncTheme();
-      this.defaultRange();
-      this.el.addEventListener('click', e => {
-        const b = e.target.closest('button');
-        if (!b) {
-          const row = e.target.closest('tr[data-row]'), doc = e.target.closest('tr[data-doc]'), foc = e.target.closest('tr[data-focus]');
-          if (foc && !e.target.closest('a') && !String(window.getSelection?.() || '')) this.selectVehicle(foc.dataset.focus, true);
-          if (row && !e.target.closest('a') && !String(window.getSelection?.() || '')) this.detail(row.dataset.row);
-          if (doc && !e.target.closest('a') && !String(window.getSelection?.() || '')) frappe.set_route('Form', doc.dataset.doc, doc.dataset.name);
-          return;
-        }
-        if (b.dataset.section) this.setSection(b.dataset.section);
-        if (b.dataset.select !== undefined) this.selectVehicle(b.dataset.select, false);
-        if (b.dataset.chip) { this.live.filter = b.dataset.chip; this.live.refit = true; this.pages = {}; this.render(); }
-        if (b.dataset.map) this.mapAction(b.dataset.map);
-        if (b.dataset.report) this.openReport(b.dataset.report);
-        if (b.dataset.list) frappe.set_route('List', b.dataset.list, 'List');
-        if (b.dataset.action === 'preset') { ['company', 'kind', 'buyer', 'search'].forEach(f => { const el = this.el.querySelector(`[data-pfilter="${f}"]`); if (el) el.value = ''; }); this.pages = {}; this.pq = null; this.pissue = null; this.render(); }
-        if (b.dataset.pqueue !== undefined) { this.pq = this.pq === +b.dataset.pqueue ? null : +b.dataset.pqueue; this.pissue = null; this.pages = {}; this.render(); this.el.querySelector('.fo-queue-title')?.focus(); }
-        if (b.dataset.pissue !== undefined) { this.pissue = this.pissue === b.dataset.pissue ? null : b.dataset.pissue; this.pq = null; this.pages = {}; this.render(); this.el.querySelector('.fo-queue-title')?.focus(); }
-        if (b.dataset.action === 'refresh') {
-          if (this.section === 'procurement') { this.delay.loaded = false; this.refreshProcurement(); } else { this.veh.loaded = false; this.recs.loaded = false; this.refresh(); }
-        }
-        if (b.dataset.action === 'lang') this.setLang(this.lang === 'ar' ? 'en' : 'ar');
-        if (b.dataset.action === 'new') frappe.new_doc(this.section === 'procurement' ? 'Purchase Order' : 'Delivery Trip');
-        if (b.dataset.action === 'export') this.exportCSV();
-        if (b.dataset.action === 'reset') this.reset();
-        if (b.dataset.action === 'filters') { this.filtersOpen = !this.filtersOpen; this.render(); }
-        if (b.dataset.period !== undefined) this.period(b.dataset.period);
-        if (b.dataset.pageKey) {
-          const key = b.dataset.pageKey, target = +b.dataset.page;
-          this.pages[key] = target; this.render();
-          this.el.querySelector(`[data-page-key="${key}"]:not(:disabled)`)?.focus();
-        }
-        if (b.dataset.queue !== undefined) { this.queue = this.queue === +b.dataset.queue ? null : +b.dataset.queue; this.issue = null; this.pages = {}; this.render(); this.el.querySelector('.fo-queue-title')?.focus(); }
-        if (b.dataset.issue !== undefined) { this.issue = this.issue === b.dataset.issue ? null : b.dataset.issue; this.queue = null; this.pages = {}; this.render(); this.el.querySelector('.fo-queue-title')?.focus(); }
-        if (b.dataset.openList) this.openList(b.dataset.openList);
-        if (b.dataset.action === 'clear-queue') { this.queue = null; this.issue = null; this.pq = null; this.pissue = null; this.pages = {}; this.render(); this.el.querySelector('[data-queue],[data-pqueue]')?.focus(); }
-        if (b.dataset.trip) this.detail(b.dataset.trip);
-        if (b.dataset.tab !== undefined) { if (this.section === 'procurement') this.ptab = PTABS[+b.dataset.tab]; else this.tab = TABS[+b.dataset.tab]; this.queue = null; this.issue = null; this.pq = null; this.pissue = null; this.pages = {}; this.render();
-          if (this.section === 'fleet' && this.tab === 'Live map') this.loadLive();
-          if (this.section === 'procurement' && this.ptab === 'Purchase requests') this.loadDelay(); }
-      });
-      this.el.addEventListener('change', e => {
-        if (e.target.dataset.pfilter) { if (e.target.dataset.pfilter !== 'search') { this.pages = {}; this.pq = null; this.pissue = null; this.render(); } return; }
-        const f = e.target.dataset.filter;
-        if (f === 'search') return;
-        this.pages = {}; this.queue = null; this.issue = null;
-        if (['from','to','basis'].includes(f)) this.applyRange(); else if (f) this.render();
-      });
-      this.el.querySelectorAll('input[type=date]').forEach(i => i.addEventListener('click', () => { try { if (!i.disabled && i.showPicker) i.showPicker(); } catch (e) { /* already open or not allowed */ } }));
-      this.get('search').addEventListener('input', () => { this.pages = {}; this.queue = null; this.issue = null; this.render(); });
-      this.el.querySelector('[data-pfilter="search"]').addEventListener('input', () => { this.pages = {}; this.pq = null; this.pissue = null; this.render(); });
-      this.el.addEventListener('pointerdown', e => {
-        const layer = e.target.closest('.fo-map-layer'); if (!layer || e.target.closest('.fo-pin') || !this.live.view) return;
-        this.drag = { x: e.clientX, y: e.clientY, layer, moved: false };
-        const move = ev => { const d = this.drag; if (!d) return; const dx = ev.clientX - d.x, dy = ev.clientY - d.y; if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true; d.layer.style.transform = `translate(${dx}px,${dy}px)`; d.dx = dx; d.dy = dy; };
-        const up = () => {
-          window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
-          const d = this.drag; this.drag = null; if (!d || !d.moved) return;
-          const v = this.live.view; v.lng = unMercX(mercX(v.lng, v.z) - d.dx, v.z); v.lat = unMercY(mercY(v.lat, v.z) - d.dy, v.z); this.drawMap();
-        };
-        window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
-      });
-      if (typeof ResizeObserver === 'function') new ResizeObserver(() => { if (this.host.isConnected && this.tab === 'Live map' && this.section === 'fleet') this.drawMap(); }).observe(this.el);
-    }
-    syncTheme() {
-      // Selectors outside a shadow root cannot see Desk's theme attribute, so mirror it onto the dashboard.
-      if (typeof document === 'undefined') return;
-      const root = document.documentElement, apply = () => { if (this.el) this.el.dataset.foTheme = root.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'; };
-      apply();
-      if (typeof MutationObserver === 'undefined') return;
-      const watcher = new MutationObserver(() => { if (this.host.isConnected) apply(); else watcher.disconnect(); });
-      watcher.observe(root, { attributes: true, attributeFilter: ['data-theme'] });
-    }
-    get(f) { return this.el.querySelector(`[data-filter="${f}"]`); }
-    value(f) { return this.get(f).value; }
-    state(text, tone, section = this.section) {
-      if (!this.msgs) this.msgs = {};
-      this.msgs[section] = [text, tone];
-      if (section !== this.section) return;
-      const alert = tone === 'warn' || tone === 'error', box = this.el.querySelector('.fo-alert');
-      this.el.querySelector('.fo-state').textContent = alert ? '' : text;
-      box.hidden = !alert; box.textContent = alert ? text : ''; box.dataset.tone = tone || '';
-      this.applyLang(box.parentNode.querySelector('.fo-state'), box);
-    }
-    // ---- language ----
-    T(s) { return this.lang === 'ar' ? tr(s) : s; }
-    trHTML(html) { if (this.lang !== 'ar') return html; const d = document.createElement('div'); d.innerHTML = html; d.querySelectorAll('option:not([value])').forEach(o => o.setAttribute('value', o.textContent)); trTree(d); return d.innerHTML; }
-    applyLang(...nodes) {
-      if (!this.el) return;
-      const ar = this.lang === 'ar';
-      this.el.classList.toggle('fo-rtl', ar); this.el.setAttribute('dir', ar ? 'rtl' : 'ltr'); this.el.setAttribute('lang', ar ? 'ar' : 'en');
-      const btn = this.el.querySelector('[data-action="lang"]'); if (btn) { btn.textContent = ar ? 'English' : 'العربية'; btn.setAttribute('aria-label', ar ? 'Switch to English' : 'التبديل إلى العربية'); }
-      if (ar) (nodes.length ? nodes : [this.el]).forEach(n => n && trTree(n));
-    }
-    setLang(lang) {
-      this.lang = lang;
-      try { localStorage.setItem('fo-lang', lang); } catch (e) { /* storage unavailable */ }
-      if (lang !== 'ar') trRestore(this.el);
-      this.tabsFor = null; this.paintState(); this.render();
-      if (lang === 'ar') this.applyLang();
-    }
-    defaultRange() {
-      const today = frappe.datetime.get_today();
-      this.get('basis').value = F.date;
-      this.get('from').value = frappe.datetime.add_days(today, -7);
-      this.get('to').value = frappe.datetime.add_days(today, 7);
-    }
-    reset() {
-      ['company','type','warehouse','search','status','delivery'].forEach(f => this.get(f).value = '');
-      this.defaultRange(); this.pages = {}; this.queue = null; this.issue = null; this.applyRange();
-    }
-    period(value) {
-      const today = frappe.datetime.get_today(), n = +value;
-      this.get('basis').value = value === 'all' ? 'all' : F.date;
-      if (value !== 'all') {
-        this.get('from').value = frappe.datetime.add_days(today, n === 1 ? 1 : n < 0 ? n+1 : 0);
-        this.get('to').value = frappe.datetime.add_days(today, n === 1 ? 1 : n > 1 ? n-1 : 0);
+  /* ---------- dates (ERP site time zone, calendar arithmetic) ---------- */
+  function siteTz() {
+    try {
+      if (G.frappe && frappe.boot) {
+        if (frappe.boot.time_zone && frappe.boot.time_zone.system) { return frappe.boot.time_zone.system; }
+        if (frappe.boot.sysdefaults && frappe.boot.sysdefaults.time_zone) { return frappe.boot.sysdefaults.time_zone; }
       }
-      this.pages = {}; this.queue = null; this.issue = null; this.applyRange();
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+  function siteParts() {
+    var tz = siteTz(), o = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }, p;
+    if (tz) { o.timeZone = tz; }
+    try { p = new Intl.DateTimeFormat('en-CA', o).formatToParts(new Date()); } catch (e) { delete o.timeZone; p = new Intl.DateTimeFormat('en-CA', o).formatToParts(new Date()); }
+    var m = {}; p.forEach(function (x) { m[x.type] = x.value; }); if (m.hour === '24') { m.hour = '00'; } return m;
+  }
+  function parseISO(s) {
+    if (!s || typeof s !== 'string') { return null; }
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s); if (!m) { return null; }
+    var y = +m[1], mo = +m[2], d = +m[3], ms = Date.UTC(y, mo - 1, d), dt = new Date(ms);
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) { return null; }
+    return ms;
+  }
+  function isoOf(ms) { var d = new Date(ms); return d.getUTCFullYear() + '-' + ('0' + (d.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + d.getUTCDate()).slice(-2); }
+  function addDays(iso, n) { return isoOf(parseISO(iso) + n * 86400000); }
+  function diffDays(a, b) { return Math.round((parseISO(b) - parseISO(a)) / 86400000); }
+  var TODAY = '', STAMP = '';
+  function setToday() { var p = siteParts(); TODAY = p.year + '-' + p.month + '-' + p.day; STAMP = p.hour + ':' + p.minute; }
+  function monthStart(iso) { return iso.slice(0, 8) + '01'; }
+  function monthEnd(iso) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7); return isoOf(Date.UTC(y, m, 0)); }
+  function addMonths(iso, n) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n; return isoOf(Date.UTC(y, m, 1)); }
+  function weekStartOf(iso) { var dow = new Date(parseISO(iso)).getUTCDay(); return addDays(iso, -((dow - CFG.weekStart + 7) % 7)); }
+  function quarterStart(iso) { var m = +iso.slice(5, 7); return iso.slice(0, 5) + ('0' + (Math.floor((m - 1) / 3) * 3 + 1)).slice(-2) + '-01'; }
+  function shiftMonths(iso, n) {
+    var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n, d = +iso.slice(8, 10), last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    return isoOf(Date.UTC(y, m, Math.min(d, last)));
+  }
+  function periodRange(key, cf, ct) {
+    var t = TODAY, y = t.slice(0, 4), ws = weekStartOf(t), qs = quarterStart(t), lm = addMonths(monthStart(t), -1);
+    switch (key) {
+      case 'today': return [t, t];
+      case 'yesterday': return [addDays(t, -1), addDays(t, -1)];
+      case 'week': return [ws, addDays(ws, 6)];
+      case 'lastWeek': return [addDays(ws, -7), addDays(ws, -1)];
+      case 'month': return [monthStart(t), monthEnd(t)];
+      case 'lastMonth': return [lm, monthEnd(lm)];
+      case 'quarter': return [qs, monthEnd(addMonths(qs, 2))];
+      case 'year': return [y + '-01-01', y + '-12-31'];
+      case 'prevYear': return [(y - 1) + '-01-01', (y - 1) + '-12-31'];
+      case 'custom': return [cf, ct];
+      default: return [y + '-01-01', t];   // ytd
     }
-    // The trips loaded always cover the picked range plus a live window around today, so the headline counts never depend on the picker.
-    liveWindow() { const t = frappe.datetime.get_today(); return [shift(t, -30), shift(t, 14)]; }
-    inRange(r) {
-      const basis = this.value('basis'), from = this.value('from'), to = this.value('to');
-      if (!basis || basis === 'all') return true;
-      const d = day(r[basis]);
-      return !!d && d >= from && d <= to;
+  }
+  /* Comparison window: the same span one preset unit earlier; custom ranges compare with the equally long range before. */
+  function prevRange(key, from, to) {
+    switch (key) {
+      case 'today': case 'yesterday': return [addDays(from, -1), addDays(to, -1)];
+      case 'week': case 'lastWeek': return [addDays(from, -7), addDays(to, -7)];
+      case 'month': case 'lastMonth': return [shiftMonths(from, -1), shiftMonths(to, -1)];
+      case 'quarter': return [shiftMonths(from, -3), shiftMonths(to, -3)];
+      case 'ytd': case 'year': case 'prevYear': return [shiftMonths(from, -12), shiftMonths(to, -12)];
+      default: var n = diffDays(from, to) + 1; return [addDays(from, -n), addDays(from, -1)];
     }
-    needsFetch() {
-      const L = this.loaded, basis = this.value('basis'), from = this.value('from'), to = this.value('to');
-      if (!L || this.capped) return true;
-      if (L.basis === 'all') return false;
-      if (basis === 'all' || basis !== L.basis) return true;
-      return !from || !to || from > to || from < L.from || to > L.to;
+  }
+  /* In-progress periods stop at today, so this month to date compares with the same days of last month. */
+  function clip(r) { return [r[0], r[1] > TODAY && r[0] <= TODAY ? TODAY : r[1]]; }
+  function cmpRanges() { var c = clip(PERIOD); return { cur: c, prev: prevRange(F.period, c[0], c[1]) }; }
+  function monthList(from, to) { var out = [], cur = monthStart(from); for (var i = 0; i < 72 && cur <= to; i++) { out.push(cur.slice(0, 7)); cur = addMonths(cur, 1); } return out; }
+  function locale() { return LANG === 'ar' ? 'ar-SA-u-nu-latn-ca-gregory' : 'en-GB'; }
+  function fmtDate(iso, yr) {
+    try { var o = { day: 'numeric', month: 'short', timeZone: 'UTC' }; if (yr) { o.year = 'numeric'; } return new Intl.DateTimeFormat(locale(), o).format(new Date(parseISO(String(iso).slice(0, 10)))); } catch (e) { return iso; }
+  }
+  function rangeLabel(r) {
+    if (!r || !r[0] || !r[1]) { return ''; }
+    return r[0] === r[1] ? fmtDate(r[0], true) : fmtDate(r[0], r[0].slice(0, 4) !== r[1].slice(0, 4)) + ' – ' + fmtDate(r[1], true);
+  }
+  var PLR = null;
+  function daysTxt(n) {
+    if (LANG !== 'ar') { return num(n) + (n === 1 ? ' day' : ' days'); }
+    var c = 'other'; try { c = (PLR || (PLR = new Intl.PluralRules('ar'))).select(n); } catch (e) { /* generic form */ }
+    return c === 'one' ? 'يوم واحد' : c === 'two' ? 'يومان' : c === 'few' ? n + ' أيام' : c === 'many' ? n + ' يومًا' : n + ' يوم';
+  }
+  function ageOf(iso) { var d = iso ? diffDays(String(iso).slice(0, 10), TODAY) : 0; return isNaN(d) ? 0 : Math.max(0, d); }
+  function lateTxt(iso) {
+    var d = diffDays(String(iso).slice(0, 10), TODAY); if (isNaN(d)) { return ''; }
+    return d > 0 ? tr(daysTxt(d) + ' overdue', 'متأخر ' + daysTxt(d)) : d === 0 ? tr('Due today', 'مستحق اليوم') : tr('Due in ' + daysTxt(-d), 'مستحق خلال ' + daysTxt(-d));
+  }
+  function agoTxt(iso, en, ar) { var a = ageOf(iso); return a ? tr((en || 'Waiting') + ' ' + daysTxt(a), (ar || 'منذ') + ' ' + daysTxt(a)) : tr('Today', 'اليوم'); }
+
+  /* ---------- ERP read-only API layer (bounded concurrency, one retry, cancellation) ---------- */
+  var REQ_TIMEOUT = 90000;
+  function callP(method, args) {
+    return new Promise(function (resolve, reject) {
+      var done = false, ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var timer = setTimeout(function () { if (done) { return; } done = true; if (ctl) { try { ctl.abort(); } catch (x) { /* ignore */ } } var te = new Error('Request timed out'); te.timeout = true; reject(te); }, REQ_TIMEOUT);
+      var body = new URLSearchParams();
+      Object.keys(args || {}).forEach(function (k) { var v = args[k]; if (v === undefined || v === null) { return; } body.append(k, (typeof v === 'object') ? JSON.stringify(v) : String(v)); });
+      fetch('/api/method/' + method, { method: 'POST', credentials: 'same-origin', signal: ctl ? ctl.signal : undefined,
+        headers: { 'X-Frappe-CSRF-Token': (G.frappe && frappe.csrf_token) || '', 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' }, body: body.toString() })
+        .then(function (r) { return r.text().then(function (txt) { return { r: r, txt: txt }; }); })
+        .then(function (o) {
+          if (done) { return; } done = true; clearTimeout(timer);
+          var j = null; try { j = JSON.parse(o.txt); } catch (x) { /* ignore */ }
+          if (o.r.ok && j && !j.exc) { resolve(j.message === undefined ? null : j.message); return; }
+          var ex = String((j && (j.exception || j.exc_type)) || '');
+          var perm = o.r.status === 401 || o.r.status === 403 || /permission/i.test(ex);
+          var e = new Error((perm ? 'No access to ' + ((args && (args.doctype || args.report_name)) || method) : (ex.split(':').slice(-1)[0].trim() || ('HTTP ' + o.r.status))));
+          e.status = perm ? 403 : o.r.status; reject(e);
+        })
+        .catch(function (err) { if (done) { return; } done = true; clearTimeout(timer); reject(err || new Error('request failed')); });
+    });
+  }
+  var active = 0, queue = [];
+  function pump() {
+    while (active < CFG.conc && queue.length) {
+      var j = queue.shift(); active++;
+      j.fn().then(j.res, j.rej).then(function () { active--; pump(); });
     }
-    applyRange() {
-      this.pages = {}; this.queue = null; this.issue = null;
-      this.get('from').disabled = this.get('to').disabled = this.value('basis') === 'all';
-      this.loadRecords();
-      if (this.needsFetch()) this.refresh(); else { this.state(`${plural(this.rows.length, 'trip')} loaded. Updated ${String(frappe.datetime.now_datetime()).slice(11, 16)} site time.`, '', 'fleet'); this.render(); }
-    }
-    activeRange() {
-      const basis = this.value('basis');
-      if (basis === 'all') return 'all';
-      if (basis !== F.date) return null;
-      const t = frappe.datetime.get_today(), from = this.value('from'), to = this.value('to');
-      const presets = { '0': [t, t], '1': [shift(t, 1), shift(t, 1)], '7': [t, shift(t, 6)], '-30': [shift(t, -29), t] };
-      return Object.keys(presets).find(k => presets[k][0] === from && presets[k][1] === to) ?? null;
-    }
-    rangeLabel() {
-      const k = this.activeRange(), names = { '0': 'Today', '1': 'Tomorrow', '7': 'Next 7 days', '-30': 'Last 30 days', all: 'All dates' };
-      if (k !== null && names[k]) return names[k];
-      const b = this.value('basis'), f = this.value('from'), t = this.value('to');
-      if (b !== F.date || !f || !t) return 'Selected range';
-      return f === t ? dayLabel(f) : `${dayLabel(f)} to ${dayLabel(t)}`;
-    }
-    queueRows(rows, index) {
-      const working = rows.filter(active), today = frappe.datetime.get_today(), inR = working.filter(r => this.inRange(r));
-      const timeErr = r => issues(r).some(i => /timestamp/i.test(i));
-      return [()=>inR,
-        ()=>working.filter(isPlanned),
-        ()=>inR.filter(delivery),
-        ()=>inR.filter(follow),
-        ()=>working.filter(timeErr),
-        ()=>working.filter(r=>!r.driver||!r.vehicle)][index]();
-    }
-    exportCSV() {
-      if (this.section === 'procurement') { this.exportProcurement(); return; }
-      const rows = this.filtered().filter(r => this.inRange(r));
-      if (!rows.length) { frappe.msgprint(this.T('No matching trips to export.')); return; }
-      const columns = ['name','company',F.date,F.type,F.from,F.to,'vehicle','driver','status','delivery_status',F.report,F.depart,F.arrive,F.exit];
-      // Prevent spreadsheet programs from executing formula-like record values.
-      const cell = v => '"' + (/^[\s]*[=+@\-\t\r]/.test(String(v||'')) ? "'" : '') + String(v??'').replace(/"/g,'""') + '"';
-      const csv = '﻿' + [columns,...rows.map(r=>columns.map(c=>r[c]))].map(row=>row.map(cell).join(',')).join('\r\n');
-      const url = URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'})), a = document.createElement('a');
-      a.href = url; a.download = `logistics-fleet-${frappe.datetime.get_today()}${this.capped?'-partial':''}.csv`;
-      document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000);
-      frappe.show_alert({message:this.T(`Exported ${plural(rows.length,'trip')}${this.capped?' (partial data)':''}. The file includes every status that matches the filters, whatever tab is open.`),indicator:'blue'});
-    }
-    async refresh() {
-      const token = ++this.version;
-      const from = this.value('from'), to = this.value('to'), basis = this.value('basis');
-      this.rows = []; this.loaded = null; this.capped = false; this.pages = {}; this.loading = true; this.render();
-      this.el.removeAttribute('aria-busy');
-      this.get('from').disabled = this.get('to').disabled = basis === 'all';
-      if (basis !== 'all' && (!from || !to || from > to)) { this.loading = false; this.render(); this.state('Choose a valid date range: the start date must be on or before the end date.', 'error', 'fleet'); return; }
-      this.el.setAttribute('aria-busy', 'true'); this.state('Loading permitted Delivery Trips…', '', 'fleet');
-      const [lf, lt] = this.liveWindow(), wf = from < lf ? from : lf, wt = to > lt ? to : lt;
-      const filters = basis === 'all' ? [] : [[basis, '>=', basis === F.depart ? `${wf} 00:00:00` : wf], [basis, '<=', basis === F.depart ? `${wt} 23:59:59` : wt]];
-      const rows = []; let capped = false;
-      try {
-        for (let start=0; start<10000; start+=500) {
-          const page = await frappe.db.get_list('Delivery Trip', { fields, filters, order_by:'name asc', limit_start:start, limit_page_length:500, limit:500 });
-          if (token !== this.version || !this.host.isConnected) return;
-          rows.push(...page);
-          if (page.length < 500) break;
-          if (start === 9500) capped = true;
-        }
-        this.rows = rows; this.capped = capped; this.loaded = { basis, from: wf, to: wt };
-        for (const [filter,field] of [['company','company'],['warehouse',F.from]]) {
-          const select = this.get(filter), prior = select.value;
-          select.innerHTML = `<option value="">${filter === 'company' ? 'All permitted companies' : 'All sources'}</option>` + [...new Set(rows.map(r=>r[field]).filter(Boolean))].sort().map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
-          select.value = prior; if (select.selectedIndex < 0) select.selectedIndex = 0;
-        }
-        this.loading = false; this.render();
-        if (capped) this.state('Partial results: the 10,000-trip limit was reached, so counts cover loaded trips only. Narrow the date range.', 'warn', 'fleet');
-        else this.state(`${plural(rows.length, 'trip')} loaded. Updated ${String(frappe.datetime.now_datetime()).slice(11, 16)} site time.`, '', 'fleet');
-        // Background work after the trips are on screen: vehicles, procurement (for the switch count) and the map positions.
-        if (!this.veh.loaded) this.loadVehicles();
-        if (!this.recs.loaded) this.loadRecords();
-        if (!this.proc.loaded && !this.proc.loading) this.refreshProcurement();
-        if (this.tab === 'Live map') this.loadLive();
-      } catch (error) {
-        if (token !== this.version) return;
-        this.rows = []; this.loading = false; this.render();
-        this.state('Could not load trips. Check Delivery Trip read permission and custom field access, then select Refresh.', 'error', 'fleet');
-        console.error('Logistics Dashboard fleet load failed', error);
-      } finally { if (token === this.version) this.el.removeAttribute('aria-busy'); }
-    }
-    filtered() {
-      const q = this.value('search').trim().toLowerCase();
-      return this.rows.filter(r => (!this.value('company') || r.company === this.value('company')) &&
-        (!this.value('warehouse') || r[F.from] === this.value('warehouse')) &&
-        (!this.value('type') || r[F.type] === this.value('type')) &&
-        (!this.value('status') || tripState(r) === this.value('status')) &&
-        (!this.value('delivery') || r.delivery_status === this.value('delivery')) &&
-        (!q || [r.name,r.driver,r.driver_name,r.vehicle,r[F.from],r[F.to]].some(v=>String(v||'').toLowerCase().includes(q))));
-    }
-    table(rows, mode='normal', empty='No trips match these filters.', size=25) {
-      const key = `table-${this.tableIndex++}`;
-      (this.lists || (this.lists = {}))[key] = { dt: 'Delivery Trip', names: rows.map(r => r.name) };
-      if (!rows.length) return `<div class="fo-empty">${esc(empty)}${this.filterCount ? ' <button type="button" class="fo-link" data-action="reset">Reset filters</button>' : ''}</div>`;
-      const page = Math.min(this.pages[key]||0,Math.max(0,Math.ceil(rows.length/size)-1));
-      const start = page*size;
-      const cells = r => {
-        const list = issues(r), to = r[F.to];
-        const dep = r[F.depart] ? `<time datetime="${esc(r[F.depart])}"><strong>${esc(String(r[F.depart]).slice(11, 16) || '–')}</strong><span>${esc(dayLabel(day(r[F.depart])))}</span></time>` : '<span class="fo-muted">Not set</span>';
-        const progress = mode === 'issues'
-          ? `<div class="fo-issues">${list.map(i => `<span class="${urgent(i) ? 'fo-bad' : 'fo-warn'}">${esc(i)}</span>`).join('') || '<span class="fo-warn">Review trip</span>'}</div>`
-          : `<div class="fo-prog">${executed(r) ? journey(r) : ''}<span class="fo-stage">${esc(stage(r))}</span></div>`;
-        return `<tr data-row="${esc(r.name)}" data-lane="${lane(r)}">
-          <td data-slot="trip"><button type="button" class="fo-link" data-trip="${esc(r.name)}">${esc(r.name)}</button><small>${esc(r[F.type]||'Type unknown')}${r.docstatus===0?' (draft)':''}</small></td>
-          <td data-slot="route"><span>${esc(r[F.from]||'Source unknown')}</span>${to ? `<span class="fo-to">${esc(to)}</span>` : r[F.type] === 'Internal Transfer' ? '<span class="fo-to"><em>Destination not set</em></span>' : ''}<small>${esc(r.company)}</small></td>
-          <td data-slot="who" data-label="Assigned"><div class="fo-who">${r.vehicle ? link('vehicle',r.vehicle) : '<span class="fo-bad-text">No vehicle</span>'}<small>${r.driver ? link('driver',r.driver,r.driver_name) : '<span class="fo-bad-text">No driver</span>'}</small></div></td>
-          <td data-slot="when" data-label="Departs">${dep}</td>
-          <td data-slot="status">${statusBadge(r)}${deliveryBadge(r)}</td>
-          <td data-slot="next" data-label="${mode==='issues' ? 'Needs action' : 'Progress'}">${progress}</td></tr>`;
-      };
-      return `<div class="fo-table-wrap" tabindex="0" role="region" aria-label="Trips, scrollable"><table><thead><tr><th>Trip</th><th>Route</th><th>Vehicle and driver</th><th>Departure</th><th>Status</th><th>${mode==='issues' ? 'Needs action' : 'Progress'}</th></tr></thead><tbody>${rows.slice(start,start+size).map(cells).join('')}</tbody></table></div>${this.pager(key, rows.length, start, size, page, 'trips', 'Delivery Trip')}`;
-    }
-    openList(key) {
-      const l = (this.lists || {})[key];
-      if (!l || !l.names.length) return;
-      frappe.route_options = l.names.length <= 200 ? { name: ['in', l.names] } : (LIST_FALLBACK[l.dt] ? LIST_FALLBACK[l.dt](this, frappe.datetime.get_today()) : {});
-      frappe.set_route('List', l.dt, 'List');
-    }
-    panel(title, content, note='', count=null, extra='', cls='') {
-      return `<section class="fo-panel ${cls}"><div class="fo-panel-head"><h3>${esc(title)}${count === null ? '' : `<b class="fo-count">${count}</b>`}</h3>${extra}</div>${note?`<p class="fo-note">${esc(note)}</p>`:''}<div class="fo-panel-body">${content}</div></section>`;
-    }
-    tiles(items, clickable = false, attr = 'queue') {
-      const cur = attr === 'queue' ? this.queue : this.pq;
-      return `<div class="fo-strip n${items.length}" ${clickable ? `role="group" aria-label="${attr === 'queue' ? 'Counts for the selected range' : 'Counts for the filtered orders and requests'}"` : ''}>${items.map(([label, n, note, tone], i) => {
-        const inner = `<span class="fo-kpi-label"><i aria-hidden="true"></i>${esc(label)}</span><strong>${esc(n)}</strong><small>${esc(note)}</small>`;
-        return clickable ? `<button type="button" class="fo-kpi" data-tone="${tone || ''}" data-${attr}="${i}" aria-pressed="${cur===i}">${inner}</button>` : `<div class="fo-kpi" data-tone="${tone || ''}">${inner}</div>`;
-      }).join('')}</div>`;
-    }
-    skeleton() {
-      const strip = `<div class="fo-strip n6" aria-hidden="true">${'<div class="fo-kpi"><i class="fo-skel" style="width:55%"></i><i class="fo-skel big"></i><i class="fo-skel" style="width:80%"></i></div>'.repeat(6)}</div>`;
-      const card = '<section class="fo-panel" aria-hidden="true"><div class="fo-panel-head"><i class="fo-skel" style="width:140px;height:16px"></i></div><div class="fo-panel-body"><i class="fo-skel" style="height:14px"></i><i class="fo-skel" style="height:14px;width:80%"></i><i class="fo-skel" style="height:14px;width:60%"></i><i class="fo-skel" style="height:80px"></i></div></section>';
-      return `${strip}<div class="fo-grid g3">${card.repeat(3)}</div><div class="fo-grid g2">${card.repeat(2)}</div>`;
-    }
-    issueGroups(working) {
-      const m = tally(working.flatMap(r => issues(r).map(i => ({ i }))), x => x.i);
-      return [...m].sort((a, b) => urgent(b[0]) - urgent(a[0]) || b[1] - a[1] || a[0].localeCompare(b[0]));
-    }
-    render() { this.renderMain(); this.applyLang(); }
-    renderMain() {
-      if (!this.el) return;
-      this.tableIndex = 0; this.lists = {};
-      this.syncSection();
-      if (this.section === 'procurement') { this.renderProcurement(); return; }
-      // `all` is every loaded trip that matches the filters (live window); `rows` is the part inside the picked date range.
-      const all = this.filtered(), rows = all.filter(r => this.inRange(r)), working = rows.filter(active), live = all.filter(active), today = frappe.datetime.get_today();
-      const planned = live.filter(isPlanned), followUp = rows.filter(follow);
-      const clash = clashes(working);
-      // Controls reflect state.
-      this.filterCount = ['company','type','warehouse','status','delivery'].filter(f => this.value(f)).length + (this.value('basis') === F.depart ? 1 : 0);
-      const range = this.activeRange();
-      this.el.querySelectorAll('[data-period]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.period === range)));
-      const toggle = this.el.querySelector('[data-action="filters"]'), count = toggle.querySelector('.fo-count');
-      toggle.setAttribute('aria-expanded', String(this.filtersOpen)); this.el.querySelector('.fo-more').hidden = !this.filtersOpen;
-      count.hidden = !this.filterCount; count.textContent = this.filterCount;
-      const now = stamp(frappe.datetime.now_datetime()), trips = mapTrips(all, today, now);
-      const tabCounts = [null, trips.length, planned.length, null, followUp.length, null];
-      this.el.querySelectorAll('[data-tab]').forEach(b => {
-        const i = +b.dataset.tab, c = b.querySelector('.fo-count'), n = this.loading ? null : tabCounts[i];
-        if (TABS[i] === this.tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
-        c.hidden = n === null; c.textContent = n ?? '';
+  }
+  function limited(fn) { return new Promise(function (res, rej) { queue.push({ fn: fn, res: res, rej: rej }); pump(); }); }
+  function guarded(chk, method, args) {
+    return limited(function () {
+      if (destroyed || (chk && !chk())) { return Promise.resolve(null); }
+      return callP(method, args).catch(function (e) { if (e && (e.status === 403 || e.timeout || e.status === 417)) { throw e; } return new Promise(function (r) { setTimeout(r, 400); }).then(function () { return callP(method, args); }); });
+    });
+  }
+  function errKind(e) {
+    var txt = ''; try { txt = (e && (e.responseText || e.statusText || e.message)) || ''; } catch (x) { /* ignore */ }
+    return (/PermissionError|not permitted|No access|403/i.test(String(txt)) || (e && e.status === 403)) ? 'perm' : 'tech';
+  }
+  function getList(args, chk) { return guarded(chk, 'frappe.client.get_list', args); }
+  function getCount(dt, filters, chk) { return getList({ doctype: dt, fields: ['count(name) as n'], filters: filters || [], limit_page_length: 1 }, chk).then(function (r) { return +one(r).n || 0; }); }
+  /* All rows of a bounded list (paged); rejects with e.tooLarge when the source exceeds `cap`. */
+  function fetchAll(args, chk, cap) {
+    cap = cap || 20000;
+    return getCount(args.doctype, args.filters, chk).then(function (n) {
+      if (n > cap) { var e = new Error('too large'); e.tooLarge = n; throw e; }
+      var jobs = []; for (var i = 0; i < Math.ceil(n / 500); i++) { jobs.push(getList(Object.assign({}, args, { order_by: args.order_by || 'name asc', limit_start: i * 500, limit_page_length: 500 }), chk)); }
+      return Promise.all(jobs).then(function (res) { var out = []; res.forEach(function (r) { if (r) { out = out.concat(r); } }); return out; });
+    });
+  }
+  function docUrl(dt, name) {
+    try { if (G.frappe && frappe.utils && frappe.utils.get_form_link) { return frappe.utils.get_form_link(dt, name); } } catch (e) { /* fall through */ }
+    return '/app/' + dt.toLowerCase().replace(/ /g, '-') + '/' + encodeURIComponent(name);
+  }
+  function docLink(dt, name, label) { return '<a class="dms-link" href="' + esc(docUrl(dt, name)) + '" target="_blank" rel="noopener noreferrer"><bdi>' + esc(label || name) + '</bdi> ↗</a>'; }
+
+  /* ---------- data store: each source loads and renders independently; stale generations are dropped ---------- */
+  var D = {};
+  var softT = null;
+  function soon() { if (softT) { return; } softT = later(function () { softT = null; renderSoft(); }, 40); }
+  function run(key, fn) {
+    var g = GEN, chk = function () { return g === GEN && !destroyed; }, tok = {};
+    D[key] = null; D[key + 'Err'] = null; D[key + 'Tok'] = tok;
+    var mine = function () { return chk() && D[key + 'Tok'] === tok; };
+    fn(mine).then(function (v) { if (!mine()) { return; } D[key] = v; if (APP.afterLoad) { APP.afterLoad(key); } soon(); },
+      function (e) { if (!mine()) { return; } D[key + 'Err'] = e && e.tooLarge ? 'large:' + e.tooLarge : errKind(e); if (G.console && e && !e.status && !e.tooLarge) { console.error(APP.key, key, e); } soon(); });
+  }
+  function busy() { return !BOOTED || (APP.sources || []).some(function (k) { return D[k] == null && D[k + 'Err'] == null; }); }
+  function errText(kind) { return /^large:/.test(String(kind)) ? tr('too many records (' + num(+String(kind).slice(6)) + ') — narrow the filters or period', 'عدد كبير من السجلات (' + num(+String(kind).slice(6)) + ') — ضيّق المرشحات أو الفترة') : kind === 'perm' ? tr('permission denied for your user', 'لا تملك صلاحية القراءة') : tr('technical error while reading', 'خطأ تقني أثناء القراءة'); }
+
+  /* ---------- UI primitives ---------- */
+  var ICO = {
+    refresh: '<path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/>', filter: '<path d="M4 5h16l-6.2 7.6V19l-3.6 1.6v-8z"/>',
+    cal: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/>', down: '<path d="m6 9 6 6 6-6"/>',
+    prev: '<path d="m15 6-6 6 6 6"/>', next: '<path d="m9 6 6 6-6 6"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
+    up: '<path d="M12 19V6M6.5 11.5 12 6l5.5 5.5"/>', dn: '<path d="M12 5v13M6.5 12.5 12 18l5.5-5.5"/>', dl: '<path d="M12 4v11M7 10.5 12 15.5l5-5M5 20h14"/>'
+  };
+  function ico(n, cls) { return '<svg class="dms-ico' + (cls ? ' ' + cls : '') + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + ICO[n] + '</svg>'; }
+  function kpi(o) {
+    var inner = '<span class="dms-kpi-h"><span class="dms-kpi-l">' + (o.dot ? '<i class="dms-dot" style="--dms-c:' + o.dot + '"></i>' : '') + esc(o.label) + '</span>' + (o.top || '') + '</span>' +
+      '<span class="dms-kpi-n">' + o.val + '</span>' + (o.sub ? '<span class="dms-kpi-s">' + o.sub + '</span>' : '') + (o.foot != null ? '<span class="dms-kpi-f">' + o.foot + '</span>' : '');
+    var t = o.tip ? ' title="' + esc(o.tip) + '"' : '';
+    return o.act ? '<button type="button" class="dms-kpi" data-act="kpi" data-v="' + esc(o.act) + '"' + t + '>' + inner + '</button>' : '<div class="dms-kpi"' + t + '>' + inner + '</div>';
+  }
+  function kpis(list, ov) { return '<div class="dms-grid dms-kpis' + (ov ? ' dms-ov-kpis' : '') + '">' + list.join('') + '</div>'; }
+  function tagc(txt) { return '<span class="dms-tag">' + txt + '</span>'; }
+  function stat(k, txt) { return '<span class="dms-stat dms-stat-' + k + '">' + esc(txt) + '</span>'; }
+  function ctx(html) { return '<span class="dms-kpi-ctx">' + html + '</span>'; }
+  function badge(txt, color) { return '<span class="dms-badge" style="--dms-c:' + color + '">' + esc(txt) + '</span>'; }
+  function wait() { return '<span class="dms-sm">' + esc(tr('Calculating…', 'جارٍ الحساب…')) + '</span>'; }
+  function asOf() { return tagc(esc(tr('As of today', 'حتى اليوم'))); }
+  /* Value of a source-backed KPI: '…' while loading, '—' when the source failed (never a false zero). */
+  function kv(key, f) { return D[key + 'Err'] ? '—' : D[key] == null ? '…' : f(D[key]); }
+  function ks(key, f) { return D[key + 'Err'] ? esc(tr('Unavailable', 'غير متاح')) : D[key] == null ? wait() : f(D[key]); }
+  function spark(vs) {
+    var n = vs.length, real = vs.filter(function (v) { return v != null; }), pts = [];
+    if (n < 3 || real.length < 3 || !real.some(function (v) { return v > 0; })) { return ''; }
+    var max = Math.max.apply(null, real), min = Math.min(0, Math.min.apply(null, real)), rng = (max - min) || 1;
+    vs.forEach(function (v, i) { if (v != null) { pts.push([(i / (n - 1) * 100).toFixed(2), (26 - (v - min) / rng * 23).toFixed(2)]); } });
+    var line = pts.map(function (p) { return p.join(','); }).join(' L');
+    return '<svg class="dms-spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path class="dms-spark-a" d="M' + pts[0][0] + ',28 L' + line + ' L' + pts[pts.length - 1][0] + ',28 Z"/><path class="dms-spark-l" d="M' + line + '"/></svg>';
+  }
+  /* Change vs the comparison window. fmt formats values; small count bases show "was N" instead of a percentage. */
+  function deltaChip(cur, prev, R, fmt, isCount, lowerIsBetter) {
+    if (cur == null || prev == null || !R) { return ''; }
+    fmt = fmt || moneyS;
+    var tip = tr('This period', 'هذه الفترة') + ' (' + rangeLabel(R[0]) + '): ' + fmt(cur) + '\n' + tr('Previous', 'السابقة') + ' (' + rangeLabel(R[1]) + '): ' + fmt(prev);
+    var sr = '<span class="dms-sr"> ' + esc(tr('vs previous period', 'مقارنة بالفترة السابقة')) + '</span>';
+    if (prev === 0 || (isCount && prev < 5)) { return '<span class="dms-delta dms-flat" data-tip="' + esc(tip) + '">' + esc(tr('was', 'كان')) + ' <bdi>' + esc(fmt(prev)) + '</bdi>' + sr + '</span>'; }
+    var p = (cur - prev) / prev * 100, a = Math.abs(p), k = a < 0.05 ? 'flat' : p > 0 ? 'up' : 'down', tone = k === 'flat' ? 'flat' : ((k === 'up') !== !!lowerIsBetter ? 'up' : 'down');
+    var txt = a > 999 ? '10×+' : (a < 10 ? a.toFixed(1) : Math.round(a)) + '%';
+    return '<span class="dms-delta dms-' + tone + '" data-tip="' + esc(tip) + '">' + (k === 'flat' ? '' : ico(k === 'up' ? 'up' : 'dn')) + '<bdi>' + (k === 'down' ? '−' : '') + txt + '</bdi>' + sr + '</span>';
+  }
+  function panel(title, body, extra, meta) {
+    return '<section class="dms-panelbox ' + (extra || '') + '"><div class="dms-ph"><h3 class="dms-h3">' + esc(title) + '</h3>' + (meta ? '<span class="dms-ph-meta">' + meta + '</span>' : '') + '</div>' + body + '</section>';
+  }
+  function note(txt) { return '<p class="dms-note">' + txt + '</p>'; }
+  function alertBox(kind, html) { return '<div class="dms-alert dms-alert-' + kind + '" role="' + (kind === 'err' ? 'alert' : 'status') + '">' + html + '</div>'; }
+  function empty(txt) { return '<div class="dms-empty">' + esc(txt || tr('No data for the current filters.', 'لا توجد بيانات للمرشحات الحالية.')) + '</div>'; }
+  function srcErr(kind, what) { return alertBox('err', '<b>' + esc(tr('Source unavailable', 'المصدر غير متاح')) + ':</b> ' + esc(what) + ' — ' + esc(errText(kind))); }
+  function skel(n, cls) { return rep('<div class="dms-skel ' + (cls || '') + '"></div>', n); }
+  /* Body for a panel backed by source `key`: skeleton while loading, named error on failure, else f(data). */
+  function src(key, what, f) { return D[key + 'Err'] ? srcErr(D[key + 'Err'], what) : D[key] == null ? skel(1, 'dms-skel-panel') : f(D[key]); }
+
+  /* ---------- charts (HTML/CSS; hover details via the shared tooltip, data-tip) ---------- */
+  function niceMax(v) { if (!(v > 0)) { return 1; } var p = Math.pow(10, Math.floor(Math.log(v) / Math.LN10)), f = v / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
+  function axisFmt(v) { var a = Math.abs(v); return a >= 1e9 ? +(v / 1e9).toFixed(1) + 'B' : a >= 1e6 ? +(v / 1e6).toFixed(1) + 'M' : a >= 1e3 ? +(v / 1e3).toFixed(1) + 'K' : String(a < 10 ? +v.toFixed(2) : Math.round(v)); }
+  function bucketLabel(k, g, short) {
+    if (g === 'cat') { return String(k); }
+    if (g === 'week' && !short) { return tr('Week of ', 'أسبوع ') + fmtDate(k, true); }
+    if (g !== 'month') { return fmtDate(k, !short); }
+    try { return new Intl.DateTimeFormat(locale(), { month: 'short', year: '2-digit', timeZone: 'UTC' }).format(new Date(parseISO(k + '-01'))); } catch (e) { return k; }
+  }
+  /* Count charts get whole-number ticks (top is a multiple of 4), so small counts never show 0, 1, 1, 2, 2. */
+  function countTop(max, fmt) { var t = niceMax(max); return fmt === num ? Math.max(4, Math.ceil(t / 4) * 4) : t; }
+  function granName(g) { return g === 'day' ? tr('by day', 'يوميًا') : g === 'week' ? tr('by week', 'أسبوعيًا') : tr('by month', 'شهريًا'); }
+  /* Time buckets for a range: daily up to 45 days, weekly up to 120 days, monthly beyond; stops at today. */
+  function buckets(range) {
+    var from = range[0], to = clip(range)[1], span = diffDays(from, to) + 1, g = span <= 45 ? 'day' : span <= 120 ? 'week' : 'month', keys = [], cur, i;
+    function keyOf(iso) { iso = String(iso).slice(0, 10); return g === 'day' ? iso : g === 'week' ? weekStartOf(iso) : iso.slice(0, 7); }
+    if (to < from) { return { keys: [], gran: g, keyOf: keyOf }; }
+    if (g === 'month') { keys = monthList(from, to); } else { cur = keyOf(from); for (i = 0; i < 200 && cur <= to; i++) { keys.push(cur); cur = addDays(cur, g === 'day' ? 1 : 7); } }
+    return { keys: keys, gran: g, keyOf: keyOf };
+  }
+  /* Grouped rows (one per date) folded into buckets: rows[dateField], rows[valField]. */
+  function series(range, rows, dateF, valF) {
+    var B = buckets(range), d = {}; B.keys.forEach(function (k) { d[k] = { v: 0, n: 0 }; });
+    (rows || []).forEach(function (r) { var k = B.keyOf(r[dateF]); if (d[k]) { d[k].v += valF ? (+r[valF] || 0) : 1; d[k].n += +r.n || (valF ? 0 : 1); } });
+    B.d = d; return B;
+  }
+  function legend(series) { return '<div class="dms-legend">' + series.map(function (s) { return '<span><i style="--dms-c:' + s.color + '"></i>' + esc(s.label) + '</span>'; }).join('') + '</div>'; }
+  /* Column chart. ser = [{label, color, val: function (key) {}}]; fmt formats values (default money). */
+  function barChart(keys, gran, ser, fmt, extraTip, emptyTxt) {
+    if (!Array.isArray(ser)) { ser = [ser]; }
+    fmt = fmt || moneyFull; var max = 0;
+    keys.forEach(function (k) { ser.forEach(function (s) { max = Math.max(max, s.val(k) || 0); }); });
+    if (!keys.length || !max) { return empty(emptyTxt || tr('Nothing in this range.', 'لا شيء في هذا النطاق.')); }
+    var top = countTop(max, fmt), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, gran) + ser.map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k) || 0); }).join('') + (extraTip ? extraTip(k) : '');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '">' + ser.map(function (s) { var v = s.val(k) || 0; return '<i class="dms-bar' + (v ? '' : ' dms-bar-0') + '" style="height:' + (v / top * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i>'; }).join('') + '</div>';
+    }).join('');
+    var aria = ser.map(function (s) { return s.label + ': ' + keys.map(function (k) { return bucketLabel(k, gran, true) + ' ' + fmt(s.val(k) || 0); }).join(', '); }).join('; ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + (ser.length > 1 ? legend(ser) : '');
+  }
+  /* Line chart for balances (may go negative). ser = [{label, color, val(key), dash?}]; the first series is the main line. */
+  function lineChart(keys, gran, ser, fmt) {
+    fmt = fmt || moneyFull; var all = [];
+    keys.forEach(function (k) { ser.forEach(function (s) { var v = s.val(k); if (v != null) { all.push(v); } }); });
+    if (!keys.length || !all.length) { return empty(); }
+    var mx = Math.max.apply(null, all), mn = Math.min.apply(null, all), hi = mx > 0 ? niceMax(mx) : 0, lo = mn < 0 ? -niceMax(-mn) : 0;
+    if (hi === lo) { hi = lo + 1; }
+    var y = function (v) { return (100 - (v - lo) / (hi - lo) * 100).toFixed(2); }, x = function (i) { return (keys.length < 2 ? 50 : i / (keys.length - 1) * 100).toFixed(2); };
+    var ticks = [0, 0.25, 0.5, 0.75, 1].map(function (t) { return lo + (hi - lo) * t; });
+    var paths = ser.map(function (s) { var pts = keys.map(function (k, i) { var v = s.val(k); return v == null ? null : x(i) + ',' + y(v); }).filter(Boolean); return '<polyline class="dms-line' + (s.dash ? ' dms-line-ref' : '') + '" style="--dms-c:' + s.color + '" points="' + pts.join(' ') + '"/>'; }).join('');
+    var zero = lo < 0 ? '<i class="dms-gl dms-gl-0" style="bottom:' + ((0 - lo) / (hi - lo) * 100).toFixed(2) + '%"></i>' : '';
+    var hits = keys.map(function (k) { return '<div class="dms-col dms-col-hit" data-tip="' + esc(bucketLabel(k, gran) + ser.map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k)); }).join('')) + '"></div>'; }).join('');
+    var aria = ser[0].label + ': ' + keys.map(function (k) { return bucketLabel(k, gran, true) + ' ' + fmt(ser[0].val(k)); }).join(', ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (v, i) { return '<span style="bottom:' + i * 25 + '%">' + axisFmt(v) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + [0, 25, 50, 75, 100].map(function (b) { return '<i class="dms-gl" style="bottom:' + b + '%"></i>'; }).join('') + zero + '<svg class="dms-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">' + paths + '</svg><div class="dms-cols">' + hits + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + (ser.length > 1 ? legend(ser) : '');
+  }
+  /* Stacked columns (one bar per key, segments per series). */
+  function stackChart(keys, gran, ser, fmt) {
+    fmt = fmt || num; var tot = {}, max = 0;
+    keys.forEach(function (k) { tot[k] = sum(ser, function (s) { return s.val(k) || 0; }); max = Math.max(max, tot[k]); });
+    if (!keys.length || !max) { return empty(); }
+    var top = countTop(max, fmt), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, gran) + ser.filter(function (s) { return s.val(k); }).map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k)); }).join('');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '"><span class="dms-stackbar" style="height:' + (tot[k] / top * 100).toFixed(2) + '%">' + ser.map(function (s) { var v = s.val(k) || 0; return v ? '<i style="flex:' + v + ' 0 0;background:' + s.color + '"></i>' : ''; }).join('') + '</span></div>';
+    }).join('');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(ser.map(function (s) { return s.label; }).join(', ')) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + legend(ser);
+  }
+  function fitChartLabels() {
+    HOST.querySelectorAll('.dms-xaxis').forEach(function (axis) {
+      var labels = axis.querySelectorAll('span'), widest = 0;
+      labels.forEach(function (label) { var range = document.createRange(); range.selectNodeContents(label); widest = Math.max(widest, range.getBoundingClientRect().width); });
+      var slots = Math.max(1, Math.min(8, Math.floor(axis.clientWidth / (widest + 16)))), step = Math.max(1, Math.ceil(labels.length / slots));
+      labels.forEach(function (label, i) { label.style.visibility = i % step ? 'hidden' : 'visible'; });
+    });
+  }
+  /* Share rows: label · bar · value · %. items = [{label, value, color, act?, tip?}]; ordered=true keeps the given order. */
+  function shareList(items, head, fmt, ordered) {
+    fmt = fmt || num; var tot = sum(items, function (s) { return s.value; }), rows = items.filter(function (s) { return s.value; });
+    if (!ordered) { rows = rows.slice().sort(function (a, b) { return b.value - a.value; }); }
+    if (!tot) { return empty(); }
+    return (head ? '<div class="dms-share-t">' + head + '</div>' : '') + rows.map(function (s) {
+      var tip = s.tip || (s.label + ': ' + fmt(s.value) + ' (' + pct(s.value, tot) + ')');
+      var inner = '<span class="dms-share-l"><i class="dms-dot" style="--dms-c:' + s.color + '"></i>' + bdi(s.label) + '</span><span class="dms-share-b"><i style="width:' + (s.value / tot * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i></span>' +
+        '<span class="dms-num">' + esc(fmt(s.value)) + '</span><span class="dms-share-p dms-num">' + pct(s.value, tot, 0) + '</span>';
+      return s.act ? '<button type="button" class="dms-share dms-share-btn" data-act="kpi" data-v="' + esc(s.act) + '" data-tip="' + esc(tip) + '">' + inner + '</button>' : '<div class="dms-share" data-tip="' + esc(tip) + '">' + inner + '</div>';
+    }).join('');
+  }
+  /* Ranked horizontal bars: items = [{label, value, color?, act?}]. */
+  function hbars(items, fmt, color) {
+    if (!items.length) { return empty(); }
+    var max = Math.max.apply(null, items.map(function (i) { return Math.abs(i.value); }).concat([1])); fmt = fmt || num;
+    return items.map(function (i) {
+      var inner = '<span class="dms-split-l">' + bdi(i.label) + '</span><span class="dms-split"><i style="width:' + (Math.abs(i.value) / max * 100).toFixed(2) + '%;background:' + (i.color || color || 'var(--dms-royal)') + '"></i></span><span class="dms-num dms-split-v">' + esc(fmt(i.value)) + '</span>';
+      var tip = ' data-tip="' + esc(i.label + ': ' + fmt(i.value)) + '"';
+      return i.act ? '<button type="button" class="dms-stack-row dms-split-row" data-act="kpi" data-v="' + esc(i.act) + '"' + tip + '>' + inner + '</button>' : '<div class="dms-stack-row dms-split-row"' + tip + '>' + inner + '</div>';
+    }).join('');
+  }
+  /* Two-part bars ranked by total: items = [{label, total, part, act?}]; parts = [{label, color}] for part and remainder. */
+  function splitBars(items, parts, fmt) {
+    if (!items.length) { return empty(); }
+    fmt = fmt || money; var max = Math.max.apply(null, items.map(function (i) { return i.total; }).concat([1]));
+    return items.map(function (i) {
+      var tip = i.label + '\n' + parts[0].label + ': ' + fmt(i.part) + '\n' + parts[1].label + ': ' + fmt(i.total - i.part);
+      var bar = '<span class="dms-split"><i style="width:' + (i.part / max * 100).toFixed(2) + '%;background:' + parts[0].color + '"></i><i style="width:' + (Math.max(0, i.total - i.part) / max * 100).toFixed(2) + '%;background:' + parts[1].color + '"></i></span>';
+      var inner = '<span class="dms-split-l">' + bdi(i.label) + '</span>' + bar + '<span class="dms-num dms-split-v">' + esc(fmt(i.total)) + '</span>';
+      return i.act ? '<button type="button" class="dms-stack-row dms-split-row" data-act="kpi" data-v="' + esc(i.act) + '" data-tip="' + esc(tip) + '">' + inner + '</button>' : '<div class="dms-stack-row dms-split-row" data-tip="' + esc(tip) + '">' + inner + '</div>';
+    }).join('') + legend(parts);
+  }
+  function mixBar(segs) {
+    var tot = sum(segs, function (s) { return s.value; }); if (!tot) { return ''; }
+    return '<span class="dms-mix"><span class="dms-mix-b">' + segs.map(function (s) { return s.value ? '<i style="width:' + (s.value / tot * 100).toFixed(2) + '%;background:' + s.color + '" data-tip="' + esc(s.label + ': ' + (s.fmt || num)(s.value)) + '"></i>' : ''; }).join('') + '</span></span>';
+  }
+  var PAL = ['var(--dms-royal)', '#6b8be0', '#1f8a5b', '#d97a1e', '#8a97a8', '#a3b4ef', '#c2412d', '#d6a419', '#4b5a6e', '#b6bfca'];
+
+  /* ---------- tables: client-side (search / sort / pagination / CSV) and server-side (paginated, sortable, CSV) ---------- */
+  var TBL = {}, TS = {}, SS = {}, focusId = null;
+  function regTable(spec) { TBL[spec.id] = spec; return '<div class="dms-tbl" data-tbl="' + esc(spec.id) + '"></div>'; }
+  function fillTables(scope) { var els = (scope || HOST).querySelectorAll('[data-tbl]'); for (var i = 0; i < els.length; i++) { fillTable(els[i].getAttribute('data-tbl'), els[i]); } }
+  function clientRows(sp, st) {
+    var rows = sp.rows, q = st.q.trim().toLowerCase();
+    if (q) { rows = rows.filter(function (r) { return sp.text(r).toLowerCase().indexOf(q) >= 0; }); }
+    if (st.sk) { var col = sp.cols.filter(function (c) { return c.k === st.sk; })[0]; if (col && col.s) { rows = rows.slice().sort(function (a, b) { var x = col.s(a), y = col.s(b); return (x < y ? -1 : x > y ? 1 : 0) * st.dir; }); } }
+    return rows;
+  }
+  function thead(sp, sk, dir, act, id) {
+    return '<thead><tr>' + sp.cols.map(function (c) {
+      var key = act === 'ssort' ? c.sf : c.k, can = act === 'ssort' ? !!c.sf : !!c.s, on = can && sk === key;
+      return '<th class="' + (can ? 'dms-th-s' : '') + (c.num ? ' dms-th-n' : '') + '"' + (can ? ' data-act="' + act + '" data-id="' + esc(id) + '" data-v="' + esc(key) + '" tabindex="0" aria-sort="' + (on ? (dir > 0 ? 'ascending' : 'descending') : 'none') + '"' : '') + '>' + esc(c.h) + (on ? (dir > 0 ? ' ▲' : ' ▼') : '') + '</th>';
+    }).join('') + '</tr></thead>';
+  }
+  function tcells(sp, r) { return '<tr>' + sp.cols.map(function (c) { return '<td' + (c.num ? ' class="dms-td-n"' : '') + '>' + c.r(r) + '</td>'; }).join('') + '</tr>'; }
+  function fillTable(id, el) {
+    var sp = TBL[id]; el = el || HOST.querySelector('[data-tbl="' + id + '"]'); if (!sp || !el) { return; }
+    if (sp.server) { return fillServer(id, el); }
+    var st = TS[id] || (TS[id] = { q: '', page: 1, sk: sp.sk || '', dir: sp.dir || 1 }), rows = clientRows(sp, st);
+    var ps = sp.pageSize || CFG.pageSize, pages = Math.max(1, Math.ceil(rows.length / ps)); if (st.page > pages) { st.page = pages; }
+    var slice = rows.slice((st.page - 1) * ps, st.page * ps);
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(tr('Search this table…', 'ابحث في الجدول…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search this table', 'ابحث في الجدول')) + '"><span class="dms-tb-r"><span class="dms-sm">' + num(rows.length) + ' ' + esc(rows.length === 1 ? tr('row', 'سجل') : tr('rows', 'سجل')) + (st.q ? ' / ' + num(sp.rows.length) : '') + '</span>' +
+      (rows.length ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csv" data-id="' + esc(id) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    if (sp.notice) { h += sp.notice; }
+    if (!rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
+    h += '<div class="dms-tablewrap"><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'tsort', id) + '<tbody>' + slice.map(function (r) { return tcells(sp, r); }).join('') + '</tbody>' + (sp.foot ? '<tfoot>' + sp.foot(rows) + '</tfoot>' : '') + '</table></div>';
+    h += pager(id, 'tpage', st.page, pages, rows.length, ps);
+    el.innerHTML = h; restoreFocus(el, id);
+  }
+  function pager(id, act, pg, pages, total, ps) {
+    if (total <= ps) { return ''; }
+    return '<div class="dms-pager"><span>' + esc(tr('Showing', 'عرض')) + ' ' + num((pg - 1) * ps + 1) + '–' + num(Math.min(pg * ps, total)) + ' / ' + num(total) + '</span><span><button type="button" class="dms-btn" data-act="' + act + '" data-id="' + esc(id) + '" data-v="-1"' + (pg <= 1 ? ' disabled' : '') + '>‹ ' + esc(tr('Previous', 'السابق')) + '</button> ' +
+      esc(tr('Page', 'صفحة')) + ' ' + pg + ' ' + esc(tr('of', 'من')) + ' ' + pages + ' <button type="button" class="dms-btn" data-act="' + act + '" data-id="' + esc(id) + '" data-v="1"' + (pg >= pages ? ' disabled' : '') + '>' + esc(tr('Next', 'التالي')) + ' ›</button></span></div>';
+  }
+  function restoreFocus(el, id) { if (focusId === id) { var i = el.querySelector('[data-tq]'); if (i) { i.focus(); try { i.setSelectionRange(i.value.length, i.value.length); } catch (e) { /* ignore */ } } } }
+  function srvArgs(sp, st) {
+    var q = st.q.trim(), base = { doctype: sp.dt, filters: sp.filters };
+    if (sp.parent) { base.parent = sp.parent; }
+    if (q && sp.search) { base.or_filters = sp.search.map(function (f) { return [sp.dt, f, 'like', '%' + q + '%']; }); }
+    return base;
+  }
+  function srvOrder(sp, st) { return st.sk ? st.sk + (st.dir > 0 ? ' asc' : ' desc') : sp.order; }
+  function fillServer(id, el) {
+    var sp = TBL[id], st = SS[id] || (SS[id] = { q: '', page: 1, total: null, rows: null, loading: false, err: null, req: 0, sk: '', dir: 1 });
+    if (!st.dirty && st.rows && st.key === JSON.stringify(sp.filters)) { return paintServer(id, el); }
+    st.dirty = false; st.key = JSON.stringify(sp.filters);
+    var req = ++st.req; st.loading = true; st.err = null;
+    var ps = sp.pageSize || CFG.modalPage, base = srvArgs(sp, st);
+    paintServer(id, el);
+    var chk = function () { return !destroyed && SS[id] && SS[id].req === req; };
+    if (sp.loader) { sp.loader(st.page - 1, ps, st.q.trim(), srvOrder(sp, st)).then(function (res) { if (!chk()) { return; } st.total = res.total; st.rows = res.rows || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); }, function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } }); return; }
+    var cnt = getList(Object.assign({}, base, { fields: ['count(name) as n'], limit_page_length: 1 }), chk).then(function (r) { return r ? +one(r).n || 0 : null; });
+    var rows = getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: (st.page - 1) * ps, limit_page_length: ps }), chk);
+    Promise.all([cnt, rows]).then(function (res) {
+      if (!chk()) { return; } st.total = res[0]; st.rows = res[1] || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]'));
+    }).catch(function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } });
+  }
+  function paintServer(id, el) {
+    if (!el) { return; } var sp = TBL[id], st = SS[id], ps = sp.pageSize || CFG.modalPage;
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(sp.searchHint || tr('Search…', 'بحث…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search', 'بحث')) + '"><span class="dms-tb-r"><span class="dms-sm">' + (st.total == null ? '' : num(st.total) + ' ' + esc(st.total === 1 ? tr('record', 'سجل') : tr('records', 'سجل'))) + '</span>' +
+      (st.total ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csvall" data-id="' + esc(id) + '" title="' + esc(tr('Export up to 5,000 rows', 'تصدير حتى 5,000 سجل')) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    if (st.err) { el.innerHTML = h + alertBox('err', esc(st.err === 'perm' ? tr('Permission denied for your user.', 'لا تملك صلاحية القراءة.') : tr('Technical error while reading this list.', 'خطأ تقني أثناء قراءة القائمة.')) + ' <button type="button" class="dms-linkbtn" data-act="sretry" data-id="' + esc(id) + '">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>'); return restoreFocus(el, id); }
+    if (st.loading && !st.rows) { el.innerHTML = h + '<div class="dms-skel"></div>'; return restoreFocus(el, id); }
+    if (!st.rows || !st.rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
+    var pages = Math.max(1, Math.ceil((st.total || 0) / ps));
+    h += '<div class="dms-tablewrap" style="opacity:' + (st.loading ? .55 : 1) + '"' + (st.loading ? ' aria-busy="true"' : '') + '><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'ssort', id) + '<tbody>' + st.rows.map(function (r) { return tcells(sp, r); }).join('') + '</tbody></table></div>' + pager(id, 'spage', st.page, pages, st.total || 0, ps);
+    el.innerHTML = h; restoreFocus(el, id);
+  }
+  function csvCell(v) { v = v == null ? '' : String(v); if (/^[=+\-@\t\r]/.test(v) && !/^-?[\d.,]+$/.test(v)) { v = "'" + v; } return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  function download(name, sp, rows) {
+    var cols = sp.cols.filter(function (c) { return c.c; }), lines = [cols.map(function (c) { return csvCell(c.h); }).join(',')].concat(rows.map(function (r) { return cols.map(function (c) { return csvCell(c.c(r)); }).join(','); }));
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+    a.download = String(name).replace(/[^\w-]+/g, '_') + '_' + TODAY + '.csv'; HOST.appendChild(a); a.click(); later(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+  function exportServer(id) {
+    var sp = TBL[id], st = SS[id], out = [], step = 500, base = srvArgs(sp, st), g = GEN;
+    if (sp.loader) { toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…')); var acc = [], pg = function (p) { return sp.loader(p, 500, st.q.trim(), srvOrder(sp, st)).then(function (res) { acc = acc.concat(res.rows || []); return (res.rows || []).length === 500 && acc.length < 5000 ? pg(p + 1) : acc; }); }; pg(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); }); return; }
+    function next(s) {
+      return getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: s, limit_page_length: step }), function () { return g === GEN; }).then(function (r) {
+        out = out.concat(r || []); return (r && r.length === step && out.length < 5000) ? next(s + step) : out;
       });
-      this.el.querySelector('[data-action="export"]').disabled = this.loading || !rows.length;
-      if (this.loading) {
-        this.el.querySelector('.fo-body').innerHTML = this.skeleton();
-        this.el.querySelector('.fo-footer').textContent = 'Loading trips…';
+    }
+    toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…'));
+    next(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); });
+  }
+  function toast(msg, bad) { var e = document.createElement('div'); e.className = 'dms-toast' + (bad ? ' dms-toast-err' : ''); e.setAttribute('role', 'status'); e.textContent = msg; HOST.appendChild(e); later(function () { e.remove(); }, 3500); }
+  /* common cells */
+  function dtc(v) { return v ? '<span class="dms-num">' + esc(String(v).slice(0, 10)) + '</span>' : '<span class="dms-sm">—</span>'; }
+  function who(v) { return v ? bdi(v) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>'; }
+  function txt(v) { return v ? bdi(v) : '<span class="dms-sm">—</span>'; }
+  function amc(v) { return v == null || v === '' ? '<span class="dms-sm">—</span>' : '<span class="dms-num">' + esc(amt(v)) + '</span>'; }
+  function overdueTag(due) { var d = diffDays(String(due || TODAY).slice(0, 10), TODAY); return d > 0 ? '<span class="dms-days ' + (d > 90 ? 'dms-days-bad' : 'dms-days-warn') + '">' + num(d) + '</span>' : '<span class="dms-sm">—</span>'; }
+  function col(h, f, o) { o = o || {}; return Object.assign({ h: h, sf: o.sort === false ? undefined : f, r: function (x) { return o.fmt ? o.fmt(x[f], x) : txt(x[f]); }, c: function (x) { return x[f]; } }, o); }
+  function linkCol(h, dt, f, labelF) { return { h: h, sf: f, r: function (x) { return docLink(typeof dt === 'function' ? dt(x) : dt, x[f], labelF ? x[labelF] || x[f] : x[f]); }, c: function (x) { return x[f]; } }; }
+
+  /* ---------- actions pending ---------- */
+  var PRIO = { high: ['High', 'عالية'], med: ['Medium', 'متوسطة'], low: ['Low', 'منخفضة'] };
+  function score(p, amount, age) { return { high: 300, med: 200, low: 100 }[p] + Math.min(40, Math.log(1 + Math.abs(amount || 0)) / Math.LN10 * 6) + Math.min(20, (age || 0) / 10); }
+  /* Server specs ({id, server:true, dt, filters, fields, order, it(row) → item}) load count + 6 most urgent rows each. */
+  function loadActions(specs, key) {
+    run(key || 'act', function (chk) {
+      return Promise.all(specs.filter(function (s) { return s.server; }).map(function (s) {
+        var c = getList({ doctype: s.dt, fields: ['count(name) as n'], filters: s.filters, limit_page_length: 1 }, chk).then(function (r) { return +one(r).n || 0; }, function (e) { return 'ERR:' + errKind(e); });
+        var l = (s.rank ? fetchAll({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order }, chk, 2000) : getList({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order, limit_page_length: 6 }, chk)).then(function (r) { return r || []; }, function (e) { return 'ERR:' + errKind(e); });
+        return Promise.all([c, l]).then(function (x) { return { id: s.id, count: typeof x[1] === 'string' ? x[1] : x[0], rows: Array.isArray(x[1]) ? x[1] : [] }; });
+      })).then(function (res) { var o = {}; res.forEach(function (x) { o[x.id] = x; }); return o; });
+    });
+  }
+  /* client: {id: {rows, item}} for client specs, null while their sources load, or 'ERR:kind'. */
+  function actModel(specs, key, client) {
+    var counts = {}, items = [], A = D[key || 'act'], AE = D[(key || 'act') + 'Err'];
+    specs.forEach(function (s) {
+      if (s.client) {
+        var c = client == null ? null : typeof client === 'string' ? client : client[s.id];
+        if (typeof c === 'string') { counts[s.id] = c; }
+        else if (c) { counts[s.id] = c.count != null ? c.count : c.rows.length; c.rows.slice(0, 6).forEach(function (r) { items.push(c.item(r)); }); }
         return;
       }
-      const open = key => `<button type="button" data-open-list="${key}">Open in Delivery Trip list</button>`;
-      let content = '';
-      if (this.tab === 'Overview') {
-        const label = this.rangeLabel(), todayRows = working, dnToday = todayRows.filter(delivery);
-        const timeErr = working.filter(r => issues(r).some(i => /timestamp/i.test(i))), noAssign = working.filter(r => !r.driver || !r.vehicle);
-        const kpis = [
-          ['Trips',todayRows.length,`${label}, ${todayRows.filter(r=>r.docstatus===1).length} submitted`,''],
-          ['Awaiting submission',planned.length,'Draft trips to review and submit',planned.length ? 'warn' : ''],
-          ['Deliveries',dnToday.length,`Customer delivery trips, ${label.toLowerCase()}`,''],
-          ['Follow-up',followUp.length,`Not delivered or no proof of receipt, ${label.toLowerCase()}`,followUp.length ? 'warn' : ''],
-          ['Time errors',timeErr.length,`Timestamps out of order, ${label.toLowerCase()}`,timeErr.length ? 'bad' : ''],
-          ['Missing assignment',noAssign.length,`Driver or vehicle not set, ${label.toLowerCase()}`,noAssign.length ? 'bad' : '']
-        ];
-        content = this.tiles(kpis, true);
-        // Row of three: today, assignment, closure.
-        const tDone = todayRows.filter(done).length, tDraft = todayRows.filter(r => r.docstatus === 0).length, tSub = todayRows.length - tDone - tDraft;
-        const nextHTML = `<p class="fo-foot">${todayRows.length ? `${plural(todayRows.length, 'trip')}, ${plural(dnToday.length, 'delivery', 'deliveries')}.` : 'No trips are dated in this range.'}</p>`;
-        const m1 = this.panel('Trips in range', stackHTML([{label:'Draft',n:tDraft,tone:'neutral'},{label:'Submitted',n:tSub,tone:'info'},{label:'Delivered',n:tDone,tone:'good'}], 'Trips in range') + nextHTML, label);
-        const todayV = new Set(todayRows.map(r => r.vehicle).filter(Boolean)).size, todayD = new Set(todayRows.map(r => r.driver).filter(Boolean)).size, rangeMissing = working.filter(r=>!r.driver);
-        const m2 = this.panel('Fleet assignment', meterHTML('Trips with a vehicle', working.filter(r=>r.vehicle).length, working.length) + meterHTML('Trips with a driver', working.length - rangeMissing.length, working.length) +
-          `<dl class="fo-trio"><div><dt>Vehicles used</dt><dd>${todayV}</dd></div><div><dt>Drivers used</dt><dd>${todayD}</dd></div><div><dt>Possible duplicates</dt><dd class="${clash.length ? 'fo-bad-text' : ''}">${clash.length}</dd></div></dl>`);
-        const exec = rows.filter(r => executed(r) && delivery(r)), okN = exec.filter(r => !follow(r)).length;
-        const reasons = this.issueGroups(exec.filter(follow)).filter(([k]) => /Deliver|proof|Partial/.test(k)).slice(0, 3);
-        const m3 = this.panel('Delivery closure', ringHTML(okN, exec.length, 'Delivered with proof of receipt') + `<ul class="fo-reasons">${reasons.length ? reasons.map(([k, n]) => `<li><span>${esc(k)}</span><strong>${n}</strong></li>`).join('') : `<li class="fo-muted">${exec.length ? 'Every submitted delivery is closed.' : 'No submitted customer deliveries in range.'}</li>`}</ul>`);
-        content += `<div class="fo-grid g3">${m1}${m2}${m3}</div>`;
-        // Row of two: volume by day, attention groups.
-        const groups = this.issueGroups(working), shown = groups.slice(0, 6), restN = groups.slice(6).reduce((s, g) => s + g[1], 0);
-        const g1 = this.panel('Trips per day', colsHTML(buckets(working, today), 'Trips per day'));
-        const g2 = this.panel('Needs attention', groups.length ? `<ul class="fo-issue-list">${shown.map(([k, n]) => `<li><button type="button" data-issue="${esc(k)}" aria-pressed="${this.issue === k}"><i data-tone="${urgent(k) ? 'bad' : 'warn'}" aria-hidden="true"></i><span>${esc(k)}</span><strong>${n}</strong></button></li>`).join('')}${restN ? `<li class="fo-muted fo-more-line">${restN} more in smaller groups</li>` : ''}</ul>` : '<div class="fo-empty fo-ok">Nothing needs attention in this range.</div>', 'Select a group to list its trips.', groups.length ? working.filter(r => issues(r).length).length : null);
-        content += `<div class="fo-grid g2">${g1}${g2}</div>`;
-        // Capped detail list.
-        const queueNames = [`Trips, ${label}`,'Awaiting submission',`Deliveries, ${label}`,'Delivery follow-up','Time errors','Missing assignment'];
-        let title = 'Most urgent trips', list = working.filter(r=>issues(r).length), extra = '', note = 'The most urgent trips first. Use the native list for everything else.';
-        if (this.queue !== null) { title = queueNames[this.queue]; list = this.queueRows(all, this.queue); note = ''; }
-        else if (this.issue !== null) { title = this.issue; list = working.filter(r => issues(r).includes(this.issue)); note = ''; }
-        if (this.queue !== null || this.issue !== null) extra = '<button type="button" data-action="clear-queue">Clear selection</button>';
-        list = list.slice().sort(bySeverity);
-        content += this.panel(title, this.table(list,'issues','Nothing in this selection.',6), note, list.length, extra, 'fo-detail').replace('<h3>','<h3 class="fo-queue-title" tabindex="-1">');
-        content += this.recordsPanel(all, today, now);
-      } else if (this.tab === 'Live map') {
-        content = this.renderLive(trips, today, now);
-      } else if (this.tab === 'Awaiting submission') {
-        const noV = planned.filter(r=>!r.vehicle).length, noD = planned.filter(r=>!r.driver).length, terr = planned.filter(r=>issues(r).some(i=>/timestamp/i.test(i))).length;
-        content = this.tiles([['Awaiting submission',planned.length,'Draft trips',planned.length ? 'warn' : ''],['Missing driver',noD,'Of draft trips',noD ? 'bad' : ''],['Missing vehicle',noV,'Of draft trips',noV ? 'bad' : ''],['Time errors',terr,'Timestamps out of order',terr ? 'bad' : '']]);
-        const left = this.panel('Drafts by day', colsHTML(buckets(planned, today), 'Draft trips per day'), 'By delivery date.');
-        const right = this.panel('Possible duplicates', clash.length ? `<ul class="fo-clashes">${clash.slice(0, 5).map(([a,b,kind,who])=>`<li>${link('delivery-trip',a.name)} and ${link('delivery-trip',b.name)} leave at ${esc(String(a[F.depart]).slice(11, 16))} on ${esc(dayLabel(day(a[F.depart])).toLowerCase())} and share ${kind} ${esc(who)}.</li>`).join('')}</ul>${clash.length > 5 ? `<p class="fo-foot">${clash.length - 5} more pairs not shown.</p>` : ''}` : '<div class="fo-empty fo-ok">No trips share a departure time with the same vehicle or driver.</div>', 'Trips with the same departure time and a shared vehicle or driver. Several delivery notes on one run can cause this legitimately.');
-        content += `<div class="fo-grid g2">${left}${right}</div>`;
-        content += this.panel('Oldest drafts', this.table(planned.slice().sort(byDeparture),'issues','No drafts are waiting to be submitted.',6), 'Oldest first. Submit each trip once its times and delivery status are confirmed.', planned.length);
-      } else if (this.tab === 'Vehicles & drivers') {
-        const rank = (list, key, label = k => k) => [...tally(list.filter(r => key(r)), key)].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0]))).map(([k, n]) => [label(k), n]);
-        const names = new Map(working.filter(r => r.driver_name).map(r => [r.driver, r.driver_name]));
-        const byV = rank(working, r => r.vehicle), byD = rank(working, r => r.driver, k => names.get(k) || k);
-        const dn = working.filter(delivery).length, it = working.filter(r => r[F.type] === 'Internal Transfer').length;
-        content = this.tiles([['Vehicles used',byV.length,'In this range',''],['Drivers active',byD.length,'In this range',''],['Trips per vehicle',byV.length ? (working.filter(r => r.vehicle).length / byV.length).toFixed(1) : '0','Average',''],['Deliveries',dn,'Customer delivery trips',''],['Internal transfers',it,'Between warehouses',''],['Other',working.length - dn - it,'Workshop, petrol and the rest','']], false);
-        content += `<div class="fo-grid g2">${this.panel('Trips per vehicle', barsHTML(byV, working.length, 'No trips in this range.', 8), 'Top 8 vehicles.')}${this.panel('Trips per driver', barsHTML(byD, working.length, 'No trips in this range.', 8), 'Top 8 drivers.')}</div>`;
-        content += this.vehiclePanels(all, today);
-        content += `<div class="fo-grid g2">${this.panel('By movement', barsHTML(rank(working, r => r[F.type] || 'Not set'), working.length, 'No trips in this range.', 6))}${this.panel('By source warehouse', barsHTML(rank(working, r => r[F.from] || 'Not set'), working.length, 'No trips in this range.', 6))}</div>`;
-        content += this.panel('Latest trips', this.table(working.slice().sort((a, b) => byDeparture(b, a)),'normal','No trips in this range.',6), 'Most recent departure first.', working.length);
-      } else if (this.tab === 'Delivery follow-up') {
-        const by = f => followUp.filter(f).length;
-        content = this.tiles([['Open closures',followUp.length,'Delivery or evidence incomplete',followUp.length ? 'warn' : ''],['Not delivered',by(r=>r.delivery_status!=='Delivered'&&r.delivery_status!=='Partially Delivered'),'Submitted, status not Delivered',''],['Partially delivered',by(r=>r.delivery_status==='Partially Delivered'),'Needs a closing decision',''],['No proof of receipt',by(r=>evidenceMissing(r)),'No receiver name, mobile, signature or stamp','']]);
-        const ageOf = r => /^\d{4}/.test(r[F.date] || '') ? diffDays(day(r[F.date]), today) : null;
-        const ages = [['Today',a=>a===0],['1 to 2 days',a=>a>=1&&a<=2],['3 to 7 days',a=>a>=3&&a<=7],['Over 7 days',a=>a>7]].map(([k, f]) => [k, followUp.filter(r => { const a = ageOf(r); return a !== null && f(a); }).length, k === 'Over 7 days' ? 'bad' : k === '3 to 7 days' ? 'warn' : '']);
-        const undated = followUp.filter(r => ageOf(r) === null).length; if (undated) ages.push(['No delivery date', undated, '']);
-        const why = [...tally(followUp.flatMap(r => issues(r).filter(i => /Deliver|proof|Partial/.test(i)).map(i => ({ i }))), x => x.i)].sort((a, b) => b[1] - a[1]);
-        content += `<div class="fo-grid g2">${this.panel('Why they are open', barsHTML(why, followUp.length, 'No open closures.', 6), 'A trip can appear under more than one reason.')}${this.panel('How long they have been open', barsHTML(ages.filter(a => a[1]), followUp.length, 'No open closures.', 6), 'Days since delivery date.')}</div>`;
-        content += this.panel('Oldest open closures', this.table(followUp.slice().sort((a, b) => String(a[F.date] || '9').localeCompare(String(b[F.date] || '9')) || byDeparture(a, b)),'issues','No deliveries need follow-up.',6), 'Proof of receipt means at least one of receiver name, mobile, signature or stamp is Yes. The signed delivery note attachment is not required.', followUp.length);
-      } else content = this.performance(rows);
-      this.el.querySelector('.fo-body').innerHTML = content;
-      if (this.tab === 'Live map') { this.drawMap(); this.ensureFixes(trips); }
-      this.el.querySelector('.fo-footer').textContent = this.tab === 'Live map' ? 'Positions come from the Vehicle Arabitra Logs tracker feed. Ongoing means a trip has departed in the last 24 hours and has no recorded site exit, so a vehicle can be listed here while parked. Map tiles from OpenStreetMap.' : `${rows.length} of ${plural(this.rows.length,'loaded trip')} match your filters.${this.capped?' Partial data: narrow the date range.':''} Progress is inferred from recorded timestamps, not live location. Cancelled trips are left out of operational counts. Full records live in the Delivery Trip list.`;
-    }
-    performance(rows) {
-      const completed = rows.filter(done), trips = rows.filter(r=>executed(r)&&delivery(r)), today = frappe.datetime.get_today();
-      const avg = (a,b) => {
-        const values = completed.map(r=>delta(r[a],r[b])).filter(v=>v!==null);
-        return values.length ? [`${(values.reduce((s,v)=>s+v,0)/values.length).toFixed(1)} min`, plural(values.length,'sample')] : ['No data','No valid completed-trip samples'];
-      };
-      const partial = trips.filter(r=>r.delivery_status==='Partially Delivered').length, complete = trips.filter(r=>!evidenceMissing(r)).length;
-      const none = 'No executed delivery trips';
-      const metrics = [['Completed trips',String(completed.length),'In this range'],['Warehouse wait',...avg(F.report,F.depart)],['Travel',...avg(F.depart,F.arrive)],['Time on site',...avg(F.arrive,F.exit)],
-        ['Partial deliveries',trips.length ? `${(100*partial/trips.length).toFixed(1)}%` : 'No data',trips.length ? `${partial} of ${plural(trips.length,'executed delivery trip')}` : none],
-        ['Evidence complete',trips.length ? `${complete} of ${trips.length}` : 'No data',trips.length ? 'executed delivery trips' : none]];
-      let html = `<div class="fo-strip n6 fo-metrics" role="group" aria-label="Execution measures">${metrics.map(([l,v,s])=>`<div class="fo-kpi"><span class="fo-kpi-label">${esc(l)}</span><strong>${esc(v)}</strong><small>${esc(s)}</small></div>`).join('')}</div><p class="fo-hint">Intervals are differences between recorded timestamps on submitted Completed trips, not verified durations. Missing or negative pairs are excluded.</p>`;
-      const names = new Map(completed.filter(r => r.driver_name).map(r => [r.driver, r.driver_name]));
-      const top = (field, label = k => k) => barsHTML([...tally(completed, r => r[field] || 'Unknown')].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0]))).map(([k, n]) => [label(k), n]), completed.length, 'No completed trips in this range.');
-      html += this.panel('Completed per day', colsHTML(buckets(completed, today), 'Completed trips per day'));
-      html += `<div class="fo-grid g2">${this.panel('Busiest drivers', top('driver', k => names.get(k) || k), 'Top 5 by completed trips.')}${this.panel('Busiest vehicles', top('vehicle'), 'Top 5 by completed trips.')}</div>`;
-      html += `<div class="fo-grid g2">${this.panel('By movement', top(F.type))}${this.panel('By source warehouse', top(F.from))}</div>`;
-      return html;
-    }
-    // ---- section switch (Fleet / Procurement) ----
-    setSection(section) {
-      if (section === this.section) return;
-      this.section = section; this.pages = {}; this.queue = null; this.issue = null; this.pq = null; this.pissue = null;
-      this.paintState();
-      if (section === 'procurement' && !this.proc.loaded && !this.proc.loading) this.refreshProcurement(); else this.render();
-    }
-    paintState() { const m = (this.msgs || {})[this.section] || ['', '']; this.state(m[0], m[1]); }
-    syncSection() {
-      const p = this.section === 'procurement';
-      this.el.dataset.foSection = this.section;
-      this.el.querySelectorAll('[data-section]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.section === this.section)));
-      this.el.querySelector('.fo-bar-fleet').hidden = p; this.el.querySelector('.fo-bar-proc').hidden = !p;
-      if (p) this.el.querySelector('.fo-more').hidden = true;
-      if (this.tabsFor !== this.section) {
-        this.el.querySelector('.fo-tabs').innerHTML = (p ? PTABS : TABS).map((t, i) => `<button type="button" data-tab="${i}"><span>${t}</span><b class="fo-count" hidden></b></button>`).join('');
-        this.tabsFor = this.section;
-      }
-      this.el.querySelector('[data-action="new"] span').textContent = p ? 'New purchase order' : 'New trip';
-      this.updateSwitch();
-    }
-    // Attention counts on the section switch, so the other section's problems are visible without opening it.
-    updateSwitch() {
-      const today = frappe.datetime.get_today(), [lf, lt] = this.liveWindow(), P = this.proc, V = this.veh;
-      const set = (sec, n, title) => { const b = this.el.querySelector(`[data-section="${sec}"] .fo-count`), btn = this.el.querySelector(`[data-section="${sec}"]`); if (!b) return; b.hidden = !n; b.textContent = n || ''; if (n) btn.title = title; else btn.removeAttribute('title'); };
-      let fleet = 0, ft = '';
-      if (!this.loading && this.loaded) {
-        const trips = fleetAttention(this.rows.filter(r => { const d = day(r[F.date]); return !d || (d >= lf && d <= lt); })).length;
-        fleet = trips; ft = `${plural(trips, 'trip')} need follow-up`;
-      }
-      let proc = 0, pt = '';
-      if (P.loaded && !P.loading) {
-        const po = P.po.filter(r => poOpen(r) && poIssues(r, today).some(urgentP)).length, mr = P.mr.filter(r => mrIssues(r, today).some(urgentM)).length;
-        proc = po + mr; pt = `${plural(po, 'order')} past due, ${plural(mr, 'purchase request')} late or high priority`;
-      }
-      set('fleet', fleet, ft); set('procurement', proc, pt);
-    }
-    pv(f) { const el = this.el && this.el.querySelector(`[data-pfilter="${f}"]`); return el ? el.value : ''; }
-    openReport(name) { frappe.set_route('query-report', name); }
-    linksPanel(kind) {
-      const items = LINKS[kind];
-      return this.panel('Reports and lists', `<div class="fo-links c${kind === 'fleet' ? 3 : 4}">${items.map(([type, name]) => `<button type="button" ${type === 'report' ? 'data-report' : 'data-list'}="${esc(name)}"><span>${esc(name)}</span><small>${type === 'report' ? 'Report' : 'List'}</small></button>`).join('')}</div>`,
-        'Opens the native report or list in Desk, using your own permissions.');
-    }
+      if (AE) { counts[s.id] = 'ERR:' + AE; return; }
+      var x = A && A[s.id]; if (!x) { return; }
+      counts[s.id] = x.count;
+      x.rows.forEach(function (r) { var it = s.it(r); it.dt = it.dt || s.dt; it.name = it.name || r.name; items.push(it); });
+    });
+    items.sort(function (a, b) { return b.score - a.score; });
+    var seen = {}; items = items.filter(function (it) { var k = it.dt + '|' + it.name; if (seen[k]) { return false; } seen[k] = 1; return true; });   /* one row per record, under its most urgent category */
+    return { specs: specs, counts: counts, items: items, ready: specs.every(function (s) { return counts[s.id] !== undefined; }) };
+  }
+  function pendingTotal(AM) {
+    if (!AM) { return null; }
+    var t = 0, any = false; Object.keys(AM.counts).forEach(function (k) { var c = AM.counts[k]; if (typeof c === 'number') { t += c; any = true; } });
+    return any ? t : null;
+  }
+  function dtLabel(dt) { var L = APP.dtLabels && APP.dtLabels[dt]; return L ? tr(L[0], L[1]) : dt; }
+  function arow(it) {
+    return '<a class="dms-arow" href="' + esc(it.href || docUrl(it.dt, it.name)) + '" target="_blank" rel="noopener noreferrer">' +
+      '<span class="dms-prio dms-prio-' + it.p + '">' + esc(tr(PRIO[it.p][0], PRIO[it.p][1])) + '</span>' +
+      '<span class="dms-arow-main"><span class="dms-arow-t"><bdi>' + esc(it.title || it.name) + '</bdi><span class="dms-arow-dt">' + esc(dtLabel(it.dt)) + '</span></span><span class="dms-arow-d">' + bdi(it.desc || '') + '</span></span>' +
+      '<span class="dms-arow-who">' + (it.who ? bdi(it.who) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>') + '</span>' +
+      '<span class="dms-arow-due dms-tone-' + (it.tone || 'n') + '">' + esc(it.due || '') + '</span><span class="dms-sr"> (' + esc(tr('opens in a new tab', 'يفتح في علامة تبويب جديدة')) + ')</span></a>';
+  }
+  function drillId(s) { return s.drill || ((s.client ? 'cli:' : 'srv:') + s.id); }
+  function catBtn(s, c) {
+    var err = typeof c === 'string', inner = '<span class="dms-acat-t">' + esc(s.short) + '</span><b class="dms-num">' + (err || c == null ? '—' : num(c)) + '</b>';
+    return (!err && c) ? '<button type="button" class="dms-acat" data-act="kpi" data-v="' + esc(drillId(s)) + '" title="' + esc(s.title + ' — ' + tr('view all', 'عرض الكل')) + '">' + inner + '</button>'
+      : '<div class="dms-acat dms-acat-off" title="' + esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.title) + '">' + inner + '</div>';
+  }
+  function actionsPanel(AM) {
+    var tot = pendingTotal(AM);
+    var h = '<section class="dms-panelbox dms-actpanel" id="dms-pending" tabindex="-1" aria-labelledby="dms-pending-h"><div class="dms-ph"><h3 class="dms-h3" id="dms-pending-h">' + esc(tr('Actions pending', 'الإجراءات المعلقة')) +
+      (tot != null ? ' <span class="dms-h3-n dms-num">' + num(tot) + '</span>' : '') + '</h3><span class="dms-ph-meta">' + esc(tr('As of today · most urgent first', 'حتى اليوم · الأكثر إلحاحًا أولًا')) + '</span>' +
+      (tab !== 'actions' && APP.tabs.some(function (x) { return x.id === 'actions'; }) ? '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="goto:actions">' + esc(tr('View all', 'عرض الكل')) + '</button>' : '') + '</div>';
+    if (!AM) { return h + '<div class="dms-arows" aria-busy="true">' + skel(6, 'dms-skel-row') + '</div></section>'; }
+    var known = AM.specs.filter(function (s) { return AM.counts[s.id] !== undefined; });
+    if (!known.length) { return h + '<div class="dms-arows" aria-busy="true">' + skel(6, 'dms-skel-row') + '</div></section>'; }
+    var errs = known.filter(function (s) { return typeof AM.counts[s.id] === 'string'; });
+    if (AM.ready && errs.length === AM.specs.length) { return h + alertBox('err', esc(tr('Pending actions could not be loaded.', 'تعذر تحميل الإجراءات المعلقة.')) + ' <button type="button" class="dms-linkbtn" data-act="refresh">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>') + '</section>'; }
+    var items = AM.items.slice(0, CFG.actRows || 7);
+    h += items.length ? '<div class="dms-arows">' + items.map(arow).join('') + '</div>' : (AM.ready ? '<div class="dms-empty dms-empty-sm">' + esc(tr('Nothing pending for this selection.', 'لا توجد إجراءات معلقة لهذا الاختيار.')) + '</div>' : '<div class="dms-arows" aria-busy="true">' + skel(4, 'dms-skel-row') + '</div>');
+    h += '<div class="dms-acats">' + AM.specs.map(function (s) { return catBtn(s, AM.counts[s.id]); }).join('') + '</div>';
+    if (errs.length) { h += note(esc(tr('Could not load: ', 'تعذر التحميل: ') + errs.map(function (s) { return s.short; }).join(', '))); }
+    return h + '</section>';
+  }
+  function actionsTab(AM, info) {
+    var h = alertBox('info', esc(info || tr('Action lists are as of today and not filtered by the period. They follow the filters where the source supports them.', 'قوائم الإجراءات حتى اليوم وغير مرتبطة بالفترة، وتتبع المرشحات حيثما يدعمها المصدر.')));
+    h += kpis((AM ? AM.specs : []).map(function (s) {
+      var c = AM.counts[s.id], err = typeof c === 'string';
+      return kpi({ label: s.title, val: c === undefined ? '…' : err ? '—' : num(c), sub: esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.why), act: (!err && c) ? drillId(s) : null });
+    }));
+    return h + actionsPanel(AM);
+  }
 
-    // ---- vehicles: documents and utilisation ----
-    async loadVehicles() {
-      const V = this.veh; if (V.loading) return;
-      V.loading = true; V.denied = false; V.reduced = false;
-      const all = [...VEH_FIELDS.core, ...VEH_FIELDS.optional], args = { order_by: 'name asc', limit_page_length: 500, limit: 500 };
-      try {
-        let rows;
-        try { rows = await frappe.db.get_list('Vehicle', { ...args, fields: all, filters: [['custom_vehicle_status', '=', 'Active']] }); }
-        catch (e1) {
-          V.reduced = true; console.warn('Logistics Dashboard: reading Vehicle with fewer fields', e1);
-          try { rows = await frappe.db.get_list('Vehicle', { ...args, fields: VEH_FIELDS.core }); }
-          catch (e2) { V.denied = true; rows = []; console.error('Logistics Dashboard: could not read Vehicle', e2); }
-        }
-        V.rows = rows; V.loaded = true;
-      } finally { V.loading = false; }
-      if (this.host.isConnected && this.section === 'fleet') this.render();
+  /* ---------- drill-downs (overlay) ---------- */
+  var OVL = null;
+  function openDrill(id) {
+    if (id.indexOf('goto:') === 0) { goTab(id.slice(5)); return; }
+    var r = null;
+    if (id.indexOf('srv:') === 0 && APP.actSpecs) {
+      var s = APP.actSpecs().filter(function (x) { return x.id === id.slice(4); })[0];
+      if (s && s.table) { delete SS.drill; r = { title: s.title, sub: s.why, spec: Object.assign({ id: 'drill', server: true, dt: s.dt, filters: s.filters, order: s.order, file: s.id }, s.table()) }; }
     }
-    vehiclePanels(all, today) {
-      const V = this.veh;
-      if (V.loading || !V.loaded) return this.panel('Vehicle utilisation', '<div class="fo-empty">Loading vehicles…</div>');
-      if (V.denied) return this.panel('Vehicle utilisation', '<div class="fo-empty">No read access to Vehicle.</div>');
-      const basis = this.value('basis'), [lf, lt] = this.liveWindow(), from = basis === 'all' ? lf : this.value('from'), to = basis === 'all' ? lt : this.value('to');
-      const U = utilisation(V.rows, all, today, from, to);
-      const idleList = U.idle.slice(0, 6).map(i => `<li><span>${link('vehicle', i.vehicle, i.plate)}</span><strong>${i.last ? 'Last trip ' + esc(dayLabel(i.last).toLowerCase()) : 'No trip in the loaded window'}</strong></li>`).join('');
-      const util = this.panel('Vehicle utilisation', U.scope ? meterHTML('Goods vehicles with a trip in range', U.used, U.scope) + `<dl class="fo-trio"><div><dt>Active fleet</dt><dd>${U.fleet}</dd></div><div><dt>Ran trips</dt><dd>${U.used}</dd></div><div><dt>Idle</dt><dd class="${U.idle.length ? 'fo-warn-text' : ''}">${U.idle.length}</dd></div></dl>` + (U.idle.length ? `<ul class="fo-reasons fo-first">${idleList}</ul>${U.idle.length > 6 ? `<p class="fo-foot">${U.idle.length - 6} more idle vehicles. Open the Vehicle list for the full fleet.</p>` : ''}` : '<p class="fo-foot">Every goods vehicle ran a trip in this range.</p>') : '<div class="fo-empty">No goods-carriage vehicles found.</div>',
-        `Counts active goods-carriage vehicles, plus any vehicle that made a trip. ${V.rows.length} active vehicles in the fleet list.`, U.idle.length || null);
-      return util;
-    }
+    if (!r && APP.drill) { r = APP.drill(id); }
+    if (!r || (!r.spec && r.body == null)) { return; }
+    if (r.spec) { r.spec.id = 'drill'; if (!r.spec.server && !r.spec.pageSize) { r.spec.pageSize = CFG.modalPage; } }
+    delete SS.drill; delete TS.drill;
+    var opener = OVL ? OVL.opener : activeEl();
+    OVL = Object.assign(r, { id: id, prev: OVL && r.stack !== false ? OVL : null, opener: opener, openerKey: OVL ? OVL.openerKey : opener && opener.getAttribute && opener.getAttribute('data-v') }); renderOverlay();
+  }
+  function overlayHTML() {
+    if (!OVL) { return ''; }
+    var link = OVL.link ? ' ' + docLink(OVL.link[0], OVL.link[1], OVL.link[2]) : '';
+    return '<div class="dms-overlay" data-act="ovbg"><div class="dms-modal" role="dialog" aria-modal="true" aria-labelledby="dms-dialog-title"><div class="dms-dhead"><div>' + (OVL.prev ? '<button type="button" class="dms-linkbtn" data-act="ovback">‹ ' + esc(tr('Back', 'رجوع')) + '</button>' : '') + '<h3 id="dms-dialog-title">' + esc(OVL.title) + '</h3>' + (OVL.sub || link ? '<p class="dms-sm">' + esc(OVL.sub || '') + link + '</p>' : '') + '</div><button type="button" class="dms-x" data-act="closeov" aria-label="' + esc(tr('Close', 'إغلاق')) + '">×</button></div>' + (OVL.body || '') + (OVL.spec ? regTable(OVL.spec) : '') + '</div></div>';
+  }
+  function renderOverlay() { var el = $('[data-ref="overlay"]'); if (!el) { return; } var app = $('.dms-app'); if (app) { app.inert = !!OVL; } if (!OVL) { Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { delete TBL[k]; } }); } else { delete TBL.drill; } el.innerHTML = overlayHTML(); fillTables(el); var x = el.querySelector('.dms-x'); if (x) { x.focus(); } }
+  function closeOverlay() {
+    var previous = OVL; OVL = null; renderOverlay(); delete SS.drill; delete TS.drill;
+    if (!previous) { return; }
+    var opener = previous.opener;
+    if (!opener || !opener.isConnected) { opener = Array.prototype.find.call(HOST.querySelectorAll('[data-act="kpi"]'), function (el) { return el.getAttribute('data-v') === previous.openerKey; }); }
+    if (opener) { opener.focus({ preventScroll: true }); }
+  }
 
-    // ---- fleet records summary: counts from Delivery Note, Driver and Vehicle (permission-checked counts, no row lists) ----
-    recKey() { const b = this.value('basis'); return b === 'all' ? 'all' : `${this.value('from')}|${this.value('to')}`; }
-    async loadRecords() {
-      const R = this.recs, key = this.recKey(); if (R.loading) { R.queued = true; return; }
-      R.loading = true; R.queued = false;
-      const today = frappe.datetime.get_today(), count = async (doctype, filters) => { try { const r = await frappe.call({ method: 'frappe.client.get_count', args: { doctype, filters } }); return Number(r && r.message) || 0; } catch (e) { console.warn('Logistics Dashboard: count failed for', doctype, e); return null; } };
-      // Delivery Note: delivery_mode is always "DM Vehicle" and driver / vehicle_no are empty on live notes, so the split uses custom_delivery_by.
-      const dates = key === 'all' ? [] : [['posting_date', 'between', [this.value('from'), this.value('to')]]], sub = [['docstatus', '=', 1], ...dates];
-      try {
-        const [dTotal, dDm, dPick, dRent, dDraft, dBill, drvAll, drvActive, drvNoEmp] = await Promise.all([
-          count('Delivery Note', sub), count('Delivery Note', [...sub, ['custom_delivery_by', '=', 'DM Vehicle']]), count('Delivery Note', [...sub, ['custom_delivery_by', '=', 'Customer Pickup']]), count('Delivery Note', [...sub, ['custom_delivery_by', '=', 'Rented Vehicle']]),
-          count('Delivery Note', [['docstatus', '=', 0]]), count('Delivery Note', [['docstatus', '=', 1], ['status', '=', 'To Bill']]),
-          count('Driver', []), count('Driver', [['status', '=', 'Active']]), count('Driver', [['status', '=', 'Active'], ['employee', 'is', 'not set']])]);
-        R.dn = { total: dTotal, dm: dDm, pickup: dPick, rented: dRent, draft: dDraft, toBill: dBill }; R.drv = { all: drvAll, active: drvActive, noEmployee: drvNoEmp }; R.loaded = true; R.key = key;
-      } finally { R.loading = false; }
-      if (R.queued || key !== this.recKey()) { this.loadRecords(); return; }
-      if (this.host.isConnected && this.section === 'fleet') this.render();
-    }
-    recordsPanel(all, today, now) {
-      const R = this.recs, V = this.veh, show = n => n === null || n === undefined ? '–' : n.toLocaleString ? n.toLocaleString('en-US') : n;
-      const card = (title, list, rows, note) => this.panel(title, `<dl class="fo-trio">${rows.map(([l, n, tone]) => `<div><dt>${esc(l)}</dt><dd class="${tone || ''}">${esc(show(n))}</dd></div>`).join('')}</dl>`, note, null, `<button type="button" data-list="${esc(list)}">Open list</button>`);
-      const dn = R.dn || {}, dr = R.drv || {}, wait = !R.loaded, dnWait = wait || R.key !== this.recKey();
-      const trips = mapTrips(all, today, now), working = all.filter(x => active(x) && x.vehicle && day(x[F.date]) === today);
-      const active30 = V.loaded ? V.rows.length : null, goods = V.loaded ? V.rows.filter(v => v.vehicle_service_type === 'Goods Carriage Vehicle').length : null;
-      const usedToday = new Set(working.map(x => x.vehicle)).size;
-      const driversToday = new Set(all.filter(x => active(x) && x.driver && day(x[F.date]) === today).map(x => x.driver)).size;
-      const g = [
-        card(`Delivery notes, ${this.rangeLabel()}`, 'Delivery Note', [['DM vehicle', dnWait ? null : dn.dm], ['Customer pickup', dnWait ? null : dn.pickup], ['Rented vehicle', dnWait ? null : dn.rented]], dnWait ? 'Counting…' : `${show(dn.total)} submitted in range. ${show(dn.draft)} drafts, ${show(dn.toBill)} waiting to be billed. Only DM vehicle notes need a trip.`),
-        card('Vehicles', 'Vehicle', [['Active', active30], ['Goods carriage', goods], ['Used today', usedToday]], `${plural(trips.filter(t => t.phase !== 'Finished today').length, 'vehicle')} on an ongoing or upcoming trip, ${plural(new Set(working.map(x => x.vehicle)).size, 'vehicle')} used today.`),
-        card('Drivers', 'Driver', [['Active', wait ? null : dr.active], ['On trips today', driversToday], ['No employee linked', wait ? null : dr.noEmployee, dr.noEmployee ? 'fo-warn-text' : '']], wait ? 'Counting…' : `${show(dr.all)} drivers on file, active and inactive.`)];
-      const reports = LINKS.fleet.filter(l => l[0] === 'report');
-      return `<div class="fo-grid g3">${g.join('')}</div>` + this.panel('Reports', `<div class="fo-links c3">${reports.map(([, name]) => `<button type="button" data-report="${esc(name)}"><span>${esc(name)}</span><small>Report</small></button>`).join('')}</div>`, 'Opens the native report in Desk, using your own permissions.');
-    }
-    // ---- live map ----
-    // Every active vehicle is on the map at its last known position. Vehicles on a trip are green; the rest are grey.
-    mapEntries() {
-      const L = this.live, today = frappe.datetime.get_today(), now = stamp(frappe.datetime.now_datetime());
-      const trips = mapTrips(this.filtered(), today, now), by = new Map(trips.map(t => [t.vehicle, t])), names = new Map();
-      this.veh.rows.forEach(v => names.set(v.name, v.license_plate || v.name));
-      trips.forEach(t => { if (!names.has(t.vehicle)) names.set(t.vehicle, t.vehicle); });
-      return [...names].map(([vehicle, plate]) => { const t = by.get(vehicle); return { vehicle, plate, trip: t ? t.trip : null, phase: t ? t.phase : 'No trip', rank: t ? t.rank : 3, fix: L.pos.get(vehicle) || null }; })
-        .sort((a, b) => a.rank - b.rank || a.plate.localeCompare(b.plate));
-    }
-    pinPhase(e) { return isOngoing(e.phase) ? 'on' : e.phase === 'Upcoming' ? 'up' : e.phase === 'Finished today' ? 'fin' : 'none'; }
-    liveEntries() {
-      const L = this.live, now = stamp(frappe.datetime.now_datetime()), stale = e => !e.fix || minutesSince(e.fix.at, now) > FRESH_MIN;
-      const keep = { all: () => true, trip: e => !!e.trip, parked: e => !e.trip, nosignal: stale }[L.filter || 'all'];
-      return this.mapEntries().filter(keep);
-    }
-    tripCard(e, now, today) {
-      if (!e) return '<div class="fo-empty">Select a vehicle on the map or in the list to see its trip.</div>';
-      const f = e.fix, m = f ? minutesSince(f.at, now) : null, stale = !f || m > FRESH_MIN, t = e.trip, hm = v => (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(v || '') ? String(v).slice(11, 16) : '');
-      const tone = isOngoing(e.phase) ? 'good' : e.phase === 'Upcoming' ? 'info' : 'neutral';
-      const pos = f ? `<dl class="fo-facts"><div><dt>Last known place</dt><dd>${esc(f.place || 'Place not reported')}</dd></div><div><dt>Last fix</dt><dd>${esc(agoText(m))}${stale ? ' (signal old)' : ''}</dd></div><div><dt>Movement</dt><dd>${stale ? 'Unknown' : f.speed > 3 ? Math.round(f.speed) + ' km/h' : f.ignition ? 'Engine on, stopped' : 'Parked'}</dd></div></dl>` : '<p class="fo-muted">This vehicle has no tracker position.</p>';
-      let body = '';
-      if (t) {
-        const next = STEPS.findIndex(([, k]) => !recorded(t[k]));
-        const steps = `<ol class="fo-steps">${STEPS.map(([l, k], i) => `<li class="${recorded(t[k]) ? 'on' : ''}${i === next ? ' cur' : ''}"><i aria-hidden="true"></i><strong>${l}</strong><span>${recorded(t[k]) ? esc(hm(t[k])) : t[k] ? 'Due ' + esc(hm(t[k])) : 'Pending'}</span></li>`).join('')}</ol>`;
-        const route = `<div class="fo-route"><div><i aria-hidden="true"></i><strong>${esc(t[F.from] || 'Source unknown')}</strong><small>${hm(t[F.depart]) ? 'Departs ' + esc(hm(t[F.depart])) : 'Departure not set'}</small></div><div class="fo-route-end"><i aria-hidden="true"></i><strong>${esc(t[F.to] || (delivery(t) ? 'Customer delivery' : 'Destination not set'))}</strong><small>${hm(t[F.arrive]) ? 'Arrives ' + esc(hm(t[F.arrive])) : 'Arrival not set'}</small></div></div>`;
-        body = `<div class="fo-tc-trip"><div><button type="button" class="fo-link" data-trip="${esc(t.name)}">${esc(t.name)}</button><small>${esc(t[F.type] || 'Type unknown')}${t.docstatus === 0 ? ' (draft)' : ''}</small></div>${badge(e.phase, tone)}</div>${route}${steps}
-          <dl class="fo-facts"><div><dt>Driver</dt><dd>${t.driver ? link('driver', t.driver, t.driver_name) : '<span class="fo-bad-text">Not assigned</span>'}</dd></div><div><dt>Recorded window</dt><dd>${esc(hm(t[F.depart]) || '–')} to ${esc(hm(t[F.exit]) || hm(t[F.arrive]) || '–')}</dd></div></dl>`;
-      } else {
-        const last = this.rows.filter(r => active(r) && r.vehicle === e.vehicle).sort((a, b) => String(b[F.depart] || b[F.date] || '').localeCompare(String(a[F.depart] || a[F.date] || '')))[0];
-        body = `<div class="fo-tc-trip"><div><strong>No trip today</strong><small>${last ? `Last trip ${esc(dayLabel(day(last[F.date] || last[F.depart])).toLowerCase())}` : 'No trip in the loaded window'}</small></div>${badge('Parked', 'neutral')}</div>${last ? `<p class="fo-foot"><button type="button" class="fo-link" data-trip="${esc(last.name)}">${esc(last.name)}</button>, ${esc(last[F.from] || 'source unknown')}${last[F.to] ? ' to ' + esc(last[F.to]) : ''}</p>` : ''}`;
+  /* ---------- filters, period, toolbar, tabs ---------- */
+  var F = { period: APP.period || 'month', from: '', to: '' }, PERIOD = [];
+  (APP.filters || []).forEach(function (f) { F[f.k] = ''; });
+  var tab = APP.tabs[0].id, POP = null, FD = null, FS = {}, CAL = null, ANIM = false, built = false, AMC = null;
+  var PERIODS = [['today', 'Today', 'اليوم'], ['yesterday', 'Yesterday', 'أمس'], ['week', 'This week', 'هذا الأسبوع'], ['lastWeek', 'Last week', 'الأسبوع الماضي'],
+    ['month', 'This month', 'هذا الشهر'], ['lastMonth', 'Last month', 'الشهر الماضي'], ['quarter', 'This quarter', 'هذا الربع'], ['ytd', 'Year to date', 'السنة حتى اليوم'],
+    ['year', 'This year', 'هذه السنة'], ['prevYear', 'Previous year', 'السنة الماضية'], ['custom', 'Custom range', 'نطاق مخصص']];
+  var PGROUPS = [['today', 'yesterday'], ['week', 'lastWeek'], ['month', 'lastMonth'], ['quarter', 'ytd', 'year', 'prevYear'], ['custom']];
+  function curPeriod() { return periodRange(F.period, F.from, F.to); }
+  function periodName(k) { var p = PERIODS.filter(function (x) { return x[0] === k; })[0]; return p ? tr(p[1], p[2]) : k; }
+  function filterCount() { return (APP.filters || []).filter(function (f) { return F[f.k]; }).length; }
+  function optList(f, draft) { var l = f.options ? f.options(draft || F) : []; return (l || []).map(function (x) { return typeof x === 'string' ? { v: x, l: x } : x; }); }
+  function optLabel(f, v) { var o = optList(f).filter(function (x) { return x.v === v; })[0]; return o ? o.l : (f.label ? f.label(v) : v); }
+  function pendingBtnHTML() {
+    var n = pendingTotal(AMC), lbl = n == null ? (AMC && AMC.ready ? '—' : '…') : num(n);
+    return '<button type="button" class="dms-pend' + (n ? ' dms-pend-on' : '') + '" data-act="pending" data-fk="pending" title="' + esc(tr('Pending actions as of today — show the list', 'الإجراءات المعلقة حتى اليوم — عرض القائمة')) + '">' +
+      '<i class="dms-pend-dot" aria-hidden="true"></i><b class="dms-num">' + lbl + '</b><span class="dms-pend-l">' + esc(tr('pending', 'معلّقة')) + '</span></button>';
+  }
+  function opt(v, label, cur) { return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(label) + '</option>'; }
+  function ffield(f) {
+    if (f.type === 'text' || f.type === 'date') { return '<div class="dms-ff"><label for="dms-fd-' + f.k + '">' + esc(tr(f.en, f.ar)) + '</label><input type="' + (f.type === 'date' ? 'date' : 'search') + '" id="dms-fd-' + f.k + '" class="dms-input" data-fd="' + f.k + '" data-fk="fd:' + f.k + '" value="' + esc(FD[f.k] || '') + '" placeholder="' + esc(f.ph ? tr(f.ph[0], f.ph[1]) : '') + '" autocomplete="off"></div>'; }
+    var list = optList(f, FD), label = tr(f.en, f.ar), k = f.k;
+    var q = clean(FS[k]).toLowerCase(), cur = FD[k], shown = list.filter(function (x) { return !q || String(x.l).toLowerCase().indexOf(q) >= 0 || String(x.v).toLowerCase().indexOf(q) >= 0; }), more = shown.length > 200;
+    shown = shown.slice(0, 200);
+    if (cur && !shown.some(function (x) { return x.v === cur; })) { shown.unshift({ v: cur, l: optLabel(f, cur) }); }
+    var h = '<div class="dms-ff"><label for="dms-fd-' + k + '">' + esc(label) + '</label>';
+    if (list.length > 8) { h += '<input type="search" class="dms-input" data-fs="' + k + '" data-fk="fs:' + k + '" value="' + esc(FS[k] || '') + '" placeholder="' + esc(tr('Search ' + num(list.length) + ' options', 'ابحث في ' + num(list.length) + ' خيار')) + '" aria-label="' + esc(tr('Search', 'بحث') + ' — ' + label) + '" autocomplete="off">'; }
+    h += '<select id="dms-fd-' + k + '" class="dms-input" data-fd="' + k + '" data-fk="fd:' + k + '">' + opt('', f.none ? tr(f.none[0], f.none[1]) : tr('All', 'الكل'), cur) + shown.map(function (x) { return opt(x.v, x.l, cur); }).join('') + '</select>';
+    if (q && !shown.length) { h += '<span class="dms-ff-hint">' + esc(tr('No matches', 'لا نتائج')) + '</span>'; }
+    else if (more) { h += '<span class="dms-ff-hint">' + esc(tr('First 200 matches — type to narrow', 'أول 200 نتيجة — اكتب للتضييق')) + '</span>'; }
+    return h + '</div>';
+  }
+  function filtersPopHTML() {
+    var n = APP.filterNote ? APP.filterNote() : '';
+    return '<div class="dms-pop dms-pop-filters" role="dialog" aria-label="' + esc(tr('Filters', 'المرشحات')) + '"><div class="dms-pop-b">' + APP.filters.map(ffield).join('') + '</div>' +
+      (n ? '<p class="dms-pop-note">' + esc(n) + '</p>' : '') +
+      '<div class="dms-pop-f"><button type="button" class="dms-btn" data-act="fclear" data-fk="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button><button type="button" class="dms-btn dms-btn-primary" data-act="fapply" data-fk="fapply">' + esc(tr('Apply', 'تطبيق')) + '</button></div></div>';
+  }
+  function calendarHTML() {
+    var v = CAL.view, first = weekStartOf(v), mon = v.slice(0, 7), fdy = CAL.focus && CAL.focus.slice(0, 7) === mon ? CAL.focus : (CAL.from && CAL.from.slice(0, 7) === mon ? CAL.from : v), wd = '', rows = '', r, c, d;
+    for (c = 0; c < 7; c++) { try { wd += '<span role="columnheader">' + esc(new Intl.DateTimeFormat(locale(), { weekday: 'narrow', timeZone: 'UTC' }).format(new Date(parseISO(addDays(first, c))))) + '</span>'; } catch (e) { wd += '<span></span>'; } }
+    for (r = 0; r < 6; r++) {
+      rows += '<div role="row" class="dms-cal-row">';
+      for (c = 0; c < 7; c++) {
+        d = addDays(first, r * 7 + c);
+        var end = d === CAL.from || d === CAL.to, inR = CAL.from && CAL.to && d > CAL.from && d < CAL.to;
+        rows += '<button type="button" role="gridcell" class="dms-day' + (d.slice(0, 7) !== mon ? ' dms-out' : '') + (d === TODAY ? ' dms-today' : '') + (inR ? ' dms-in' : '') + (end ? ' dms-end' : '') +
+          (CAL.from && CAL.to && d === CAL.from && d !== CAL.to ? ' dms-s' : '') + (CAL.from && CAL.to && d === CAL.to && d !== CAL.from ? ' dms-e' : '') + '" data-act="calday" data-v="' + d + '" data-fk="day:' + d + '" tabindex="' + (d === fdy ? 0 : -1) +
+          '" aria-pressed="' + end + '" aria-label="' + esc(fmtDate(d, true)) + '"><bdi>' + (+d.slice(8, 10)) + '</bdi></button>';
       }
-      const actions = `<div class="fo-tc-actions">${t ? `<button type="button" class="fo-primary" data-trip="${esc(t.name)}">Trip details</button>` : ''}<a class="fo-btn" href="/app/vehicle/${encodeURIComponent(e.vehicle)}">Open vehicle</a>${t ? `<a class="fo-btn" href="/app/delivery-trip/${encodeURIComponent(t.name)}">Open trip form</a>` : ''}</div>`;
-      return `<div class="fo-tc-head"><h4>${esc(e.plate || e.vehicle)}</h4>${f && !stale ? '<span class="fo-live"><i aria-hidden="true"></i>Live</span>' : ''}</div>${body}${pos}${actions}`;
+      rows += '</div>';
     }
-    renderLive(trips, today, now) {
-      const L = this.live, all = this.mapEntries(), stale = e => !e.fix || minutesSince(e.fix.at, now) > FRESH_MIN;
-      const on = all.filter(e => isOngoing(e.phase)), up = all.filter(e => e.phase === 'Upcoming'), fin = all.filter(e => e.phase === 'Finished today'), quiet = all.filter(stale), waiting = L.loading && !L.pos.size;
-      const kpis = [['Vehicles tracked', waiting ? '–' : all.filter(e => e.fix).length, `Of ${plural(all.length, 'active vehicle')}`, ''], ['On the road', on.length, 'Departed, no site exit recorded', ''], ['Upcoming', up.length, 'Not yet departed', ''],
-        ['Finished today', fin.length, 'Trip times all recorded', ''], ['No recent signal', waiting ? '–' : quiet.length, `Last fix over ${FRESH_MIN} minutes old, or none`, quiet.length ? 'warn' : '']];
-      let html = this.tiles(kpis, false);
-      const chips = [['all', 'All', all.length], ['trip', 'On a trip', all.filter(e => e.trip).length], ['parked', 'No trip', all.filter(e => !e.trip).length], ['nosignal', 'No signal', quiet.length]];
-      const flt = L.filter || 'all', entries = this.liveEntries(), sel = entries.find(e => e.vehicle === L.sel) || all.find(e => e.vehicle === L.sel) || null;
-      const bar = `<div class="fo-map-bar"><div class="fo-chips" role="group" aria-label="Show vehicles">${chips.map(([k, l, n]) => `<button type="button" data-chip="${k}" aria-pressed="${flt === k}">${l}<b>${n}</b></button>`).join('')}</div>
-        <div class="fo-map-status"><span class="fo-muted">${L.loading ? 'Locating vehicles…' : L.error ? esc(L.error) : L.at ? `Updated ${esc(L.at)} site time` : ''}</span><button type="button" data-map="refresh">Update positions</button></div></div>`;
-      const located = entries.filter(e => e.fix);
-      const legend = '<p class="fo-legend-line fo-map-legend"><i class="fo-ldot" data-phase="on"></i>On the road <i class="fo-ldot" data-phase="up"></i>Upcoming <i class="fo-ldot" data-phase="fin"></i>Finished today <i class="fo-ldot" data-phase="none"></i>No trip <i class="fo-ldot" data-phase="none" data-stale="true"></i>Signal old</p>';
-      const map = all.length ? `${bar}<div class="fo-map" data-map-box role="region" aria-label="Map of vehicles"><div class="fo-map-layer"></div><div class="fo-map-tools"><button type="button" data-map="in" aria-label="Zoom in">+</button><button type="button" data-map="out" aria-label="Zoom out">−</button><button type="button" data-map="fit" aria-label="Fit all vehicles">${icons.fit}</button></div>${located.length || L.loading ? '' : '<div class="fo-map-empty fo-empty">No tracker positions found for these vehicles.</div>'}<p class="fo-map-credit">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors</p></div>${legend}`
-        : `<div class="fo-empty">No active vehicles found. Check read access to Vehicle.</div>`;
-      html += `<div class="fo-mapgrid">${this.panel('Where vehicles are now', map, '', entries.length || null, '', 'fo-mappanel')}${this.panel('Selected vehicle', `<div class="fo-tc" aria-live="polite">${this.tripCard(sel, now, today)}</div>`, '', null, '', 'fo-tcpanel')}</div>`;
-      const key = `live-${flt}`, size = 8, page = Math.min(this.pages[key] || 0, Math.max(0, Math.ceil(entries.length / size) - 1)), start = page * size;
-      (this.lists || (this.lists = {}))[key] = { dt: 'Vehicle', names: entries.map(e => e.vehicle) };
-      const rowHTML = e => {
-        const f = e.fix, m = f ? minutesSince(f.at, now) : null, old = !f || m > FRESH_MIN, t = e.trip, moving = f && !old && f.speed > 3;
-        return `<tr data-focus="${esc(e.vehicle)}" data-lane="${t && isOngoing(e.phase) ? 'good' : !f ? 'none' : old ? 'warn' : 'none'}"${L.sel === e.vehicle ? ' aria-selected="true"' : ''}>
-          <td data-slot="trip"><strong>${esc(e.plate || e.vehicle)}</strong><small>${t ? esc(t.name) : 'No trip'}</small></td>
-          <td data-slot="route"><span>${f ? esc(f.place || 'Place not reported') : '<em>No tracker position</em>'}</span><small>${t ? esc((t[F.from] || 'Source unknown') + (t[F.to] ? ' to ' + t[F.to] : '')) : ''}</small></td>
-          <td data-slot="who" data-label="Driver"><div class="fo-who">${t && t.driver ? esc(t.driver_name || t.driver) : '<span class="fo-muted">–</span>'}</div></td>
-          <td data-slot="when" data-label="Last fix"><time><strong>${esc(f ? String(f.at).slice(11, 16) : '–')}</strong><span>${esc(agoText(m))}</span></time></td>
-          <td data-slot="status">${badge(e.phase, isOngoing(e.phase) ? 'good' : e.phase === 'Upcoming' ? 'info' : 'neutral')}</td>
-          <td data-slot="next" data-label="Movement">${!f ? '<span class="fo-muted">–</span>' : old ? '<span class="fo-warn">Signal old</span>' : `<span class="fo-stage">${moving ? Math.round(f.speed) + ' km/h' : f.ignition ? 'Engine on, stopped' : 'Parked'}</span>`}</td></tr>`;
-      };
-      html += this.panel('Vehicles', entries.length ? `<div class="fo-table-wrap" tabindex="0" role="region" aria-label="Vehicles, scrollable"><table><thead><tr><th>Vehicle</th><th>Last known place</th><th>Driver</th><th>Last fix</th><th>Trip</th><th>Movement</th></tr></thead><tbody>${entries.slice(start, start + size).map(rowHTML).join('')}</tbody></table></div>${this.pager(key, entries.length, start, size, page, 'vehicles', 'Vehicle')}` : '<div class="fo-empty">No vehicles match this filter.</div>', 'Select a row to centre the map on that vehicle.', entries.length);
-      return html;
+    var ok = CAL.from && CAL.to, msg = ok ? '<bdi>' + esc(rangeLabel([CAL.from, CAL.to])) + '</bdi> · ' + esc(daysTxt(diffDays(CAL.from, CAL.to) + 1)) : esc(CAL.from ? tr('Select an end date', 'اختر تاريخ النهاية') : tr('Select a start date', 'اختر تاريخ البداية'));
+    var title = v; try { title = new Intl.DateTimeFormat(locale(), { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(parseISO(v))); } catch (e) { /* ISO fallback */ }
+    return '<div class="dms-cal"><div class="dms-cal-h"><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="-1" data-fk="calprev" aria-label="' + esc(tr('Previous month', 'الشهر السابق')) + '">' + ico('prev', 'dms-flip') + '</button>' +
+      '<b aria-live="polite">' + esc(title) + '</b><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="1" data-fk="calnext" aria-label="' + esc(tr('Next month', 'الشهر التالي')) + '">' + ico('next', 'dms-flip') + '</button></div>' +
+      '<div class="dms-cal-g" role="grid" aria-label="' + esc(title) + '"><div class="dms-cal-wd" role="row">' + wd + '</div>' + rows + '</div>' +
+      '<div class="dms-cal-f"><span class="dms-cal-msg" aria-live="polite">' + msg + '</span><span class="dms-cal-btns"><button type="button" class="dms-btn" data-act="popclose" data-fk="calcancel">' + esc(tr('Cancel', 'إلغاء')) + '</button>' +
+      '<button type="button" class="dms-btn dms-btn-primary" data-act="calapply" data-fk="calapply"' + (ok ? '' : ' disabled') + '>' + esc(tr('Apply', 'تطبيق')) + '</button></span></div></div>';
+  }
+  function periodPopHTML() {
+    var n = APP.periodNote ? APP.periodNote() : '';
+    return '<div class="dms-pop dms-pop-period' + (CAL ? ' dms-has-cal' : '') + '" role="dialog" aria-label="' + esc(tr('Select period', 'اختر الفترة')) + '"><div class="dms-presets">' +
+      PGROUPS.map(function (g) {
+        return '<div class="dms-pgroup">' + g.map(function (k) {
+          var on = CAL ? k === 'custom' : F.period === k;
+          return '<button type="button" class="dms-preset' + (on ? ' dms-on' : '') + '" aria-pressed="' + on + '" data-act="preset" data-v="' + k + '" data-fk="preset:' + k + '"><span>' + esc(periodName(k)) + '</span>' +
+            (k !== 'custom' ? '<small><bdi>' + esc(rangeLabel(periodRange(k))) + '</bdi></small>' : '') + '</button>';
+        }).join('') + '</div>';
+      }).join('') + '</div>' + (CAL ? calendarHTML() : '') + (n ? '<p class="dms-pop-note dms-pop-note-p">' + esc(n) + '</p>' : '') + '</div>';
+  }
+  function toolbarHTML() {
+    var ac = filterCount(), R = PERIOD, hasF = APP.filters && APP.filters.length;
+    return '<div class="dms-topbar"><div class="dms-tb-title"><h2 class="dms-title">' + esc(APP.title()) + '</h2><p class="dms-sub" data-ref="stamp"></p></div>' +
+      '<div class="dms-tb-ctrls"><div class="dms-pendwrap" data-ref="pendwrap">' + pendingBtnHTML() + '</div>' +
+      (APP.period === false ? '' : '<div class="dms-anchor"><button type="button" class="dms-btn dms-period" data-act="pop" data-v="period" data-fk="pop:period" aria-haspopup="dialog" aria-expanded="' + (POP === 'period') + '" aria-label="' + esc(tr('Period', 'الفترة') + ': ' + periodName(F.period) + ' ' + rangeLabel(R)) + '">' + ico('cal') +
+        '<span class="dms-period-t"><b>' + esc(periodName(F.period)) + '</b><span class="dms-period-r"><bdi>' + esc(rangeLabel(R)) + '</bdi></span></span>' + ico('down', 'dms-chev') + '</button>' + (POP === 'period' ? periodPopHTML() : '') + '</div>') +
+      (hasF ? '<div class="dms-anchor"><button type="button" class="dms-btn' + (ac ? ' dms-btn-on' : '') + '" data-act="pop" data-v="filters" data-fk="pop:filters" aria-haspopup="dialog" aria-expanded="' + (POP === 'filters') + '">' + ico('filter') +
+        '<span class="dms-btn-t">' + esc(tr('Filters', 'المرشحات')) + '</span>' + (ac ? '<span class="dms-count" aria-label="' + esc(ac + ' ' + tr('active', 'نشط')) + '">' + ac + '</span>' : '') + '</button>' + (POP === 'filters' ? filtersPopHTML() : '') + '</div>' : '') +
+      '<button type="button" class="dms-btn dms-icobtn" data-act="refresh" data-ref="refresh" data-fk="refresh" aria-label="' + esc(tr('Refresh data', 'تحديث البيانات')) + '" title="' + esc(tr('Refresh data (keeps filters)', 'تحديث البيانات (مع الإبقاء على المرشحات)')) + '">' + ico('refresh') + '</button></div>' +
+      '<div class="dms-lang" role="group" aria-label="Language / اللغة"><button type="button" data-act="lang" data-v="en" data-fk="lang:en" lang="en" aria-pressed="' + (LANG === 'en') + '"' + (LANG === 'en' ? ' class="dms-on"' : '') + '>English</button>' +
+        '<button type="button" data-act="lang" data-v="ar" data-fk="lang:ar" lang="ar" aria-pressed="' + (LANG === 'ar') + '"' + (LANG === 'ar' ? ' class="dms-on"' : '') + '>العربية</button></div></div>';
+  }
+  function chipsHTML() {
+    var a = (APP.filters || []).filter(function (f) { return F[f.k]; }); if (!a.length) { return ''; }
+    return '<div class="dms-chips">' + a.map(function (f) {
+      var v = optLabel(f, F[f.k]), lab = tr(f.en, f.ar);
+      return '<span class="dms-chip"><span class="dms-chip-k">' + esc(lab) + '</span><bdi>' + esc(v) + '</bdi><button type="button" class="dms-chip-x" data-act="rmf" data-v="' + f.k + '" data-fk="rmf:' + f.k + '" aria-label="' + esc(tr('Remove filter', 'إزالة المرشح') + ' ' + lab + ': ' + v) + '">' + ico('x') + '</button></span>';
+    }).join('') + (a.length > 1 ? '<button type="button" class="dms-linkbtn" data-act="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button>' : '') + '</div>';
+  }
+  function tabsHTML() {
+    var pend = pendingTotal(AMC);
+    return '<div class="dms-tabs" role="tablist" aria-label="' + esc(tr('Sections', 'الأقسام')) + '">' + APP.tabs.map(function (x) {
+      var on = x.id === tab, lbl = tr(x.en, x.ar), b = x.id === 'actions' && pend ? '<span class="dms-tab-n dms-num" title="' + esc(tr('Pending actions as of today', 'الإجراءات المعلقة حتى اليوم')) + '">' + num(pend) + '</span>' : '';
+      return '<button class="dms-tab' + (on ? ' dms-on' : '') + '" role="tab" id="dms-tab-' + x.id + '" aria-selected="' + on + '" aria-controls="dms-panel" tabindex="' + (on ? 0 : -1) + '" data-act="tab" data-v="' + x.id + '" data-fk="tab:' + x.id + '" title="' + esc(lbl) + '" type="button"><span>' + esc(lbl) + '</span>' + b + '</button>';
+    }).join('') + '</div>';
+  }
+
+  /* ---------- rendering: a fixed skeleton whose regions repaint independently (focus kept via data-fk) ---------- */
+  function activeEl() { try { return ROOT.activeElement || null; } catch (e) { return null; } }
+  function paint(el, html) {
+    if (!el) { return; }
+    var a = activeEl(), fk = a && el.contains(a) && a.getAttribute ? a.getAttribute('data-fk') : null, ss = null;
+    if (fk && typeof a.selectionStart === 'number') { try { ss = [a.selectionStart, a.selectionEnd]; } catch (e) { /* not a text input */ } }
+    el.innerHTML = html;
+    if (fk) { focusFk(fk); if (ss) { var n = activeEl(); try { n.setSelectionRange(ss[0], ss[1]); } catch (e) { /* ignore */ } } }
+  }
+  function focusFk(k) { var n = HOST.querySelector('[data-fk="' + k + '"]'); if (n) { try { n.focus({ preventScroll: true }); } catch (e) { n.focus(); } } }
+  function skeleton() {
+    HOST.innerHTML = '<div class="dms-app"><div data-ref="tb"></div><div data-ref="chips"></div><div data-ref="tabs"></div><div class="dms-sheet" role="tabpanel" id="dms-panel" data-ref="sheet"><div data-ref="banner"></div><div class="dms-content" data-ref="content"></div></div>' +
+      '<div class="dms-tip" data-ref="tip" role="tooltip" hidden></div></div><div data-ref="overlay"></div>';
+    built = true;
+  }
+  function renderHeaderState() {
+    var b = $('[data-ref="refresh"]'), s = $('[data-ref="stamp"]'), bz = busy();
+    if (b) { b.classList.toggle('dms-busy', bz); b.setAttribute('aria-busy', String(bz)); }
+    if (s) { s.textContent = (APP.stamp ? APP.stamp() : tr('Read-only', 'للقراءة فقط')) + (LOADED ? ' · ' + tr('Updated ', 'آخر تحديث ') + LOADED : '') + (bz ? ' · ' + tr('loading…', 'جارٍ التحميل…') : ''); }
+    paint($('[data-ref="pendwrap"]'), pendingBtnHTML());
+    paint($('[data-ref="tabs"]'), tabsHTML());
+  }
+  function renderToolbar() { paint($('[data-ref="tb"]'), toolbarHTML()); paint($('[data-ref="chips"]'), chipsHTML()); renderHeaderState(); }
+  function contentHTML() {
+    if (!BOOTED) {
+      return '<div class="dms-grid dms-kpis dms-ov-kpis" aria-busy="true">' + skel(CFG.kpiCount || 6, 'dms-skel-kpi') + '</div><div class="dms-main2"><div class="dms-skel dms-skel-panel"></div><div class="dms-skel dms-skel-panel"></div></div>' +
+        note(esc(tr('Loading from ERPNext…', 'جارٍ التحميل من ERPNext…')));
     }
-    async loadLive(silent, scope = 'all') {
-      const L = this.live; if (L.loading) return;
-      const all = this.mapEntries(), pick = { all: () => true, trips: e => !!e.trip || e.vehicle === L.sel, missing: e => !L.tried.has(e.vehicle) }[scope];
-      const names = [...new Set(all.filter(pick).map(e => e.vehicle))].slice(0, 120);
-      if (!names.length) { if (scope === 'all') L.at = String(frappe.datetime.now_datetime()).slice(11, 16); return; }
-      L.loading = true; L.error = ''; ++L.token;
-      if (!silent) this.render();
-      const FIELDS = ['vehicle', 'latitude', 'longitude', 'track_date_time', 'speed', 'ignition', 'location', 'distance'];
-      try {
-        for (let i = 0; i < names.length; i += 6) {
-          await Promise.all(names.slice(i, i + 6).map(async v => {
-            const logs = await frappe.db.get_list('Vehicle Arabitra Logs', { fields: FIELDS, filters: [['vehicle', '=', v]], order_by: 'track_date_time desc', limit_page_length: 8, limit: 8 });
-            const fixes = logs.map(toFix).filter(Boolean); L.tried.add(v);
-            L.pos.set(v, fixes.length ? { ...fixes[0], trail: fixes.slice().reverse().map(x => ({ lat: x.lat, lng: x.lng })) } : null);
-          }));
-          if (!this.host.isConnected) return;
-        }
-        L.at = String(frappe.datetime.now_datetime()).slice(11, 16);
-      } catch (error) {
-        L.error = 'Could not read vehicle tracking. Check read permission on Vehicle Arabitra Logs.';
-        console.error('Logistics Dashboard live map failed', error);
-      } finally { L.loading = false; }
-      if (this.host.isConnected && this.section === 'fleet' && this.tab === 'Live map') this.render();
+    if (APP.period !== false && (!PERIOD[0] || PERIOD[0] > PERIOD[1])) { return alertBox('err', esc(tr('Choose a valid date range.', 'اختر نطاق تاريخ صحيحًا.'))); }
+    return APP.content(tab, AMC);
+  }
+  function renderSoft() {
+    PERIOD = curPeriod(); AMC = APP.actions ? APP.actions() : null;
+    var keep = {}; Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { keep[k] = TBL[k]; } }); TBL = keep;
+    var b = $('[data-ref="banner"]'), c = $('[data-ref="content"]'), sh = $('[data-ref="sheet"]');
+    if (b) { b.innerHTML = BOOTED && APP.banner ? APP.banner() : ''; }
+    if (c) { paint(c, contentHTML()); c.classList.remove('dms-enter'); if (ANIM) { void c.offsetWidth; c.classList.add('dms-enter'); } ANIM = false; fillTables(c); fitChartLabels(); if (APP.afterRender) { APP.afterRender(c); } }
+    if (sh) { sh.setAttribute('aria-labelledby', 'dms-tab-' + tab); }
+    renderHeaderState();
+  }
+  function renderAll() {
+    HOST.setAttribute('dir', LANG === 'ar' ? 'rtl' : 'ltr'); HOST.setAttribute('lang', LANG);
+    if (!built) { skeleton(); }
+    PERIOD = curPeriod(); renderToolbar(); renderSoft();
+  }
+  /* Full reload (filters, refresh): new generation, empty store, tables back to page 1. */
+  function reload() {
+    setToday(); PERIOD = curPeriod(); GEN++; D = {}; LOADED = STAMP;
+    Object.keys(SS).forEach(function (k) { SS[k].dirty = true; SS[k].page = 1; }); Object.keys(TS).forEach(function (k) { TS[k].page = 1; });
+    APP.load(); ANIM = true; renderAll();
+  }
+
+  /* ---------- navigation and popovers ---------- */
+  function goTab(id, focusTab, force) {
+    if (tab !== id || force) { tab = id; ANIM = true; if (APP.onTab) { APP.onTab(id); } renderAll(); }
+    var t = $('#dms-tab-' + id); if (!t) { return; }
+    try { t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) { /* ignore */ }
+    if (focusTab) { t.focus(); }
+  }
+  function openPop(w) {
+    POP = w; CAL = null;
+    if (w === 'filters') { FD = {}; APP.filters.forEach(function (f) { FD[f.k] = F[f.k]; }); FS = {}; }
+    else if (F.period === 'custom' && F.from && F.to) { CAL = { from: F.from, to: F.to, view: monthStart(F.from), focus: F.from }; }
+    renderToolbar(); focusFk(w === 'filters' ? 'fd:' + APP.filters[0].k : CAL ? 'day:' + CAL.focus : 'preset:' + F.period);
+  }
+  function closePop(restore) { var w = POP; if (!w) { return; } POP = null; CAL = null; renderToolbar(); if (restore) { focusFk('pop:' + w); } }
+  function applyFilters(next) {
+    var prev = {}; APP.filters.forEach(function (f) { prev[f.k] = F[f.k]; F[f.k] = (next && next[f.k]) || ''; }); POP = null;
+    if (APP.onFilters) { APP.onFilters(prev); }
+    reload();
+  }
+  function applyPeriod(key, from, to) {
+    F.period = key; if (key === 'custom') { F.from = from; F.to = to; }
+    POP = null; CAL = null; setToday(); PERIOD = curPeriod();
+    Object.keys(SS).forEach(function (k) { if (TBL[k] && TBL[k].period) { SS[k].dirty = true; SS[k].page = 1; } });
+    if (APP.onPeriod) { APP.onPeriod(); } else { reload(); return; }
+    ANIM = true; renderAll(); focusFk('pop:period');
+  }
+  function calPick(d) {
+    if (!CAL.from || CAL.to) { CAL.from = d; CAL.to = null; } else if (d < CAL.from) { CAL.to = CAL.from; CAL.from = d; } else { CAL.to = d; }
+    CAL.focus = d;
+  }
+  function calMove(d) { CAL.focus = d; if (d.slice(0, 7) !== CAL.view.slice(0, 7)) { CAL.view = monthStart(d); } renderToolbar(); focusFk('day:' + d); }
+
+  /* ---------- tooltip (one shared element; positioned against the dashboard, clamped to its width) ---------- */
+  function showTip(n) {
+    var tip = $('[data-ref="tip"]'), app = $('.dms-app'); if (!tip || !app) { return; }
+    tip.textContent = n.getAttribute('data-tip'); tip.hidden = false;
+    var a = app.getBoundingClientRect(), r = n.getBoundingClientRect(), w = tip.offsetWidth, hgt = tip.offsetHeight;
+    var x = Math.max(4, Math.min(r.left - a.left + r.width / 2 - w / 2, a.width - w - 4)), y = r.top - a.top - hgt - 8;
+    if (y < 0) { y = r.bottom - a.top + 8; }
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  }
+  function hideTip() { var tip = $('[data-ref="tip"]'); if (tip) { tip.hidden = true; } }
+  function onOver(ev) { var n = ev.target.closest ? ev.target.closest('[data-tip]') : null; if (n && HOST.contains(n)) { showTip(n); } else { hideTip(); } }
+
+  /* ---------- events (single delegated set, removed on destroy) ---------- */
+  function onClick(ev) {
+    var n = ev.target.closest ? ev.target.closest('[data-act]') : null;
+    if (POP && !(ev.target.closest && ev.target.closest('.dms-anchor'))) { closePop(false); }
+    if (!n || !HOST.contains(n)) { return; }
+    var a = n.getAttribute('data-act'), v = n.getAttribute('data-v'), id = n.getAttribute('data-id');
+    if (APP.onAct && APP.onAct(a, v, n, id) === true) { return; }
+    if (a === 'ovbg') { if (ev.target === n) { closeOverlay(); } return; }
+    if (a === 'closeov') { closeOverlay(); return; }
+    if (a === 'ovback' && OVL && OVL.prev) { var pv = OVL.prev; delete SS.drill; delete TS.drill; OVL = pv; if (OVL.spec) { regTable(OVL.spec); } renderOverlay(); return; }
+    if (a === 'tab') { goTab(v); return; }
+    if (a === 'lang') { if (LANG !== v) { LANG = v; try { G.localStorage.setItem('dms_lang', LANG); } catch (e) { /* ignore */ } POP = null; CAL = null; renderAll(); if (OVL) { var o = OVL; OVL = null; renderOverlay(); openDrill(o.id); } focusFk('lang:' + v); } return; }
+    if (a === 'refresh') { if (APP.onRefresh) { APP.onRefresh(); } reload(); return; }
+    if (a === 'pop') { if (POP === v) { closePop(true); } else { openPop(v); } return; }
+    if (a === 'popclose') { closePop(true); return; }
+    if (a === 'preset') {
+      if (v !== 'custom') { applyPeriod(v); return; }
+      var r0 = PERIOD[0] || TODAY, r1 = PERIOD[1] || TODAY; CAL = { from: r0, to: r1, view: monthStart(r1 > TODAY ? TODAY : r1), focus: r1 > TODAY ? TODAY : r1 };
+      renderToolbar(); focusFk('day:' + CAL.focus); return;
     }
-    ensureFixes() { // vehicles that appeared after the last read (vehicle list loaded, filters changed) get a position lookup
-      const L = this.live; if (L.loading || L.error) return;
-      if (this.mapEntries().some(e => !L.tried.has(e.vehicle))) this.loadLive(true, 'missing');
+    if (a === 'calnav' && CAL) { CAL.view = addMonths(CAL.view, +v); CAL.focus = CAL.view; renderToolbar(); return; }
+    if (a === 'calday' && CAL) { calPick(v); renderToolbar(); focusFk('day:' + v); return; }
+    if (a === 'calapply' && CAL && CAL.from && CAL.to) { applyPeriod('custom', CAL.from, CAL.to); return; }
+    if (a === 'fapply') { applyFilters(FD); focusFk('pop:filters'); return; }
+    if (a === 'fclear') { applyFilters(null); focusFk('pop:filters'); return; }
+    if (a === 'rmf') { var nf = {}; APP.filters.forEach(function (f) { nf[f.k] = F[f.k]; }); nf[v] = ''; applyFilters(nf); focusFk('pop:filters'); return; }
+    if (a === 'pending') {
+      goTab(APP.tabs[0].id); var p = $('#dms-pending');
+      if (p) { var still = G.matchMedia && G.matchMedia('(prefers-reduced-motion: reduce)').matches; try { p.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' }); } catch (e) { p.scrollIntoView(); } p.focus({ preventScroll: true }); }
+      return;
     }
-    mapAction(a) {
-      const L = this.live;
-      if (a === 'refresh') { this.loadLive(false, 'all'); return; }
-      if (!L.view) return;
-      if (a === 'in') L.view.z = Math.min(18, L.view.z + 1);
-      if (a === 'out') L.view.z = Math.max(3, L.view.z - 1);
-      if (a === 'fit') L.refit = true;
-      this.drawMap();
-    }
-    selectVehicle(v, centre) {
-      const L = this.live, f = L.pos.get(v); L.sel = v;
-      if (centre && f) L.view = { lat: f.lat, lng: f.lng, z: Math.max(L.view ? L.view.z : 0, 14) };
-      this.render();
-      if (centre) this.el.querySelector('[data-map-box]')?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
-    }
-    drawMap() { this.drawMapCore(); if (this.lang === 'ar') trTree(this.el.querySelector('.fo-map')); }
-    drawMapCore() {
-      const box = this.el.querySelector('[data-map-box]'); if (!box) return;
-      const layer = box.querySelector('.fo-map-layer'), L = this.live, W = box.clientWidth || 640, H = box.clientHeight || 420, now = stamp(frappe.datetime.now_datetime());
-      const entries = this.liveEntries(), located = entries.filter(e => e.fix);
-      if (!L.view || L.refit) { L.view = fitView(located.map(e => e.fix), W, H); L.refit = false; }
-      const { lat, lng, z } = L.view, cx = mercX(lng, z), cy = mercY(lat, z), n = Math.pow(2, z), ox = cx - W / 2, oy = cy - H / 2;
-      let tiles = '';
-      for (let ty = Math.floor(oy / 256) - 1; ty <= Math.floor((oy + H) / 256) + 1; ty++) {
-        if (ty < 0 || ty >= n) continue;
-        for (let tx = Math.floor(ox / 256) - 1; tx <= Math.floor((ox + W) / 256) + 1; tx++) {
-          tiles += `<img class="fo-tile" alt="" draggable="false" src="https://tile.openstreetmap.org/${z}/${((tx % n) + n) % n}/${ty}.png" style="left:${Math.round(tx * 256 - ox)}px;top:${Math.round(ty * 256 - oy)}px">`;
-        }
-      }
-      const px = p => [mercX(p.lng, z) - ox, mercY(p.lat, z) - oy];
-      const trails = located.filter(e => e.fix.trail && e.fix.trail.length > 1).map(e => `<polyline points="${e.fix.trail.map(p => px(p).map(v => v.toFixed(1)).join(',')).join(' ')}" data-phase="${isOngoing(e.phase) ? 'on' : 'off'}"/>`).join('');
-      // Vehicles parked in the same yard share a position; nudge overlapping pins apart so each one can be clicked.
-      const placed = [], spot = e => {
-        let [x, y] = px(e.fix);
-        for (let k = 0, r = 20; k < 36 && placed.some(q => Math.hypot(q[0] - x, q[1] - y) < 19); k++) { const [bx, by] = px(e.fix), ang = (k % 6) * Math.PI / 3 + (k / 6 | 0) * 0.5; r = 20 + 14 * (k / 6 | 0); x = bx + r * Math.cos(ang); y = by + r * Math.sin(ang); }
-        placed.push([x, y]); return [x, y];
-      };
-      const pins = located.map(e => {
-        const [x, y] = spot(e); if (x < -30 || y < -30 || x > W + 30 || y > H + 30) return '';
-        const m = minutesSince(e.fix.at, now), stale = m === null || m > FRESH_MIN, label = e.plate || e.vehicle;
-        return `<button type="button" class="fo-pin${L.sel === e.vehicle ? ' is-sel' : ''}${e.trip ? '' : ' is-quiet'}" data-select="${esc(e.vehicle)}" data-phase="${this.pinPhase(e)}" data-stale="${stale}" style="left:${x.toFixed(1)}px;top:${y.toFixed(1)}px" aria-label="${esc(`${label}, ${e.phase}, ${agoText(m)}`)}" title="${esc(`${label} · ${e.phase} · ${agoText(m)}${e.fix.place ? ' · ' + e.fix.place : ''}`)}"><i></i><span>${esc(label)}</span></button>`;
-      }).join('');
-      layer.style.transform = '';
-      layer.innerHTML = `${tiles}<svg class="fo-trails" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true">${trails}</svg>${pins}`;
-      layer.querySelectorAll('.fo-tile').forEach(i => i.addEventListener('error', () => { i.style.visibility = 'hidden'; }));
-    }
-    // ---- request-to-order delay (Procurement Tracker report) ----
-    async loadDelay() {
-      const D = this.delay; if (D.loading || D.loaded) return;
-      D.loading = true; D.error = ''; this.render();
-      const today = frappe.datetime.get_today();
-      try {
-        const res = await frappe.call({ method: 'frappe.desk.query_report.run', args: { report_name: 'Procurement Tracker', filters: { from_date: shift(today, -90), to_date: today } } });
-        D.rows = rowsOf(res); D.loaded = true; D.at = String(frappe.datetime.now_datetime()).slice(11, 16);
-      } catch (error) {
-        D.error = 'Could not run the Procurement Tracker report. Check that your role can open it, then select Refresh.';
-        console.error('Logistics Dashboard delay report failed', error);
-      } finally { D.loading = false; }
-      if (this.host.isConnected && this.section === 'procurement') this.render();
-    }
-    delayPanel(today) {
-      const D = this.delay;
-      if (D.loading) return this.panel('Request to order time', '<div class="fo-empty">Running the Procurement Tracker report…</div>');
-      if (D.error) return this.panel('Request to order time', `<div class="fo-empty">${esc(D.error)} <button type="button" class="fo-link" data-report="Procurement Tracker">Open report</button></div>`);
-      if (!D.loaded) return '';
-      const X = delayStats(D.rows, today);
-      if (!X.requests) return this.panel('Request to order time', '<div class="fo-empty">No purchase requests in the last 90 days.</div>');
-      const dl = `<dl class="fo-trio"><div><dt>Median days</dt><dd>${X.median === null ? '–' : X.median}</dd></div><div><dt>Ordered in 3 days</dt><dd>${X.within3 === null ? '–' : X.within3 + '%'}</dd></div><div><dt>Waiting over 7 days</dt><dd class="${X.waitingOld ? 'fo-bad-text' : ''}">${X.waitingOld}</dd></div></dl>`;
-      const left = this.panel('Time from request to first order', dl + barsHTML(X.buckets, X.ordered, 'No request has been ordered yet.', 6), `${X.ordered} of ${plural(X.requests, 'request')} ordered. ${X.waiting} still have no order. Requests from the last 90 days.`);
-      const slow = X.slow.slice(0, 5).map(([k, avg, n]) => [`${k} (${n})`, avg, avg > 7 ? 'bad' : avg > 3 ? 'warn' : '']);
-      const right = this.panel('Slowest cost centres', barsHTML(slow, Math.max(1, ...slow.map(x => x[1])), 'Not enough ordered requests to compare.', 5), 'Average days to first order. Cost centres with at least 2 ordered requests; request count in brackets.');
-      return `<div class="fo-grid g2">${left}${right}</div>`;
-    }
-    // ---- procurement data ----
-    async pagesOf(doctype, args, alive) {
-      const rows = []; let capped = false;
-      let fields = args.fields;
-      if (!Array.isArray(fields)) { // { core, optional }: try everything, fall back to the core fields if a custom field is refused
-        const all = [...fields.core, ...fields.optional];
-        try { await frappe.db.get_list(doctype, { ...args, fields: all, limit_start: 0, limit_page_length: 1, limit: 1 }); fields = all; }
-        catch (e) { console.warn('Logistics Dashboard: using core fields only for', doctype, e); fields = fields.core; this.proc.reduced = this.proc.reduced || new Set(); this.proc.reduced.add(doctype); }
-      }
-      for (let start = 0; start < 5000; start += 500) {
-        const page = await frappe.db.get_list(doctype, { ...args, fields, limit_start: start, limit_page_length: 500, limit: 500 });
-        if (!alive()) return null;
-        rows.push(...page);
-        if (page.length < 500) break;
-        if (start === 4500) capped = true;
-      }
-      return { rows, capped };
-    }
-    async refreshProcurement() {
-      const token = this.pversion = (this.pversion || 0) + 1, alive = () => token === this.pversion && this.host.isConnected, today = frappe.datetime.get_today(), P = this.proc;
-      P.loading = true; P.denied = new Set(); P.capped = false; P.reduced = new Set();
-      this.el.setAttribute('aria-busy', 'true'); this.render();
-      this.state('Loading purchase orders, requests and receipts…', '', 'procurement');
-      const jobs = [
-        ['Purchase Order', { fields: PO_FIELDS, filters: [['docstatus', 'in', [0, 1]], ['status', 'in', ['Draft', ...PO_OPEN_STATUS]]], order_by: 'name asc' }],
-        ['Material Request', { fields: MR_FIELDS, filters: [['docstatus', '=', 1], ['material_request_type', '=', 'Purchase'], ['status', 'in', ['Pending', 'Partially Ordered']]], order_by: 'name asc' }],
-        ['Purchase Receipt', { fields: PR_FIELDS, filters: [['docstatus', '=', 1], ['posting_date', '>=', shift(today, -29)]], order_by: 'name asc' }]];
-      try {
-        const out = await Promise.allSettled(jobs.map(([dt, a]) => this.pagesOf(dt, a, alive)));
-        if (!alive()) return;
-        const keys = ['po', 'mr', 'pr'];
-        out.forEach((o, i) => {
-          if (o.status === 'fulfilled' && o.value) { P[keys[i]] = o.value.rows; P.capped = P.capped || o.value.capped; }
-          else { P[keys[i]] = []; P.denied.add(jobs[i][0]); console.error('Logistics Dashboard: could not load', jobs[i][0], o.reason); }
-        });
-        P.loaded = true; P.loading = false; P.at = String(frappe.datetime.now_datetime()).slice(11, 16);
-        const fill = (field, rows, first) => {
-          const select = this.el.querySelector(`[data-pfilter="${field.name}"]`), prior = select.value;
-          select.innerHTML = `<option value="">${first}</option>` + [...new Set(rows.map(r => r[field.key]).filter(Boolean))].sort().map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
-          select.value = prior; if (select.selectedIndex < 0) select.selectedIndex = 0;
-        };
-        fill({ name: 'company', key: 'company' }, [...P.po, ...P.mr, ...P.pr], 'All permitted companies');
-        fill({ name: 'buyer', key: 'buyer' }, [...P.po.map(r => ({ buyer: poBuyer(r) })), ...P.pr.map(r => ({ buyer: r.custom_purchaser_name }))], 'All buyers');
-        this.render();
-        if (P.denied.size === 3) this.state('Could not load procurement data. Check read permission on Purchase Order, Material Request and Purchase Receipt, and access to their custom fields, then select Refresh.', 'error', 'procurement');
-        else if (P.denied.size) this.state(`Could not read ${[...P.denied].join(' and ')}. Check read permission and custom field access. Figures that depend on it show a dash.`, 'warn', 'procurement');
-        else if (P.reduced && P.reduced.size) this.state(`Some custom fields on ${[...P.reduced].join(' and ')} are not readable for your role, so buyer, location or priority may show as not set.`, 'warn', 'procurement');
-        else if (P.capped) this.state('Partial results: the 5,000-record limit was reached for one list, so counts cover loaded records only. Use the native lists for the rest.', 'warn', 'procurement');
-        else this.state(`${plural(P.po.filter(poOpen).length, 'open order')} and ${plural(P.mr.length, 'purchase request')} loaded. Updated ${P.at} site time.`, '', 'procurement');
-      } catch (error) {
-        if (!alive()) return;
-        P.loading = false; this.render();
-        this.state('Could not load procurement data. Select Refresh to try again.', 'error', 'procurement');
-        console.error('Logistics Dashboard procurement load failed', error);
-      } finally { if (token === this.pversion) this.el.removeAttribute('aria-busy'); }
-    }
-    pFiltered() {
-      const company = this.pv('company'), kind = this.pv('kind'), buyer = this.pv('buyer'), q = this.pv('search').trim().toLowerCase(), P = this.proc;
-      const hit = (...vals) => !q || vals.some(x => String(x || '').toLowerCase().includes(q));
-      return {
-        po: P.po.filter(r => (!company || r.company === company) && (!kind || r[PO.kind] === kind) && (!buyer || poBuyer(r) === buyer) && hit(r.name, r.supplier, r.supplier_name, r[PO.stage], r[PO.place])),
-        mr: P.mr.filter(r => (!company || r.company === company) && (!kind || r.custom_purchase_type === (kind === 'Foreign' ? 'Import' : 'Local')) && hit(r.name, r.custom_purpose_of_purchase)),
-        pr: P.pr.filter(r => (!company || r.company === company) && (!buyer || r.custom_purchaser_name === buyer) && hit(r.name, r.supplier, r.supplier_name))
-      };
-    }
-    pSets() {
-      const f = this.pFiltered(), today = frappe.datetime.get_today(), open = f.po.filter(poOpen), drafts = f.po.filter(poDraft);
-      return { today, open, drafts, working: [...open, ...drafts], mr: f.mr, pr: f.pr, totalPO: f.po.length,
-        moving: open.filter(poMoving), late: open.filter(r => poLate(r, today) && !poStale(r, today)), stale: open.filter(r => poStale(r, today)),
-        due7: open.filter(r => { const d = poDue(r); return d && d >= today && d <= shift(today, 6); }),
-        customs: open.filter(inCustoms), foreign: open.filter(foreignShipment),
-        partial: open.filter(r => num(r.per_received) > 0), toBill: f.pr.filter(r => !r.is_return && ['To Bill', 'Partly Billed'].includes(r.status)), ahead: open.filter(billedAhead),
-        tracked: open.filter(r => poMoving(r) || inCustoms(r) || r[PO.eta]) };
-    }
-    exportProcurement() {
-      const S = this.pSets(), rows = S.working;
-      if (!rows.length) { frappe.msgprint(this.T('No matching purchase orders to export.')); return; }
-      const columns = ['name', 'status', 'company', 'supplier_name', PO.kind, PO.buyer, PO.place, 'transaction_date', 'schedule_date', 'per_received', 'per_billed', 'base_grand_total', PO.eta, PO.stage];
-      this.download(columns, rows, `logistics-procurement-${S.today}${this.proc.capped ? '-partial' : ''}.csv`);
-      frappe.show_alert({ message: this.T(`Exported ${plural(rows.length, 'purchase order')}${this.proc.capped ? ' (partial data)' : ''}. Open and draft orders that match the filters are included.`), indicator: 'blue' });
-    }
-    download(columns, rows, filename) {
-      // Prevent spreadsheet programs from executing formula-like record values.
-      const cell = v => '"' + (/^[\s]*[=+@\-\t\r]/.test(String(v || '')) ? "'" : '') + String(v ?? '').replace(/"/g, '""') + '"';
-      const csv = '﻿' + [columns, ...rows.map(r => columns.map(c => r[c]))].map(row => row.map(cell).join(',')).join('\r\n');
-      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' })), a = document.createElement('a');
-      a.href = url; a.download = filename;
-      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-    }
-    pager(key, total, start, size, page, noun, doctype) {
-      return `<div class="fo-pagination"><span>${start + 1}–${Math.min(start + size, total)} of ${total} ${noun}</span><div>${total > size ? `<button type="button" data-page-key="${key}" data-page="${page - 1}" ${page === 0 ? 'disabled' : ''} aria-label="Previous page">Previous</button><button type="button" data-page-key="${key}" data-page="${page + 1}" ${start + size >= total ? 'disabled' : ''} aria-label="Next page">Next</button>` : ''}<button type="button" data-open-list="${key}">Open in ${esc(doctype)} list</button></div></div>`;
-    }
-    dtable(kind, rows, size = 6, empty = 'Nothing in this selection.') {
-      const S = PSPEC[kind], key = `table-${this.tableIndex++}`, today = frappe.datetime.get_today();
-      this.lists[key] = { dt: S.doctype, names: rows.map(r => r.name) };
-      if (!rows.length) return `<div class="fo-empty">${esc(empty)}</div>`;
-      const page = Math.min(this.pages[key] || 0, Math.max(0, Math.ceil(rows.length / size) - 1)), start = page * size;
-      const body = rows.slice(start, start + size).map(r => `<tr data-doc="${esc(S.doctype)}" data-name="${esc(r.name)}" data-lane="${S.lane(r, today)}">${S.cells(r, today)}</tr>`).join('');
-      return `<div class="fo-table-wrap" tabindex="0" role="region" aria-label="${esc(S.label)}, scrollable"><table><thead><tr>${S.head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>${this.pager(key, rows.length, start, size, page, S.noun, S.doctype)}`;
-    }
-    pQueue(index, S) {
-      const today = S.today;
-      return [['po', S.open], ['po', S.due7], ['po', S.late], ['po', S.stale], ['pr', S.toBill], ['mr', S.mr]][index];
-    }
-    // Delivery Trips of type "Materials Collection from Supplier": the vehicle side of procurement, from the same loaded trips as Fleet.
-    supplierTrips(today) {
-      const all = this.rows.filter(r => active(r) && r[F.type] === 'Materials Collection from Supplier');
-      const [lf, lt] = this.liveWindow(), basis = this.value('basis');
-      const inW = basis === 'all' ? all : all.filter(r => { const d = day(r[F.date]); return d && d >= (this.value('from') < lf ? this.value('from') : lf) && d <= (this.value('to') > lt ? this.value('to') : lt); });
-      const rs = inW.filter(r => this.inRange(r)).filter(r => !this.value('company') || r.company === this.value('company'));
-      const d = rs.filter(r => r.docstatus === 0).length, sub = rs.filter(r => r.docstatus === 1 && !done(r)).length, dn = rs.filter(r => r.docstatus === 1 && done(r)).length;
-      const body = stackHTML([{label:'Draft',n:d,tone:'neutral'},{label:'Submitted',n:sub,tone:'info'},{label:'Delivered',n:dn,tone:'good'}], 'Supplier collection trips')
-        + this.table(rs.slice().sort((a, b) => byDeparture(b, a)), 'normal', 'No supplier collection trips in this range.', 6);
-      return this.panel('Supplier collection trips', body, `${this.rangeLabel()}. Delivery Trips of type Materials Collection from Supplier; customer deliveries are on the Fleet side.`, rs.length);
-    }
-    renderProcurement() {
-      const P = this.proc, S = this.pSets(), today = S.today, no = dt => P.denied.has(dt);
-      const dash = (dt, n) => no(dt) ? '–' : n, guard = (dt, html) => no(dt) ? `<div class="fo-empty">No read access to ${esc(dt)}.</div>` : html;
-      const tabCounts = [null, S.open.length, S.toBill.length, S.mr.length];
-      this.el.querySelectorAll('[data-tab]').forEach(b => {
-        const i = +b.dataset.tab, c = b.querySelector('.fo-count'), n = P.loading ? null : tabCounts[i];
-        if (PTABS[i] === this.ptab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
-        c.hidden = n === null; c.textContent = n ?? '';
-      });
-      this.el.querySelector('[data-action="export"]').disabled = P.loading || !S.working.length;
-      if (P.loading || !P.loaded) { this.el.querySelector('.fo-body').innerHTML = this.skeleton(); this.el.querySelector('.fo-footer').textContent = 'Loading procurement data…'; return; }
-      const sev = bySeverityP(today), sevM = bySeverityM(today), newest = (a, b) => String(b.posting_date + (b.posting_time || '')).localeCompare(String(a.posting_date + (a.posting_time || '')));
-      const openValue = sumOf(S.open, 'base_grand_total'), lateValue = sumOf(S.late, 'base_grand_total'), staleValue = sumOf(S.stale, 'base_grand_total');
-      let content = '';
-      if (this.ptab === 'Overview') {
-        const kpis = [
-          ['Open orders', dash('Purchase Order', S.open.length), 'Submitted, not fully received', ''],
-          ['Due in 7 days', dash('Purchase Order', S.due7.length), 'By required date, or ETA when set', ''],
-          ['Past due', dash('Purchase Order', S.late.length), 'Up to 30 days past required date', S.late.length ? 'bad' : ''],
-          ['Stale', dash('Purchase Order', S.stale.length), 'Over 30 days late, review or close', S.stale.length ? 'warn' : ''],
-          ['Waiting to bill', dash('Purchase Receipt', S.toBill.length), 'Receipts in the last 30 days', S.toBill.length ? 'warn' : ''],
-          ['Requests', dash('Material Request', S.mr.length), 'Purchase requests not fully ordered', '']
-        ];
-        content = this.tiles(kpis, true, 'pqueue');
-        const groups = [['Awaiting delivery', 'neutral'], ['Partly received', 'info'], ['Late', 'bad'], ['Stale', 'warn']], gt = tally(S.open, r => poGroup(r, today));
-        const next = S.open.filter(r => poDue(r) >= today && poDue(r)).sort(byDue)[0];
-        const m1 = this.panel('Order pipeline', guard('Purchase Order', stackHTML(groups.map(([label, tone]) => ({ label, tone, n: gt.get(label) || 0 })), 'Order pipeline') +
-          (next ? `<p class="fo-foot">Next due <strong>${esc(dayLabel(poDue(next)))}</strong> ${link('purchase-order', next.name)}</p>` : `<p class="fo-foot">${S.open.length ? 'No dated orders ahead.' : 'No open orders.'}</p>`)));
-        const rc = S.pr.filter(r => !r.is_return), billed = rc.filter(r => num(r.per_billed) >= 100).length;
-        const m2 = this.panel('Receiving and billing', guard('Purchase Receipt', meterHTML('Receipts fully billed', billed, rc.length) + meterHTML('Open orders with goods received', S.partial.length, S.open.length) +
-          `<dl class="fo-trio"><div><dt>To bill</dt><dd>${S.toBill.length}</dd></div><div><dt>Returns</dt><dd>${S.pr.filter(r => r.is_return).length}</dd></div><div><dt>Billed early</dt><dd class="${S.ahead.length ? 'fo-bad-text' : ''}">${S.ahead.length}</dd></div></dl>`), 'Receipts of the last 30 days.');
-        const m3 = this.panel('Value in motion', guard('Purchase Order', `<ul class="fo-money"><li><span>Open order value</span><strong>${compact(openValue)}</strong></li><li><span>Past due value</span><strong>${compact(lateValue)}</strong></li><li><span>Stale value</span><strong>${compact(staleValue)}</strong></li></ul>`), 'Order totals in company currency.');
-        content += `<div class="fo-grid g3">${m1}${m2}${m3}</div>`;
-        const tl = tally(S.working.flatMap(r => poIssues(r, today).map(i => ({ i }))), x => x.i), ig = [...tl].sort((a, b) => urgentP(b[0]) - urgentP(a[0]) || b[1] - a[1] || a[0].localeCompare(b[0]));
-        const shown = ig.slice(0, 6), restN = ig.slice(6).reduce((s, g) => s + g[1], 0);
-        const g1 = this.panel('Orders due, next 14 days', guard('Purchase Order', colsHTML(dueBuckets(S.open, today), 'Orders due per day')), S.late.length ? `${plural(S.late.length, 'past-due order')} not shown here.` : 'By required date, or ETA when set.');
-        const g2 = this.panel('Needs attention', guard('Purchase Order', ig.length ? `<ul class="fo-issue-list">${shown.map(([k, n]) => `<li><button type="button" data-pissue="${esc(k)}" aria-pressed="${this.pissue === k}"><i data-tone="${urgentP(k) ? 'bad' : 'warn'}" aria-hidden="true"></i><span>${esc(k)}</span><strong>${n}</strong></button></li>`).join('')}</ul>${restN ? `<p class="fo-foot">${plural(restN, 'more flag')} not shown.</p>` : ''}` : '<div class="fo-empty fo-ok">Nothing needs action.</div>'));
-        content += `<div class="fo-grid g2">${g1}${g2}</div>`;
-        content += this.supplierTrips(today);
-        const queueNames = ['Open orders', 'Due in 7 days', 'Past due', 'Stale orders', 'Receipts waiting to bill', 'Purchase requests'];
-        let title = 'Most urgent orders', kind = 'po', list = S.working.filter(r => poIssues(r, today).length), note = 'The most urgent orders first. Use the native list for everything else.', extra = '';
-        if (this.pq !== null) { title = queueNames[this.pq]; [kind, list] = this.pQueue(this.pq, S); note = ''; }
-        else if (this.pissue !== null) { title = this.pissue; list = S.working.filter(r => poIssues(r, today).includes(this.pissue)); note = ''; }
-        if (this.pq !== null || this.pissue !== null) extra = '<button type="button" data-action="clear-queue">Clear selection</button>';
-        list = list.slice().sort(kind === 'mr' ? sevM : kind === 'pr' ? newest : sev);
-        content += this.panel(title, guard(kind === 'mr' ? 'Material Request' : kind === 'pr' ? 'Purchase Receipt' : 'Purchase Order', this.dtable(kind, list, 6, 'Nothing in this selection.')), note, list.length, extra, 'fo-detail').replace('<h3>', '<h3 class="fo-queue-title" tabindex="-1">');
-        content += this.linksPanel('procurement');
-      } else if (this.ptab === 'Orders & suppliers') {
-        const sup = [...tally(S.open, r => r.supplier_name || r.supplier)].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
-        const buy = [...tally(S.open, r => poBuyer(r) || 'Not set')].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
-        const loc = [...tally(S.open, r => r[PO.place] || 'Not set')].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
-        content = this.tiles([['Open orders', dash('Purchase Order', S.open.length), 'Submitted, not fully received', ''], ['Open value', dash('Purchase Order', compact(openValue)), 'Company currency', ''], ['Past due', dash('Purchase Order', S.late.length), `${compact(lateValue)} in value`, S.late.length ? 'bad' : ''], ['Stale', dash('Purchase Order', S.stale.length), 'Over 30 days late', S.stale.length ? 'warn' : ''], ['On hold', dash('Purchase Order', S.open.filter(r => r.status === 'On Hold').length), 'Stopped by the buyer', ''], ['Awaiting approval', dash('Purchase Order', S.drafts.length), 'Draft orders', '']], false);
-        const left = this.panel('Suppliers with most open orders', guard('Purchase Order', barsHTML(sup, S.open.length, 'No open orders.', 5)), 'Top 5 by open orders.');
-        const mid = this.panel('Open orders by buyer', guard('Purchase Order', barsHTML(buy, S.open.length, 'No open orders.', 5)), 'Purchaser, else PO in charge.');
-        const right = this.panel('Delivery location', guard('Purchase Order', barsHTML(loc, S.open.length, 'No open orders.', 5)), 'Where open orders are to be received.');
-        content += `<div class="fo-grid g3">${left}${mid}${right}</div>`;
-        if (S.tracked.length) content += this.panel('Shipment tracking', guard('Purchase Order', this.dtable('po', S.tracked.slice().sort(byDue), 6, 'No tracked shipments.')), 'Orders with a shipment status, ETA or customs entry.', S.tracked.length);
-        content += this.panel('Next due', guard('Purchase Order', this.dtable('po', S.open.slice().sort(byDue), 6, 'No open orders.')), 'Earliest first. The required date is used when no ETA is set.', S.open.length);
-        if (!S.tracked.length && !P.denied.has('Purchase Order')) content += '<p class="fo-foot fo-center">Shipment status, ETA and customs fields are not filled in on any open order, so shipment tracking is hidden until they are.</p>';
-      } else if (this.ptab === 'Receiving & billing') {
-        const rc = S.pr.filter(r => !r.is_return), recent = rc.filter(r => day(r.posting_date) >= shift(today, -6)).length, ret = S.pr.filter(r => r.is_return).length;
-        const sup = [...tally(S.toBill, r => r.supplier_name || r.supplier)].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
-        content = this.tiles([['Received, 7 days', dash('Purchase Receipt', recent), 'Receipts posted', ''], ['Waiting to bill', dash('Purchase Receipt', S.toBill.length), 'Status To Bill or Partly Billed', S.toBill.length ? 'warn' : ''], ['Billed', dash('Purchase Receipt', rc.filter(r => num(r.per_billed) >= 100).length), 'Fully billed', 'good'], ['Returns', dash('Purchase Receipt', ret), 'Last 30 days', ret ? 'warn' : ''], ['Billed early', dash('Purchase Order', S.ahead.length), 'Billed more than received', S.ahead.length ? 'bad' : ''], ['Partly received', dash('Purchase Order', S.partial.length), 'Open orders', 'info']], false);
-        const left = this.panel('Receipts per day', guard('Purchase Receipt', colsHTML(receiptBuckets(S.pr, today), 'Receipts per day')), 'Last 14 days.');
-        const right = this.panel('Waiting to bill, by supplier', guard('Purchase Receipt', barsHTML(sup, S.toBill.length, 'Every receipt is billed.', 5)), 'Top 5 by receipts.');
-        content += `<div class="fo-grid g2">${left}${right}</div>`;
-        content += this.panel('Waiting to bill', guard('Purchase Receipt', this.dtable('pr', S.toBill.slice().sort(newest), 6, 'Every receipt is billed.')), 'Newest first.', S.toBill.length);
-        if (S.ahead.length) content += this.panel('Billed ahead of receipt', guard('Purchase Order', this.dtable('po', S.ahead.slice().sort(sev), 6, 'None.')), 'Invoice progress is higher than receiving progress.', S.ahead.length);
-        content += this.panel('Latest receipts', guard('Purchase Receipt', this.dtable('pr', S.pr.slice().sort(newest), 6, 'No receipts in the last 30 days.')), 'Last 30 days.', S.pr.length);
-      } else {
-        const mr = S.mr, high = mr.filter(r => r.custom_priority === 'High').length, noPO = mr.filter(mrNoPO).length, late = mr.filter(r => r.schedule_date && r.schedule_date < today).length;
-        content = this.tiles([['Pending requests', dash('Material Request', mr.length), 'Not fully ordered', ''], ['High priority', dash('Material Request', high), 'Priority set to High', high ? 'bad' : ''], ['No PO yet', dash('Material Request', noPO), 'Nothing ordered so far', noPO ? 'warn' : ''], ['Past required date', dash('Material Request', late), 'Required date has passed', late ? 'bad' : ''], ['Partly ordered', dash('Material Request', mr.filter(r => num(r.per_ordered) > 0).length), 'Some items on a PO', 'info'], ['Import requests', dash('Material Request', mr.filter(r => r.custom_purchase_type === 'Import').length), 'Purchase type Import', '']], false);
-        const ages = [['0 to 2 days', a => a <= 2, ''], ['3 to 7 days', a => a >= 3 && a <= 7, ''], ['8 to 14 days', a => a >= 8 && a <= 14, 'warn'], ['Over 14 days', a => a > 14, 'bad']].map(([k, f, tone]) => [k, mr.filter(r => { const a = mrAge(r, today); return a !== null && f(a); }).length, tone]).filter(a => a[1]);
-        const pri = [...tally(mr, r => r.custom_priority || 'Not set')].sort((a, b) => b[1] - a[1]).map(([k, n]) => [k, n, k === 'High' ? 'bad' : '']);
-        const left = this.panel('How long requests have waited', guard('Material Request', barsHTML(ages, mr.length, 'No pending requests.', 6)), 'Days since the request date.');
-        const right = this.panel('Requests by priority', guard('Material Request', barsHTML(pri, mr.length, 'No pending requests.', 6)), 'Priority set on the request.');
-        content += `<div class="fo-grid g2">${left}${right}</div>`;
-        content += this.delayPanel(today);
-        content += this.panel('Oldest pending requests', guard('Material Request', this.dtable('mr', mr.slice().sort(sevM), 6, 'No pending purchase requests.')), 'Urgent requests first, then the oldest.', mr.length);
-      }
-      this.el.querySelector('.fo-body').innerHTML = content;
-      this.el.querySelector('.fo-footer').textContent = `${plural(S.totalPO, 'order')}, ${plural(S.mr.length, 'request')} and ${plural(S.pr.length, 'receipt')} match your filters. Open orders are submitted Purchase Orders that are not fully received; drafts appear only under Needs attention. The supplier-type filter does not apply to receipts and the buyer filter does not apply to requests.${P.capped ? ' Partial data: use the native lists.' : ''}`;
-    }
-    async detail(name) {
-      try {
-        const doc = await frappe.db.get_doc('Delivery Trip',name);
-        const stops = doc.delivery_stops || [], list = issues(doc);
-        const evidenceURL = (()=>{
-          try {
-            const url = new URL(doc[F.evidence],window.location.origin);
-            return doc[F.evidence] && url.origin === window.location.origin && /^\/(private\/)?files\//.test(url.pathname) ? url.href : null;
-          } catch { return null; }
-        })();
-        const d = new frappe.ui.Dialog({title:name,size:'large',fields:[{fieldtype:'HTML',fieldname:'trip'}],primary_action_label:this.T('Open Delivery Trip'),primary_action:()=>{d.hide();frappe.set_route('Form','Delivery Trip',name);}});
-        const check = (ok, label, text) => `<li class="${ok ? 'fo-yes' : 'fo-no'}"><b aria-hidden="true">${ok ? '✓' : '✕'}</b><span>${esc(label)}</span><em>${esc(text)}</em></li>`;
-        const css = this.styles.map(n => n.textContent).join('');
-        d.fields_dict.trip.$wrapper.html(this.trHTML(`${css ? `<style>${css}</style>` : ''}<div class="fo fo-dialog${this.lang === 'ar' ? ' fo-rtl' : ''}" dir="${this.lang === 'ar' ? 'rtl' : 'ltr'}">
-          <div class="fo-d-head">${statusBadge(doc)}${deliveryBadge(doc)}<span class="fo-muted">${esc(doc.company)}</span></div>
-          <dl class="fo-facts"><div><dt>Movement</dt><dd>${esc(doc[F.type]||'Unknown')}</dd></div><div><dt>Vehicle</dt><dd>${link('vehicle',doc.vehicle) || '<span class="fo-bad-text">Not assigned</span>'}</dd></div><div><dt>Driver</dt><dd>${link('driver',doc.driver,doc.driver_name) || '<span class="fo-bad-text">Not assigned</span>'}</dd></div><div><dt>Route</dt><dd>${esc(doc[F.from]||'Source unknown')}${doc[F.to] ? `<span class="fo-to">${esc(doc[F.to])}</span>` : ''}</dd></div></dl>
-          ${list.length ? `<div class="fo-d-actions"><h3>To review</h3><ul>${list.map(i=>`<li class="${urgent(i) ? 'fo-bad' : 'fo-warn'}">${esc(i)}</li>`).join('')}</ul></div>` : ''}
-          <h3>Recorded journey</h3><ol class="fo-timeline">${STEPS.map(([l,f])=>`<li class="${recorded(doc[f])?'fo-recorded':''}"><strong>${l}</strong><span>${doc[f] ? esc(when(doc[f])) : 'Not recorded'}${stamp(doc[f])>stamp(frappe.datetime.now_datetime())?' (future)':''}</span></li>`).join('')}</ol>
-          <p class="fo-note">Recorded fields can be prefilled, so this timeline does not confirm actual movement.</p>
-          ${delivery(doc) ? `<h3>Delivery evidence</h3><ul class="fo-evidence">${RECEIPT.map(([f,l])=>check(doc[f]==='Yes',l,doc[f]||'Not set')).join('')}<li class="${doc[F.evidence] ? 'fo-yes' : 'fo-no'}"><b aria-hidden="true">${doc[F.evidence] ? '✓' : '✕'}</b><span>Signed delivery note</span><em>${evidenceURL?`<a href="${esc(evidenceURL)}" target="_blank" rel="noopener noreferrer">Open attachment</a>`:doc[F.evidence]?'Review in trip':'Missing'}</em></li></ul>` : ''}
-          <h3>Delivery stops</h3>${stops.length?`<ul class="fo-stops">${stops.map(s=>`<li><strong>${esc(s.customer||'Customer unknown')}</strong><span>${esc(s.address||'Address unknown')}</span><span>${s.delivery_note?link('delivery-note',s.delivery_note):'<em>No Delivery Note linked</em>'}</span></li>`).join('')}</ul>`:'<p class="fo-muted">No delivery stops recorded.</p>'}</div>`));
-        d.show();
-      } catch(error) { frappe.msgprint(this.T('Unable to open this trip. Check record permission.')); }
+    if (a === 'kpi') { openDrill(v); return; }
+    if (a === 'tpage') { TS[id].page = Math.max(1, TS[id].page + (+v)); fillTable(id); return; }
+    if (a === 'tsort') { var st = TS[id]; if (st.sk === v) { st.dir = -st.dir; } else { st.sk = v; st.dir = 1; } st.page = 1; fillTable(id); focusHead(id, v); return; }
+    if (a === 'spage') { var ss = SS[id]; ss.page = Math.max(1, ss.page + (+v)); ss.dirty = true; fillTable(id); return; }
+    if (a === 'ssort') { var s2 = SS[id]; if (s2.sk === v) { s2.dir = -s2.dir; } else { s2.sk = v; s2.dir = 1; } s2.page = 1; s2.dirty = true; fillTable(id); focusHead(id, v); return; }
+    if (a === 'sretry') { SS[id].dirty = true; fillTable(id); return; }
+    if (a === 'csv') { var sp = TBL[id]; download(sp.file || id, sp, clientRows(sp, TS[id])); return; }
+    if (a === 'csvall') { exportServer(id); return; }
+  }
+  function focusHead(id, v) { var th = HOST.querySelector('[data-tbl="' + id + '"] th[data-v="' + v + '"]'); if (th) { th.focus(); } }
+  function onInput(ev) {
+    var n = ev.target; if (!n || !n.getAttribute || !HOST.contains(n)) { return; }
+    var fs = n.getAttribute('data-fs'), fd = n.getAttribute('data-fd'), tq = n.getAttribute('data-tq');
+    if (APP.onInput && APP.onInput(n, ev) === true) { return; }
+    if (fs) { if (FS[fs] === n.value) { return; } FS[fs] = n.value; renderToolbar(); return; }
+    if (fd) { if (!FD || FD[fd] === n.value) { return; } FD[fd] = n.value; if (n.type === 'search') { return; } if (APP.filters.some(function (f) { return f.dependsOn === fd; })) { APP.filters.forEach(function (f) { if (f.dependsOn === fd && FD[f.k] && !optList(f, FD).some(function (x) { return x.v === FD[f.k]; })) { FD[f.k] = ''; } }); renderToolbar(); } return; }
+    if (tq) {
+      focusId = tq; var spx = TBL[tq]; if (!spx) { return; }
+      if (spx.server) { var s2 = SS[tq]; if (s2.q === n.value) { return; } s2.q = n.value; s2.page = 1; clearTimeout(onInput.t); onInput.t = later(function () { s2.dirty = true; fillTable(tq); }, 350); }
+      else { var s1 = TS[tq] || (TS[tq] = { q: '', page: 1, sk: spx.sk || '', dir: spx.dir || 1 }); if (s1.q === n.value) { return; } s1.q = n.value; s1.page = 1; fillTable(tq); }
     }
   }
-  window.DMLogisticsDashboard = { mount: host => new LogisticsDashboard(host) };
-  window.DMFleetOperations = window.DMLogisticsDashboard; // kept so existing embeds keep working
-  if (typeof root_element !== 'undefined' && root_element) {
-    new LogisticsDashboard(root_element.jquery ? root_element[0] : root_element);
-  } else {
-    frappe.pages['logistics-dashboard'] = frappe.pages['logistics-dashboard'] || {};
-    frappe.pages['logistics-dashboard'].on_page_load = wrapper => {
-      const page = frappe.ui.make_app_page({parent:wrapper,title:'Logistics Dashboard',single_column:true});
-      const host = document.createElement('div'); page.main.append(host); new LogisticsDashboard(host);
-    };
+  function onKey(ev) {
+    var t = ev.target, act = t && t.getAttribute ? t.getAttribute('data-act') : null, rtl = LANG === 'ar', k = ev.key;
+    if (k === 'Escape') {
+      if (POP) { ev.preventDefault(); closePop(true); return; }
+      if (OVL) { closeOverlay(); }
+      return;
+    }
+    if ((k === 'Enter' || k === ' ') && (act === 'tsort' || act === 'ssort')) { ev.preventDefault(); t.click(); return; }
+    if (k === 'Tab' && OVL) {
+      var modal = $('.dms-modal'), controls = Array.prototype.filter.call(modal.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), [tabindex="0"]'), function (el) { return el.getClientRects().length; });
+      var first = controls[0], last = controls[controls.length - 1];
+      if (ev.shiftKey && t === first) { ev.preventDefault(); last.focus(); }
+      else if (!ev.shiftKey && t === last) { ev.preventDefault(); first.focus(); }
+    }
+    if (act === 'tab' && /^(ArrowLeft|ArrowRight|Home|End)$/.test(k)) {
+      var ids = APP.tabs.map(function (x) { return x.id; }), i = ids.indexOf(t.getAttribute('data-v')), L = ids.length;
+      var d = k === 'Home' ? -i : k === 'End' ? L - 1 - i : ((k === 'ArrowRight') !== rtl ? 1 : -1);
+      ev.preventDefault(); goTab(ids[(i + d + L) % L], true); return;
+    }
+    if (act === 'calday' && CAL) {
+      var cur = t.getAttribute('data-v'), step = { ArrowRight: rtl ? -1 : 1, ArrowLeft: rtl ? 1 : -1, ArrowUp: -7, ArrowDown: 7 }[k];
+      if (step) { ev.preventDefault(); calMove(addDays(cur, step)); return; }
+      if (k === 'PageUp' || k === 'PageDown') { ev.preventDefault(); calMove(shiftMonths(cur, k === 'PageUp' ? -1 : 1)); return; }
+      if (k === 'Home' || k === 'End') { ev.preventDefault(); calMove(k === 'Home' ? weekStartOf(cur) : addDays(weekStartOf(cur), 6)); }
+    }
   }
+  /* Start: wire events, render the skeleton, run APP.boot (reference lists), then the first load. */
+  function start() {
+    HOST.addEventListener('click', onClick, SIG);
+    HOST.addEventListener('input', onInput, SIG);
+    HOST.addEventListener('change', onInput, SIG);
+    HOST.addEventListener('keydown', onKey, SIG);
+    HOST.addEventListener('pointerover', onOver, SIG);
+    HOST.addEventListener('pointerleave', hideTip, SIG);
+    HOST.addEventListener('focusin', function (ev) { var n = ev.target.closest && ev.target.closest('[data-tip]'); if (n) { showTip(n); } }, SIG);
+    HOST.addEventListener('focusout', hideTip, SIG);
+    document.addEventListener('pointerdown', function (ev) {
+      if (!POP) { return; } var p = ev.composedPath ? ev.composedPath() : [];
+      for (var i = 0; i < p.length; i++) { if (p[i] === HOST) { return; } }
+      closePop(false);
+    }, SIG);
+    if (!G.frappe || !frappe.call) { HOST.innerHTML = '<div class="dms-empty">Frappe client API not available.</div>'; return; }
+    setToday(); PERIOD = curPeriod();
+    var chartResize = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fitChartLabels) : null;
+    if (chartResize) { chartResize.observe(HOST); if (abort) { abort.signal.addEventListener('abort', function () { chartResize.disconnect(); }); } }
+    if (document.fonts) { document.fonts.ready.then(function () { if (!destroyed) { fitChartLabels(); } }); }
+    renderAll();
+    var g = GEN, chk = function () { return g === GEN && !destroyed; };
+    Promise.resolve(APP.boot ? APP.boot(chk) : null).catch(function (e) { if (G.console) { console.error(APP.key, 'boot', e); } }).then(function () { if (destroyed) { return; } BOOTED = true; reload(); });
+  }
+  /* ==== end DMS kit ==== */
+
+  /* ============================================================ v6 definitions (rules unchanged) */
+  var TF = { date: 'custom_delivery_date', type: 'custom_trip_type_', from: 'custom_source_warehouse', to: 'custom_delivery_to_warehouse', report: 'custom_driver_reporting_time__at_warehouse', depart: 'departure_time', arrive: 'custom_delivered_time', exit: 'custom_driver__out_of_site', evidence: 'custom_signed_delivery_note' };
+  var TYPES = ['Delivery Note', 'Internal Transfer', 'Materials Collection from Supplier', 'Petrol', 'Workshop'];
+  var RECEIPT = [['custom_receiver_name', 'Receiver name', 'اسم المستلم'], ['custom_receiver_mob', 'Receiver mobile', 'جوال المستلم'], ['custom_receiver_sign', 'Signature', 'التوقيع'], ['custom_stamp', 'Stamp', 'الختم']];
+  var STEPS = [['Reported', 'حضر', TF.report], ['Departed', 'غادر', TF.depart], ['Arrived', 'وصل', TF.arrive], ['Left site', 'غادر الموقع', TF.exit]];
+  var TRIP_FIELDS = ['name', 'docstatus', 'status', 'company', 'driver', 'driver_name', 'vehicle', 'delivery_status', 'modified', 'custom_receiver_name', 'custom_receiver_mob', 'custom_receiver_sign', 'custom_stamp'].concat(Object.keys(TF).map(function (k) { return TF[k]; }));
+  function day(v) { return String(v || '').slice(0, 10); }
+  function stamp(v) { var m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) : NaN; }
+  function nowStr() { try { var p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).formatToParts(new Date()), g = function (k) { return (p.filter(function (x) { return x.type === k; })[0] || {}).value; }; return g('year') + '-' + g('month') + '-' + g('day') + ' ' + (g('hour') === '24' ? '00' : g('hour')) + ':' + g('minute') + ':' + g('second'); } catch (e) { return TODAY + ' 12:00:00'; } }
+  function NOW() { return stamp(nowStr()); }
+  function delta(a, b) { return isFinite(stamp(a)) && stamp(b) >= stamp(a) ? (stamp(b) - stamp(a)) / 60000 : null; }
+  function tActive(r) { return r.docstatus !== 2 && ['Cancelled', 'Canceled'].indexOf(r.status) < 0; }
+  function departed(r) { return isFinite(stamp(r[TF.depart])) && stamp(r[TF.depart]) <= NOW(); }
+  function done(r) { return tActive(r) && r.docstatus === 1 && (r.status === 'Completed' || r.delivery_status === 'Delivered'); }
+  function executed(r) { return tActive(r) && r.docstatus === 1 && (done(r) || r.status === 'In Transit' || r.delivery_status === 'Partially Delivered' || departed(r)); }
+  function delivery(r) { return r[TF.type] === 'Delivery Note'; }
+  function evidenceMissing(r) { return delivery(r) && RECEIPT.every(function (x) { return r[x[0]] !== 'Yes'; }); }
+  function follow(r) { return executed(r) && delivery(r) && (r.delivery_status !== 'Delivered' || evidenceMissing(r)); }
+  function recorded(v) { return isFinite(stamp(v)) && stamp(v) <= NOW(); }
+  function stageOf(r) { if (!tActive(r)) { return tr('Cancelled', 'ملغاة'); } if (r.docstatus === 0 || r.status === 'Draft') { return tr('Awaiting submission', 'بانتظار الاعتماد'); } if (done(r)) { return tr('Completed', 'مكتملة'); } if (!executed(r)) { return tr('Scheduled', 'مجدولة'); } var n = NOW(); if (stamp(r[TF.exit]) <= n) { return tr('Site exit recorded', 'سُجل الخروج من الموقع'); } if (stamp(r[TF.arrive]) <= n) { return tr('At site (inferred)', 'في الموقع (مستنتج)'); } return tr('In transit', 'في الطريق'); }
+  /* issue keys stay English (they drive grouping); labels are translated for display */
+  function issues(r) {
+    var a = []; if (!tActive(r)) { return a; }
+    if (!r.driver) { a.push('Assign driver'); } if (!r.vehicle) { a.push('Assign vehicle'); } if (!r[TF.date]) { a.push('Delivery date missing'); }
+    if (executed(r)) { if (!r[TF.report] || !r[TF.depart] || !r[TF.arrive]) { a.push('Trip timestamps incomplete'); } if (done(r) && !r[TF.exit]) { a.push('Site exit missing'); } }
+    if (executed(r) || (r.docstatus === 0 && r[TF.depart])) { var seq = [r[TF.report], r[TF.depart], r[TF.arrive], r[TF.exit]].filter(Boolean); if (seq.some(function (t, i) { return !isFinite(stamp(t)) || (i && stamp(t) < stamp(seq[i - 1])); })) { a.push('Review timestamp order'); } }
+    if (follow(r)) { if (r.delivery_status !== 'Delivered') { a.push(r.delivery_status || 'Delivery status unknown'); } if (evidenceMissing(r)) { a.push('No proof of receipt'); } }
+    return a;
+  }
+  var ISSUE_AR = { 'Assign driver': 'تعيين سائق', 'Assign vehicle': 'تعيين مركبة', 'Delivery date missing': 'تاريخ التسليم مفقود', 'Trip timestamps incomplete': 'أوقات الرحلة غير مكتملة', 'Site exit missing': 'وقت الخروج مفقود', 'Review timestamp order': 'راجع ترتيب الأوقات', 'Not Delivered': 'لم تُسلَّم', 'Partially Delivered': 'سُلّمت جزئيًا', 'Delivery status unknown': 'حالة التسليم غير معروفة', 'No proof of receipt': 'بلا إثبات استلام',
+    'Awaiting approval': 'بانتظار الاعتماد', 'On hold': 'معلق', 'Stale, over 30 days late': 'راكد، متأخر أكثر من 30 يومًا', 'Past due, partly received': 'متأخر، مستلم جزئيًا', 'Past due, nothing received': 'متأخر، لم يُستلم شيء', 'No required date': 'بلا تاريخ احتياج', 'Billed ahead of receipt': 'مفوتر قبل الاستلام', 'Shipment delayed': 'الشحنة متأخرة', 'Arrived, receipt not posted': 'وصل ولم يرحل الاستلام', 'ETA missing on shipped order': 'الوصول المقدر مفقود', 'Documents not received': 'المستندات لم تستلم', 'Document mismatch': 'عدم تطابق المستندات', 'Under customs inspection': 'قيد الفحص الجمركي', 'Customs charges unpaid': 'رسوم جمركية غير مسددة', 'Past required date': 'تجاوز تاريخ الاحتياج', 'High priority, no PO yet': 'أولوية عالية بلا أمر شراء', 'No PO after 7 days': 'بلا أمر شراء بعد 7 أيام' };
+  function iss(k) { return LANG === 'ar' && ISSUE_AR[k] ? ISSUE_AR[k] : k; }
+  function urgent(i) { return /^Assign |order|Delivery date missing/.test(i); }
+  function byDeparture(a, b) { return String(a[TF.depart] || '9').localeCompare(String(b[TF.depart] || '9')) || a.name.localeCompare(b.name); }
+  function bySeverity(a, b) { return issues(b).filter(urgent).length - issues(a).filter(urgent).length || issues(b).length - issues(a).length || byDeparture(a, b); }
+  function tripState(r) { return !tActive(r) ? 'Cancelled' : r.docstatus === 0 ? 'Draft' : done(r) ? 'Delivered' : 'Submitted'; }
+  function isPlanned(r) { return tActive(r) && r.docstatus === 0; }
+  function tally(list, keyOf) { var m = {}; list.forEach(function (r) { var k = keyOf(r); if (k != null) { m[k] = (m[k] || 0) + 1; } }); return Object.keys(m).map(function (k) { return [k, m[k]]; }).sort(function (a, b) { return b[1] - a[1] || String(a[0]).localeCompare(String(b[0])); }); }
+  function clashes(list) { var pairs = [], seen = {}, as = {}; list.forEach(function (b) { if (!b[TF.depart]) { return; } ['vehicle', 'driver'].forEach(function (kind) { if (!b[kind]) { return; } var key = kind + '|' + b[kind] + '|' + b[TF.depart], a = as[key]; if (a && pairs.length < 100) { var pk = [a.name, b.name].sort().join('|'); if (!seen[pk]) { pairs.push([a, b, kind, b[kind]]); seen[pk] = 1; } } if (!a) { as[key] = b; } }); }); return pairs; }
+  /* live map phases */
+  var DAY_MS = 864e5, FRESH_MIN = 15;
+  function tripPhase(r, today, now) {
+    if (!tActive(r) || !r.vehicle) { return null; }
+    var dep = stamp(r[TF.depart]), ex = stamp(r[TF.exit]), arr = stamp(r[TF.arrive]), d = day(r[TF.date] || r[TF.depart]);
+    if (!done(r) && isFinite(dep) && dep <= now && now - dep <= DAY_MS && !(isFinite(ex) && ex <= now)) { return isFinite(arr) && arr <= now ? 'At destination' : 'On the road'; }
+    if (!done(r) && (isFinite(dep) ? dep > now : !!d && d >= today)) { return 'Upcoming'; }
+    return d === today ? 'Finished today' : null;
+  }
+  function isOngoing(ph) { return ph === 'On the road' || ph === 'At destination'; }
+  var PHASE_AR = { 'On the road': 'على الطريق', 'At destination': 'في الوجهة', 'Upcoming': 'قادمة', 'Finished today': 'انتهت اليوم', 'No trip': 'بلا رحلة' };
+  function ph(p) { return LANG === 'ar' && PHASE_AR[p] ? PHASE_AR[p] : p; }
+  function mapTrips(rows, today, now) { var best = {}; rows.forEach(function (r) { var p = tripPhase(r, today, now); if (!p) { return; } var cur = best[r.vehicle], rank = isOngoing(p) ? 0 : p === 'Upcoming' ? 1 : 2; if (!cur || rank < cur.rank || (rank === cur.rank && String(r[TF.depart] || '9') < String(cur.trip[TF.depart] || '9'))) { best[r.vehicle] = { vehicle: r.vehicle, trip: r, phase: p, rank: rank }; } }); return Object.keys(best).map(function (k) { return best[k]; }); }
+  function toFix(log) { var lat = parseFloat(log.latitude), lng = parseFloat(log.longitude); if (!isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 85 || Math.abs(lng) > 180 || (lat === 0 && lng === 0)) { return null; } return { lat: lat, lng: lng, at: log.track_date_time || '', speed: Number(log.speed) || 0, ignition: /^(1|true|on|yes)$/i.test(String(log.ignition == null ? '' : log.ignition)), place: log.location || '' }; }
+  function minutesSince(v, now) { return isFinite(stamp(v)) ? Math.max(0, Math.round((now - stamp(v)) / 60000)) : null; }
+  function agoText(m) { return m === null ? tr('No fix', 'لا موقع') : m < 1 ? tr('Just now', 'الآن') : m < 60 ? tr(m + ' min ago', 'قبل ' + m + ' د') : m < 1440 ? tr(Math.floor(m / 60) + ' h ' + (m % 60) + ' min ago', 'قبل ' + Math.floor(m / 60) + ' س ' + (m % 60) + ' د') : tr(Math.floor(m / 1440) + ' d ago', 'قبل ' + Math.floor(m / 1440) + ' يوم'); }
+  function mercX(lng, z) { return (lng + 180) / 360 * Math.pow(2, z) * 256; }
+  function mercY(lat, z) { var s = Math.sin(lat * Math.PI / 180); return (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * Math.pow(2, z) * 256; }
+  function unMercX(x, z) { return x / (Math.pow(2, z) * 256) * 360 - 180; }
+  function unMercY(y, z) { var n = Math.PI - 2 * Math.PI * y / (Math.pow(2, z) * 256); return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n))); }
+  function fitView(pts, w, h) { if (!pts.length) { return { lat: 24.7, lng: 46.7, z: 5 }; } var la = pts.map(function (p) { return p.lat; }), ln = pts.map(function (p) { return p.lng; }), la0 = Math.min.apply(null, la), la1 = Math.max.apply(null, la), ln0 = Math.min.apply(null, ln), ln1 = Math.max.apply(null, ln), z = 15; for (; z > 3; z--) { if (mercX(ln1, z) - mercX(ln0, z) <= w - 120 && mercY(la0, z) - mercY(la1, z) <= h - 120) { break; } } return { lat: (la0 + la1) / 2, lng: (ln0 + ln1) / 2, z: z }; }
+  function utilisation(vehicles, trips, from, to) {
+    var inWin = trips.filter(function (r) { return tActive(r) && r.vehicle; }), usedIn = {}, ever = {}, last = {};
+    inWin.forEach(function (r) { var d = day(r[TF.date]); ever[r.vehicle] = 1; if (d >= from && d <= to) { usedIn[r.vehicle] = 1; } if (d && (!last[r.vehicle] || d > last[r.vehicle])) { last[r.vehicle] = d; } });
+    var scope = vehicles.filter(function (v) { return v.vehicle_service_type === 'Goods Carriage Vehicle' || ever[v.name]; });
+    var idle = scope.filter(function (v) { return !usedIn[v.name]; }).map(function (v) { return { vehicle: v.name, plate: v.license_plate || v.name, last: last[v.name] || '' }; }).sort(function (a, b) { return String(a.last || '0').localeCompare(String(b.last || '0')) || a.vehicle.localeCompare(b.vehicle); });
+    return { scope: scope.length, used: scope.length - idle.length, idle: idle, fleet: vehicles.length };
+  }
+  /* procurement (v6) */
+  var PO = { stage: 'custom_shipment_status', eta: 'custom_estimated_arrival_time', kind: 'custom_supplier_type', buyer: 'custom_purchaser_name', docs: 'custom_clearing_document_status', customs: 'custom_customs_status', charges: 'custom_customs_charges', paid: 'custom_customs_charges_paid', transit: 'custom_goods_in_transit_', toLoad: 'custom_to_be_loaded', bl: 'custom_original_bl_status', material: 'custom_material_status', place: 'custom_delivery_location' };
+  var CHECKS = [['Price', 'custom_price_verification'], ['HS code', 'custom_hs_code_verification'], ['BL invoice', 'custom_bl_invoice_verification'], ['BL weight', 'custom_bl_weight_varification'], ['Original BL', PO.bl]];
+  var MOVING = ['Shipped Partial Qty', 'Shipped Full Qty', 'In Transit', 'In Customs', 'Out for Delivery'], PO_OPEN_STATUS = ['To Receive and Bill', 'To Receive', 'On Hold'], STALE_DAYS = 30;
+  var PO_FIELDS = { core: ['name', 'docstatus', 'status', 'company', 'supplier', 'supplier_name', 'transaction_date', 'schedule_date', 'per_received', 'per_billed', 'base_grand_total', 'currency', 'modified'], optional: [PO.buyer, PO.kind, PO.place, PO.stage, PO.eta, PO.docs, PO.customs, PO.charges, PO.paid, PO.transit, PO.toLoad, PO.material].concat(CHECKS.map(function (c) { return c[1]; })).filter(function (x, i, a) { return a.indexOf(x) === i; }) };
+  var MR_FIELDS = { core: ['name', 'docstatus', 'status', 'company', 'material_request_type', 'transaction_date', 'schedule_date', 'per_ordered', 'per_received', 'modified'], optional: ['custom_priority', 'custom_purchase_type', 'custom_purpose_of_purchase'] };
+  var PR_FIELDS = { core: ['name', 'docstatus', 'status', 'company', 'supplier', 'supplier_name', 'posting_date', 'posting_time', 'per_billed', 'is_return', 'base_grand_total', 'modified'], optional: ['custom_purchaser_name'] };
+  function nm(v) { return Number(v) || 0; }
+  function poDraft(r) { return r.docstatus === 0; }
+  function poOpen(r) { return r.docstatus === 1 && PO_OPEN_STATUS.indexOf(r.status) > -1 && nm(r.per_received) < 100; }
+  function poMoving(r) { return MOVING.indexOf(r[PO.stage]) > -1; }
+  function poDue(r) { return r[PO.eta] || r.schedule_date || ''; }
+  function poLate(r) { var d = poDue(r); return !!d && day(d) < TODAY; }
+  function lateDays(r) { var d = poDue(r); return d && day(d) < TODAY ? diffDays(day(d), TODAY) : 0; }
+  function poStale(r) { return lateDays(r) > STALE_DAYS; }
+  function inCustoms(r) { return r[PO.stage] === 'In Customs' || r[PO.customs] === 'Under Inspection'; }
+  function billedAhead(r) { return nm(r.per_billed) > nm(r.per_received) + 0.5; }
+  function poIssues(r) {
+    if (poDraft(r)) { return ['Awaiting approval']; } if (!poOpen(r)) { return []; }
+    var a = []; if (r.status === 'On Hold') { a.push('On hold'); }
+    if (poStale(r)) { a.push('Stale, over 30 days late'); } else if (poLate(r)) { a.push(nm(r.per_received) > 0 ? 'Past due, partly received' : 'Past due, nothing received'); } else if (!poDue(r)) { a.push('No required date'); }
+    if (billedAhead(r)) { a.push('Billed ahead of receipt'); } if (r[PO.stage] === 'Shipment Delayed') { a.push('Shipment delayed'); }
+    if ((r[PO.stage] === 'Delivered' || r[PO.material] === 'Landed') && nm(r.per_received) < 100) { a.push('Arrived, receipt not posted'); }
+    if (poMoving(r) && !r[PO.eta]) { a.push('ETA missing on shipped order'); }
+    if (r[PO.kind] === 'Foreign' && poMoving(r) && (!r[PO.docs] || r[PO.docs] === 'Documents in courier')) { a.push('Documents not received'); }
+    if (CHECKS.some(function (c) { return r[c[1]] === 'Not Matching'; })) { a.push('Document mismatch'); }
+    if (r[PO.customs] === 'Under Inspection') { a.push('Under customs inspection'); }
+    if (nm(r[PO.charges]) > 0 && !nm(r[PO.paid])) { a.push('Customs charges unpaid'); }
+    return a;
+  }
+  function urgentP(i) { return /^Past due|delayed|mismatch|^Arrived/.test(i); }
+  function byDue(a, b) { return String(poDue(a) || '9').localeCompare(String(poDue(b) || '9')) || a.name.localeCompare(b.name); }
+  function sevP(a, b) { return poIssues(b).filter(urgentP).length - poIssues(a).filter(urgentP).length || poIssues(b).length - poIssues(a).length || byDue(a, b); }
+  function mrNoPO(r) { return nm(r.per_ordered) === 0; }
+  function mrAge(r) { return /^\d{4}-\d{2}-\d{2}/.test(r.transaction_date || '') ? diffDays(day(r.transaction_date), TODAY) : null; }
+  function mrIssues(r) { var a = [], age = mrAge(r); if (r.schedule_date && r.schedule_date < TODAY) { a.push('Past required date'); } if (r.custom_priority === 'High' && mrNoPO(r)) { a.push('High priority, no PO yet'); } else if (mrNoPO(r) && age !== null && age > 7) { a.push('No PO after 7 days'); } return a; }
+  function urgentM(i) { return /^Past|^High/.test(i); }
+  function sevM(a, b) { return mrIssues(b).filter(urgentM).length - mrIssues(a).filter(urgentM).length || mrIssues(b).length - mrIssues(a).length || String(a.transaction_date || '9').localeCompare(String(b.transaction_date || '9')) || a.name.localeCompare(b.name); }
+  function median(a) { if (!a.length) { return null; } var s = a.slice().sort(function (x, y) { return x - y; }), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
+  function delayStats(rows) {
+    var by = {}; rows.forEach(function (r) { var no = r.material_request_no; if (!no) { return; } var m = by[no] || (by[no] = { no: no, date: r.material_request_date, status: r.status, cc: r.cost_center || 'Not set', po: '' }), pd = /^\d{4}-\d{2}-\d{2}/.test(r.purchase_order_date || '') ? day(r.purchase_order_date) : ''; if (pd && (!m.po || pd < m.po)) { m.po = pd; } });
+    var reqs = Object.keys(by).map(function (k) { return by[k]; }).filter(function (m) { return /^\d{4}-\d{2}-\d{2}/.test(m.date || '') && ['Cancelled', 'Stopped', 'Rejected'].indexOf(m.status) < 0; });
+    var ordered = reqs.filter(function (m) { return m.po; }).map(function (m) { return Object.assign({}, m, { days: diffDays(day(m.date), m.po) }); }).filter(function (m) { return m.days >= 0; }), waiting = reqs.filter(function (m) { return !m.po; }).map(function (m) { return Object.assign({}, m, { age: diffDays(day(m.date), TODAY) }); });
+    var ds = ordered.map(function (m) { return m.days; }), cc = {}; ordered.forEach(function (m) { (cc[m.cc] = cc[m.cc] || []).push(m.days); });
+    return { requests: reqs.length, ordered: ordered.length, waiting: waiting.length, waitingOld: waiting.filter(function (m) { return m.age > 7; }).length, median: median(ds), within3: ds.length ? Math.round(100 * ds.filter(function (d) { return d <= 3; }).length / ds.length) : null,
+      buckets: [['Same day', 'نفس اليوم', function (d) { return d === 0; }], ['1 to 3 days', '1–3 أيام', function (d) { return d >= 1 && d <= 3; }], ['4 to 7 days', '4–7 أيام', function (d) { return d >= 4 && d <= 7; }], ['8 to 14 days', '8–14 يومًا', function (d) { return d >= 8 && d <= 14; }], ['Over 14 days', 'أكثر من 14 يومًا', function (d) { return d > 14; }]].map(function (b, i) { return { label: tr(b[0], b[1]), value: ds.filter(b[2]).length, color: i >= 4 ? 'var(--dms-bad)' : i === 3 ? 'var(--dms-age3)' : null }; }).filter(function (b) { return b.value; }),
+      slow: Object.keys(cc).filter(function (k) { return cc[k].length >= 2; }).map(function (k) { return [k, Math.round(10 * cc[k].reduce(function (s, x) { return s + x; }, 0) / cc[k].length) / 10, cc[k].length]; }).sort(function (a, b) { return b[1] - a[1]; }) };
+  }
+
+  /* ============================================================ loading */
+  var CO = [], VEH = { rows: [], denied: false, reduced: false }, LIVE = { pos: {}, loading: false, filter: 'all', at: '', error: '', view: null, refit: true, sel: '', tried: {}, timer: 0 }, DELAY = { rows: null, loading: false, error: '' }, LOADED_WIN = null;
+  function liveWindow() { return [addDays(TODAY, -30), addDays(TODAY, 14)]; }
+  function basis() { return F.basis === 'depart' ? TF.depart : F.basis === 'all' ? 'all' : TF.date; }
+  function needsFetch() { var L = LOADED_WIN, b = basis(); if (!L || L.capped) { return true; } if (L.basis === 'all') { return false; } if (b === 'all' || b !== L.basis) { return true; } return PERIOD[0] < L.from || PERIOD[1] > L.to; }
+  function pagesOf(doctype, args, cap) {
+    var fields = args.fields, reduced = false;
+    var probe = Array.isArray(fields) ? Promise.resolve(fields) : getList(Object.assign({}, args, { doctype: doctype, fields: fields.core.concat(fields.optional), limit_page_length: 1 }), null).then(function () { return fields.core.concat(fields.optional); }, function () { reduced = true; return fields.core; });
+    return probe.then(function (fl) { var rows = []; var step = function (start) { return getList(Object.assign({}, args, { doctype: doctype, fields: fl, limit_start: start, limit_page_length: 500 }), null).then(function (page) { page = page || []; rows = rows.concat(page); if (page.length < 500 || start + 500 >= cap) { return { rows: rows, capped: page.length === 500 && start + 500 >= cap, reduced: reduced }; } return step(start + 500); }); }; return step(0); });
+  }
+  function loadAll() {
+    run('trips', function () {
+      var b = basis(), lw = liveWindow(), wf = PERIOD[0] < lw[0] ? PERIOD[0] : lw[0], wt = PERIOD[1] > lw[1] ? PERIOD[1] : lw[1];
+      var f = b === 'all' ? [] : [[b, '>=', b === TF.depart ? wf + ' 00:00:00' : wf], [b, '<=', b === TF.depart ? wt + ' 23:59:59' : wt]];
+      return pagesOf('Delivery Trip', { fields: TRIP_FIELDS, filters: f, order_by: 'name asc' }, 10000).then(function (r) { LOADED_WIN = { basis: b, from: wf, to: wt, capped: r.capped }; return r.rows; });
+    });
+    run('veh', function () { return getList({ doctype: 'Vehicle', fields: ['name', 'license_plate', 'custom_vehicle_status', 'vehicle_service_type'], filters: [['custom_vehicle_status', '=', 'Active']], order_by: 'name asc', limit_page_length: 500 }, null).then(function (r) { VEH.reduced = false; return r || []; }, function () { VEH.reduced = true; return getList({ doctype: 'Vehicle', fields: ['name', 'license_plate'], order_by: 'name asc', limit_page_length: 500 }, null); }).then(function (r) { VEH.rows = r || []; return VEH.rows; }); });
+    run('recs', function () {
+      var dates = basis() === 'all' ? [] : [['posting_date', 'between', [PERIOD[0], PERIOD[1]]]], sub = [['docstatus', '=', 1]].concat(dates), c = function (dt, f) { return getCount(dt, f, null).catch(function () { return null; }); };
+      return Promise.all([c('Delivery Note', sub), c('Delivery Note', sub.concat([['custom_delivery_by', '=', 'DM Vehicle']])), c('Delivery Note', sub.concat([['custom_delivery_by', '=', 'Customer Pickup']])), c('Delivery Note', sub.concat([['custom_delivery_by', '=', 'Rented Vehicle']])), c('Delivery Note', [['docstatus', '=', 0]]), c('Delivery Note', [['docstatus', '=', 1], ['status', '=', 'To Bill']]), c('Driver', []), c('Driver', [['status', '=', 'Active']]), c('Driver', [['status', '=', 'Active'], ['employee', 'is', 'not set']])])
+        .then(function (r) { return { dn: { total: r[0], dm: r[1], pickup: r[2], rented: r[3], draft: r[4], toBill: r[5] }, drv: { all: r[6], active: r[7], noEmployee: r[8] } }; });
+    });
+    run('proc', function () {
+      var jobs = [['Purchase Order', 'po', { fields: PO_FIELDS, filters: [['docstatus', 'in', [0, 1]], ['status', 'in', ['Draft'].concat(PO_OPEN_STATUS)]], order_by: 'name asc' }], ['Material Request', 'mr', { fields: MR_FIELDS, filters: [['docstatus', '=', 1], ['material_request_type', '=', 'Purchase'], ['status', 'in', ['Pending', 'Partially Ordered']]], order_by: 'name asc' }], ['Purchase Receipt', 'pr', { fields: PR_FIELDS, filters: [['docstatus', '=', 1], ['posting_date', '>=', addDays(TODAY, -29)]], order_by: 'name asc' }]];
+      return Promise.all(jobs.map(function (j) { return pagesOf(j[0], j[2], 5000).then(function (v) { return v; }, function (e) { return { err: errKind(e) }; }); })).then(function (res) { var P = { denied: [], reduced: [], capped: false }; res.forEach(function (v, i) { var k = jobs[i][1]; if (v.err) { P[k] = []; P.denied.push(jobs[i][0]); } else { P[k] = v.rows; if (v.capped) { P.capped = true; } if (v.reduced) { P.reduced.push(jobs[i][0]); } } }); return P; });
+    });
+    if (tab === 'map') { LIVE.tried = {}; later(function () { loadLive(true, 'all'); }, 0); }
+  }
+  function loadDelay() {
+    if (DELAY.loading || DELAY.rows) { return; } DELAY.loading = true; DELAY.error = '';
+    callP('frappe.desk.query_report.run', { report_name: 'Procurement Tracker', filters: { from_date: addDays(TODAY, -90), to_date: TODAY } }).then(function (m) {
+      var cols = (m && m.columns) || [], out = (m && m.result) || []; DELAY.rows = out.filter(function (r) { return r && !(Array.isArray(r) && !r.length); }).map(function (r) { if (!Array.isArray(r)) { return r; } var o = {}; cols.forEach(function (c, i) { o[c.fieldname || c.fieldName] = r[i]; }); return o; });
+    }, function () { DELAY.error = tr('Could not run the Procurement Tracker report. Check that your role can open it, then select Refresh.', 'تعذر تشغيل تقرير متتبع المشتريات. تحقق من صلاحيتك ثم حدّث.'); }).then(function () { DELAY.loading = false; soon(); });
+  }
+  function mapEntries() {
+    var now = NOW(), trips = mapTrips(fTrips(), TODAY, now), by = {}, names = {}; trips.forEach(function (t) { by[t.vehicle] = t; });
+    VEH.rows.forEach(function (v) { names[v.name] = v.license_plate || v.name; }); trips.forEach(function (t) { if (!names[t.vehicle]) { names[t.vehicle] = t.vehicle; } });
+    return Object.keys(names).map(function (v) { var t = by[v]; return { vehicle: v, plate: names[v], trip: t ? t.trip : null, phase: t ? t.phase : 'No trip', rank: t ? t.rank : 3, fix: LIVE.pos[v] || null }; }).sort(function (a, b) { return a.rank - b.rank || String(a.plate).localeCompare(String(b.plate)); });
+  }
+  function loadLive(silent, scope) {
+    if (LIVE.loading || !D.trips) { return; }
+    var all = mapEntries(), pick = { all: function () { return true; }, trips: function (e) { return !!e.trip || e.vehicle === LIVE.sel; }, missing: function (e) { return !LIVE.tried[e.vehicle]; } }[scope || 'all'];
+    var names = all.filter(pick).map(function (e) { return e.vehicle; }).slice(0, 120); if (!names.length) { return; }
+    LIVE.loading = true; LIVE.error = ''; if (!silent) { renderSoft(); }
+    var F2 = ['vehicle', 'latitude', 'longitude', 'track_date_time', 'speed', 'ignition', 'location', 'distance'], i = 0;
+    var batch = function () { if (i >= names.length) { return Promise.resolve(); } var part = names.slice(i, i + 6); i += 6; return Promise.all(part.map(function (v) { return getList({ doctype: 'Vehicle Arabitra Logs', fields: F2, filters: [['vehicle', '=', v]], order_by: 'track_date_time desc', limit_page_length: 8 }, null).then(function (logs) { var fx = (logs || []).map(toFix).filter(Boolean); LIVE.tried[v] = 1; LIVE.pos[v] = fx.length ? Object.assign({}, fx[0], { trail: fx.slice().reverse().map(function (x) { return { lat: x.lat, lng: x.lng }; }) }) : null; }); })).then(batch); };
+    batch().then(function () { LIVE.at = nowStr().slice(11, 16); }, function () { LIVE.error = tr('Could not read vehicle tracking. Check read permission on Vehicle Arabitra Logs.', 'تعذرت قراءة تتبع المركبات. تحقق من صلاحية Vehicle Arabitra Logs.'); }).then(function () { LIVE.loading = false; if (tab === 'map') { renderSoft(); } });
+    clearTimeout(LIVE.timer); LIVE.timer = later(function () { if (tab === 'map' && !(G.document && document.hidden)) { loadLive(true, 'trips'); } }, 60000);
+  }
+
+  /* ============================================================ filtered views */
+  function fTrips() { var q = String(F.q || '').trim().toLowerCase(); return (D.trips || []).filter(function (r) { return (!F.company || r.company === F.company) && (!F.wh || r[TF.from] === F.wh) && (!F.type || r[TF.type] === F.type) && (!F.status || tripState(r) === F.status) && (!F.delivery || r.delivery_status === F.delivery) && (!q || [r.name, r.driver, r.driver_name, r.vehicle, r[TF.from], r[TF.to]].some(function (v) { return String(v || '').toLowerCase().indexOf(q) > -1; })); }); }
+  function inRange(r) { var b = basis(); if (b === 'all') { return true; } var d = day(r[b]); return !!d && d >= PERIOD[0] && d <= PERIOD[1]; }
+  function sets() { var all = fTrips(), rows = all.filter(inRange), working = rows.filter(tActive), live = all.filter(tActive); return { all: all, rows: rows, working: working, planned: live.filter(isPlanned), followUp: rows.filter(follow), timeErr: working.filter(function (r) { return issues(r).some(function (i) { return /timestamp/i.test(i); }); }), noAssign: working.filter(function (r) { return !r.driver || !r.vehicle; }), clash: clashes(working) }; }
+  function pFilt() {
+    var P = D.proc || { po: [], mr: [], pr: [], denied: [] }, q = String(F.q || '').trim().toLowerCase(), hit = function () { var a = arguments; return !q || Array.prototype.some.call(a, function (x) { return String(x || '').toLowerCase().indexOf(q) > -1; }); };
+    var po = P.po.filter(function (r) { return (!F.company || r.company === F.company) && (!F.kind || r[PO.kind] === F.kind) && (!F.buyer || r[PO.buyer] === F.buyer) && hit(r.name, r.supplier, r.supplier_name, r[PO.stage], r[PO.place]); });
+    var mr = P.mr.filter(function (r) { return (!F.company || r.company === F.company) && (!F.kind || r.custom_purchase_type === (F.kind === 'Foreign' ? 'Import' : 'Local')) && hit(r.name, r.custom_purpose_of_purchase); });
+    var pr = P.pr.filter(function (r) { return (!F.company || r.company === F.company) && (!F.buyer || r.custom_purchaser_name === F.buyer) && hit(r.name, r.supplier, r.supplier_name); });
+    var open = po.filter(poOpen), drafts = po.filter(poDraft);
+    return { P: P, po: po, mr: mr, pr: pr, open: open, drafts: drafts, working: open.concat(drafts), late: open.filter(function (r) { return poLate(r) && !poStale(r); }), stale: open.filter(poStale), due7: open.filter(function (r) { var d = day(poDue(r)); return d && d >= TODAY && d <= addDays(TODAY, 6); }), partial: open.filter(function (r) { return nm(r.per_received) > 0; }), toBill: pr.filter(function (r) { return !r.is_return && ['To Bill', 'Partly Billed'].indexOf(r.status) > -1; }), ahead: open.filter(billedAhead), tracked: open.filter(function (r) { return poMoving(r) || inCustoms(r) || r[PO.eta]; }) };
+  }
+  function sysCos() { return CO.filter(function (c) { return (c.default_currency || CUR) === CUR; }).map(function (c) { return c.name; }); }
+  function valueOf(list) { var s = sysCos(), cur = F.company ? ((CO.filter(function (c) { return c.name === F.company; })[0] || {}).default_currency || CUR) : CUR; return { v: list.filter(function (r) { return F.company || !CO.length || s.indexOf(r.company) > -1; }).reduce(function (a, r) { return a + nm(r.base_grand_total); }, 0), cur: cur }; }
+
+  /* ============================================================ actions pending */
+  function actSpecs() {
+    return [
+      { id: 'a_assign', client: true, short: tr('Missing driver or vehicle', 'سائق أو مركبة مفقودة'), title: tr('Trips without a driver or vehicle', 'رحلات بلا سائق أو مركبة'), why: tr('Active trips in the loaded window (30 days back, 14 ahead).', 'رحلات نشطة في النافذة المحملة (30 يومًا مضت و14 قادمة).') },
+      { id: 'a_time', client: true, short: tr('Timestamp errors', 'أخطاء الأوقات'), title: tr('Trips with incomplete or out-of-order times', 'رحلات بأوقات ناقصة أو غير مرتبة'), why: tr('Reported → departed → arrived → left site must be recorded in order.', 'يجب تسجيل الحضور ← المغادرة ← الوصول ← الخروج بالترتيب.') },
+      { id: 'a_follow', client: true, short: tr('Delivery follow-up', 'متابعة التسليم'), title: tr('Deliveries not closed or without proof of receipt', 'تسليمات غير مغلقة أو بلا إثبات استلام'), why: tr('Proof = receiver name, mobile, signature or stamp marked Yes.', 'الإثبات = اسم المستلم أو جواله أو توقيعه أو الختم بنعم.') },
+      { id: 'a_draft', client: true, short: tr('Awaiting submission', 'بانتظار الاعتماد'), title: tr('Draft trips to review and submit', 'رحلات مسودة للمراجعة والاعتماد'), why: tr('Oldest departure first.', 'الأقدم مغادرة أولًا.') },
+      { id: 'a_po', client: true, short: tr('Orders needing action', 'أوامر تحتاج إجراء'), title: tr('Purchase orders past due, delayed, arrived unposted or mismatched', 'أوامر شراء متأخرة أو شحنة متأخرة أو وصلت دون ترحيل أو غير مطابقة'), why: tr('Open orders with an urgent flag; stale orders (over 30 days late) are listed separately.', 'أوامر مفتوحة بعلامة عاجلة؛ الراكدة (أكثر من 30 يومًا) منفصلة.') },
+      { id: 'a_mr', client: true, short: tr('Purchase requests', 'طلبات الشراء'), title: tr('Requests past their required date or high priority without a PO', 'طلبات تجاوزت تاريخ الاحتياج أو عالية الأولوية بلا أمر'), why: tr('Urgent first, then the oldest.', 'العاجلة أولًا ثم الأقدم.') },
+      { id: 'a_stale', client: true, short: tr('Stale orders', 'أوامر راكدة'), title: tr('Open orders over 30 days late', 'أوامر مفتوحة متأخرة أكثر من 30 يومًا'), why: tr('Review with the supplier or close.', 'راجع مع المورد أو أغلق.') }
+    ];
+  }
+  function tripItem(p, tone, dueFn) { return function (r) { var iz = issues(r); return { p: p, score: score(p, 0, ageOf(day(r[TF.date] || r[TF.depart]))), dt: 'Delivery Trip', name: r.name, title: r.name, desc: [r[TF.type] || '', r[TF.from] || '', iz.map(iss).join(', ')].filter(Boolean).join(' · '), who: r.driver_name || r.driver || null, due: dueFn(r), tone: tone }; }; }
+  function actClient() {
+    var o = {};
+    if (D.tripsErr) { ['a_assign', 'a_time', 'a_follow', 'a_draft'].forEach(function (k) { o[k] = 'ERR:' + D.tripsErr; }); }
+    else if (D.trips) {
+      var lw = liveWindow(), live = fTrips().filter(function (r) { var d = day(r[TF.date]); return tActive(r) && (!d || (d >= lw[0] && d <= lw[1])); }), dl = function (r) { return r[TF.date] ? tr('Delivery ', 'التسليم ') + day(r[TF.date]) : tr('No delivery date', 'بلا تاريخ تسليم'); };
+      var as = live.filter(function (r) { return !r.driver || !r.vehicle; }).sort(bySeverity), tm = live.filter(function (r) { return issues(r).some(function (i) { return /timestamp/i.test(i); }); }).sort(bySeverity), fo = live.filter(follow).sort(function (a, b) { return String(a[TF.date] || '9').localeCompare(String(b[TF.date] || '9')); }), dr = live.filter(isPlanned).sort(byDeparture);
+      o.a_assign = { rows: as, count: as.length, item: tripItem('high', 'bad', dl) }; o.a_time = { rows: tm, count: tm.length, item: tripItem('high', 'bad', dl) };
+      o.a_follow = { rows: fo, count: fo.length, item: tripItem('med', 'warn', dl) }; o.a_draft = { rows: dr, count: dr.length, item: tripItem('med', 'warn', function (r) { return r[TF.depart] ? tr('Departs ', 'تغادر ') + String(r[TF.depart]).slice(0, 16) : dl(r); }) };
+    }
+    if (D.procErr) { ['a_po', 'a_mr', 'a_stale'].forEach(function (k) { o[k] = 'ERR:' + D.procErr; }); }
+    else if (D.proc) {
+      var S = pFilt(), den = function (dt) { return S.P.denied.indexOf(dt) > -1; };
+      var po = S.open.filter(function (r) { return !poStale(r) && poIssues(r).some(urgentP); }).sort(sevP), mr = S.mr.filter(function (r) { return mrIssues(r).some(urgentM); }).sort(sevM), st = S.stale.slice().sort(byDue);
+      var poItem = function (p, tone) { return function (r) { return { p: p, score: score(p, nm(r.base_grand_total), lateDays(r)), dt: 'Purchase Order', name: r.name, title: r.supplier_name || r.supplier, desc: r.name + ' · ' + poIssues(r).map(iss).join(', '), who: r[PO.buyer] || null, due: lateDays(r) ? tr(daysTxt(lateDays(r)) + ' late', 'متأخر ' + daysTxt(lateDays(r))) : tr('Due ', 'يستحق ') + day(poDue(r)), tone: tone }; }; };
+      o.a_po = den('Purchase Order') ? 'ERR:perm' : { rows: po, count: po.length, item: poItem('high', 'bad') }; o.a_stale = den('Purchase Order') ? 'ERR:perm' : { rows: st, count: st.length, item: poItem('low', 'n') };
+      o.a_mr = den('Material Request') ? 'ERR:perm' : { rows: mr, count: mr.length, item: function (r) { var p = mrIssues(r).some(urgentM) ? 'med' : 'low'; return { p: p, score: score(p, 0, mrAge(r) || 0), dt: 'Material Request', name: r.name, title: r.custom_purpose_of_purchase || r.name, desc: r.name + ' · ' + mrIssues(r).map(iss).join(', '), who: r.custom_priority || null, due: r.schedule_date ? tr('Required ', 'مطلوب ') + r.schedule_date : '', tone: 'warn' }; } };
+    }
+    return Object.keys(o).length ? o : null;
+  }
+
+  /* ============================================================ shared pieces */
+  function banner() {
+    var h = '';
+    if (LOADED_WIN && LOADED_WIN.capped) { h += alertBox('warn', esc(tr('Partial results: the 10,000-trip limit was reached, so counts cover loaded trips only. Narrow the date range.', 'نتائج جزئية: بلغ حد 10,000 رحلة. ضيّق الفترة.'))); }
+    var P = D.proc; if (P) { if (P.denied.length) { h += alertBox('warn', esc(tr('Could not read ', 'تعذرت قراءة ') + P.denied.join(tr(' and ', ' و')) + tr('. Figures that depend on it show a dash.', '. الأرقام المعتمدة عليه تظهر شرطة.'))); } else if (P.reduced.length) { h += alertBox('info', esc(tr('Some custom fields on ', 'بعض الحقول المخصصة في ') + P.reduced.join(tr(' and ', ' و')) + tr(' are not readable for your role, so buyer, location or priority may show as not set.', ' غير متاحة لدورك، فقد يظهر المشتري أو الموقع أو الأولوية غير محدد.'))); } if (P.capped) { h += alertBox('warn', esc(tr('Partial procurement data: the 5,000-record limit was reached for one list.', 'بيانات مشتريات جزئية: بلغ حد 5,000 سجل لإحدى القوائم.'))); } }
+    var other = CO.filter(function (c) { return (c.default_currency || CUR) !== CUR; }); if (tab === 'proc' && other.length && !F.company) { h += alertBox('info', esc(tr('Order values are in ', 'قيم الأوامر بعملة ') + CUR + tr('; companies in another currency are left out of value totals: ', '؛ الشركات بعملة أخرى مستبعدة من مجاميع القيم: ') + other.map(function (c) { return c.name + ' (' + c.default_currency + ')'; }).join(', '))); }
+    return h;
+  }
+  function plateOf(v) { var x = VEH.rows.filter(function (y) { return y.name === v; })[0]; return (x && x.license_plate) || v; }
+  function tState(r) { var s = tripState(r); return stat(s === 'Delivered' ? 'ok' : s === 'Submitted' ? 'n' : s === 'Draft' ? 'warn' : 'n', { Delivered: tr('Delivered', 'مُسلّمة'), Submitted: tr('Submitted', 'معتمدة'), Draft: tr('Draft', 'مسودة'), Cancelled: tr('Cancelled', 'ملغاة') }[s]) + (executed(r) && delivery(r) && !done(r) ? ' ' + stat(r.delivery_status === 'Partially Delivered' ? 'warn' : r.status === 'Completed' ? 'bad' : 'n', iss(r.delivery_status || 'Not recorded')) : ''); }
+  function journey(r) { return '<span class="lg-journey" role="img" aria-label="' + esc(STEPS.map(function (s) { return tr(s[0], s[1]) + ': ' + (recorded(r[s[2]]) ? '✓' : '—'); }).join(', ')) + '">' + STEPS.map(function (s) { return '<i class="' + (recorded(r[s[2]]) ? 'on' : '') + '"></i>'; }).join('') + '</span>'; }
+  function issueChips(list, urg) { return list.length ? list.map(function (i) { return stat(urg(i) ? 'bad' : 'warn', iss(i)); }).join(' ') : '<span class="dms-sm">' + esc(tr('On track', 'على المسار')) + '</span>'; }
+  function tripTable(id, list, mode, file) {
+    return regTable({ id: id, rows: list, file: file || id, pageSize: 10, text: function (r) { return [r.name, r.driver, r.driver_name, r.vehicle, r[TF.from], r[TF.to], r.company].join(' '); }, empty: tr('No trips in this selection.', 'لا رحلات في هذا الاختيار.'), cols: [
+      { k: 'trip', h: tr('Trip', 'الرحلة'), s: function (r) { return r.name; }, r: function (r) { return '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="trip:' + esc(r.name) + '">' + esc(r.name) + '</button><span class="dms-sm lg-sub">' + esc((r[TF.type] || tr('Type unknown', 'نوع غير معروف')) + (r.docstatus === 0 ? tr(' (draft)', ' (مسودة)') : '')) + '</span>'; }, c: function (r) { return r.name; } },
+      { k: 'route', h: tr('Route', 'المسار'), s: function (r) { return r[TF.from] || ''; }, r: function (r) { return bdi(r[TF.from] || tr('Source unknown', 'مصدر غير معروف')) + (r[TF.to] ? '<span class="dms-sm lg-sub">→ ' + bdi(r[TF.to]) + '</span>' : '') + '<span class="dms-sm lg-sub">' + esc(r.company || '') + '</span>'; }, c: function (r) { return (r[TF.from] || '') + ' → ' + (r[TF.to] || ''); } },
+      { k: 'who', h: tr('Vehicle and driver', 'المركبة والسائق'), s: function (r) { return r.vehicle || ''; }, r: function (r) { return (r.vehicle ? docLink('Vehicle', r.vehicle, plateOf(r.vehicle)) : stat('bad', tr('No vehicle', 'بلا مركبة'))) + '<span class="dms-sm lg-sub">' + (r.driver ? bdi(r.driver_name || r.driver) : '<b class="dms-tone-bad">' + esc(tr('No driver', 'بلا سائق')) + '</b>') + '</span>'; }, c: function (r) { return (r.vehicle || '') + ' / ' + (r.driver_name || r.driver || ''); } },
+      { k: 'dep', h: tr('Departure', 'المغادرة'), s: function (r) { return r[TF.depart] || '9'; }, r: function (r) { return r[TF.depart] ? '<span class="dms-num">' + esc(String(r[TF.depart]).slice(11, 16)) + '</span><span class="dms-sm lg-sub">' + esc(day(r[TF.depart])) + '</span>' : '<span class="dms-sm">' + esc(tr('Not set', 'غير محدد')) + '</span>'; }, c: function (r) { return r[TF.depart]; } },
+      { k: 'st', h: tr('Status', 'الحالة'), s: function (r) { return tripState(r); }, r: tState, c: function (r) { return tripState(r) + ' / ' + (r.delivery_status || ''); } },
+      { k: 'next', h: mode === 'issues' ? tr('Needs action', 'يتطلب إجراء') : tr('Progress', 'التقدم'), r: function (r) { return mode === 'issues' ? issueChips(issues(r), urgent) : (executed(r) ? journey(r) + ' ' : '') + '<span class="dms-sm">' + esc(stageOf(r)) + '</span>'; }, c: function (r) { return mode === 'issues' ? issues(r).join('; ') : stageOf(r); } }] });
+  }
+  function rows3(list) { return list.map(function (x) { return { label: x[0], value: x[1], color: x[2] || null }; }); }
+  function need(AM) {
+    if (D.tripsErr) { return srcErr(D.tripsErr, 'Delivery Trip') + (AM ? actionsPanel(AM) : ''); }
+    if (!D.trips) { return '<div class="dms-grid dms-kpis dms-ov-kpis" aria-busy="true">' + skel(6, 'dms-skel-kpi') + '</div>' + (AM ? '<div class="dms-main2">' + actionsPanel(AM) + '<div class="dms-skel dms-skel-panel"></div></div>' : '<div class="dms-skel dms-skel-panel"></div>'); }
+    return '';
+  }
+  function perDay(list, color, label) {
+    var dated = list.filter(function (r) { return /^\d{4}-\d{2}-\d{2}/.test(r[TF.date] || ''); }); if (!dated.length) { return empty(tr('No dated trips in this range.', 'لا رحلات مؤرخة في هذه الفترة.')); }
+    var ds = dated.map(function (r) { return day(r[TF.date]); }).sort(), lo = ds[0], hi = ds[ds.length - 1], weekly = diffDays(lo, hi) > 30, keys = [], m = {}, dn = {};
+    if (weekly) { keys = monthList(lo, hi); dated.forEach(function (r) { var k = day(r[TF.date]).slice(0, 7); m[k] = (m[k] || 0) + 1; if (done(r)) { dn[k] = (dn[k] || 0) + 1; } }); } else { for (var d = lo; d <= hi; d = addDays(d, 1)) { keys.push(d); } dated.forEach(function (r) { var k = day(r[TF.date]); m[k] = (m[k] || 0) + 1; if (done(r)) { dn[k] = (dn[k] || 0) + 1; } }); }
+    if (label) { return barChart(keys, weekly ? 'month' : 'day', [{ label: label, color: color, val: function (k) { return m[k] || 0; } }], num); }
+    return barChart(keys, weekly ? 'month' : 'day', [{ label: tr('Delivered', 'مُسلّمة'), color: 'var(--dms-ok)', val: function (k) { return dn[k] || 0; } }, { label: tr('Draft or not delivered', 'مسودة أو غير مُسلّمة'), color: '#8a97a8', val: function (k) { return (m[k] || 0) - (dn[k] || 0); } }], num);
+  }
+
+  /* ============================================================ overview */
+  var TQ = { q: '', issue: '' };
+  function tabOverview(AM) {
+    var n0 = need(AM); if (n0) { return n0; }
+    var s = sets(), P = D.proc ? pFilt() : null, rl = rangeLbl();
+    var h = kpis([
+      kpi({ label: tr('Trips', 'الرحلات'), dot: 'var(--dms-navy)', val: num(s.working.length), sub: esc(num(s.working.filter(function (r) { return r.docstatus === 1; }).length) + tr(' submitted', ' معتمدة')), act: 'tq:all' }),
+      kpi({ label: tr('Awaiting submission', 'بانتظار الاعتماد'), dot: 'var(--dms-age3)', val: num(s.planned.length), sub: esc(tr('Draft trips in the live window', 'رحلات مسودة في النافذة المباشرة')), act: 'tq:planned' }),
+      kpi({ label: tr('Delivery follow-up', 'متابعة التسليم'), dot: 'var(--dms-age3)', val: num(s.followUp.length), sub: esc(tr('Undelivered or no proof', 'لم تُسلّم أو بلا إثبات')), act: 'tq:follow' }),
+      kpi({ label: tr('Time errors', 'أخطاء الأوقات'), dot: 'var(--dms-bad)', val: num(s.timeErr.length), sub: esc(tr('Incomplete or out of order', 'ناقصة أو غير مرتبة')), act: 'tq:time' }),
+      kpi({ label: tr('Missing assignment', 'نقص التعيين'), dot: 'var(--dms-bad)', val: num(s.noAssign.length), sub: esc(tr('Driver or vehicle not set', 'السائق أو المركبة غير محدد')), act: 'tq:assign' }),
+      kpi({ label: tr('Open purchase orders', 'أوامر شراء مفتوحة'), dot: 'var(--dms-royal)', val: !P ? (D.procErr ? '—' : '…') : P.P.denied.indexOf('Purchase Order') > -1 ? '—' : num(P.open.length), sub: P ? esc(num(P.late.length) + tr(' past due · ', ' متأخرة · ') + num(P.stale.length) + tr(' stale', ' راكدة')) : '', act: 'go:proc' })
+    ], true);
+    var exec = s.rows.filter(function (r) { return executed(r) && delivery(r); }), okN = exec.filter(function (r) { return !follow(r); }).length;
+    var tDone = s.working.filter(done).length, tDraft = s.working.filter(function (r) { return r.docstatus === 0; }).length;
+    h += '<div class="dms-main2">' + actionsPanel(AM) + '<div class="dms-stackcol">' + panel(tr('Trips per day', 'الرحلات حسب اليوم'), perDay(s.working), '', esc(rl)) +
+      panel(tr('Trips in range', 'الرحلات في الفترة'), mixBar([{ label: tr('Draft', 'مسودة'), value: tDraft, color: '#8a97a8' }, { label: tr('Submitted', 'معتمدة'), value: s.working.length - tDone - tDraft, color: 'var(--dms-royal)' }, { label: tr('Delivered', 'مُسلّمة'), value: tDone, color: 'var(--dms-ok)' }]) +
+        facts3([[tr('Trips with a vehicle', 'رحلات بمركبة'), num(s.working.filter(function (r) { return r.vehicle; }).length) + ' / ' + num(s.working.length)], [tr('Trips with a driver', 'رحلات بسائق'), num(s.working.filter(function (r) { return r.driver; }).length) + ' / ' + num(s.working.length)], [tr('Delivered with proof', 'مُسلّمة بإثبات'), exec.length ? num(okN) + ' / ' + num(exec.length) : '—'], [tr('Possible duplicates', 'احتمال تكرار'), num(s.clash.length), s.clash.length ? 'bad' : '']])) + '</div></div>';
+    var groups = tally([].concat.apply([], s.working.map(function (r) { return issues(r); })), function (i) { return i; });
+    h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Needs attention', 'تحتاج انتباهًا'), groups.length ? hbars(groups.slice(0, 8).map(function (g) { return { label: iss(g[0]), value: g[1], color: urgent(g[0]) ? 'var(--dms-bad)' : 'var(--dms-age3)', act: 'ti:' + g[0] }; }), num) : empty(tr('Nothing needs attention in this range.', 'لا شيء يحتاج انتباهًا في هذه الفترة.')), '', esc(tr('Select a group to list its trips', 'اختر مجموعة لعرض رحلاتها'))) + recordsPanel() + '</div>';
+    return h;
+  }
+  function facts3(rows) { return '<div class="dms-facts lg-facts">' + rows.map(function (r) { return '<div><span class="dms-sm">' + esc(r[0]) + '</span><b class="dms-num' + (r[2] ? ' dms-tone-' + r[2] : '') + '">' + (/^[\d,.]+ \/ [\d,.]+$/.test(String(r[1])) ? '<bdi dir="ltr">' + esc(r[1]) + '</bdi>' : esc(r[1])) + '</b></div>'; }).join('') + '</div>'; }
+  function recordsPanel() {
+    var R = D.recs, w = !R && !D.recsErr, sh = function (v) { return v == null ? '—' : num(v); }, dn = (R || {}).dn || {}, dr = (R || {}).drv || {}, today = fTrips().filter(function (x) { return tActive(x) && day(x[TF.date]) === TODAY; });
+    return panel(tr('Fleet records', 'سجلات الأسطول'), w ? skel(1, 'dms-skel-panel') : facts3([[tr('Delivery notes · DM vehicle', 'إشعارات التسليم · مركبة DM'), sh(dn.dm)], [tr('Customer pickup', 'استلام العميل'), sh(dn.pickup)], [tr('Rented vehicle', 'مركبة مستأجرة'), sh(dn.rented)], [tr('DN drafts', 'مسودات الإشعارات'), sh(dn.draft), dn.draft ? 'warn' : ''], [tr('Waiting to bill', 'بانتظار الفوترة'), sh(dn.toBill)], [tr('Active drivers', 'السائقون النشطون'), sh(dr.active)], [tr('Drivers on trips today', 'سائقون في رحلات اليوم'), num(Object.keys(today.reduce(function (m, x) { if (x.driver) { m[x.driver] = 1; } return m; }, {})).length)], [tr('Drivers with no employee', 'سائقون بلا موظف'), sh(dr.noEmployee), dr.noEmployee ? 'warn' : '']]), '', esc(tr('Delivery notes in the period; only DM vehicle notes need a trip', 'إشعارات التسليم في الفترة؛ إشعارات مركبات DM فقط تحتاج رحلة')));
+  }
+  function rangeLbl() { var b = basis(); return b === 'all' ? tr('All dates', 'كل التواريخ') : PERIOD[0] === PERIOD[1] ? PERIOD[0] : PERIOD[0] + ' → ' + PERIOD[1]; }
+
+  /* ============================================================ trips */
+  function tabTrips() {
+    var n0 = need(); if (n0) { return n0; }
+    var s = sets(), Q = [['all', tr('In range', 'في الفترة'), s.working], ['planned', tr('Awaiting submission', 'بانتظار الاعتماد'), s.planned], ['delivery', tr('Deliveries', 'التوصيلات'), s.working.filter(delivery)], ['follow', tr('Follow-up', 'المتابعة'), s.followUp], ['time', tr('Time errors', 'أخطاء الأوقات'), s.timeErr], ['assign', tr('Missing assignment', 'نقص التعيين'), s.noAssign], ['issues', tr('Needs action', 'تحتاج إجراء'), s.working.filter(function (r) { return issues(r).length; })]];
+    var cur = Q.filter(function (q) { return q[0] === TQ.q; })[0] || Q[6], list = TQ.issue ? s.working.filter(function (r) { return issues(r).indexOf(TQ.issue) > -1; }) : cur[2];
+    var h = '<div class="lg-qf" role="group">' + Q.map(function (q) { var on = !TQ.issue && cur[0] === q[0]; return '<button type="button" class="dms-btn dms-btn-sm' + (on ? ' dms-btn-primary' : '') + '" data-act="tq" data-v="' + q[0] + '" aria-pressed="' + on + '">' + esc(q[1]) + ' <b>' + num(q[2].length) + '</b></button>'; }).join('') + (TQ.issue ? '<span class="dms-stat dms-stat-warn">' + esc(iss(TQ.issue)) + '</span><button type="button" class="dms-linkbtn" data-act="tq" data-v="issues">' + esc(tr('Clear', 'مسح')) + '</button>' : '') + '</div>';
+    if (cur[0] === 'planned' && !TQ.issue) {
+      h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Drafts by day', 'المسودات حسب اليوم'), perDay(s.planned), '', esc(tr('By delivery date', 'حسب تاريخ التسليم'))) +
+        panel(tr('Possible duplicates', 'احتمال تكرار'), s.clash.length ? '<ul class="lg-list">' + s.clash.slice(0, 6).map(function (c) { return '<li>' + docLink('Delivery Trip', c[0].name) + ' & ' + docLink('Delivery Trip', c[1].name) + ' · ' + esc(String(c[0][TF.depart]).slice(0, 16)) + ' · ' + esc((c[2] === 'vehicle' ? tr('Vehicle ', 'المركبة ') : tr('Driver ', 'السائق ')) + (c[2] === 'vehicle' ? plateOf(c[3]) : c[1].driver_name || c[3])) + '</li>'; }).join('') + '</ul>' : empty(tr('No trips share a departure time with the same vehicle or driver.', 'لا رحلات تشترك في وقت المغادرة والمركبة أو السائق.')), '', esc(tr('Several delivery notes on one run can cause this legitimately.', 'قد يحدث ذلك مشروعًا بعدة إشعارات في رحلة واحدة.'))) + '</div>';
+    }
+    if (cur[0] === 'follow' && !TQ.issue) {
+      var why = tally([].concat.apply([], s.followUp.map(function (r) { return issues(r).filter(function (i) { return /Deliver|proof|Partial/.test(i); }); })), function (i) { return i; });
+      var ages = [['Today', 'اليوم', function (a) { return a === 0; }], ['1 to 2 days', '1–2 يوم', function (a) { return a >= 1 && a <= 2; }], ['3 to 7 days', '3–7 أيام', function (a) { return a >= 3 && a <= 7; }], ['Over 7 days', 'أكثر من 7 أيام', function (a) { return a > 7; }]].map(function (x, i) { return { label: tr(x[0], x[1]), value: s.followUp.filter(function (r) { var a = /^\d{4}/.test(r[TF.date] || '') ? diffDays(day(r[TF.date]), TODAY) : null; return a !== null && x[2](a); }).length, color: i === 3 ? 'var(--dms-bad)' : i === 2 ? 'var(--dms-age3)' : null }; }).filter(function (x) { return x.value; });
+      h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Why they are open', 'سبب بقائها مفتوحة'), why.length ? hbars(why.map(function (w) { return { label: iss(w[0]), value: w[1] }; }), num) : empty(), '', esc(tr('A trip can appear under more than one reason', 'قد تظهر الرحلة تحت أكثر من سبب'))) + panel(tr('How long they have been open', 'مدة بقائها مفتوحة'), ages.length ? hbars(ages, num) : empty(), '', esc(tr('Days since delivery date', 'أيام منذ تاريخ التسليم'))) + '</div>';
+    }
+    var mode = ['planned', 'follow', 'time', 'assign', 'issues'].indexOf(cur[0]) > -1 || TQ.issue ? 'issues' : 'normal';
+    list = list.slice().sort(mode === 'issues' ? bySeverity : function (a, b) { return byDeparture(b, a); });
+    return h + panel(TQ.issue ? iss(TQ.issue) : cur[1], tripTable('t_trips', list, mode, 'delivery_trips'), '', esc(num(s.rows.length) + tr(' of ', ' من ') + num((D.trips || []).length) + tr(' loaded trips match the filters. Progress is inferred from recorded times, not live location.', ' رحلة محملة تطابق المرشحات. التقدم مستنتج من الأوقات المسجلة لا من الموقع.')));
+  }
+
+  /* ============================================================ live map */
+  function liveEntries() { var now = NOW(), stale = function (e) { return !e.fix || minutesSince(e.fix.at, now) > FRESH_MIN; }; return mapEntries().filter({ all: function () { return true; }, trip: function (e) { return !!e.trip; }, parked: function (e) { return !e.trip; }, nosignal: stale }[LIVE.filter || 'all']); }
+  function pinPhase(e) { return isOngoing(e.phase) ? 'on' : e.phase === 'Upcoming' ? 'up' : e.phase === 'Finished today' ? 'fin' : 'none'; }
+  function tabMap() {
+    var n0 = need(); if (n0) { return n0; }
+    var now = NOW(), all = mapEntries(), stale = function (e) { return !e.fix || minutesSince(e.fix.at, now) > FRESH_MIN; }, wait = LIVE.loading && !Object.keys(LIVE.pos).length;
+    var h = kpis([[tr('Vehicles tracked', 'مركبات متتبعة'), wait ? '…' : num(all.filter(function (e) { return e.fix; }).length), tr('Of ', 'من ') + num(all.length) + tr(' active vehicles', ' مركبة نشطة'), 'var(--dms-navy)'], [tr('On the road', 'على الطريق'), num(all.filter(function (e) { return isOngoing(e.phase); }).length), tr('Departed, no site exit recorded', 'غادرت دون تسجيل الخروج'), 'var(--dms-ok)'], [tr('Upcoming', 'قادمة'), num(all.filter(function (e) { return e.phase === 'Upcoming'; }).length), tr('Not yet departed', 'لم تغادر بعد'), 'var(--dms-royal)'], [tr('Finished today', 'انتهت اليوم'), num(all.filter(function (e) { return e.phase === 'Finished today'; }).length), tr('Trip times all recorded', 'كل الأوقات مسجلة'), '#8a97a8'], [tr('No recent signal', 'لا إشارة حديثة'), wait ? '…' : num(all.filter(stale).length), tr('Last fix over ' + FRESH_MIN + ' minutes old, or none', 'آخر موقع أقدم من ' + FRESH_MIN + ' دقيقة أو لا يوجد'), 'var(--dms-age3)']].map(function (x) { return kpi({ label: x[0], dot: x[3], val: x[1], sub: esc(x[2]) }); }));
+    var ents = liveEntries(), sel = ents.filter(function (e) { return e.vehicle === LIVE.sel; })[0] || all.filter(function (e) { return e.vehicle === LIVE.sel; })[0] || null;
+    var chips = [['all', tr('All', 'الكل'), all.length], ['trip', tr('On a trip', 'في رحلة'), all.filter(function (e) { return e.trip; }).length], ['parked', tr('No trip', 'بلا رحلة'), all.filter(function (e) { return !e.trip; }).length], ['nosignal', tr('No signal', 'لا إشارة'), all.filter(stale).length]];
+    var bar = '<div class="lg-mapbar"><div class="lg-qf" role="group">' + chips.map(function (c) { return '<button type="button" class="dms-btn dms-btn-sm' + (LIVE.filter === c[0] ? ' dms-btn-primary' : '') + '" data-act="chip" data-v="' + c[0] + '" aria-pressed="' + (LIVE.filter === c[0]) + '">' + esc(c[1]) + ' <b>' + num(c[2]) + '</b></button>'; }).join('') + '</div><span class="dms-sm">' + esc(LIVE.loading ? tr('Locating vehicles…', 'جارٍ تحديد المواقع…') : LIVE.error ? LIVE.error : LIVE.at ? tr('Updated ', 'آخر تحديث ') + LIVE.at : '') + '</span><button type="button" class="dms-btn dms-btn-sm" data-act="map" data-v="refresh">' + esc(tr('Update positions', 'تحديث المواقع')) + '</button></div>';
+    var map = all.length ? '<div class="lg-map" data-map-box role="region" aria-label="' + esc(tr('Map of vehicles', 'خريطة المركبات')) + '"><div class="lg-map-layer"></div><div class="lg-map-tools"><button type="button" data-act="map" data-v="in" aria-label="' + esc(tr('Zoom in', 'تكبير')) + '">+</button><button type="button" data-act="map" data-v="out" aria-label="' + esc(tr('Zoom out', 'تصغير')) + '">−</button><button type="button" data-act="map" data-v="fit" aria-label="' + esc(tr('Fit all vehicles', 'إظهار كل المركبات')) + '">⤢</button></div>' + (ents.some(function (e) { return e.fix; }) || LIVE.loading ? '' : '<div class="lg-map-empty">' + esc(tr('No tracker positions found for these vehicles.', 'لا مواقع تتبع لهذه المركبات.')) + '</div>') + '<p class="lg-map-credit">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors</p></div><p class="dms-sm lg-legend"><i data-phase="on"></i>' + esc(ph('On the road')) + ' <i data-phase="up"></i>' + esc(ph('Upcoming')) + ' <i data-phase="fin"></i>' + esc(ph('Finished today')) + ' <i data-phase="none"></i>' + esc(ph('No trip')) + '</p>' : empty(tr('No active vehicles found. Check read access to Vehicle.', 'لا مركبات نشطة. تحقق من صلاحية Vehicle.'));
+    h += '<div class="lg-mapgrid">' + panel(tr('Where vehicles are now', 'أين المركبات الآن'), bar + map) + panel(tr('Selected vehicle', 'المركبة المختارة'), '<div aria-live="polite">' + tripCard(sel, now) + '</div>') + '</div>';
+    return h + panel(tr('Vehicles', 'المركبات'), regTable({ id: 't_live', rows: ents, pageSize: 8, file: 'vehicle_positions', text: function (e) { return [e.plate, e.vehicle, e.trip ? e.trip.name : '', e.fix ? e.fix.place : ''].join(' '); }, empty: tr('No vehicles match this filter.', 'لا مركبات مطابقة.'), cols: [
+      { k: 'v', h: tr('Vehicle', 'المركبة'), s: function (e) { return e.plate; }, r: function (e) { return '<button type="button" class="dms-linkbtn" data-act="pin" data-v="' + esc(e.vehicle) + '|1">' + bdi(e.plate || e.vehicle) + '</button><span class="dms-sm lg-sub">' + esc(e.trip ? e.trip.name : tr('No trip', 'بلا رحلة')) + '</span>'; }, c: function (e) { return e.plate; } },
+      { k: 'place', h: tr('Last known place', 'آخر موقع معروف'), r: function (e) { return e.fix ? bdi(e.fix.place || tr('Place not reported', 'الموقع غير مذكور')) : '<span class="dms-sm">' + esc(tr('No tracker position', 'لا موقع تتبع')) + '</span>'; }, c: function (e) { return e.fix ? e.fix.place : ''; } },
+      { k: 'drv', h: tr('Driver', 'السائق'), r: function (e) { return e.trip && e.trip.driver ? bdi(e.trip.driver_name || e.trip.driver) : '<span class="dms-sm">—</span>'; }, c: function (e) { return e.trip ? e.trip.driver_name : ''; } },
+      { k: 'fix', h: tr('Last fix', 'آخر موقع'), s: function (e) { return e.fix ? e.fix.at : ''; }, r: function (e) { var m = e.fix ? minutesSince(e.fix.at, now) : null; return '<span class="dms-num">' + esc(e.fix ? String(e.fix.at).slice(11, 16) : '—') + '</span><span class="dms-sm lg-sub">' + esc(agoText(m)) + '</span>'; }, c: function (e) { return e.fix ? e.fix.at : ''; } },
+      { k: 'ph', h: tr('Trip', 'الرحلة'), s: function (e) { return e.rank; }, r: function (e) { return stat(isOngoing(e.phase) ? 'ok' : e.phase === 'Upcoming' ? 'warn' : 'n', ph(e.phase)); }, c: function (e) { return e.phase; } },
+      { k: 'mv', h: tr('Movement', 'الحركة'), r: function (e) { var f = e.fix, m = f ? minutesSince(f.at, now) : null; return !f ? '<span class="dms-sm">—</span>' : m > FRESH_MIN ? stat('warn', tr('Signal old', 'إشارة قديمة')) : '<span class="dms-sm">' + esc(f.speed > 3 ? Math.round(f.speed) + ' km/h' : f.ignition ? tr('Engine on, stopped', 'المحرك يعمل، متوقفة') : tr('Parked', 'متوقفة')) + '</span>'; }, c: function (e) { return e.fix ? e.fix.speed : ''; } }] }), '', esc(tr('Positions from the Vehicle Arabitra Logs tracker feed, refreshed every minute while this tab is open. Ongoing = departed in the last 24 hours with no recorded site exit.', 'المواقع من تغذية Vehicle Arabitra Logs، تتحدث كل دقيقة أثناء فتح التبويب. الجارية = غادرت خلال 24 ساعة دون تسجيل الخروج.')));
+  }
+  function tripCard(e, now) {
+    if (!e) { return empty(tr('Select a vehicle on the map or in the list to see its trip.', 'اختر مركبة من الخريطة أو القائمة لعرض رحلتها.')); }
+    var f = e.fix, m = f ? minutesSince(f.at, now) : null, stale = !f || m > FRESH_MIN, t = e.trip, hm = function (v) { return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(v || '') ? String(v).slice(11, 16) : ''; };
+    var h = '<div class="lg-tc-head"><b>' + bdi(e.plate || e.vehicle) + '</b>' + (f && !stale ? stat('ok', tr('Live', 'مباشر')) : '') + stat(isOngoing(e.phase) ? 'ok' : e.phase === 'Upcoming' ? 'warn' : 'n', ph(e.phase)) + '</div>';
+    if (t) { var nx = -1; STEPS.some(function (s, i) { if (!recorded(t[s[2]])) { nx = i; return true; } return false; }); h += '<p>' + '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="trip:' + esc(t.name) + '">' + esc(t.name) + '</button> · ' + esc(t[TF.type] || '') + '</p><p class="dms-sm">' + bdi(t[TF.from] || tr('Source unknown', 'مصدر غير معروف')) + ' → ' + bdi(t[TF.to] || (delivery(t) ? tr('Customer delivery', 'توصيل عميل') : tr('Destination not set', 'الوجهة غير محددة'))) + '</p><ol class="lg-steps">' + STEPS.map(function (s, i) { return '<li class="' + (recorded(t[s[2]]) ? 'on' : '') + (i === nx ? ' cur' : '') + '"><b>' + esc(tr(s[0], s[1])) + '</b><span class="dms-sm">' + esc(recorded(t[s[2]]) ? hm(t[s[2]]) : t[s[2]] ? tr('Due ', 'مستحق ') + hm(t[s[2]]) : tr('Pending', 'معلق')) + '</span></li>'; }).join('') + '</ol>' + facts3([[tr('Driver', 'السائق'), t.driver_name || t.driver || tr('Not assigned', 'غير معين'), t.driver ? '' : 'bad']]); }
+    else { var last = (D.trips || []).filter(function (r) { return tActive(r) && r.vehicle === e.vehicle; }).sort(function (a, b) { return String(b[TF.depart] || b[TF.date] || '').localeCompare(String(a[TF.depart] || a[TF.date] || '')); })[0]; h += '<p class="dms-sm">' + esc(last ? tr('Last trip ', 'آخر رحلة ') + day(last[TF.date] || last[TF.depart]) + ' · ' + last.name : tr('No trip in the loaded window', 'لا رحلة في النافذة المحملة')) + '</p>'; }
+    h += f ? facts3([[tr('Last known place', 'آخر موقع'), f.place || tr('Place not reported', 'غير مذكور')], [tr('Last fix', 'آخر موقع'), agoText(m) + (stale ? tr(' (signal old)', ' (إشارة قديمة)') : '')], [tr('Movement', 'الحركة'), stale ? tr('Unknown', 'غير معروف') : f.speed > 3 ? Math.round(f.speed) + ' km/h' : f.ignition ? tr('Engine on, stopped', 'المحرك يعمل') : tr('Parked', 'متوقفة')]]) : '<p class="dms-sm">' + esc(tr('This vehicle has no tracker position.', 'لا موقع تتبع لهذه المركبة.')) + '</p>';
+    return h + '<div class="dms-actions-row">' + docLink('Vehicle', e.vehicle, tr('Open vehicle', 'فتح المركبة')) + (t ? ' · ' + docLink('Delivery Trip', t.name, tr('Open trip form', 'فتح نموذج الرحلة')) : '') + '</div>';
+  }
+  function drawMap() {
+    var box = HOST.querySelector('[data-map-box]'); if (!box) { return; }
+    var layer = box.querySelector('.lg-map-layer'), W = box.clientWidth || 640, H = box.clientHeight || 420, now = NOW(), ents = liveEntries(), located = ents.filter(function (e) { return e.fix; });
+    if (!LIVE.view || LIVE.refit) { LIVE.view = fitView(located.map(function (e) { return e.fix; }), W, H); LIVE.refit = false; }
+    var V = LIVE.view, z = V.z, cx = mercX(V.lng, z), cy = mercY(V.lat, z), n = Math.pow(2, z), ox = cx - W / 2, oy = cy - H / 2, tiles = '';
+    for (var ty = Math.floor(oy / 256) - 1; ty <= Math.floor((oy + H) / 256) + 1; ty++) { if (ty < 0 || ty >= n) { continue; } for (var tx = Math.floor(ox / 256) - 1; tx <= Math.floor((ox + W) / 256) + 1; tx++) { tiles += '<img class="lg-tile" alt="" draggable="false" src="https://tile.openstreetmap.org/' + z + '/' + (((tx % n) + n) % n) + '/' + ty + '.png" style="left:' + Math.round(tx * 256 - ox) + 'px;top:' + Math.round(ty * 256 - oy) + 'px">'; } }
+    var px = function (p) { return [mercX(p.lng, z) - ox, mercY(p.lat, z) - oy]; };
+    var trails = located.filter(function (e) { return e.fix.trail && e.fix.trail.length > 1; }).map(function (e) { return '<polyline points="' + e.fix.trail.map(function (p) { return px(p).map(function (v) { return v.toFixed(1); }).join(','); }).join(' ') + '" data-phase="' + (isOngoing(e.phase) ? 'on' : 'off') + '"/>'; }).join('');
+    var placed = [], spot = function (e) { var p0 = px(e.fix), x = p0[0], y = p0[1]; for (var k = 0; k < 36 && placed.some(function (q) { return Math.hypot(q[0] - x, q[1] - y) < 19; }); k++) { var ang = (k % 6) * Math.PI / 3 + (k / 6 | 0) * 0.5, r = 20 + 14 * (k / 6 | 0); x = p0[0] + r * Math.cos(ang); y = p0[1] + r * Math.sin(ang); } placed.push([x, y]); return [x, y]; };
+    var pins = located.map(function (e) { var s = spot(e), x = s[0], y = s[1]; if (x < -30 || y < -30 || x > W + 30 || y > H + 30) { return ''; } var m = minutesSince(e.fix.at, now), st = m === null || m > FRESH_MIN, label = e.plate || e.vehicle; return '<button type="button" class="lg-pin' + (LIVE.sel === e.vehicle ? ' is-sel' : '') + '" data-act="pin" data-v="' + esc(e.vehicle) + '|0" data-phase="' + pinPhase(e) + '" data-stale="' + st + '" style="left:' + x.toFixed(1) + 'px;top:' + y.toFixed(1) + 'px" aria-label="' + esc(label + ', ' + ph(e.phase) + ', ' + agoText(m)) + '" title="' + esc(label + ' · ' + ph(e.phase) + ' · ' + agoText(m) + (e.fix.place ? ' · ' + e.fix.place : '')) + '"><i></i><span>' + esc(label) + '</span></button>'; }).join('');
+    layer.style.transform = ''; layer.innerHTML = tiles + '<svg class="lg-trails" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" aria-hidden="true">' + trails + '</svg>' + pins;
+    Array.prototype.forEach.call(layer.querySelectorAll('.lg-tile'), function (i) { i.addEventListener('error', function () { i.style.visibility = 'hidden'; }); });
+  }
+  var DRAGBOUND = false, RO = null;
+  function afterRender() {
+    if (tab !== 'map') { return; }
+    drawMap(); if (!LIVE.loading && !LIVE.error && D.trips && mapEntries().some(function (e) { return !LIVE.tried[e.vehicle]; })) { loadLive(true, 'missing'); }
+    if (!DRAGBOUND) { DRAGBOUND = true;
+      HOST.addEventListener('pointerdown', function (e) { var layer = e.target.closest && e.target.closest('.lg-map-layer'); if (!layer || e.target.closest('.lg-pin') || !LIVE.view) { return; } var d = { x: e.clientX, y: e.clientY, moved: false, dx: 0, dy: 0 };
+        var move = function (ev) { d.dx = ev.clientX - d.x; d.dy = ev.clientY - d.y; if (Math.abs(d.dx) + Math.abs(d.dy) > 3) { d.moved = true; } layer.style.transform = 'translate(' + d.dx + 'px,' + d.dy + 'px)'; };
+        var up = function () { G.removeEventListener('pointermove', move); G.removeEventListener('pointerup', up); if (!d.moved) { return; } var V = LIVE.view; V.lng = unMercX(mercX(V.lng, V.z) - d.dx, V.z); V.lat = unMercY(mercY(V.lat, V.z) - d.dy, V.z); drawMap(); };
+        G.addEventListener('pointermove', move); G.addEventListener('pointerup', up); });
+      if (typeof ResizeObserver === 'function') { RO = new ResizeObserver(function () { if (tab === 'map') { drawMap(); } }); RO.observe(HOST); } }
+  }
+
+  /* ============================================================ vehicles & drivers, performance */
+  function tabFleet() {
+    var n0 = need(); if (n0) { return n0; }
+    var s = sets(), w = s.working, names = {}; w.forEach(function (r) { if (r.driver_name) { names[r.driver] = r.driver_name; } });
+    var byV = tally(w.filter(function (r) { return r.vehicle; }), function (r) { return r.vehicle; }), byD = tally(w.filter(function (r) { return r.driver; }), function (r) { return r.driver; }), dn = w.filter(delivery).length, it = w.filter(function (r) { return r[TF.type] === 'Internal Transfer'; }).length;
+    var h = kpis([[tr('Vehicles used', 'مركبات مستخدمة'), num(byV.length)], [tr('Drivers active', 'سائقون نشطون'), num(byD.length)], [tr('Trips per vehicle', 'رحلات لكل مركبة'), byV.length ? (w.filter(function (r) { return r.vehicle; }).length / byV.length).toFixed(1) : '0'], [tr('Deliveries', 'التوصيلات'), num(dn)], [tr('Internal transfers', 'تحويلات داخلية'), num(it)], [tr('Other movements', 'حركات أخرى'), num(w.length - dn - it)]].map(function (x, i) { return kpi({ label: x[0], val: x[1], sub: i ? '' : esc(rangeLbl()) }); }));
+    h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Trips per vehicle', 'الرحلات لكل مركبة'), byV.length ? hbars(byV.slice(0, 8).map(function (x) { return { label: plateOf(x[0]), value: x[1] }; }), num) : empty(), '', esc(tr('Top 8', 'أعلى 8'))) + panel(tr('Trips per driver', 'الرحلات لكل سائق'), byD.length ? hbars(byD.slice(0, 8).map(function (x) { return { label: names[x[0]] || x[0], value: x[1] }; }), num) : empty(), '', esc(tr('Top 8', 'أعلى 8'))) + '</div>';
+    var util = '';
+    if (D.vehErr) { util = srcErr(D.vehErr, 'Vehicle'); } else if (!D.veh) { util = skel(1, 'dms-skel-panel'); } else { var b = basis(), lw = liveWindow(), U = utilisation(VEH.rows, s.all, b === 'all' ? lw[0] : PERIOD[0], b === 'all' ? lw[1] : PERIOD[1]); util = U.scope ? facts3([[tr('Active fleet', 'الأسطول النشط'), num(U.fleet)], [tr('Goods vehicles with a trip', 'مركبات بضائع لها رحلة'), num(U.used) + ' / ' + num(U.scope)], [tr('Idle', 'خاملة'), num(U.idle.length), U.idle.length ? 'warn' : '']]) + (U.idle.length ? '<ul class="lg-list">' + U.idle.slice(0, 8).map(function (i) { return '<li>' + docLink('Vehicle', i.vehicle, i.plate) + ' · <span class="dms-sm">' + esc(i.last ? tr('Last trip ', 'آخر رحلة ') + i.last : tr('No trip in the loaded window', 'لا رحلة في النافذة المحملة')) + '</span></li>'; }).join('') + '</ul>' : '') : empty(tr('No goods-carriage vehicles found.', 'لا مركبات نقل بضائع.')); }
+    h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Vehicle utilisation', 'استخدام المركبات'), util, '', esc(tr('Active goods-carriage vehicles plus any vehicle that made a trip', 'مركبات نقل البضائع النشطة وأي مركبة قامت برحلة'))) + recordsPanel() + '</div>';
+    h += '<div class="dms-cols-2 dms-grid">' + panel(tr('By movement', 'حسب الحركة'), w.length ? hbars(tally(w, function (r) { return r[TF.type] || tr('Not set', 'غير محدد'); }).slice(0, 6).map(function (x) { return { label: x[0], value: x[1] }; }), num) : empty()) + panel(tr('By source warehouse', 'حسب مستودع المصدر'), w.length ? hbars(tally(w, function (r) { return r[TF.from] || tr('Not set', 'غير محدد'); }).slice(0, 6).map(function (x) { return { label: x[0], value: x[1] }; }), num) : empty()) + '</div>';
+    return h + panel(tr('Latest trips', 'أحدث الرحلات'), tripTable('t_latest', w.slice().sort(function (a, b) { return byDeparture(b, a); }), 'normal', 'latest_trips'));
+  }
+  function tabPerf() {
+    var n0 = need(); if (n0) { return n0; }
+    var s = sets(), completed = s.rows.filter(done), trips = s.rows.filter(function (r) { return executed(r) && delivery(r); }), avg = function (a, b) { var v = completed.map(function (r) { return delta(r[a], r[b]); }).filter(function (x) { return x !== null; }); return v.length ? [(v.reduce(function (x, y) { return x + y; }, 0) / v.length).toFixed(1) + tr(' min', ' د'), num(v.length) + tr(' samples', ' عينة')] : ['—', tr('No valid samples', 'لا عينات صالحة')]; };
+    var partial = trips.filter(function (r) { return r.delivery_status === 'Partially Delivered'; }).length, complete = trips.filter(function (r) { return !evidenceMissing(r); }).length, wW = avg(TF.report, TF.depart), tW = avg(TF.depart, TF.arrive), sW = avg(TF.arrive, TF.exit);
+    var h = kpis([kpi({ label: tr('Completed trips', 'رحلات مكتملة'), dot: 'var(--dms-ok)', val: num(completed.length), sub: esc(rangeLbl()) }), kpi({ label: tr('Warehouse wait', 'الانتظار بالمستودع'), val: wW[0], sub: esc(wW[1]) }), kpi({ label: tr('Travel', 'السفر'), val: tW[0], sub: esc(tW[1]) }), kpi({ label: tr('Time on site', 'الوقت بالموقع'), val: sW[0], sub: esc(sW[1]) }),
+      kpi({ label: tr('Partial deliveries', 'تسليم جزئي'), dot: 'var(--dms-age3)', val: trips.length ? (100 * partial / trips.length).toFixed(1) + '%' : '—', sub: esc(trips.length ? num(partial) + tr(' of ', ' من ') + num(trips.length) : tr('No executed delivery trips', 'لا رحلات توصيل منفذة')) }), kpi({ label: tr('Evidence complete', 'اكتمال الإثبات'), val: trips.length ? num(complete) + ' / ' + num(trips.length) : '—', sub: esc(tr('Executed delivery trips', 'رحلات التوصيل المنفذة')) })]);
+    h += note(esc(tr('Intervals are differences between recorded timestamps on completed trips, not verified durations. Missing or negative pairs are excluded.', 'الفترات فروق بين الأوقات المسجلة للرحلات المكتملة وليست مددًا موثقة. تستبعد الأزواج الناقصة أو السالبة.')));
+    var names = {}; completed.forEach(function (r) { if (r.driver_name) { names[r.driver] = r.driver_name; } }); var topOf = function (f, lab) { var t = tally(completed, function (r) { return r[f] || tr('Unknown', 'غير معروف'); }); return t.length ? hbars(t.slice(0, 5).map(function (x) { return { label: lab ? lab(x[0]) : x[0], value: x[1] }; }), num) : empty(tr('No completed trips in this range.', 'لا رحلات مكتملة في هذه الفترة.')); };
+    h += panel(tr('Completed per day', 'المكتملة حسب اليوم'), perDay(completed, 'var(--dms-ok)', tr('Completed', 'مكتملة')));
+    return h + '<div class="dms-cols-2 dms-grid">' + panel(tr('Busiest drivers', 'أكثر السائقين نشاطًا'), topOf('driver', function (k) { return names[k] || k; })) + panel(tr('Busiest vehicles', 'أكثر المركبات نشاطًا'), topOf('vehicle', plateOf)) + '</div><div class="dms-cols-2 dms-grid">' + panel(tr('By movement', 'حسب الحركة'), topOf(TF.type)) + panel(tr('By source warehouse', 'حسب مستودع المصدر'), topOf(TF.from)) + '</div>';
+  }
+
+  /* ============================================================ procurement */
+  var PT = { sub: 'overview', q: '' };
+  function poTable(id, list, file) { return regTable({ id: id, rows: list, pageSize: 8, file: file, text: function (r) { return [r.name, r.supplier_name, r.supplier, r[PO.buyer], r[PO.place], r[PO.stage]].join(' '); }, empty: tr('Nothing in this selection.', 'لا شيء في هذا الاختيار.'), cols: [
+    { k: 'po', h: tr('Order', 'الأمر'), s: function (r) { return r.name; }, r: function (r) { return docLink('Purchase Order', r.name) + '<span class="dms-sm lg-sub">' + esc((r[PO.kind] || tr('Supplier type not set', 'نوع المورد غير محدد')) + (poDraft(r) ? tr(' (draft)', ' (مسودة)') : '')) + '</span>'; }, c: function (r) { return r.name; } },
+    { k: 'sup', h: tr('Supplier', 'المورد'), s: function (r) { return r.supplier_name || ''; }, r: function (r) { return bdi(r.supplier_name || r.supplier) + '<span class="dms-sm lg-sub">' + esc(r.company || '') + '</span>'; }, c: function (r) { return r.supplier_name || r.supplier; } },
+    { k: 'buyer', h: tr('Buyer', 'المشتري'), s: function (r) { return r[PO.buyer] || ''; }, r: function (r) { return bdi(r[PO.buyer] || tr('Not set', 'غير محدد')) + (r[PO.place] ? '<span class="dms-sm lg-sub">' + esc(r[PO.place]) + '</span>' : ''); }, c: function (r) { return r[PO.buyer]; } },
+    { k: 'due', h: tr('Due', 'الاستحقاق'), s: function (r) { return day(poDue(r)) || '9'; }, r: function (r) { var d = day(poDue(r)); return d ? dtc(d) + '<span class="dms-sm lg-sub">' + esc((r[PO.eta] ? 'ETA' : tr('Required', 'مطلوب')) + (lateDays(r) ? ' · ' + tr(daysTxt(lateDays(r)) + ' late', 'متأخر ' + daysTxt(lateDays(r))) : '')) + '</span>' : '<span class="dms-sm">' + esc(tr('No date set', 'بلا تاريخ')) + '</span>'; }, c: function (r) { return poDue(r); } },
+    { k: 'rec', h: tr('Receiving', 'الاستلام'), s: function (r) { return nm(r.per_received); }, r: function (r) { return (poDraft(r) ? stat('n', tr('Awaiting approval', 'بانتظار الاعتماد')) : r.status === 'On Hold' ? stat('warn', tr('On hold', 'معلق')) : poMoving(r) ? stat('n', r[PO.stage]) : stat(nm(r.per_received) > 0 ? 'warn' : 'n', Math.round(nm(r.per_received)) + '% ' + tr('received', 'مستلم'))) + '<span class="dms-sm lg-sub">' + Math.round(nm(r.per_billed)) + '% ' + esc(tr('billed', 'مفوتر')) + (r.base_grand_total ? ' · ' + esc(money(nm(r.base_grand_total))) : '') + '</span>'; }, c: function (r) { return Math.round(nm(r.per_received)) + '%'; } },
+    { k: 'act', h: tr('Needs action', 'يتطلب إجراء'), s: function (r) { return -poIssues(r).filter(urgentP).length; }, r: function (r) { return issueChips(poIssues(r), urgentP); }, c: function (r) { return poIssues(r).join('; '); } }] }); }
+  function mrTable(id, list) { return regTable({ id: id, rows: list, pageSize: 8, file: 'purchase_requests', text: function (r) { return [r.name, r.custom_purpose_of_purchase, r.custom_purchase_type].join(' '); }, cols: [
+    { k: 'mr', h: tr('Request', 'الطلب'), s: function (r) { return r.name; }, r: function (r) { return docLink('Material Request', r.name) + '<span class="dms-sm lg-sub">' + esc(r.custom_purpose_of_purchase || tr('Purpose not set', 'الغرض غير محدد')) + '</span>'; }, c: function (r) { return r.name; } },
+    { k: 'type', h: tr('Type', 'النوع'), r: function (r) { return bdi(r.custom_purchase_type || tr('Type not set', 'النوع غير محدد')) + '<span class="dms-sm lg-sub">' + esc(r.company || '') + '</span>'; }, c: function (r) { return r.custom_purchase_type; } },
+    { k: 'pri', h: tr('Priority', 'الأولوية'), s: function (r) { return r.custom_priority || ''; }, r: function (r) { return (r.custom_priority === 'High' ? stat('bad', r.custom_priority) : bdi(r.custom_priority || tr('Not set', 'غير محدد'))) + '<span class="dms-sm lg-sub">' + Math.round(nm(r.per_ordered)) + '% ' + esc(tr('ordered', 'مطلوب')) + '</span>'; }, c: function (r) { return r.custom_priority; } },
+    { k: 'req', h: tr('Required', 'مطلوب بتاريخ'), s: function (r) { return r.schedule_date || '9'; }, r: function (r) { return r.schedule_date ? dtc(r.schedule_date) : '—'; }, c: function (r) { return r.schedule_date; } },
+    { k: 'st', h: tr('Status', 'الحالة'), r: function (r) { return stat(r.status === 'Partially Ordered' ? 'warn' : 'n', r.status); }, c: function (r) { return r.status; } },
+    { k: 'act', h: tr('Needs action', 'يتطلب إجراء'), s: function (r) { return -mrIssues(r).length; }, r: function (r) { return issueChips(mrIssues(r), urgentM); }, c: function (r) { return mrIssues(r).join('; '); } }] }); }
+  function prTable(id, list) { return regTable({ id: id, rows: list, pageSize: 8, file: 'purchase_receipts', text: function (r) { return [r.name, r.supplier_name, r.custom_purchaser_name].join(' '); }, cols: [
+    { k: 'pr', h: tr('Receipt', 'الاستلام'), s: function (r) { return r.name; }, r: function (r) { return docLink('Purchase Receipt', r.name) + '<span class="dms-sm lg-sub">' + esc(r.is_return ? tr('Return', 'مرتجع') : tr('Receipt', 'استلام')) + '</span>'; }, c: function (r) { return r.name; } },
+    { k: 'sup', h: tr('Supplier', 'المورد'), s: function (r) { return r.supplier_name || ''; }, r: function (r) { return bdi(r.supplier_name || r.supplier) + '<span class="dms-sm lg-sub">' + esc(r.company || '') + '</span>'; }, c: function (r) { return r.supplier_name; } },
+    { k: 'buyer', h: tr('Buyer', 'المشتري'), r: function (r) { return bdi(r.custom_purchaser_name || tr('Not set', 'غير محدد')); }, c: function (r) { return r.custom_purchaser_name; } },
+    { k: 'date', h: tr('Received', 'تاريخ الاستلام'), s: function (r) { return String(r.posting_date) + (r.posting_time || ''); }, r: function (r) { return dtc(day(r.posting_date)) + '<span class="dms-sm lg-sub">' + esc(String(r.posting_time || '').slice(0, 5)) + '</span>'; }, c: function (r) { return r.posting_date; } },
+    { k: 'st', h: tr('Status', 'الحالة'), r: function (r) { return stat(r.is_return ? 'warn' : r.status === 'Completed' ? 'ok' : 'n', r.is_return ? tr('Return', 'مرتجع') : r.status); }, c: function (r) { return r.status; } },
+    { k: 'bill', h: tr('Billed', 'المفوتر'), num: 1, s: function (r) { return nm(r.per_billed); }, r: function (r) { return Math.round(nm(r.per_billed)) + '%'; }, c: function (r) { return r.per_billed; } }] }); }
+  function tabProc() {
+    if (D.procErr) { return srcErr(D.procErr, 'Purchase Order'); } if (!D.proc) { return '<div class="dms-grid dms-kpis" aria-busy="true">' + skel(6, 'dms-skel-kpi') + '</div><div class="dms-skel dms-skel-panel"></div>'; }
+    var S = pFilt(), den = function (dt) { return S.P.denied.indexOf(dt) > -1; }, dash = function (dt, n) { return den(dt) ? '—' : num(n); };
+    var subs = [['overview', tr('Overview', 'نظرة عامة')], ['orders', tr('Orders & suppliers', 'الطلبات والموردون')], ['receiving', tr('Receiving & billing', 'الاستلام والفوترة')], ['requests', tr('Purchase requests', 'طلبات الشراء')]];
+    var h = '<div class="lg-qf lg-sub-tabs" role="group">' + subs.map(function (x) { return '<button type="button" class="dms-btn dms-btn-sm' + (PT.sub === x[0] ? ' dms-btn-primary' : '') + '" data-act="psub" data-v="' + x[0] + '" aria-pressed="' + (PT.sub === x[0]) + '">' + esc(x[1]) + '</button>'; }).join('') + '</div>';
+    var ov = valueOf(S.open), lv = valueOf(S.late), sv = valueOf(S.stale);
+    if (PT.sub === 'overview') {
+      var PQ = [['open', tr('Open orders', 'أوامر مفتوحة'), dash('Purchase Order', S.open.length), tr('Submitted, not fully received', 'معتمدة ولم تستلم بالكامل'), 'var(--dms-royal)'], ['due7', tr('Due in 7 days', 'تستحق خلال 7 أيام'), dash('Purchase Order', S.due7.length), tr('By required date, or ETA when set', 'حسب تاريخ الاحتياج أو الوصول المقدر'), null], ['late', tr('Past due', 'متأخرة'), dash('Purchase Order', S.late.length), tr('Up to 30 days past required date', 'حتى 30 يومًا بعد تاريخ الاحتياج'), 'var(--dms-bad)'], ['stale', tr('Stale', 'راكدة'), dash('Purchase Order', S.stale.length), tr('Over 30 days late, review or close', 'متأخرة أكثر من 30 يومًا'), 'var(--dms-age4)'], ['tobill', tr('Waiting to bill', 'بانتظار الفوترة'), dash('Purchase Receipt', S.toBill.length), tr('Receipts in the last 30 days', 'استلامات آخر 30 يومًا'), 'var(--dms-age3)'], ['mr', tr('Requests', 'الطلبات'), dash('Material Request', S.mr.length), tr('Not fully ordered', 'غير مطلوبة بالكامل'), null]];
+      h += kpis(PQ.map(function (x) { return kpi({ label: x[1], dot: x[4], val: x[2], sub: esc(x[3]), top: PT.q === x[0] ? tagc(esc(tr('Shown', 'معروضة'))) : '', act: 'pq:' + x[0] }); }));
+      var grp = function (r) { return poStale(r) ? 'Stale' : poLate(r) ? 'Late' : nm(r.per_received) > 0 ? 'Partly received' : 'Awaiting delivery'; }, gt = {}; S.open.forEach(function (r) { var g = grp(r); gt[g] = (gt[g] || 0) + 1; });
+      var keys = []; for (var i = 0; i < 14; i++) { keys.push(addDays(TODAY, i)); } var dm = {}; S.open.forEach(function (r) { var d = day(poDue(r)); dm[d] = (dm[d] || 0) + 1; });
+      h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Order pipeline', 'مسار الأوامر'), den('Purchase Order') ? srcErr('perm', 'Purchase Order') : mixBar([{ label: tr('Awaiting delivery', 'بانتظار التسليم'), value: gt['Awaiting delivery'] || 0, color: '#8a97a8' }, { label: tr('Partly received', 'مستلمة جزئيًا'), value: gt['Partly received'] || 0, color: 'var(--dms-royal)' }, { label: tr('Late', 'متأخرة'), value: gt.Late || 0, color: 'var(--dms-bad)' }, { label: tr('Stale', 'راكدة'), value: gt.Stale || 0, color: 'var(--dms-age4)' }]) + facts3([[tr('Open order value', 'قيمة الأوامر المفتوحة'), money(ov.v) + ' ' + ov.cur], [tr('Past due value', 'قيمة المتأخرة'), money(lv.v) + ' ' + lv.cur, lv.v ? 'bad' : ''], [tr('Stale value', 'قيمة الراكدة'), money(sv.v) + ' ' + sv.cur]])) +
+        panel(tr('Orders due, next 14 days', 'الأوامر المستحقة خلال 14 يومًا'), barChart(keys, 'day', [{ label: tr('Orders due', 'أوامر مستحقة'), color: 'var(--dms-royal)', val: function (k) { return dm[k] || 0; } }], num), '', esc(num(S.late.length) + tr(' past-due orders not shown', ' أمر متأخر غير معروض'))) + '</div>';
+      var ig = tally([].concat.apply([], S.working.map(poIssues)), function (i) { return i; });
+      h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Needs attention', 'تحتاج انتباهًا'), ig.length ? hbars(ig.slice(0, 8).map(function (g) { return { label: iss(g[0]), value: g[1], color: urgentP(g[0]) ? 'var(--dms-bad)' : 'var(--dms-age3)', act: 'pi:' + g[0] }; }), num) : empty(tr('Nothing needs action.', 'لا شيء يحتاج إجراء.'))) + supplierTrips() + '</div>';
+      var list = S.working.filter(function (r) { return poIssues(r).length; }), title = tr('Most urgent orders', 'الأوامر الأكثر إلحاحًا'), kind = 'po';
+      var PQM = { open: S.open, due7: S.due7, late: S.late, stale: S.stale }; if (PT.q === 'tobill') { kind = 'pr'; list = S.toBill; title = tr('Receipts waiting to bill', 'استلامات بانتظار الفوترة'); } else if (PT.q === 'mr') { kind = 'mr'; list = S.mr.slice().sort(sevM); title = tr('Purchase requests', 'طلبات الشراء'); } else if (PT.q && PQM[PT.q]) { list = PQM[PT.q]; title = PQ.filter(function (x) { return x[0] === PT.q; })[0][1]; } else if (PT.q && PT.q.indexOf('i:') === 0) { var iq = PT.q.slice(2); list = S.working.filter(function (r) { return poIssues(r).indexOf(iq) > -1; }); title = iss(iq); }
+      if (kind === 'po') { list = list.slice().sort(sevP); }
+      return h + panel(title, kind === 'po' ? poTable('t_po', list, 'purchase_orders') : kind === 'mr' ? mrTable('t_po', list) : prTable('t_po', list), '', esc(tr('Open orders are submitted purchase orders not fully received; drafts appear only under needs attention.', 'الأوامر المفتوحة أوامر معتمدة لم تستلم بالكامل؛ المسودات تظهر ضمن ما يحتاج انتباهًا فقط.')) + (PT.q ? ' · <button type="button" class="dms-linkbtn" data-act="pq" data-v="">' + esc(tr('Clear selection', 'مسح الاختيار')) + '</button>' : ''));
+    }
+    if (PT.sub === 'orders') {
+      h += kpis([[tr('Open orders', 'أوامر مفتوحة'), dash('Purchase Order', S.open.length)], [tr('Open value', 'القيمة المفتوحة'), cur$(ov.v, ov.cur)], [tr('Past due', 'متأخرة'), dash('Purchase Order', S.late.length)], [tr('Stale', 'راكدة'), dash('Purchase Order', S.stale.length)], [tr('On hold', 'معلقة'), dash('Purchase Order', S.open.filter(function (r) { return r.status === 'On Hold'; }).length)], [tr('Awaiting approval', 'بانتظار الاعتماد'), dash('Purchase Order', S.drafts.length)]].map(function (x) { return kpi({ label: x[0], val: x[1] }); }));
+      var tb = function (f) { var t = tally(S.open, f); return t.length ? hbars(t.slice(0, 6).map(function (x) { return { label: x[0], value: x[1] }; }), num) : empty(tr('No open orders.', 'لا أوامر مفتوحة.')); };
+      h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Suppliers with most open orders', 'موردون بأكثر أوامر مفتوحة'), tb(function (r) { return r.supplier_name || r.supplier; })) + panel(tr('Open orders by buyer', 'الأوامر المفتوحة حسب المشتري'), tb(function (r) { return r[PO.buyer] || tr('Not set', 'غير محدد'); })) + '</div>';
+      h += panel(tr('Delivery location', 'موقع التسليم'), tb(function (r) { return r[PO.place] || tr('Not set', 'غير محدد'); }));
+      if (S.tracked.length) { h += panel(tr('Shipment tracking', 'تتبع الشحنات'), poTable('t_track', S.tracked.slice().sort(byDue), 'shipment_tracking'), '', esc(tr('Orders with a shipment status, ETA or customs entry', 'أوامر بحالة شحن أو وصول مقدر أو بيان جمركي'))); }
+      return h + panel(tr('Next due', 'الأقرب استحقاقًا'), poTable('t_next', S.open.slice().sort(byDue), 'open_orders'), '', esc(tr('Earliest first; the required date is used when no ETA is set', 'الأقرب أولًا؛ يستخدم تاريخ الاحتياج عند غياب الوصول المقدر')));
+    }
+    if (PT.sub === 'receiving') {
+      var rc = S.pr.filter(function (r) { return !r.is_return; }), ret = S.pr.filter(function (r) { return r.is_return; }).length, rk = []; for (var j = 13; j >= 0; j--) { rk.push(addDays(TODAY, -j)); } var rm = {}, rr = {}; S.pr.forEach(function (r) { var d = day(r.posting_date); if (r.is_return) { rr[d] = (rr[d] || 0) + 1; } else { rm[d] = (rm[d] || 0) + 1; } });
+      h += kpis([[tr('Received, 7 days', 'مستلم خلال 7 أيام'), dash('Purchase Receipt', rc.filter(function (r) { return day(r.posting_date) >= addDays(TODAY, -6); }).length)], [tr('Waiting to bill', 'بانتظار الفوترة'), dash('Purchase Receipt', S.toBill.length)], [tr('Fully billed', 'مفوتر بالكامل'), dash('Purchase Receipt', rc.filter(function (r) { return nm(r.per_billed) >= 100; }).length)], [tr('Returns', 'مرتجعات'), dash('Purchase Receipt', ret)], [tr('Billed early', 'فوترة مبكرة'), dash('Purchase Order', S.ahead.length)], [tr('Partly received', 'مستلمة جزئيًا'), dash('Purchase Order', S.partial.length)]].map(function (x) { return kpi({ label: x[0], val: x[1] }); }));
+      h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Receipts per day', 'الاستلامات حسب اليوم'), barChart(rk, 'day', [{ label: tr('Receipts', 'استلامات'), color: 'var(--dms-ok)', val: function (k) { return rm[k] || 0; } }, { label: tr('Returns', 'مرتجعات'), color: 'var(--dms-age3)', val: function (k) { return rr[k] || 0; } }], num), '', esc(tr('Last 14 days', 'آخر 14 يومًا'))) + panel(tr('Waiting to bill, by supplier', 'بانتظار الفوترة حسب المورد'), S.toBill.length ? hbars(tally(S.toBill, function (r) { return r.supplier_name || r.supplier; }).slice(0, 6).map(function (x) { return { label: x[0], value: x[1] }; }), num) : empty(tr('Every receipt is billed.', 'كل الاستلامات مفوترة.'))) + '</div>';
+      h += panel(tr('Waiting to bill', 'بانتظار الفوترة'), prTable('t_tobill', S.toBill));
+      if (S.ahead.length) { h += panel(tr('Billed ahead of receipt', 'مفوتر قبل الاستلام'), poTable('t_ahead', S.ahead.slice().sort(sevP), 'billed_ahead')); }
+      return h + panel(tr('Latest receipts', 'أحدث الاستلامات'), prTable('t_pr', S.pr.slice().sort(function (a, b) { return String(b.posting_date + (b.posting_time || '')).localeCompare(String(a.posting_date + (a.posting_time || ''))); })), '', esc(tr('Last 30 days', 'آخر 30 يومًا')));
+    }
+    var mr = S.mr, high = mr.filter(function (r) { return r.custom_priority === 'High'; }).length, noPO = mr.filter(mrNoPO).length, lateM = mr.filter(function (r) { return r.schedule_date && r.schedule_date < TODAY; }).length;
+    h += kpis([[tr('Pending requests', 'طلبات معلقة'), dash('Material Request', mr.length)], [tr('High priority', 'أولوية عالية'), dash('Material Request', high)], [tr('No PO yet', 'بلا أمر شراء'), dash('Material Request', noPO)], [tr('Past required date', 'تجاوزت تاريخ الاحتياج'), dash('Material Request', lateM)], [tr('Partly ordered', 'مطلوبة جزئيًا'), dash('Material Request', mr.filter(function (r) { return nm(r.per_ordered) > 0; }).length)], [tr('Import requests', 'طلبات استيراد'), dash('Material Request', mr.filter(function (r) { return r.custom_purchase_type === 'Import'; }).length)]].map(function (x) { return kpi({ label: x[0], val: x[1] }); }));
+    var ages = [['0 to 2 days', '0–2 يوم', function (a) { return a <= 2; }], ['3 to 7 days', '3–7 أيام', function (a) { return a >= 3 && a <= 7; }], ['8 to 14 days', '8–14 يومًا', function (a) { return a >= 8 && a <= 14; }], ['Over 14 days', 'أكثر من 14 يومًا', function (a) { return a > 14; }]].map(function (x, i) { return { label: tr(x[0], x[1]), value: mr.filter(function (r) { var a = mrAge(r); return a !== null && x[2](a); }).length, color: i === 3 ? 'var(--dms-bad)' : i === 2 ? 'var(--dms-age3)' : null }; }).filter(function (x) { return x.value; });
+    h += '<div class="dms-cols-2 dms-grid">' + panel(tr('How long requests have waited', 'مدة انتظار الطلبات'), ages.length ? hbars(ages, num) : empty(tr('No pending requests.', 'لا طلبات معلقة.')), '', esc(tr('Days since the request date', 'أيام منذ تاريخ الطلب'))) + panel(tr('Requests by priority', 'الطلبات حسب الأولوية'), mr.length ? hbars(tally(mr, function (r) { return r.custom_priority || tr('Not set', 'غير محدد'); }).map(function (x) { return { label: x[0], value: x[1], color: x[0] === 'High' ? 'var(--dms-bad)' : null }; }), num) : empty()) + '</div>';
+    h += delayPanel();
+    return h + panel(tr('Oldest pending requests', 'أقدم الطلبات المعلقة'), mrTable('t_mr', mr.slice().sort(sevM)), '', esc(tr('Urgent requests first, then the oldest', 'العاجلة أولًا ثم الأقدم')));
+  }
+  function supplierTrips() {
+    var rs = fTrips().filter(function (r) { return tActive(r) && r[TF.type] === 'Materials Collection from Supplier' && inRange(r); }), d0 = rs.filter(function (r) { return r.docstatus === 0; }).length, dn = rs.filter(done).length;
+    return panel(tr('Supplier collection trips', 'رحلات الاستلام من الموردين'), rs.length ? mixBar([{ label: tr('Draft', 'مسودة'), value: d0, color: '#8a97a8' }, { label: tr('Submitted', 'معتمدة'), value: rs.length - d0 - dn, color: 'var(--dms-royal)' }, { label: tr('Delivered', 'مُسلّمة'), value: dn, color: 'var(--dms-ok)' }]) + '<ul class="lg-list">' + rs.slice().sort(function (a, b) { return byDeparture(b, a); }).slice(0, 5).map(function (r) { return '<li><button type="button" class="dms-linkbtn" data-act="kpi" data-v="trip:' + esc(r.name) + '">' + esc(r.name) + '</button> · ' + esc((r[TF.from] || '') + ' · ' + day(r[TF.date])) + '</li>'; }).join('') + '</ul>' : empty(tr('No supplier collection trips in this range.', 'لا رحلات استلام من موردين في هذه الفترة.')), '', esc(rangeLbl()));
+  }
+  function delayPanel() {
+    if (DELAY.loading || (!DELAY.rows && !DELAY.error)) { if (!DELAY.loading) { later(loadDelay, 0); } return panel(tr('Request to order time', 'الوقت من الطلب إلى الأمر'), skel(1, 'dms-skel-panel')); }
+    if (DELAY.error) { return panel(tr('Request to order time', 'الوقت من الطلب إلى الأمر'), alertBox('warn', esc(DELAY.error))); }
+    var X = delayStats(DELAY.rows); if (!X.requests) { return panel(tr('Request to order time', 'الوقت من الطلب إلى الأمر'), empty(tr('No purchase requests in the last 90 days.', 'لا طلبات شراء في آخر 90 يومًا.'))); }
+    return '<div class="dms-cols-2 dms-grid">' + panel(tr('Time from request to first order', 'الوقت من الطلب إلى أول أمر'), facts3([[tr('Median days', 'الوسيط بالأيام'), X.median === null ? '—' : String(X.median)], [tr('Ordered in 3 days', 'طُلبت خلال 3 أيام'), X.within3 === null ? '—' : X.within3 + '%'], [tr('Waiting over 7 days', 'تنتظر أكثر من 7 أيام'), num(X.waitingOld), X.waitingOld ? 'bad' : '']]) + (X.buckets.length ? hbars(X.buckets, num) : ''), '', esc(num(X.ordered) + tr(' of ', ' من ') + num(X.requests) + tr(' requests ordered · last 90 days · Procurement Tracker report', ' طلب طُلب · آخر 90 يومًا · تقرير متتبع المشتريات'))) +
+      panel(tr('Slowest cost centres', 'أبطأ مراكز التكلفة'), X.slow.length ? hbars(X.slow.slice(0, 5).map(function (x) { return { label: x[0] + ' (' + x[2] + ')', value: x[1], color: x[1] > 7 ? 'var(--dms-bad)' : x[1] > 3 ? 'var(--dms-age3)' : null }; }), function (v) { return v.toFixed(1); }) : empty(tr('Not enough ordered requests to compare.', 'لا طلبات كافية للمقارنة.')), '', esc(tr('Average days to first order; at least 2 ordered requests', 'متوسط الأيام لأول أمر؛ طلبان على الأقل'))) + '</div>';
+  }
+  function tabActions(AM) { return actionsTab(AM, tr('Trips in the loaded window (30 days back, 14 ahead) and all open procurement documents.', 'الرحلات في النافذة المحملة (30 يومًا مضت و14 قادمة) وكل مستندات المشتريات المفتوحة.')); }
+
+  /* ============================================================ trip detail and events */
+  var TRIP = null;
+  function tripBody() {
+    if (TRIP.err) { return alertBox('err', esc(TRIP.err)); } var doc = TRIP.doc; if (!doc) { return skel(1, 'dms-skel-panel'); }
+    var list = issues(doc), stops = doc.delivery_stops || [];
+    var ev = function () { try { var u = new URL(doc[TF.evidence], G.location.origin); return doc[TF.evidence] && u.origin === G.location.origin && /^\/(private\/)?files\//.test(u.pathname) ? u.href : null; } catch (e) { return null; } }();
+    return '<div class="dms-actions-row">' + tState(doc) + ' <span class="dms-sm">' + esc(doc.company || '') + '</span></div>' + facts3([[tr('Movement', 'الحركة'), doc[TF.type] || '—'], [tr('Vehicle', 'المركبة'), doc.vehicle ? plateOf(doc.vehicle) : tr('Not assigned', 'غير معينة'), doc.vehicle ? '' : 'bad'], [tr('Driver', 'السائق'), doc.driver_name || doc.driver || tr('Not assigned', 'غير معين'), doc.driver ? '' : 'bad'], [tr('Route', 'المسار'), (doc[TF.from] || '?') + ' → ' + (doc[TF.to] || '—')]]) +
+      (list.length ? '<h4 class="lg-h">' + esc(tr('To review', 'للمراجعة')) + '</h4><p>' + issueChips(list, urgent) + '</p>' : '') +
+      '<h4 class="lg-h">' + esc(tr('Recorded journey', 'الرحلة المسجلة')) + '</h4><ol class="lg-steps">' + STEPS.map(function (s) { return '<li class="' + (recorded(doc[s[2]]) ? 'on' : '') + '"><b>' + esc(tr(s[0], s[1])) + '</b><span class="dms-sm">' + esc(doc[s[2]] ? String(doc[s[2]]).slice(0, 16) + (stamp(doc[s[2]]) > NOW() ? tr(' (future)', ' (مستقبلي)') : '') : tr('Not recorded', 'غير مسجل')) + '</span></li>'; }).join('') + '</ol>' + note(esc(tr('Recorded fields can be prefilled, so this timeline does not confirm actual movement.', 'قد تُملأ الحقول مسبقًا، فلا يثبت هذا الخط الزمني الحركة الفعلية.'))) +
+      (delivery(doc) ? '<h4 class="lg-h">' + esc(tr('Delivery evidence', 'إثبات التسليم')) + '</h4>' + facts3(RECEIPT.map(function (x) { return [tr(x[1], x[2]), doc[x[0]] || tr('Not set', 'غير محدد'), doc[x[0]] === 'Yes' ? 'ok' : 'warn']; }).concat([[tr('Signed delivery note', 'إشعار تسليم موقع'), ev ? tr('Attached', 'مرفق') : doc[TF.evidence] ? tr('Review in trip', 'راجع في الرحلة') : tr('Missing', 'مفقود'), ev ? 'ok' : '']])) + (ev ? '<p><a href="' + esc(ev) + '" target="_blank" rel="noopener noreferrer">' + esc(tr('Open attachment', 'فتح المرفق')) + ' ↗</a></p>' : '') : '') +
+      '<h4 class="lg-h">' + esc(tr('Delivery stops', 'نقاط التسليم')) + '</h4>' + (stops.length ? '<ul class="lg-list">' + stops.map(function (s) { return '<li><b>' + bdi(s.customer || tr('Customer unknown', 'عميل غير معروف')) + '</b> · <span class="dms-sm">' + esc(s.address || '') + '</span> · ' + (s.delivery_note ? docLink('Delivery Note', s.delivery_note) : '<em>' + esc(tr('No Delivery Note linked', 'لا إشعار تسليم مرتبط')) + '</em>') + '</li>'; }).join('') + '</ul>' : '<p class="dms-sm">' + esc(tr('No delivery stops recorded.', 'لا نقاط تسليم مسجلة.')) + '</p>');
+  }
+  function drill(id) {
+    if (id.indexOf('trip:') === 0 && TRIP) { return { title: TRIP.name, sub: tr('Delivery Trip', 'رحلة توصيل'), link: ['Delivery Trip', TRIP.name, TRIP.name], body: tripBody(), lg: 'trip' }; }
+    if (id.indexOf('cli:') === 0) {
+      var k = id.slice(4), cc = actClient(), x = cc && cc[k], sp = actSpecs().filter(function (y) { return y.id === k; })[0];
+      if (!x || typeof x === 'string' || !sp) { return null; }
+      return { title: sp.title, sub: sp.why, spec: { rows: x.rows.slice(0, 500).map(x.item), file: k, text: function (it) { return [it.title, it.desc, it.who].join(' '); }, cols: [
+        { h: tr('Record', 'السجل'), r: function (it) { return docLink(it.dt, it.name, it.title); }, c: function (it) { return it.name; } },
+        { h: tr('Details', 'التفاصيل'), r: function (it) { return '<span class="dms-sm">' + bdi(it.desc) + '</span>'; }, c: function (it) { return it.desc; } },
+        { h: tr('Who', 'المسؤول'), r: function (it) { return bdi(it.who || '—'); }, c: function (it) { return it.who; } },
+        { h: tr('When', 'متى'), r: function (it) { return '<span class="dms-tone-' + it.tone + '">' + esc(it.due) + '</span>'; }, c: function (it) { return it.due; } }] } };
+    }
+    return null;
+  }
+  function onAct(a, v) {
+    if (a === 'kpi' && v.indexOf('trip:') === 0) { var nm2 = v.slice(5); TRIP = { name: nm2, doc: null }; openDrill(v); guarded(null, 'frappe.client.get', { doctype: 'Delivery Trip', name: nm2 }).then(function (d) { if (TRIP && TRIP.name === nm2) { TRIP.doc = d; if (OVL && OVL.lg === 'trip') { OVL.body = tripBody(); renderOverlay(); } } }, function () { if (TRIP && TRIP.name === nm2) { TRIP.err = tr('Unable to open this trip. Check record permission.', 'تعذر فتح الرحلة. تحقق من الصلاحية.'); if (OVL && OVL.lg === 'trip') { OVL.body = tripBody(); renderOverlay(); } } }); return true; }
+    if (a === 'kpi' && v.indexOf('tq:') === 0) { TQ.q = v.slice(3); TQ.issue = ''; goTab('trips', false, true); return true; }
+    if (a === 'kpi' && v.indexOf('ti:') === 0) { TQ.issue = v.slice(3); goTab('trips', false, true); return true; }
+    if (a === 'kpi' && v === 'go:proc') { PT.sub = 'overview'; goTab('proc', false, true); return true; }
+    if (a === 'kpi' && v.indexOf('pq:') === 0) { var q = v.slice(3); PT.q = PT.q === q ? '' : q; renderSoft(); return true; }
+    if (a === 'kpi' && v.indexOf('pi:') === 0) { PT.q = 'i:' + v.slice(3); renderSoft(); return true; }
+    if (a === 'pq') { PT.q = v; renderSoft(); return true; }
+    if (a === 'tq') { TQ.q = v; TQ.issue = ''; renderSoft(); return true; }
+    if (a === 'psub') { PT.sub = v; PT.q = ''; if (v === 'requests') { loadDelay(); } renderSoft(); return true; }
+    if (a === 'chip') { LIVE.filter = v; LIVE.refit = true; renderSoft(); return true; }
+    if (a === 'map') { if (v === 'refresh') { LIVE.tried = {}; loadLive(false, 'all'); return true; } if (!LIVE.view) { return true; } if (v === 'in') { LIVE.view.z = Math.min(18, LIVE.view.z + 1); } if (v === 'out') { LIVE.view.z = Math.max(3, LIVE.view.z - 1); } if (v === 'fit') { LIVE.refit = true; } drawMap(); return true; }
+    if (a === 'pin') { var p = v.split('|'), f = LIVE.pos[p[0]]; LIVE.sel = p[0]; if (p[1] === '1' && f) { LIVE.view = { lat: f.lat, lng: f.lng, z: Math.max(LIVE.view ? LIVE.view.z : 0, 14) }; } renderSoft(); return true; }
+    return false;
+  }
+
+  start();
+})();
+
+/* ==== DM theme sync (same as tools/erp/shell/dark_theme.py output; maintained here since this block is built on the standard) ==== */
+;(function () {
+  var r = typeof root_element !== 'undefined' ? root_element : null, h = r && r.host;
+  if (!h || h.__dmsTheme) return; h.__dmsTheme = 1;
+  var s = function () { h.setAttribute('data-dms-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'); };
+  s(); new MutationObserver(s).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 })();

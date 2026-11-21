@@ -1,1687 +1,1292 @@
-/* DM Operations Dashboard v4 — Custom HTML Block (Script field). Uses `root_element` (shadow root) provided by Frappe.
- * Tabs: Overview | Delivery & Fleet | Warehouse & Forklift | Production | Supply & Stock
- * v4: royal-blue top bar, English / Arabic (RTL) switch (button in the bar, remembered in this browser).
- * Speed: request cache + de-dupe, lazy (viewport) panel rendering, idle prefetch, trimmed fields, no chart animation.
- */
+/* ===== DM Group KSA — Operations Dashboard — SCRIPT field · v5 =====
+   Adapts v4 (delivery & fleet, warehouse & forklift, production, supply & stock) to the DM dashboard standard. Read-only;
+   the logged-in user's own permissions. Kept from v4: every source and field, the delivery-note-without-trip rule (DM or rented
+   vehicle, not on any Delivery Stop), the forklift latest-status rule, the ten "data to fix" checks, the panels, and the daily
+   targets saved in this browser (same storage key). Changed: one currency per view (system-currency companies unless a company
+   is selected), time series follow the period (daily / weekly / monthly), and lists are complete (no silent row caps).
+   The shared runtime between the "DMS kit" markers is generated from tools/erp/kit/dms-kit.js (edit the kit, not the copy). */
 (function () {
-	'use strict';
-
-	// ---------------------------------------------------------------- language (English / Arabic)
-	const LANG_KEY = 'dmo_lang';
-	let LANG = 'en';
-	try { LANG = localStorage.getItem(LANG_KEY) === 'ar' ? 'ar' : 'en'; } catch (_) { /* ignore */ }
-	const _fr = window.__; // Frappe's own translator (English or the site language)
-	const MISSING = new Set();
-
-	// ---------------------------------------------------------------- Arabic (display only; data and field names are untouched)
-	const AR = {
-		'% Ordered': '% المطلوب', '(no brand)': '(بدون علامة تجارية)', '(none)': '(لا يوجد)', '30D': '30 يوم', '7D': '7 أيام',
-		'Active': 'نشط', 'Active Days': 'أيام النشاط', 'Active Drivers': 'السائقون النشطون', 'Active Forklifts': 'الرافعات الشوكية النشطة',
-		'Actual': 'الفعلي', 'Actual Qty': 'الكمية الفعلية', 'Age (h)': 'العمر (ساعة)', 'All clear': 'لا شيء معلّق',
-		'All clear — nothing needs attention': 'كل شيء على ما يرام — لا يوجد ما يتطلب الانتباه', 'Amount': 'المبلغ',
-		'Assigned Driver': 'السائق المكلّف', 'Attendance Split': 'توزيع الحضور', 'Attention Needed': 'يتطلب انتباهاً', 'Auto': 'تلقائي',
-		'Avg %': 'المتوسط %', 'Avg Idle per Trip (min)': 'متوسط الخمول لكل رحلة (دقيقة)', 'Avg/Trip': 'المتوسط/رحلة', 'Avg/day': 'المتوسط/يوم',
-		'Billed': 'مفوتر', 'Branch': 'الفرع', 'Brand': 'العلامة التجارية', 'By Priority': 'حسب الأولوية', 'By Sales Person': 'حسب مندوب المبيعات',
-		'By Workflow State': 'حسب حالة سير العمل', 'Click to open the list': 'اضغط لفتح القائمة', 'Company': 'الشركة', 'Completed': 'مكتمل',
-		'Completed Qty by Operation': 'الكمية المنجزة حسب العملية', 'Completion Rate': 'نسبة الإنجاز', 'Container': 'الحاوية',
-		'Could not load this panel': 'تعذّر تحميل هذه اللوحة', 'Could not load this tab': 'تعذّر تحميل هذا التبويب', 'Customer': 'العميل',
-		'DN': 'إشعار تسليم', 'DN Status': 'حالة إشعارات التسليم', 'DN Value Today': 'قيمة إشعارات التسليم اليوم', 'DNs To Bill': 'إشعارات تسليم للفوترة',
-		'DNs by Hour of Day': 'إشعارات التسليم حسب ساعات اليوم', 'DNs by Location': 'إشعارات التسليم حسب الموقع', 'DNs no trip >24h': 'إشعارات بلا رحلة > 24 ساعة',
-		'Daily Movements': 'الحركات اليومية', 'Daily Output by Factory': 'الإنتاج اليومي حسب المصنع',
-		'Daily Targets (saved in this browser)': 'الأهداف اليومية (تُحفظ في هذا المتصفح)', 'Date': 'التاريخ', 'Days': 'أيام', 'Days Used': 'أيام الاستخدام',
-		'Delivered Rate': 'نسبة التسليم', 'Delivered?': 'تم التسليم؟', 'Delivery & Fleet': 'التوصيل والأسطول', 'Delivery Mode': 'طريقة التسليم',
-		'Delivery Note': 'إشعار تسليم', 'Delivery Notes': 'إشعارات التسليم', 'Delivery Notes Today': 'إشعارات التسليم اليوم',
-		'Delivery Notes per Day': 'إشعارات التسليم في اليوم', 'Delivery Notes per day': 'إشعارات التسليم في اليوم', 'Delivery Status': 'حالة التسليم',
-		'Delivery Value per Day': 'قيمة التسليم في اليوم', 'Delivery Vehicle': 'مركبة التوصيل', 'Departures by Hour': 'المغادرات حسب الساعة',
-		'Done / Qty': 'المنجز / الكمية', 'Draft DNs': 'إشعارات تسليم مسودة', 'Driver': 'السائق', 'Driver Scoreboard': 'لوحة أداء السائقين', 'Drivers': 'السائقون',
-		'Due': 'الاستحقاق', 'Duty hrs': 'ساعات العمل', 'Earned': 'المكتسب', 'Employee': 'الموظف', 'Entry': 'القيد',
-		'Every vehicle delivery has a trip — nothing waiting': 'كل عملية توصيل بمركبة لها رحلة — لا شيء بالانتظار', 'Expense': 'المصروف',
-		'Expenses by Vehicle Type': 'المصروفات حسب نوع المركبة', 'Expenses per Day': 'المصروفات في اليوم', 'Factory': 'المصنع', 'Forklift': 'الرافعة الشوكية',
-		'Forklift Expenses': 'مصروفات الرافعات الشوكية', 'Forklift Registry': 'سجل الرافعات الشوكية', 'Forklift Status': 'حالة الرافعات الشوكية',
-		'Forklift Utilisation': 'استخدام الرافعات الشوكية', 'Forklifts': 'الرافعات الشوكية', 'From': 'من', 'From → To': 'من ← إلى',
-		'Handled by Vehicle Type': 'المناولة حسب نوع المركبة', 'Handled by Vehicle Type per Day': 'المناولة حسب نوع المركبة يومياً', 'Idle': 'خامل',
-		'Idle Forklifts': 'الرافعات الخاملة', 'In Process': 'قيد التنفيذ', 'In Workshop': 'في الورشة', 'Item': 'الصنف', 'Items': 'الأصناف',
-		'Items in Shortage': 'أصناف في عجز', 'Job Card': 'بطاقة العمل', 'Job Card Status': 'حالة بطاقات العمل', 'Job Card Time by Operation': 'وقت بطاقات العمل حسب العملية',
-		'Job Cards': 'بطاقات العمل', 'Job Cards by Workstation': 'بطاقات العمل حسب محطة العمل', 'Last Seen': 'آخر ظهور', 'Last Status': 'آخر حالة',
-		'Latest Delivery Notes': 'أحدث إشعارات التسليم', 'Latest Material Requests': 'أحدث طلبات المواد', 'Load': 'تحميل', 'Loading': 'التحميل',
-		'Loading vs Unloading by Warehouse': 'التحميل مقابل التفريغ حسب المستودع', 'Loading vs Unloading per Day': 'التحميل مقابل التفريغ يومياً', 'Location': 'الموقع',
-		'MR': 'طلب مواد', 'MRs': 'طلبات المواد', 'MRs Created Today': 'طلبات المواد المنشأة اليوم', 'MTD': 'منذ بداية الشهر', 'Maker / Model': 'الصانع / الطراز',
-		'Material Requests': 'طلبات المواد', 'Minutes': 'دقائق', 'Mode': 'الطريقة', 'Movements': 'الحركات', 'Name': 'الاسم', 'Net Wt (kg)': 'الوزن الصافي (كجم)',
-		'New Delivery Trip': 'رحلة توصيل جديدة', 'No data for this selection': 'لا توجد بيانات لهذا الاختيار', 'No item is short': 'لا يوجد صنف ناقص',
-		'No open job cards': 'لا توجد بطاقات عمل مفتوحة', 'No overdue material requests': 'لا توجد طلبات مواد متأخرة',
-		'No production targets set for this range': 'لم تُحدَّد أهداف إنتاج لهذه الفترة', 'No stale work orders': 'لا توجد أوامر عمل متأخرة',
-		'No trips in range': 'لا توجد رحلات في الفترة', 'No work orders in process': 'لا توجد أوامر عمل قيد التنفيذ', 'Nothing pending': 'لا شيء معلّق',
-		'Nothing to show': 'لا شيء للعرض', 'OT Amount per Day': 'مبلغ العمل الإضافي في اليوم', 'OT SAR': 'العمل الإضافي (ر.س)', 'OT hours': 'ساعات العمل الإضافي',
-		'OT hrs': 'ساعات إضافية', 'On Hand': 'المتوفر', 'On Hand vs Reserved — Top Items': 'المتوفر مقابل المحجوز — أعلى الأصناف', 'On hand': 'المتوفر',
-		'Open Job Cards': 'بطاقات العمل المفتوحة', 'Open MR Ageing': 'أعمار طلبات المواد المفتوحة', 'Open MRs by Purpose': 'طلبات المواد المفتوحة حسب الغرض',
-		'Open Mat. Requests': 'طلبات المواد المفتوحة', 'Operating Cost': 'تكلفة التشغيل', 'Operating Cost by Item': 'تكلفة التشغيل حسب الصنف', 'Operation': 'العملية',
-		'Operator': 'المشغّل', 'Operator Productivity': 'إنتاجية المشغّلين', 'Operators': 'المشغّلون', 'Ordered': 'مطلوب', 'Output': 'المخرجات',
-		'Output vs Target': 'المخرجات مقابل الهدف', 'Overdue MRs': 'طلبات مواد متأخرة', 'Overdue Material Requests': 'طلبات المواد المتأخرة', 'Overtime Hours': 'ساعات العمل الإضافي',
-		'Overview': 'نظرة عامة', 'Pending': 'معلّق', 'Pending Item Lines': 'بنود الأصناف المعلّقة', 'Pending Qty by Brand': 'الكمية المعلّقة حسب العلامة التجارية',
-		'Pending Qty by Item Group': 'الكمية المعلّقة حسب مجموعة الأصناف', 'Pending Qty by Warehouse': 'الكمية المعلّقة حسب المستودع', 'Pick Up': 'استلام',
-		'Plan Attainment': 'تحقيق الخطة', 'Planned': 'المخطط', 'Planned vs Produced by Item': 'المخطط مقابل المنتج حسب الصنف', 'Priority': 'الأولوية',
-		'Process Loss': 'فاقد التصنيع', 'Process Loss by Item': 'فاقد التصنيع حسب الصنف', 'Produced': 'المنتج', 'Produced Qty': 'الكمية المنتجة', 'Production': 'الإنتاج',
-		'Productivity %': 'الإنتاجية %', 'Productivity by Activity': 'الإنتاجية حسب النشاط', 'Progress': 'التقدم', 'Projected': 'المتوقع',
-		'Purchase Receipts per Day': 'إيصالات الشراء في اليوم', 'Purpose': 'الغرض', 'Qty': 'الكمية', 'Receipt': 'الإيصال', 'Receipt Status': 'حالة الإيصالات',
-		'Receipts': 'الإيصالات', 'Receipts Today': 'إيصالات اليوم', 'Receipts in Range': 'الإيصالات في الفترة', 'Recent Daily Production Updates': 'أحدث تحديثات الإنتاج اليومي',
-		'Recent Purchase Receipts': 'أحدث إيصالات الشراء', 'Recent Stock Entries': 'أحدث قيود المخزون', 'Refresh': 'تحديث', 'Refresh every 5 minutes': 'تحديث كل 5 دقائق',
-		'Reserved': 'محجوز', 'Reserved Qty by Warehouse': 'الكمية المحجوزة حسب المستودع', 'Route': 'المسار', 'SAR': 'ر.س', 'SAR · all bins': 'ر.س · كل المواقع',
-		'SAR · range': 'ر.س · الفترة', 'SAR · total': 'ر.س · الإجمالي', 'Sales Person': 'مندوب المبيعات', 'Save': 'حفظ', 'Set daily targets': 'تحديد الأهداف اليومية',
-		'Setting': 'الإعداد', 'Shortage Items': 'أصناف العجز', 'Shortage Lines by Warehouse': 'بنود العجز حسب المستودع', 'Site idle': 'خمول الموقع',
-		'Stale WOs': 'أوامر عمل متأخرة', 'Stale Work Orders': 'أوامر العمل المتأخرة', 'State': 'الحالة', 'Status': 'الحالة', 'Stock Entries': 'قيود المخزون',
-		'Stock Entries Today': 'قيود المخزون اليوم', 'Stock Entries per Day': 'قيود المخزون في اليوم', 'Stock Entry Types': 'أنواع قيود المخزون', 'Stock Value': 'قيمة المخزون',
-		'Stock Value Share': 'حصة قيمة المخزون', 'Stock Value by Warehouse': 'قيمة المخزون حسب المستودع', 'Supplier': 'المورد', 'Supply & Stock': 'التوريد والمخزون',
-		'Target': 'الهدف', 'Target vs Actual by Activity': 'الهدف مقابل الفعلي حسب النشاط', 'Targets': 'الأهداف', 'To': 'إلى', 'Today': 'اليوم',
-		'Tonnage Delivered': 'الأطنان المسلّمة', 'Tonnage Delivered per Day': 'الأطنان المسلّمة يومياً', 'Tonnage Today': 'أطنان اليوم', 'Tonnage by Location': 'الأطنان حسب الموقع',
-		'Tonnes': 'أطنان', 'Tonnes per day': 'أطنان في اليوم', 'Top Customers by Tonnage': 'أعلى العملاء حسب الأطنان', 'Top Customers by Value': 'أعلى العملاء حسب القيمة',
-		'Top Employees by Productivity': 'أعلى الموظفين إنتاجية', 'Top Items by Planned Qty': 'أعلى الأصناف حسب الكمية المخططة', 'Top Items by Stock Value': 'أعلى الأصناف حسب قيمة المخزون',
-		'Top Operators by Volume': 'أعلى المشغّلين حسب الحجم', 'Top Pending Items': 'أعلى الأصناف المعلّقة', 'Top Routes': 'أبرز المسارات', 'Top Sales Persons': 'أفضل مندوبي المبيعات',
-		'Top Suppliers by Value': 'أعلى الموردين حسب القيمة', 'Total': 'الإجمالي', 'Total Loaded': 'إجمالي المحمّل', 'Total Unloaded': 'إجمالي المفرّغ', 'Trailer': 'المقطورة',
-		'Trip': 'الرحلة', 'Trip Earnings': 'أرباح الرحلات', 'Trip Earnings Today': 'أرباح رحلات اليوم', 'Trip Earnings per Day': 'أرباح الرحلات في اليوم', 'Trip Log': 'سجل الرحلات',
-		'Trip Status': 'حالة الرحلات', 'Trip Types': 'أنواع الرحلات', 'Trip earnings per day (SAR)': 'أرباح الرحلات في اليوم (ر.س)', 'Trips': 'الرحلات', 'Trips Today': 'رحلات اليوم',
-		'Trips by Destination': 'الرحلات حسب الوجهة', 'Trips by Source Warehouse': 'الرحلات حسب مستودع المصدر', 'Trips in Range': 'الرحلات في الفترة',
-		'Trips per Driver per Day': 'الرحلات لكل سائق في اليوم', 'Trips per day': 'الرحلات في اليوم', 'Type': 'النوع', 'Unassigned DNs': 'إشعارات تسليم بلا رحلة',
-		'Unassigned Deliveries Queue': 'قائمة التسليمات غير المسندة', 'Unload': 'تفريغ', 'Unloading': 'التفريغ', 'Update': 'التحديث', 'Updated {0}': 'آخر تحديث {0}',
-		'Utilisation': 'الاستخدام', 'Value': 'القيمة', 'Vehicle': 'المركبة', 'Vehicle Scoreboard': 'لوحة أداء المركبات', 'Vehicle Utilisation (trips per day)': 'استخدام المركبات (رحلات في اليوم)',
-		'Vehicles Used': 'المركبات المستخدمة', 'Vehicles handled': 'المركبات المناولة', 'WOs In Process': 'أوامر عمل قيد التنفيذ', 'Warehouse': 'المستودع',
-		'Warehouse & Forklift': 'المستودع والرافعات', 'Warehouse Summary': 'ملخص المستودع', 'Warehouse idle': 'خمول المستودع', 'Warehouses': 'المستودعات', 'Washes': 'الغسلات',
-		'Washings': 'الغسيل', 'Washings by Vehicle Type': 'الغسيل حسب نوع المركبة', 'Work Order': 'أمر العمل', 'Work Order Pipeline': 'مراحل أوامر العمل', 'Work Orders': 'أوامر العمل',
-		'Work Orders In Process': 'أوامر العمل قيد التنفيذ', 'Work Orders by Warehouse': 'أوامر العمل حسب المستودع', 'Workplace Summary': 'ملخص مكان العمل', 'Workshop': 'الورشة',
-		'Workstation': 'محطة العمل', 'across WOs': 'عبر أوامر العمل', 'all purposes': 'كل الأغراض', 'avg %, worked days': 'متوسط %، أيام العمل', 'by branch': 'حسب الفرع',
-		'completed': 'مكتمل', 'completed qty': 'الكمية المنجزة', 'days since request': 'أيام منذ الطلب', 'days with records': 'أيام بها سجلات', 'delivered': 'مسلّم',
-		'delivery value': 'قيمة التسليم', 'distinct': 'مميّز', 'done': 'منجز', 'from → to': 'من ← إلى', 'in range': 'في الفترة', 'in workshop': 'في الورشة',
-		'last 15': 'آخر 15', 'last {0} days in range': 'آخر {0} يوماً في الفترة', 'latest 15': 'أحدث 15', 'latest 50': 'أحدث 50', 'latest status': 'آخر حالة',
-		'leaf warehouses': 'المستودعات الفرعية', 'minutes': 'دقائق', 'need a trip': 'تحتاج رحلة', 'not started, overdue': 'لم تبدأ، متأخرة', 'not submitted': 'غير مرحّلة',
-		'of target': 'من الهدف', 'old open trips': 'رحلات مفتوحة قديمة', 'on the floor': 'على أرض المصنع', 'open / WIP / hold': 'مفتوحة / قيد العمل / معلّقة',
-		'open, by due date': 'مفتوحة، حسب تاريخ الاستحقاق', 'open: all-time · rest: in range': 'المفتوحة: الكل · الباقي: في الفترة', 'overdue MRs': 'طلبات مواد متأخرة',
-		'past due date': 'تجاوزت تاريخ الاستحقاق', 'pending / partial': 'معلّقة / جزئية', 'planned in range': 'مخطط في الفترة', 'planned vs actual · top 6': 'المخطط مقابل الفعلي · أعلى 6',
-		'produced / planned': 'المنتج / المخطط', 'projected qty < 0': 'الكمية المتوقعة < 0', 'purchase receipts': 'إيصالات الشراء', 'qty lost': 'الكمية المفقودة',
-		'qty still to receive': 'الكمية المتبقية للاستلام', 'range': 'الفترة', 'short items': 'أصناف ناقصة', 'stale WOs': 'أوامر عمل متأخرة', 'still to receive': 'متبقٍ للاستلام',
-		'submitted': 'مرحّلة', 'submitted in range': 'مرحّلة في الفترة', 'tonnes': 'أطنان', 'top 5 each': 'أعلى 5 لكل قسم', 'top 8': 'أعلى 8', 'top 8 by qty': 'أعلى 8 حسب الكمية',
-		'unavailable': 'غير متاح', 'vehicles loaded': 'مركبات محمّلة', 'vehicles unloaded': 'مركبات مفرّغة', 'vehicles washed': 'مركبات مغسولة', 'vs prev period': 'مقابل الفترة السابقة',
-		'vs yday': 'مقابل الأمس', 'with records': 'بها سجلات', 'with trips': 'لها رحلات', '{0} not started, start date passed': '{0} لم تبدأ وتجاوزت تاريخ البدء',
-		'{0} open': '{0} مفتوح', '{0} overdue': '{0} متأخر', '{0} registered': '{0} مسجّل', '{0} trips skipped (bad times)': '{0} رحلة مستبعدة (أوقات غير صحيحة)',
-		'{0} vehicle DNs with no trip': '{0} إشعار تسليم بمركبة بلا رحلة',
-		// UI added in this version
-		'Actions — Data to Fix': 'إجراءات — بيانات تحتاج إلى تصحيح', 'click a row to open the records and fix them': 'اضغط على السطر لفتح السجلات وتصحيحها', 'Trips submitted but never completed': 'رحلات مرحّلة ولم تُكمل', 'Set trip status to In Transit / Completed so delivery KPIs are real': 'حدّث حالة الرحلة إلى في الطريق / مكتمل لتصبح مؤشرات التسليم صحيحة', 'Draft trips from past days': 'رحلات مسودة من أيام سابقة', 'Submit or delete them': 'قم بترحيلها أو حذفها', 'Delivery Notes with no trip for over 24h': 'إشعارات تسليم بلا رحلة لأكثر من 24 ساعة', 'Create or link a Delivery Trip': 'أنشئ رحلة توصيل أو اربطها', 'Open requests older than 90 days': 'طلبات مواد مفتوحة أقدم من 90 يوماً', 'Order, receive or close them — stale requests hide real demand': 'اطلب أو استلم أو أغلق — الطلبات القديمة تخفي الطلب الحقيقي', 'Overdue requests (last 90 days)': 'طلبات متأخرة (آخر 90 يوماً)', 'Follow up with purchasing / the requester': 'تابع مع المشتريات / مقدّم الطلب', 'Stopped material requests': 'طلبات مواد متوقفة', 'Cancel them, or re-open if still needed': 'ألغِها أو أعد فتحها إن كانت مطلوبة', 'Work orders not started and overdue': 'أوامر عمل لم تبدأ ومتأخرة', 'Start, re-plan or cancel': 'ابدأ أو أعد التخطيط أو ألغِ', 'Work orders stuck In Process over 60 days': 'أوامر عمل عالقة قيد التنفيذ أكثر من 60 يوماً', 'Complete, update progress or close them': 'أكمل أو حدّث التقدم أو أغلق', 'Draft delivery notes from past days': 'إشعارات تسليم مسودة من أيام سابقة', 'Submit or delete': 'قم بالترحيل أو الحذف', 'Items with negative projected stock': 'أصناف بمخزون متوقع سالب', 'Raise a purchase / transfer or correct stock': 'أنشئ طلب شراء / نقل أو صحّح المخزون', '{0} records to fix': '{0} سجل يحتاج تصحيحاً', 'trip status not updated in ERP': 'حالة الرحلة لم تُحدَّث في النظام', 'Showing the first rows only for:': 'عرض الصفوف الأولى فقط لـ:', 'narrow the date range for complete numbers': 'ضيّق الفترة للحصول على أرقام كاملة', 'no entries recorded in range': 'لا توجد قيود مسجلة في الفترة', 'Delivery trips only': 'رحلات التسليم فقط', 'Scope': 'النطاق', 'other companies are not included': 'الشركات الأخرى غير مشمولة', 'all companies': 'كل الشركات', 'All companies': 'كل الشركات', 'All warehouses': 'كل المستودعات', 'English': 'English', 'العربية': 'العربية', 'Switch language': 'تبديل اللغة', 'Delivery Trip': 'رحلة توصيل',
-	};
-	// data values shown as status badges / chart labels (only these are translated; names, items and customers stay as stored)
-	const AR_VAL = {
-		'Draft': 'مسودة', 'Scheduled': 'مجدول', 'In Transit': 'في الطريق', 'Completed': 'مكتمل', 'Delivered': 'مسلّم', 'Active': 'نشط', 'Received': 'مستلم',
-		'Transferred': 'محوّل', 'Issued': 'مصروف', 'Approved': 'معتمد', 'Submitted': 'مرحّل', 'Ordered': 'مطلوب', 'Cancelled': 'ملغى', 'Stopped': 'متوقف', 'Workshop': 'الورشة',
-		'On Hold': 'معلّق', 'Closed': 'مغلق', 'Pending': 'معلّق', 'Not Started': 'لم يبدأ', 'Open': 'مفتوح', 'Partially Ordered': 'مطلوب جزئياً', 'Partially Received': 'مستلم جزئياً',
-		'Partially Delivered': 'مسلّم جزئياً', 'Not Delivered': 'غير مسلّم', 'Idle': 'خامل', 'In Process': 'قيد التنفيذ', 'Work In Progress': 'قيد العمل', 'Material Transferred': 'تم تحويل المواد',
-		'To Bill': 'للفوترة', 'To Deliver and Bill': 'للتسليم والفوترة', 'To Deliver': 'للتسليم', 'To Receive and Bill': 'للاستلام والفوترة', 'To Receive': 'للاستلام', 'Fully Billed': 'مفوتر بالكامل',
-		'Overdue': 'متأخر', 'Paused': 'متوقف مؤقتاً', 'Unassigned': 'غير مسند', 'Purchase': 'شراء', 'Material Transfer': 'نقل مواد', 'Material Issue': 'صرف مواد',
-		'Material Receipt': 'استلام مواد', 'Manufacture': 'تصنيع', 'Material Consumption for Manufacture': 'استهلاك مواد للتصنيع', 'Send to Subcontractor': 'إرسال لمقاول من الباطن',
-		'Material Transfer for Manufacture': 'نقل مواد للتصنيع', 'Repack': 'إعادة تعبئة', 'DM Vehicle': 'مركبة الشركة', 'Rented Vehicle': 'مركبة مستأجرة', 'Customer Pickup': 'استلام العميل',
-		'Low': 'منخفضة', 'Medium': 'متوسطة', 'High': 'عالية', 'Urgent': 'عاجلة', 'Loading': 'التحميل', 'Unloading': 'التفريغ', 'Washing': 'الغسيل', 'Others': 'أخرى', 'Other': 'أخرى',
-	};
-
-	const fillArgs = (t, a) => (a && a.length ? String(t).replace(/\{(\d+)\}/g, (m, i) => (a[i] != null ? a[i] : m)) : t);
-	// shadows Frappe's __ for this dashboard: Arabic first, then whatever Frappe returns
-	const __ = (s, a) => {
-		if (LANG === 'ar') {
-			if (AR[s] != null) return fillArgs(AR[s], a);
-			MISSING.add(s);
-		}
-		return typeof _fr === 'function' ? _fr(s, a) : fillArgs(s, a);
-	};
-	const tv = (v) => (LANG === 'ar' && v != null && AR_VAL[v] != null ? AR_VAL[v] : v); // data values (statuses, modes)
-	const UNIT = { h: 'س', d: 'ي' };
-	const unit = (u) => (LANG === 'ar' ? UNIT[u] || u : u);
-	window.dmoMissing = () => Array.from(MISSING); // run in the console: strings still shown in English
-
-	const PALETTE = ['#4169e1', '#1e3a8a', '#7b97ee', '#2a4fc4', '#a9bdf6', '#0f2a6b', '#64748b', '#c7d6fb', '#3b5bdb', '#94a3b8'];
-	const OPEN_MR = ['Pending', 'Partially Ordered', 'Partially Received'];
-	const OPEN_WO = ['Not Started', 'In Process'];
-	const DEFAULT_COMPANY = 'Durar Masagh Trading Company';
-	const TRIP_NEEDED_VIA = ['DM Vehicle', 'Rented Vehicle']; // Customer Pickup never needs a trip
-	const MEM_TTL = 90 * 1000;
-	const REDUCE_MOTION = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-	const ICONS = {
-		file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
-		alert: '<path d="M12 3 2 20h20z"/><path d="M12 10v5M12 18h.01"/>',
-		route: '<circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h8a3 3 0 0 0 0-6H8a3 3 0 0 1 0-6h8"/>',
-		box: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>',
-		clip: '<rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4h6v3H9zM9 12h6M9 16h4"/>',
-		cog: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/>',
-		clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-		flame: '<path d="M12 2s5 5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 0 2 1 3 2 3 0-4 1-6 1-9z"/>',
-		truck: '<path d="M1 6h13v10H1zM14 10h4l4 3v3h-8z"/><circle cx="6" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
-		users: '<circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-4 3-6 7-6s7 2 7 6M16 4.5a3.5 3.5 0 0 1 0 7M18 14c2.5.6 4 2.4 4 6"/>',
-		cash: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M6 12h.01M18 12h.01"/>',
-		scale: '<path d="M12 3v18M5 21h14M5 7h14M5 7l-3 7a3 3 0 0 0 6 0zM19 7l-3 7a3 3 0 0 0 6 0z"/>',
-		warehouse: '<path d="M3 21V9l9-6 9 6v12M3 21h18M8 21v-7h8v7"/>',
-		tool: '<path d="M14.5 6.5a4 4 0 0 0-5 5L3 18l3 3 6.5-6.5a4 4 0 0 0 5-5l-2.5 2.5-2.5-.5-.5-2.5z"/>',
-		layers: '<path d="M12 3 2 8l10 5 10-5zM2 13l10 5 10-5M2 17.5l10 5 10-5"/>',
-		check: '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
-		cal: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
-		cart: '<circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l3 12h11l2-8H6"/>',
-		trend: '<path d="M3 17l6-6 4 4 8-8M15 7h6v6"/>',
-		tag: '<path d="M3 12V3h9l9 9-9 9z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
-		drop: '<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.500 6-11 6-11z"/>',
-		stack: '<rect x="3" y="3" width="18" height="6" rx="1"/><rect x="3" y="11" width="18" height="6" rx="1"/><path d="M3 21h18"/>',
-	};
-	const ico = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[k] || ICONS.file}</svg>`;
-
-	// ---------------------------------------------------------------- helpers
-	const esc = (s) => frappe.utils.escape_html(s == null ? '' : String(s));
-	const strip = (h) => String(h == null ? '' : h).replace(/<[^>]*>/g, '').trim();
-	const fmt = (n, d) => format_number(n || 0, null, d == null ? 0 : d);
-	const link = (dt, name) => frappe.utils.get_form_link(dt, name, true);
-	const blank = (v) => (v === null || v === undefined || String(v).trim() === '' ? '—' : esc(tv(v)));
-
-	function tone(status) {
-		const s = String(status || '').toLowerCase();
-		if (['completed', 'delivered', 'active', 'received', 'transferred', 'issued', 'approved'].includes(s)) return 'green';
-		if (['in transit', 'in process', 'work in progress', 'scheduled', 'material transferred', 'submitted', 'ordered'].includes(s)) return 'blue';
-		if (['cancelled', 'stopped', 'workshop', 'on hold', 'closed'].includes(s)) return 'red';
-		if (['pending', 'not started', 'open', 'partially ordered', 'partially received', 'partially delivered', 'not delivered', 'idle'].includes(s)) return 'orange';
-		return 'grey';
-	}
-	const badge = (text) => (text ? `<span class="dmo-b ${tone(text)}">${esc(tv(text))}</span>` : '—');
-
-	function table(cols, rows, opts) {
-		opts = opts || {};
-		if (!rows.length) return `<div class="dmo-empty">${opts.empty || __('Nothing to show')}</div>`;
-		const head = cols.map((c) => `<th class="${c.cls || ''}">${c.l}</th>`).join('');
-		const body = rows.map((r) => `<tr>${cols.map((c) => `<td class="${c.cls || ''}">${c.v(r)}</td>`).join('')}</tr>`).join('');
-		return `<div class="dmo-scroll"><table class="dmo-t ${opts.cls || ''}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
-	}
-
-	const progress = (pct) => {
-		const p = Math.max(0, Math.min(100, Math.round(pct || 0)));
-		return `<div class="dmo-prog"><div style="width:${p}%"></div><span>${p}%</span></div>`;
-	};
-
-	function tally(rows, keyFn, valFn) {
-		const m = new Map();
-		rows.forEach((r) => {
-			const k = keyFn(r);
-			m.set(k, (m.get(k) || 0) + (valFn ? valFn(r) : 1));
-		});
-		return m;
-	}
-	const sortedEntries = (m, n) => Array.from(m.entries()).sort((a, b) => b[1] - a[1]).slice(0, n || 999);
-
-	function dates(from, to, cap) {
-		const out = [];
-		let d = from, guard = 0;
-		while (d <= to && guard++ < 400) {
-			out.push(d);
-			d = frappe.datetime.add_days(d, 1);
-		}
-		return out.slice(-(cap || 31));
-	}
-	const daysBetween = (dateStr, ref) => moment(ref || frappe.datetime.get_today()).diff(moment(dateStr).startOf('day'), 'days');
-
-	// ---------------------------------------------------------------- dashboard
-	class DMOpsDashboard {
-		constructor($host) {
-			this.$host = $host;
-			this.loaded = {};
-			this.cache = {};
-			this.mem = DMOpsDashboard.mem || (DMOpsDashboard.mem = new Map()); // survives a language switch
-			this.observers = [];
-			this.active = 'overview';
-			this.ready = false;
-			this.last_load = null;
-			this.tabs = [
-				{ id: 'overview', label: __('Overview') },
-				{ id: 'delivery', label: __('Delivery & Fleet') },
-				{ id: 'forklift', label: __('Warehouse & Forklift') },
-				{ id: 'production', label: __('Production') },
-				{ id: 'supply', label: __('Supply & Stock') },
-			];
-			this.auto = true;
-			try { this.auto = localStorage.getItem('dmo_auto') !== '0'; } catch (_) { /* ignore */ }
-			this.on_filter = frappe.utils.debounce(() => {
-				if (this.ready) { this.saveState(); this.refresh(false); }
-			}, 500);
-			this.make_layout();
-			this.make_filters();
-			this.ready = true;
-			this.switch_tab(this.pending_tab || 'overview');
-			this.timer = setInterval(() => {
-				if (!this.$root[0].isConnected) { clearInterval(this.timer); return; }
-				if (this.auto && !document.hidden && window.scrollY < 150) this.refresh(true);
-			}, 5 * 60 * 1000);
-		}
-
-		// ---------- remembered filters / targets
-		loadState() { try { return JSON.parse(localStorage.getItem('dmo_state') || '{}'); } catch (_) { return {}; } }
-		saveState() {
-			try {
-				const f = this.get_f();
-				localStorage.setItem('dmo_state', JSON.stringify({ company: f.company, warehouse: f.warehouse, from: f.from, to: f.to, on: f.today, tab: this.active }));
-			} catch (_) { /* ignore */ }
-		}
-		targets() {
-			const d = { dns_day: 0, trips_day: 0, tons_day: 0, earn_day: 0 };
-			try { return Object.assign(d, JSON.parse(localStorage.getItem('dmo_targets') || '{}')); } catch (_) { return d; }
-		}
-		edit_targets() {
-			const t = this.targets();
-			const dlg = frappe.prompt([
-				{ fieldname: 'dns_day', label: __('Delivery Notes per day'), fieldtype: 'Float', default: t.dns_day },
-				{ fieldname: 'trips_day', label: __('Trips per day'), fieldtype: 'Float', default: t.trips_day },
-				{ fieldname: 'tons_day', label: __('Tonnes per day'), fieldtype: 'Float', default: t.tons_day },
-				{ fieldname: 'earn_day', label: __('Trip earnings per day (SAR)'), fieldtype: 'Float', default: t.earn_day },
-			], (v) => {
-				try { localStorage.setItem('dmo_targets', JSON.stringify(v)); } catch (_) { /* ignore */ }
-				this.refresh(false);
-			}, __('Daily Targets (saved in this browser)'), __('Save'));
-			try { if (LANG === 'ar' && dlg && dlg.$wrapper) dlg.$wrapper.attr('dir', 'rtl'); } catch (_) { /* ignore */ }
-		}
-		tpct(cur, target) { return target > 0 ? ` · ${Math.round((cur / target) * 100)}% ${__('of target')}` : ''; }
-		prevF(f) {
-			const len = daysBetween(f.from, f.to) + 1;
-			return Object.assign({}, f, { from: frappe.datetime.add_days(f.from, -len), to: frappe.datetime.add_days(f.from, -1) });
-		}
-		goto(dt, filters) {
-			const o = {};
-			Object.keys(filters || {}).forEach((k) => { if (filters[k] !== '—' && filters[k] !== '(none)') o[k] = filters[k]; });
-			frappe.route_options = o;
-			frappe.set_route('List', dt);
-		}
-
-		// ---------- chrome
-		make_filters() {
-			const today = frappe.datetime.get_today();
-			const $bar = this.$root.find('.dmo-filters');
-			const st = this.loadState(), same = st.on === today;
-			this.pending_tab = this.tabs.some((t) => t.id === st.tab) ? st.tab : null;
-			this.f = {};
-			// Company + Warehouse are native <select>s: Frappe Link controls misbehave inside this shadow root (dropdown / selection), selects always work.
-			this.f.company = this.make_select(__('Company'), {
-				all: __('All companies'), init: st.company != null ? st.company : DEFAULT_COMPANY,
-				onchange: () => { this.f.warehouse.set_value(''); this.load_warehouses(''); this.on_filter(); },
-			});
-			[
-				{ fieldname: 'from_date', label: __('From'), fieldtype: 'Date', default: (same && st.from) || frappe.datetime.add_days(today, -13) },
-				{ fieldname: 'to_date', label: __('To'), fieldtype: 'Date', default: (same && st.to) || today },
-			].forEach((df) => {
-				const $w = $('<div class="dmo-fc"></div>').appendTo($bar);
-				df.change = () => this.on_filter();
-				const c = frappe.ui.form.make_control({ df: df, parent: $w, render_input: true });
-				if (df.default) c.set_value(df.default);
-				this.f[df.fieldname] = c;
-			});
-			this.f.warehouse = this.make_select(__('Warehouse'), { all: __('All warehouses'), init: st.warehouse || '', onchange: () => this.on_filter() });
-			frappe.xcall('frappe.client.get_list', { doctype: 'Company', fields: ['name'], limit_page_length: 0, order_by: 'name asc' })
-				.then((r) => this.f.company.fill(r.map((x) => x.name))).catch(() => { /* keep the default option */ });
-			this.load_warehouses(st.warehouse || '');
-			const $pre = $('<div class="dmo-pre"></div>').appendTo($bar);
-			[[__('Today'), 0], [__('7D'), 6], [__('30D'), 29], [__('MTD'), 'm']].forEach((x) => {
-				$(`<button type="button">${x[0]}</button>`).appendTo($pre).on('click', () => {
-					this.f.from_date.set_value(x[1] === 'm' ? today.slice(0, 8) + '01' : frappe.datetime.add_days(today, -x[1]));
-					this.f.to_date.set_value(today);
-				});
-			});
-			$(`<button type="button" class="dmo-tgt" title="${__('Set daily targets')}">◎ ${__('Targets')}</button>`).appendTo($pre).on('click', () => this.edit_targets());
-		}
-
-		make_select(label, o) {
-			const $w = $('<div class="dmo-fc"></div>').appendTo(this.$root.find('.dmo-filters'));
-			$('<label class="control-label"></label>').text(label).appendTo($w);
-			const $s = $('<select class="dmo-sel"></select>').appendTo($w);
-			const ctl = {
-				get_value: () => $s.val() || '',
-				set_value: (v) => {
-					if (v && !$s.find('option').filter((_, x) => x.value === v).length) $s.append($('<option></option>').val(v).text(v));
-					$s.val(v || '');
-				},
-				fill: (names, keep) => {
-					const cur = keep == null ? $s.val() || '' : keep;
-					$s.empty().append($('<option></option>').val('').text(o.all));
-					names.forEach((n) => $s.append($('<option></option>').val(n).text(n)));
-					ctl.set_value(cur);
-				},
-			};
-			$s.on('change', () => { if (o.onchange) o.onchange(); });
-			ctl.fill([], o.init || '');
-			return ctl;
-		}
-		load_warehouses(keep) {
-			const co = this.f.company.get_value();
-			const fl = [['is_group', '=', 0]];
-			if (co) fl.push(['company', '=', co]);
-			return frappe.xcall('frappe.client.get_list', { doctype: 'Warehouse', fields: ['name'], filters: fl, limit_page_length: 0, order_by: 'name asc' })
-				.then((r) => this.f.warehouse.fill(r.map((x) => x.name), keep == null ? '' : keep)).catch(() => {});
-		}
-
-		make_layout() {
-			const root = this.$host[0];
-			// shadow DOM does not inherit Frappe's stylesheets: clone them in so charts + controls are styled
-			if (window.ShadowRoot && root instanceof ShadowRoot && !root.querySelector('link[data-dmo]')) {
-				document.querySelectorAll('link[rel="stylesheet"]').forEach((l) => { const c = l.cloneNode(); c.setAttribute('data-dmo', '1'); root.appendChild(c); });
-			}
-			const tabs = this.tabs.map((t) => `<button type="button" class="dmo-tab" data-tab="${t.id}">${t.label}</button>`).join('');
-			const panes = this.tabs.map((t) => `<div class="dmo-pane" data-pane="${t.id}"></div>`).join('');
-			const rtl = LANG === 'ar';
-			this.$root = $(`<div class="dmo${rtl ? ' dmo-rtl' : ''}" dir="${rtl ? 'rtl' : 'ltr'}" lang="${rtl ? 'ar' : 'en'}">
-				<div class="dmo-top"><div class="dmo-tabs">${tabs}</div><div class="dmo-meta"><i class="dmo-live"></i><span></span><label class="dmo-auto" title="${__('Refresh every 5 minutes')}"><input type="checkbox" ${this.auto ? 'checked' : ''}> ${__('Auto')}</label><button type="button" class="dmo-refresh" title="${__('Refresh')}">↻</button><button type="button" class="dmo-lang" title="${__('Switch language')}">${rtl ? 'English' : 'العربية'}</button></div></div>
-				<div class="dmo-filters"></div>
-				<div class="dmo-alerts"></div>
-				${panes}</div>`);
-			this.$host.append(this.$root);
-			this.$root.on('click', '.dmo-tab', (e) => this.switch_tab($(e.currentTarget).data('tab')));
-			this.$root.on('click', '.dmo-refresh', () => this.refresh(true));
-			this.$root.on('click', '.dmo-lang', () => this.set_lang(LANG === 'ar' ? 'en' : 'ar'));
-			this.$root.on('change', '.dmo-auto input', (e) => {
-				this.auto = e.target.checked;
-				try { localStorage.setItem('dmo_auto', this.auto ? '1' : '0'); } catch (_) { /* ignore */ }
-			});
-			this.apply_theme();
-			this.themeObs = new MutationObserver(() => this.apply_theme());
-			this.themeObs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-			this.fix_sticky();
-			setTimeout(() => this.fix_sticky(), 400);
-			$(window).off('resize.dmo').on('resize.dmo', frappe.utils.debounce(() => this.fix_sticky(), 200));
-		}
-
-		set_lang(l) {
-			try { localStorage.setItem(LANG_KEY, l); } catch (_) { /* ignore */ }
-			this.saveState(); // filters + current tab are re-read when the dashboard is rebuilt
-			LANG = l;
-			this.destroy();
-			boot(this.$host);
-		}
-		destroy() {
-			clearInterval(this.timer);
-			this.observers.forEach((o) => o.disconnect());
-			if (this.themeObs) this.themeObs.disconnect();
-			$(window).off('resize.dmo');
-			this.$root.remove();
-		}
-
-		apply_theme() {
-			this.$root.toggleClass('dmo-dark', document.documentElement.getAttribute('data-theme') === 'dark');
-		}
-
-		// keep the tab bar just under Frappe's navbar + page header
-		fix_sticky() {
-			const nav = $('.navbar').first().outerHeight() || 48;
-			const head = $('.page-head:visible').first().outerHeight() || 0;
-			this.$root[0].style.setProperty('--dmo-top', (nav + head + 6) + 'px');
-		}
-
-		on_show() {
-			this.fix_sticky();
-			if (this.last_load && Date.now() - this.last_load > 5 * 60 * 1000) this.refresh(false);
-		}
-
-		refresh(force) {
-			this.observers.forEach((o) => o.disconnect());
-			this.observers = [];
-			this.loaded = {};
-			this.cache = {};
-			this._pf = false;
-			if (force) this.mem.clear();
-			this.load_active();
-		}
-
-		switch_tab(id) {
-			this.active = id;
-			this.$root.find('.dmo-tab').removeClass('active').filter(`[data-tab="${id}"]`).addClass('active');
-			this.$root.find('.dmo-pane').removeClass('active').filter(`[data-pane="${id}"]`).addClass('active');
-			if (this.ready) this.saveState();
-			this.$root.find('.dmo-alerts').toggle(id === 'overview'); this.load_active();
-		}
-
-		async load_active() {
-			const id = this.active;
-			if (this.loaded[id]) return;
-			this.loaded[id] = true;
-			const $p = this.$root.find(`[data-pane="${id}"]`).empty();
-			const f = this.get_f();
-			try {
-				await this['tab_' + id]($p, f);
-				this.alerts(f); this.scope_note(f);
-				this.last_load = Date.now();
-				this.$root.find('.dmo-meta span').text(__('Updated {0}', [moment().format('HH:mm:ss')]));
-				this.prefetch(f);
-			} catch (e) {
-				console.error('[dm-ops]', e);
-				this.loaded[id] = false;
-				$p.html(`<div class="dmo-err">${__('Could not load this tab')}<br><small>${esc(this.errmsg(e))}</small></div>`);
-			}
-		}
-
-		// warm the shared datasets while the browser is idle so other tabs open instantly
-		prefetch(f) {
-			if (this._pf) return;
-			this._pf = true;
-			const run = () => [this.trips(f), this.dns(f), this.openMRs(f), this.forklifts(f)].forEach((p) => p.catch(() => {}));
-			if (window.requestIdleCallback) window.requestIdleCallback(run, { timeout: 4000 });
-			else setTimeout(run, 1500);
-		}
-
-		get_f() {
-			const v = (k) => this.f[k].get_value();
-			const today = frappe.datetime.get_today();
-			return this.cur = {
-				company: v('company') || '',
-				from: v('from_date') || frappe.datetime.add_days(today, -13),
-				to: v('to_date') || today,
-				warehouse: v('warehouse') || '',
-				today: today,
-			};
-		}
-
-		errmsg(e) {
-			if (!e) return '';
-			if (e.message) return e.message;
-			try {
-				const m = JSON.parse(e._server_messages || '[]');
-				if (m.length) return strip(JSON.parse(m[0]).message);
-			} catch (_) { /* ignore */ }
-			return e.exc_type || String(e).slice(0, 200);
-		}
-
-		// ---------- layout builders
-		grid($p) {
-			return $('<div class="dmo-grid"></div>').appendTo($p);
-		}
-		kpi_row($p) {
-			return $('<div class="dmo-kpis"></div>').appendTo($p);
-		}
-		card($g, title, o) {
-			o = o || {};
-			const i = Math.min($g.children().length, 10);
-			const $c = $(`<div class="dmo-card dmo-span-${o.span || 6}" style="--i:${i}"><div class="dmo-card-h"><span class="dmo-card-t">${title}</span><small class="dmo-card-s">${o.sub || ''}</small></div><div class="dmo-card-b"><div class="dmo-skel"></div></div></div>`).appendTo($g);
-			return $c.find('.dmo-card-b');
-		}
-		sub($b, text) {
-			$b.closest('.dmo-card').find('.dmo-card-s').text(text).attr('title', text);
-		}
-		async fill($b, fn) {
-			try {
-				await fn($b);
-				this.add_export($b);
-			} catch (e) {
-				console.error('[dm-ops]', e);
-				$b.html(`<div class="dmo-err">${__('Could not load this panel')}<br><small>${esc(this.errmsg(e))}</small></div>`);
-			}
-		}
-		// Panels load lazily: the query only fires when the card nears the viewport.
-		panel($g, title, o, fn) {
-			const $b = this.card($g, title, o);
-			const run = () => this.fill($b, fn);
-			if (!('IntersectionObserver' in window)) { run(); return Promise.resolve(); }
-			const io = new IntersectionObserver((entries) => {
-				if (entries.some((x) => x.isIntersecting)) { io.disconnect(); run(); }
-			}, { rootMargin: '350px' });
-			io.observe($b.closest('.dmo-card')[0]);
-			this.observers.push(io);
-			return Promise.resolve();
-		}
-		kpi($row, label, fn, o) {
-			o = o || {};
-			const i = $row.children().length;
-			const $k = $(`<div class="dmo-kpi" style="--i:${i}"><div class="dmo-kpi-ico">${ico(o.icon)}</div><div class="dmo-kpi-body"><div class="dmo-kpi-l" title="${label}">${label}</div><div class="dmo-kpi-v">…</div><div class="dmo-kpi-s">&nbsp;</div></div></div>`).appendTo($row);
-			if (o.go) $k.addClass('click').attr('title', __('Click to open the list')).on('click', () => (typeof o.go === 'function' ? o.go() : this.goto(o.go[0], o.go[1])));
-			return fn().then((r) => {
-				const $v = $k.find('.dmo-kpi-v');
-				if (r.num != null) this.count_up($v, r.num, r.dec || 0, r.suffix || '');
-				else $v.text(r.value);
-				$k.find('.dmo-kpi-s').html(r.sub || '&nbsp;');
-				if (r.tone) $k.addClass('tone-' + r.tone);
-			}).catch((e) => {
-				console.error('[dm-ops]', e);
-				$k.find('.dmo-kpi-v').text('—');
-				$k.find('.dmo-kpi-s').text(__('unavailable'));
-			});
-		}
-		count_up($el, num, dec, suffix) {
-			if (REDUCE_MOTION || !num) { $el.text(fmt(num, dec) + suffix); return; }
-			const t0 = performance.now(), dur = 650;
-			const step = (t) => {
-				const p = Math.min(1, (t - t0) / dur);
-				$el.text(fmt(num * (1 - Math.pow(1 - p, 3)), dec) + suffix);
-				if (p < 1) requestAnimationFrame(step);
-			};
-			requestAnimationFrame(step);
-		}
-		delta(cur, prev, label) {
-			const d = cur - prev;
-			const cls = d > 0 ? 'dmo-d-up' : d < 0 ? 'dmo-d-down' : 'dmo-d-flat';
-			const arrow = d > 0 ? '▲' : d < 0 ? '▼' : '■';
-			return `<span class="${cls}">${arrow} ${fmt(Math.abs(d), Number.isInteger(d) ? 0 : 1)}</span> ${label || __('vs yday')}`;
-		}
-
-		// ---------- chart helper (no chart animation: CSS handles motion, keeps first paint fast)
-		chart($b, cfg) {
-			const has = cfg.data.labels.length && cfg.data.datasets.some((d) => d.values.some((v) => v));
-			if (!has) {
-				$b.html(`<div class="dmo-empty">${__('No data for this selection')}</div>`);
-				return;
-			}
-			const holder = $('<div class="dmo-chart"></div>').appendTo($b.empty());
-			const sel = cfg.onSelect, c2 = Object.assign({}, cfg);
-			delete c2.onSelect;
-			const axis = cfg.type === 'bar' || cfg.type === 'line';
-			if (sel && axis) c2.isNavigable = 1;
-			new frappe.Chart(holder[0], Object.assign({
-				height: 190, colors: PALETTE, animate: 0, truncateLegends: 1,
-				axisOptions: { xIsSeries: cfg.type === 'line' ? 1 : 0 },
-			}, c2));
-			if (sel && axis) { // only react to real user clicks / keys, never to the chart's own start-up selection
-				let armed = false;
-				holder.on('pointerdown keydown', () => { armed = true; setTimeout(() => { armed = false; }, 1500); });
-				holder[0].addEventListener('data-select', (e) => { if (armed) { try { sel(e.index); } catch (_) { /* ignore */ } } });
-			}
-		}
-		chart_map($b, type, map, name, n, go) {
-			const e = sortedEntries(map, n || 10);
-			this.chart($b, { type: type, onSelect: go ? (i) => e[i] && go(e[i][0]) : null, data: { labels: e.map((x) => tv(x[0])), datasets: [{ name: name || '', values: e.map((x) => x[1]) }] } });
-			if (go && !['bar', 'line'].includes(type) && e.length) { // pies have no click events: clickable chips instead
-				const chips = e.slice(0, 6).map((x, i) => `<button type="button" class="dmo-chip" data-i="${i}">${esc(tv(x[0]))} <b>${fmt(x[1])}</b></button>`).join('');
-				$(`<div class="dmo-chips">${chips}</div>`).appendTo($b).on('click', '.dmo-chip', (ev) => go(e[$(ev.currentTarget).data('i')][0]));
-			}
-		}
-
-		// ---------- data layer: request cache (90s) + in-flight de-dupe
-		req(key, fn) {
-			const hit = this.mem.get(key);
-			if (hit && Date.now() - hit.t < MEM_TTL) return hit.p;
-			const p = Promise.resolve(fn());
-			this.mem.set(key, { t: Date.now(), p: p });
-			p.catch(() => this.mem.delete(key));
-			return p;
-		}
-		note_cap(doctype, lim, r) {
-			try {
-				if (lim && r && r.length >= lim) {
-					this.capped = this.capped || {}; this.capped[doctype] = lim;
-					let $w = this.$root.find('.dmo-cap');
-					if (!$w.length) $w = $('<div class="dmo-cap"></div>').insertAfter(this.$root.find('.dmo-alerts'));
-					$w.text('⚠ ' + __('Showing the first rows only for:') + ' ' + Object.entries(this.capped).map(([k, v]) => k + ' (' + fmt(v) + ')').join(', ') + ' — ' + __('narrow the date range for complete numbers'));
-				}
-			} catch (e) { /* ignore */ }
-			return r;
-		}
-		gl(doctype, fields, filters, o) {
-			o = o || {};
-			const args = { doctype: doctype, fields: fields, filters: filters || [], limit_page_length: o.limit == null ? 3000 : o.limit };
-			if (o.order_by) args.order_by = o.order_by;
-			if (o.group_by) args.group_by = o.group_by;
-			if (o.parent) args.parent = o.parent;
-			return this.req('gl|' + JSON.stringify(args), () => frappe.xcall('frappe.client.get_list', args).then((r) => this.note_cap(doctype, args.limit_page_length, r)));
-		}
-		cnt(doctype, filters) {
-			return this.req('cnt|' + doctype + JSON.stringify(filters), () => frappe.xcall('frappe.client.get_count', { doctype: doctype, filters: filters }));
-		}
-		rep(name, filters) {
-			return this.req('rep|' + name + JSON.stringify(filters || {}), () => Promise.resolve(frappe.call({
-				method: 'frappe.desk.query_report.run',
-				args: { report_name: name, filters: JSON.stringify(filters || {}), ignore_prepared_report: true },
-			})).then((r) => r.message || {}));
-		}
-		cached(key, fn) {
-			if (!this.cache[key]) {
-				const p = Promise.resolve(fn());
-				this.cache[key] = p;
-				p.catch(() => { delete this.cache[key]; });
-			}
-			return this.cache[key];
-		}
-		// o: {co: 'company', date: 'posting_date', dt: true (datetime field), wh: 'warehouse field', extra: [...]}
-		bf(f, o) {
-			const a = [];
-			if (o.co && f.company) a.push([o.co, '=', f.company]);
-			if (o.date) {
-				a.push([o.date, '>=', f.from + (o.dt ? ' 00:00:00' : '')]);
-				a.push([o.date, '<=', f.to + (o.dt ? ' 23:59:59' : '')]);
-			}
-			if (o.wh && f.warehouse) a.push([o.wh, '=', f.warehouse]);
-			(o.extra || []).forEach((x) => a.push(x));
-			return a;
-		}
-
-		dns(f) {
-			return this.cached('dns', () => this.gl('Delivery Note',
-				['name', 'posting_date', 'posting_time', 'customer', 'custom_delivery_by', 'delivery_mode', 'total_net_weight', 'location', 'custom_sales_person', 'grand_total', 'total_qty', 'status'],
-				this.bf(f, { co: 'company', date: 'posting_date', wh: 'set_warehouse', extra: [['docstatus', '=', 1], ['is_return', '=', 0]] }),
-				{ order_by: 'posting_date desc, posting_time desc' }));
-		}
-		trips(f) {
-			return this.cached('trips', () => this.gl('Delivery Trip',
-				['name', 'custom_trip_type_', 'custom_delivery_date', 'driver_name', 'vehicle', 'status', 'delivery_status',
-					'custom_source_warehouse', 'custom_delivery_to_warehouse', 'custom_total_amount_earned',
-					'custom_driver_reporting_time__at_warehouse', 'departure_time', 'custom_delivered_time', 'custom_driver__out_of_site', 'custom_amount'],
-				this.bf(f, { co: 'company', date: 'custom_delivery_date', wh: 'custom_source_warehouse', extra: [['docstatus', '<', 2]] }),
-				{ order_by: 'custom_delivery_date desc, name desc' }));
-		}
-		// Delivery Notes that need a vehicle (DM / rented) but are not on any Delivery Trip stop
-		unassigned(f) {
-			return this.cached('unassigned', async () => {
-				const dns = (await this.dns(f)).filter((d) => TRIP_NEEDED_VIA.includes(d.custom_delivery_by));
-				if (!dns.length) return [];
-				const names = dns.map((d) => d.name);
-				const used = new Set();
-				const chunks = [];
-				for (let i = 0; i < names.length; i += 500) chunks.push(names.slice(i, i + 500));
-				const results = await Promise.all(chunks.map((c) => this.gl('Delivery Stop', ['delivery_note'], [['delivery_note', 'in', c]], { parent: 'Delivery Trip' })));
-				results.forEach((rows) => rows.forEach((r) => used.add(r.delivery_note)));
-				return dns.filter((d) => !used.has(d.name)).map((d) => Object.assign({}, d, {
-					age_h: moment().diff(moment(d.posting_date + ' ' + (d.posting_time || '00:00:00')), 'hours'),
-				})).sort((a, b) => b.age_h - a.age_h);
-			});
-		}
-		forklifts(f) {
-			return this.cached('forklifts', () => this.gl('ForkLift',
-				['name', 'date', 'warehouse', 'forklift_no', 'driver_name', 'status',
-					'loading_trailer', 'loading_dayana', 'loading_pickup', 'loading_container',
-					'unloading_trailer', 'unloading_dayana', 'unloading_pickup', 'unloading_container',
-					'trailer_expense', 'dayana_expense', 'container_expense', 'pickup_expense',
-					'trailer_cleaning', 'dayana_cleaning', 'container_cleaning', 'pickup_cleaning', 'setting'],
-				this.bf(f, { date: 'date', wh: 'warehouse', extra: [['docstatus', '<', 2]] }), { order_by: 'date asc' }));
-		}
-		openMRs(f) {
-			return this.cached('openmrs', () => this.gl('Material Request',
-				['name', 'material_request_type', 'status', 'workflow_state', 'custom_priority', 'transaction_date', 'schedule_date', 'per_ordered'],
-				this.bf(f, { co: 'company', wh: 'set_warehouse', extra: [['status', 'in', OPEN_MR], ['docstatus', '<', 2]] }),
-				{ order_by: 'schedule_date asc' }));
-		}
-		staleWOs(f) {
-			return this.cached('stalewos', () => this.gl('Work Order',
-				['name', 'production_item', 'item_name', 'qty', 'planned_start_date', 'fg_warehouse'],
-				this.bf(f, { co: 'company', wh: 'fg_warehouse', extra: [['status', '=', 'Not Started'], ['planned_start_date', '<', f.today + ' 00:00:00'], ['docstatus', '=', 1]] }),
-				{ order_by: 'planned_start_date asc', limit: 1500 }));
-		}
-
-
-		// ---------- click-through maps
-		kgo() {
-			const f = this.cur, t = f.today, co = f.company ? { company: f.company } : {};
-			const rng = (k) => ({ [k]: ['between', [f.from, f.to]] });
-			const O = Object.assign;
-			const dn = (x) => ['Delivery Note', O({ docstatus: 1, is_return: 0 }, co, x)];
-			const trip = (x) => ['Delivery Trip', O({ docstatus: ['<', 2] }, co, x)];
-			const mr = (x) => ['Material Request', O({ status: ['in', OPEN_MR], docstatus: ['<', 2] }, co, x)];
-			const wo = (x) => ['Work Order', O({}, co, x)];
-			const jc = (x) => ['Job Card', O({ docstatus: ['<', 2] }, co, x)];
-			const fk = (x) => ['ForkLift', O({ docstatus: ['<', 2] }, rng('date'), x)];
-			const openJc = { status: ['in', ['Open', 'Work In Progress', 'On Hold']] };
-			const short = ['Bin', { projected_qty: ['<', 0] }];
-			return {
-				[__('Delivery Notes Today')]: dn({ posting_date: t }),
-				[__('Unassigned DNs')]: () => this.switch_tab('delivery'),
-				[__('Trips Today')]: trip({ custom_delivery_date: t }),
-				[__('Tonnage Today')]: dn({ posting_date: t }),
-				[__('Open Mat. Requests')]: mr({}),
-				[__('WOs In Process')]: wo({ status: 'In Process' }),
-				[__('Stale Work Orders')]: wo({ status: 'Not Started', docstatus: 1, planned_start_date: ['<', t + ' 00:00:00'] }),
-				[__('Items in Shortage')]: short,
-				[__('DN Value Today')]: dn({ posting_date: t }),
-				[__('Trip Earnings Today')]: trip({ custom_delivery_date: t }),
-				[__('Draft DNs')]: ['Delivery Note', O({ docstatus: 0 }, co)],
-				[__('DNs To Bill')]: dn(O({ status: 'To Bill' }, rng('posting_date'))),
-				[__('MRs Created Today')]: ['Material Request', O({ transaction_date: t, docstatus: ['<', 2] }, co)],
-				[__('Open Job Cards')]: jc(openJc),
-				[__('Receipts Today')]: ['Purchase Receipt', O({ posting_date: t, docstatus: 1 }, co)],
-				[__('Stock Entries Today')]: ['Stock Entry', O({ posting_date: t, docstatus: 1 }, co)],
-				[__('Trips in Range')]: trip(rng('custom_delivery_date')),
-				[__('Completion Rate')]: trip(O({ status: 'Completed' }, rng('custom_delivery_date'))),
-				[__('Delivered Rate')]: trip(O({ delivery_status: 'Delivered' }, rng('custom_delivery_date'))),
-				[__('Trip Earnings')]: trip(rng('custom_delivery_date')),
-				[__('Tonnage Delivered')]: dn(rng('posting_date')),
-				[__('Active Forklifts')]: fk({ status: 'Active' }),
-				[__('Idle Forklifts')]: fk({ status: 'Idle' }),
-				[__('In Workshop')]: fk({ status: 'Workshop' }),
-				[__('Total Loaded')]: fk({}),
-				[__('Total Unloaded')]: fk({}),
-				[__('Forklift Expenses')]: fk({}),
-				[__('Washings')]: fk({}),
-				[__('Operators')]: fk({}),
-				[__('Work Orders')]: wo(rng('planned_start_date')),
-				[__('In Process')]: wo(O({ status: 'In Process' }, rng('planned_start_date'))),
-				[__('Completed')]: wo(O({ status: 'Completed' }, rng('planned_start_date'))),
-				[__('Operating Cost')]: wo(rng('planned_start_date')),
-				[__('Process Loss')]: wo(rng('planned_start_date')),
-				[__('Overdue MRs')]: mr({ schedule_date: ['<', t] }),
-				[__('Stock Value')]: ['Bin', {}],
-				[__('Warehouses')]: ['Warehouse', O({ is_group: 0 }, co)],
-				[__('Receipts in Range')]: ['Purchase Receipt', O({ docstatus: 1 }, co, rng('posting_date'))],
-				[__('Stock Entries')]: ['Stock Entry', O({ docstatus: 1 }, co, rng('posting_date'))],
-			};
-		}
-		gomap() {
-			const f = this.cur, co = f.company ? { company: f.company } : {};
-			const rng = (k) => ({ [k]: ['between', [f.from, f.to]] });
-			const O = Object.assign;
-			const dn = (x) => ['Delivery Note', O({ docstatus: 1, is_return: 0 }, co, rng('posting_date'), x)];
-			const trip = (x) => ['Delivery Trip', O({ docstatus: ['<', 2] }, co, rng('custom_delivery_date'), x)];
-			const mr = (x) => ['Material Request', O({ status: ['in', OPEN_MR], docstatus: ['<', 2] }, co, x)];
-			const wo = (x) => ['Work Order', O({}, co, rng('planned_start_date'), x)];
-			const jc = (x) => ['Job Card', O({ docstatus: ['<', 2] }, co, rng('posting_date'), x)];
-			const fk = (x) => ['ForkLift', O({ docstatus: ['<', 2] }, rng('date'), x)];
-			const by = (fn, field) => (k) => fn({ [field]: k });
-			return {
-				[__('Top Customers by Tonnage')]: by(dn, 'customer'),
-				[__('Top Customers by Value')]: by(dn, 'customer'),
-				[__('Top Sales Persons')]: by(dn, 'custom_sales_person'),
-				[__('By Sales Person')]: by(dn, 'custom_sales_person'),
-				[__('DN Status')]: by(dn, 'status'),
-				[__('DNs by Location')]: by(dn, 'location'),
-				[__('Tonnage by Location')]: by(dn, 'location'),
-				[__('Delivery Mode')]: by(dn, 'delivery_mode'),
-				[__('Delivery Vehicle')]: by(dn, 'custom_delivery_by'),
-				[__('Trip Types')]: by(trip, 'custom_trip_type_'),
-				[__('Trip Status')]: by(trip, 'status'),
-				[__('Delivery Status')]: by(trip, 'delivery_status'),
-				[__('Trips by Source Warehouse')]: by(trip, 'custom_source_warehouse'),
-				[__('Trips by Destination')]: by(trip, 'custom_delivery_to_warehouse'),
-				[__('Open MRs by Purpose')]: by(mr, 'material_request_type'),
-				[__('By Workflow State')]: by(mr, 'workflow_state'),
-				[__('By Priority')]: by(mr, 'custom_priority'),
-				[__('Work Order Pipeline')]: by(wo, 'status'),
-				[__('Work Orders by Warehouse')]: by(wo, 'fg_warehouse'),
-				[__('Job Card Status')]: by(jc, 'status'),
-				[__('Job Cards by Workstation')]: by(jc, 'workstation'),
-				[__('Job Card Time by Operation')]: by(jc, 'operation'),
-				[__('Completed Qty by Operation')]: by(jc, 'operation'),
-				[__('Top Operators by Volume')]: by(fk, 'driver_name'),
-				[__('Setting')]: by(fk, 'setting'),
-				[__('Loading vs Unloading by Warehouse')]: by(fk, 'warehouse'),
-				[__('Stock Entry Types')]: (k) => ['Stock Entry', O({ docstatus: 1, stock_entry_type: k }, co, rng('posting_date'))],
-				[__('Receipt Status')]: (k) => ['Purchase Receipt', O({ docstatus: 1, status: k }, co, rng('posting_date'))],
-				[__('Top Suppliers by Value')]: (k) => ['Purchase Receipt', O({ docstatus: 1, supplier: k }, co, rng('posting_date'))],
-				[__('Stock Value by Warehouse')]: (k) => ['Bin', { warehouse: k }],
-				[__('Stock Value Share')]: (k) => ['Bin', { warehouse: k }],
-				[__('Reserved Qty by Warehouse')]: (k) => ['Bin', { warehouse: k }],
-				[__('Shortage Lines by Warehouse')]: (k) => ['Bin', { warehouse: k, projected_qty: ['<', 0] }],
-			};
-		}
-
-		// ---------- alerts strip
-		scope_note(f) {
-			let $n = this.$root.find('.dmo-scope');
-			if (!$n.length) $n = $('<div class="dmo-scope"></div>').insertAfter(this.$root.find('.dmo-filters'));
-			$n.text(f.company ? __('Scope') + ': ' + f.company + ' — ' + __('other companies are not included') : __('Scope') + ': ' + __('all companies'));
-		}
-		async alerts(f) {
-			const $a = this.$root.find('.dmo-alerts');
-			const co = f.company ? { company: f.company } : {};
-			const goMr = () => this.goto('Material Request', Object.assign({ status: ['in', OPEN_MR], docstatus: ['<', 2], schedule_date: ['<', f.today] }, co));
-			const defs = [
-				[() => this.unassigned(f).then((u) => u.filter((d) => d.age_h >= 24).length), __('DNs no trip >24h'), 'alert', () => this.switch_tab('delivery')],
-				[() => this.trips(f).then((t) => t.filter((r) => ['Draft', 'Scheduled', 'In Transit'].includes(r.status) && r.custom_delivery_date < f.today).length), __('old open trips'), 'route',
-					() => this.goto('Delivery Trip', Object.assign({ status: ['in', ['Draft', 'Scheduled', 'In Transit']], custom_delivery_date: ['<', f.today], docstatus: ['<', 2] }, co))],
-				[() => this.openMRs(f).then((m) => m.filter((x) => x.schedule_date && x.schedule_date < f.today).length), __('overdue MRs'), 'clip', goMr],
-				[() => this.staleWOs(f).then((w) => w.length), __('stale WOs'), 'clock', () => this.goto('Work Order', Object.assign({ status: 'Not Started', docstatus: 1, planned_start_date: ['<', f.today + ' 00:00:00'] }, co))],
-				[() => this.forklifts(f).then((rows) => { const l = {}; rows.forEach((r) => { l[r.forklift_no || r.name] = r; }); return Object.values(l).filter((r) => r.status === 'Workshop').length; }), __('in workshop'), 'tool', () => this.switch_tab('forklift')],
-				[() => this.shortBins(f).then((b) => b.length), __('short items'), 'flame', () => this.goto('Bin', { projected_qty: ['<', 0] })],
-			];
-			const res = await Promise.all(defs.map((d) => d[0]().catch(() => null)));
-			const hot = defs.map((d, i) => ({ n: res[i], label: d[1], icon: d[2], go: d[3] })).filter((x) => x.n);
-			$a.empty();
-			if (!hot.length) { $a.html(`<span class="dmo-al ok">${ico('check')} ${__('All clear — nothing needs attention')}</span>`); return; }
-			hot.forEach((x) => $(`<button type="button" class="dmo-al">${ico(x.icon)}<b>${fmt(x.n)}</b> ${x.label}</button>`).appendTo($a).on('click', x.go));
-		}
-
-		// ---------- CSV export for any table card
-		add_export($b) {
-			const $c = $b.closest('.dmo-card');
-			if (!$b.find('table.dmo-t').length || $c.find('.dmo-exp').length) return;
-			$('<button type="button" class="dmo-exp" title="CSV">⤓ CSV</button>').appendTo($c.find('.dmo-card-h')).on('click', () => {
-				const q = (v) => '"' + String(v).replace(/"/g, '""').replace(/\s+/g, ' ').trim() + '"';
-				const rows = [];
-				$b.find('table.dmo-t tr').each((_, tr) => rows.push($(tr).children('th,td').map((__i, c) => q(c.textContent)).get().join(',')));
-				const blob = new Blob(['﻿' + rows.join('\n')], { type: 'text/csv;charset=utf-8' });
-				const a = document.createElement('a');
-				a.href = URL.createObjectURL(blob);
-				a.download = (strip($c.find('.dmo-card-t').text()) || 'export').replace(/[^\w؀-ۿ-]+/g, '_') + '.csv';
-				document.body.appendChild(a); a.click(); a.remove();
-				setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-			});
-		}
-
-		// ---------- extra datasets
-		whs(f) { // leaf warehouses of the company (Bin has no company field)
-			return this.cached('whs', async () => {
-				if (f.warehouse) return [f.warehouse];
-				if (!f.company) return null;
-				const r = await this.gl('Warehouse', ['name'], [['company', '=', f.company], ['is_group', '=', 0]], { limit: 0 });
-				return r.map((x) => x.name);
-			});
-		}
-		async binF(f, extra) {
-			const w = await this.whs(f);
-			return (w ? [['warehouse', 'in', w]] : []).concat(extra || []);
-		}
-		async binAgg(f, groupBy, extra) {
-			const flt_ = await this.binF(f, extra);
-			return this.gl('Bin', [groupBy, 'sum(actual_qty) as q', 'sum(stock_value) as v', 'sum(reserved_qty) as r', 'sum(projected_qty) as p'], flt_, { group_by: groupBy, limit: 0 });
-		}
-		shortBins(f) {
-			return this.cached('shortbins', async () => this.gl('Bin', ['item_code', 'warehouse', 'actual_qty', 'projected_qty', 'reserved_qty', 'ordered_qty'],
-				await this.binF(f, [['projected_qty', '<', 0]]), { order_by: 'projected_qty asc', limit: 1000 }));
-		}
-		mrItems(f) {
-			return this.cached('mritems', async () => {
-				const mrs = await this.openMRs(f);
-				if (!mrs.length) return [];
-				const names = mrs.map((m) => m.name);
-				const parts = [];
-				for (let i = 0; i < names.length; i += 400) parts.push(names.slice(i, i + 400));
-				const res = await Promise.all(parts.map((c) => this.gl('Material Request Item', ['parent', 'item_code', 'item_name', 'brand', 'item_group', 'qty', 'received_qty', 'warehouse'], [['parent', 'in', c]], { parent: 'Material Request', limit: 8000 })));
-				return [].concat(...res).map((r) => Object.assign(r, { pend: Math.max(0, flt(r.qty) - flt(r.received_qty)) })).filter((r) => r.pend > 0);
-			});
-		}
-		woRange(f) {
-			return this.cached('worange', () => this.gl('Work Order',
-				['name', 'production_item', 'item_name', 'qty', 'produced_qty', 'status', 'fg_warehouse', 'planned_start_date', 'planned_end_date',
-					'planned_operating_cost', 'actual_operating_cost', 'total_operating_cost', 'process_loss_qty'],
-				this.bf(f, { co: 'company', wh: 'fg_warehouse', date: 'planned_start_date', dt: true, extra: [['docstatus', '=', 1]] }), { order_by: 'planned_start_date desc', limit: 3000 }));
-		}
-		jobCards(f) {
-			return this.cached('jobcards', () => this.gl('Job Card',
-				['name', 'workstation', 'operation', 'status', 'for_quantity', 'total_completed_qty', 'process_loss_qty', 'total_time_in_mins', 'posting_date'],
-				this.bf(f, { co: 'company', date: 'posting_date', extra: [['docstatus', '<', 2]] }), { order_by: 'posting_date desc', limit: 5000 }));
-		}
-		dpu(f) {
-			return this.cached('dpu', () => this.gl('Daily Production Update', ['name', 'date', 'factory', 'completed_qty', 'ot_hours'],
-				this.bf(f, { date: 'date', extra: [['docstatus', '<', 2]] }), { order_by: 'date asc' }));
-		}
-		fdp(f) {
-			return this.cached('fdp', () => this.gl('Daily Production Table',
-				['date', 'employee', 'branch', 'worked_item', 'target_qty', 'daily_target_qty', 'actual_qty', 'productivity', 'duty_hours', 'ot_hrs', 'ot_amount', 'activity', 'type'],
-				[['date', '>=', f.from], ['date', '<=', f.to]], { parent: 'Factory Daily Production', limit: 15000 }));
-		}
-		stockEntries(f) {
-			return this.cached('se', () => this.gl('Stock Entry', ['name', 'posting_date', 'stock_entry_type', 'purpose', 'total_amount'],
-				this.bf(f, { co: 'company', date: 'posting_date', extra: [['docstatus', '=', 1]] }), { order_by: 'posting_date desc', limit: 5000 }));
-		}
-		receipts(f) {
-			return this.cached('pr', () => this.gl('Purchase Receipt', ['name', 'posting_date', 'supplier', 'status', 'grand_total', 'per_billed'],
-				this.bf(f, { co: 'company', date: 'posting_date', extra: [['docstatus', '=', 1]] }), { order_by: 'posting_date desc', limit: 5000 }));
-		}
-		async sumq(doctype, field, filters) {
-			const r = await this.gl(doctype, [`sum(${field}) as s`], filters, { limit: 0 });
-			return flt((r[0] || {}).s);
-		}
-		K($row, specs) { // specs: [label, icon, fn, legacy-route]
-			const map = this.kgo();
-			return specs.map((s) => this.kpi($row, s[0], s[2], { icon: s[1], go: map[s[0]] || (s[3] ? [s[3][1], {}] : null) }));
-		}
-		// chart panel from an async () => Map
-		cp($g, title, span, type, mapFn, o) {
-			o = o || {};
-			const g = this.gomap()[title];
-			return this.panel($g, title, { span: span, sub: o.sub }, async ($b) => {
-				this.chart_map($b, type, await mapFn(), o.name || '', o.n || 10, g ? (k) => { const r = g(k); if (r) this.goto(r[0], r[1]); } : null);
-			});
-		}
-		// time-series panel; seriesFn(ds) => [{name, values}]
-		ts($g, title, span, f, type, seriesFn, o) {
-			o = o || {};
-			return this.panel($g, title, { span: span, sub: o.sub }, async ($b) => {
-				const ds = dates(f.from, f.to, 31);
-				const sets = await seriesFn(ds);
-				const cfg = { type: type, data: { labels: ds.map((d) => d.slice(5)), datasets: sets } };
-				if (type === 'line') cfg.lineOptions = { regionFill: sets.length === 1 ? 1 : 0 };
-				if (o.marker > 0) cfg.yMarkers = [{ label: __('Target') + ' ' + fmt(o.marker, 1), value: o.marker, options: { labelPos: 'left' } }];
-				if (o.stacked) cfg.barOptions = { stacked: 1 };
-				this.chart($b, cfg);
-			});
-		}
-		perDay(rows, dateKey, valFn) {
-			return (ds) => ds.map((d) => rows.filter((r) => String(r[dateKey]).slice(0, 10) === d).reduce((a, r) => a + (valFn ? valFn(r) : 1), 0));
-		}
-
-		// ====================================================== TAB 1: OVERVIEW
-		async tab_overview($p, f) {
-			const today = f.today, yday = frappe.datetime.add_days(today, -1);
-			const dnF = (d, x) => this.bf(f, { co: 'company', wh: 'set_warehouse', extra: [['posting_date', '=', d], ['docstatus', '=', 1], ['is_return', '=', 0]].concat(x || []) });
-			const tripF = (d, x) => this.bf(f, { co: 'company', wh: 'custom_source_warehouse', extra: [['custom_delivery_date', '=', d], ['docstatus', '<', 2]].concat(x || []) });
-			const tg = this.targets();
-			const $k = this.kpi_row($p);
-			const $k2 = this.kpi_row($p);
-			const $g = this.grid($p);
-			const jobs = [];
-			this.panel($g, __('Actions — Data to Fix'), { span: 12, sub: __('click a row to open the records and fix them') }, async ($b) => {
-				const co = f.company ? { company: f.company } : {};
-				const O = Object.assign, T = f.today, ago = (n) => frappe.datetime.add_days(T, -n);
-				const arr = (fl) => Object.keys(fl).map((k) => (Array.isArray(fl[k]) ? [k, fl[k][0], fl[k][1]] : [k, '=', fl[k]]));
-				const lst = (dt, fl, order) => Promise.all([
-					this.cnt(dt, arr(fl)),
-					frappe.xcall('frappe.client.get_list', { doctype: dt, fields: ['name'], filters: arr(fl), order_by: order, limit_page_length: 4 }),
-				]).then((x) => ({ n: x[0], rows: x[1].map((r) => [dt, r.name]) }));
-				const A = [
-					{ ico: 'route', sev: 'bad', dt: 'Delivery Trip', order: 'custom_delivery_date asc', fl: O({ status: 'Scheduled', docstatus: 1, custom_delivery_date: ['<', ago(1)] }, co), title: __('Trips submitted but never completed'), why: __('Set trip status to In Transit / Completed so delivery KPIs are real') },
-					{ ico: 'route', sev: 'warn', dt: 'Delivery Trip', order: 'custom_delivery_date asc', fl: O({ status: 'Draft', docstatus: 0, custom_delivery_date: ['<', T] }, co), title: __('Draft trips from past days'), why: __('Submit or delete them') },
-					{ ico: 'alert', sev: 'bad', title: __('Delivery Notes with no trip for over 24h'), why: __('Create or link a Delivery Trip'), go: () => this.switch_tab('delivery'),
-						load: async () => { const u = (await this.unassigned(f)).filter((d) => d.age_h >= 24); return { n: u.length, rows: u.slice(0, 4).map((d) => ['Delivery Note', d.name]) }; } },
-					{ ico: 'clip', sev: 'bad', dt: 'Material Request', order: 'transaction_date asc', fl: O({ status: ['in', OPEN_MR], docstatus: ['<', 2], transaction_date: ['<', ago(90)] }, co), title: __('Open requests older than 90 days'), why: __('Order, receive or close them — stale requests hide real demand') },
-					{ ico: 'clip', sev: 'warn', dt: 'Material Request', order: 'schedule_date asc', fl: O({ status: ['in', OPEN_MR], docstatus: ['<', 2], schedule_date: ['<', T], transaction_date: ['>=', ago(90)] }, co), title: __('Overdue requests (last 90 days)'), why: __('Follow up with purchasing / the requester') },
-					{ ico: 'clip', sev: 'warn', dt: 'Material Request', order: 'transaction_date asc', fl: O({ status: 'Stopped', docstatus: 1 }, co), title: __('Stopped material requests'), why: __('Cancel them, or re-open if still needed') },
-					{ ico: 'clock', sev: 'bad', dt: 'Work Order', order: 'planned_start_date asc', fl: O({ status: 'Not Started', docstatus: 1, planned_start_date: ['<', T + ' 00:00:00'] }, co), title: __('Work orders not started and overdue'), why: __('Start, re-plan or cancel') },
-					{ ico: 'cog', sev: 'bad', dt: 'Work Order', order: 'planned_start_date asc', fl: O({ status: 'In Process', docstatus: 1, planned_start_date: ['<', ago(60) + ' 00:00:00'] }, co), title: __('Work orders stuck In Process over 60 days'), why: __('Complete, update progress or close them') },
-					{ ico: 'file', sev: 'warn', dt: 'Delivery Note', order: 'posting_date asc', fl: O({ docstatus: 0, posting_date: ['<', T] }, co), title: __('Draft delivery notes from past days'), why: __('Submit or delete') },
-					{ ico: 'flame', sev: 'warn', dt: 'Bin', order: 'projected_qty asc', fl: { projected_qty: ['<', 0] }, title: __('Items with negative projected stock'), why: __('Raise a purchase / transfer or correct stock') },
-				];
-				const res = await Promise.all(A.map((a) => (a.load ? a.load() : lst(a.dt, a.fl, a.order)).catch(() => null)));
-				const hot = A.map((a, i) => ({ a: a, r: res[i] })).filter((x) => x.r && x.r.n)
-					.sort((p, q) => (p.a.sev === 'bad' ? 0 : 1) - (q.a.sev === 'bad' ? 0 : 1) || q.r.n - p.r.n);
-				if (!hot.length) { $b.html('<span class="dmo-al ok">' + ico('check') + ' ' + __('All clear — nothing needs attention') + '</span>'); return; }
-				this.sub($b, __('{0} records to fix', [fmt(hot.reduce((t, x) => t + x.r.n, 0))]));
-				$b.html(hot.map((x, i) => '<div class="dmo-act"><div class="dmo-act-m"><a class="dmo-act-go" data-i="' + i + '">' + ico(x.a.ico) + ' ' + esc(x.a.title) + ' →</a><div class="m">' + esc(x.a.why) + '</div><div class="dmo-act-ex">' + x.r.rows.map((r) => link(r[0], r[1])).join('') + '</div></div><span class="dmo-act-n ' + x.a.sev + '">' + fmt(x.r.n) + '</span></div>').join(''));
-				$b.off('click.act').on('click.act', '.dmo-act-go', (ev) => { const x = hot[$(ev.currentTarget).data('i')]; if (x.a.go) x.a.go(); else this.goto(x.a.dt, x.a.fl); });
-			});
-
-			
-
-			jobs.push(...this.K($k, [
-				[__('Delivery Notes Today'), 'file', async () => {
-					const [a, b] = await Promise.all([this.cnt('Delivery Note', dnF(today)), this.cnt('Delivery Note', dnF(yday))]);
-					return { num: a, sub: this.delta(a, b) + this.tpct(a, tg.dns_day) };
-				}, ['List', 'Delivery Note']],
-				[__('Unassigned DNs'), 'alert', async () => {
-					const u = await this.unassigned(f);
-					return { num: u.length, sub: __('need a trip'), tone: u.length ? 'orange' : 'green' };
-				}],
-				[__('Trips Today'), 'route', async () => {
-					const [a, done, b] = await Promise.all([this.cnt('Delivery Trip', tripF(today)), this.cnt('Delivery Trip', tripF(today, [['status', '=', 'Completed']])), this.cnt('Delivery Trip', tripF(yday))]);
-					return { num: a, sub: `${fmt(done)} ${__('done')} · ` + this.delta(a, b, '') + this.tpct(a, tg.trips_day) };
-				}, ['List', 'Delivery Trip']],
-				[__('Tonnage Today'), 'scale', async () => {
-					const sum = (d) => this.sumq('Delivery Note', 'total_net_weight', dnF(d)).then((v) => v / 1000);
-					const [a, b] = await Promise.all([sum(today), sum(yday)]);
-					return { num: a, dec: 1, suffix: ' t', sub: this.delta(a, b) + this.tpct(a, tg.tons_day) };
-				}],
-				[__('Open Mat. Requests'), 'clip', async () => {
-					const n = await this.cnt('Material Request', this.bf(f, { co: 'company', wh: 'set_warehouse', extra: [['status', 'in', OPEN_MR], ['docstatus', '<', 2]] }));
-					return { num: n, sub: __('pending / partial'), tone: n ? 'orange' : 'green' };
-				}, ['List', 'Material Request']],
-				[__('WOs In Process'), 'cog', async () => {
-					const n = await this.cnt('Work Order', this.bf(f, { co: 'company', wh: 'fg_warehouse', extra: [['status', '=', 'In Process']] }));
-					return { num: n, sub: __('on the floor') };
-				}, ['List', 'Work Order']],
-				[__('Stale Work Orders'), 'clock', async () => {
-					const n = (await this.staleWOs(f)).length;
-					return { num: n, sub: __('not started, overdue'), tone: n ? 'red' : 'green' };
-				}],
-				[__('Items in Shortage'), 'flame', async () => {
-					const n = (await this.shortBins(f)).length;
-					return { num: n, sub: __('projected qty < 0'), tone: n ? 'red' : 'green' };
-				}],
-			]));
-
-			jobs.push(...this.K($k2, [
-				[__('DN Value Today'), 'cash', async () => {
-					const [a, b] = await Promise.all([this.sumq('Delivery Note', 'grand_total', dnF(today)), this.sumq('Delivery Note', 'grand_total', dnF(yday))]);
-					return { num: a, sub: this.delta(a, b), suffix: '' };
-				}],
-				[__('Trip Earnings Today'), 'truck', async () => {
-					const a = await this.sumq('Delivery Trip', 'custom_total_amount_earned', tripF(today));
-					return { num: a, sub: __('SAR') + this.tpct(a, tg.earn_day) };
-				}],
-				[__('Draft DNs'), 'file', async () => {
-					const n = await this.cnt('Delivery Note', this.bf(f, { co: 'company', wh: 'set_warehouse', extra: [['docstatus', '=', 0]] }));
-					return { num: n, sub: __('not submitted'), tone: n ? 'orange' : 'green' };
-				}],
-				[__('DNs To Bill'), 'tag', async () => {
-					const n = await this.cnt('Delivery Note', this.bf(f, { co: 'company', wh: 'set_warehouse', date: 'posting_date', extra: [['docstatus', '=', 1], ['status', '=', 'To Bill'], ['is_return', '=', 0]] }));
-					return { num: n, sub: __('in range') };
-				}],
-				[__('MRs Created Today'), 'cart', async () => {
-					const n = await this.cnt('Material Request', this.bf(f, { co: 'company', extra: [['transaction_date', '=', today], ['docstatus', '<', 2]] }));
-					return { num: n, sub: __('all purposes') };
-				}],
-				[__('Open Job Cards'), 'tool', async () => {
-					const n = await this.cnt('Job Card', this.bf(f, { co: 'company', extra: [['status', 'in', ['Open', 'Work In Progress', 'On Hold']], ['docstatus', '<', 2]] }));
-					return { num: n, sub: __('open / WIP / hold') };
-				}],
-				[__('Receipts Today'), 'box', async () => {
-					const n = await this.cnt('Purchase Receipt', this.bf(f, { co: 'company', extra: [['posting_date', '=', today], ['docstatus', '=', 1]] }));
-					return { num: n, sub: __('purchase receipts') };
-				}],
-				[__('Stock Entries Today'), 'layers', async () => {
-					const n = await this.cnt('Stock Entry', this.bf(f, { co: 'company', extra: [['posting_date', '=', today], ['docstatus', '=', 1]] }));
-					return { num: n, sub: __('submitted') };
-				}],
-			]));
-
-			this.ts($g, __('Delivery Notes per Day'), 6, f, 'line', async (ds) => {
-				const rows = await this.gl('Delivery Note', ['posting_date', 'count(name) as c'], this.bf(f, { co: 'company', date: 'posting_date', wh: 'set_warehouse', extra: [['docstatus', '=', 1], ['is_return', '=', 0]] }), { group_by: 'posting_date', limit: 0 });
-				const m = {}; rows.forEach((r) => { m[r.posting_date] = r.c; });
-				return [{ name: __('Delivery Notes'), values: ds.map((d) => m[d] || 0) }];
-			}, { marker: tg.dns_day });
-
-			this.panel($g, __('Attention Needed'), { span: 6, sub: __('top 5 each') }, async ($b) => {
-				const [un, mr, wo] = await Promise.all([this.unassigned(f), this.openMRs(f), this.staleWOs(f)]);
-				const col = (title, items) => `<div><h6>${title}</h6><ul class="dmo-list">${items || `<li><span class="m">${__('All clear')}</span></li>`}</ul></div>`;
-				const a = un.slice(0, 5).map((d) => `<li><span>${link('Delivery Note', d.name)}<br><span class="m">${esc(d.customer)}</span></span><span class="m">${d.age_h}${unit('h')}</span></li>`).join('');
-				const b = mr.filter((m) => m.schedule_date && m.schedule_date < f.today).slice(0, 5)
-					.map((m) => `<li><span>${link('Material Request', m.name)}<br><span class="m">${esc(m.material_request_type)}</span></span><span class="m">${daysBetween(m.schedule_date)}${unit('d')}</span></li>`).join('');
-				const c = wo.slice(0, 5).map((w) => `<li><span>${link('Work Order', w.name)}<br><span class="m">${esc(w.item_name || w.production_item)}</span></span><span class="m">${daysBetween(w.planned_start_date)}${unit('d')}</span></li>`).join('');
-				$b.html(`<div class="dmo-att">${col(__('Unassigned DNs'), a)}${col(__('Overdue MRs'), b)}${col(__('Stale WOs'), c)}</div>`);
-			});
-
-			this.ts($g, __('Delivery Value per Day'), 6, f, 'bar', async (ds) => {
-				const d = await this.dns(f);
-				return [{ name: __('SAR'), values: this.perDay(d, 'posting_date', (r) => flt(r.grand_total))(ds).map((v) => Math.round(v)) }];
-			});
-			this.ts($g, __('Tonnage Delivered per Day'), 6, f, 'line', async (ds) => {
-				const d = await this.dns(f);
-				return [{ name: __('Tonnes'), values: this.perDay(d, 'posting_date', (r) => flt(r.total_net_weight) / 1000)(ds).map((v) => Math.round(v * 10) / 10) }];
-			}, { marker: tg.tons_day });
-
-			this.cp($g, __('DN Status'), 3, 'donut', async () => tally(await this.dns(f), (r) => r.status || '—'));
-			this.cp($g, __('DNs by Location'), 3, 'donut', async () => tally(await this.dns(f), (r) => r.location || '—'), { n: 6 });
-			this.cp($g, __('DNs by Hour of Day'), 6, 'bar', async () => {
-				const m = new Map();
-				for (let h = 6; h <= 22; h++) m.set(String(h).padStart(2, '0'), 0);
-				(await this.dns(f)).forEach((r) => { const h = String(r.posting_time || '').slice(0, 2); if (m.has(h)) m.set(h, m.get(h) + 1); });
-				return m;
-			}, { name: __('Delivery Notes'), n: 20 });
-
-			this.cp($g, __('Top Customers by Tonnage'), 6, 'bar', async () => tally(await this.dns(f), (r) => r.customer || '—', (r) => Math.round(flt(r.total_net_weight) / 100) / 10), { name: __('Tonnes'), n: 8, sub: __('tonnes') });
-			this.cp($g, __('Top Sales Persons'), 6, 'bar', async () => tally(await this.dns(f), (r) => r.custom_sales_person || '—', (r) => flt(r.grand_total)), { name: __('SAR'), n: 8, sub: __('delivery value') });
-
-			this.panel($g, __('Latest Delivery Notes'), { span: 6, sub: __('last 15') }, async ($b) => {
-				$b.html(table([
-					{ l: __('DN'), v: (r) => link('Delivery Note', r.name) },
-					{ l: __('Customer'), v: (r) => blank(r.customer) },
-					{ l: __('Date'), v: (r) => blank(r.posting_date) },
-					{ l: __('Net Wt (kg)'), cls: 'num', v: (r) => fmt(r.total_net_weight) },
-					{ l: __('Value'), cls: 'num', v: (r) => fmt(r.grand_total) },
-					{ l: __('Status'), v: (r) => badge(r.status) },
-				], (await this.dns(f)).slice(0, 15)));
-			});
-			this.panel($g, __('Latest Material Requests'), { span: 6, sub: __('open, by due date') }, async ($b) => {
-				$b.html(table([
-					{ l: __('MR'), v: (r) => link('Material Request', r.name) },
-					{ l: __('Purpose'), v: (r) => blank(r.material_request_type) },
-					{ l: __('Due'), v: (r) => blank(r.schedule_date) },
-					{ l: __('State'), v: (r) => badge(r.workflow_state || r.status) },
-					{ l: __('% Ordered'), v: (r) => progress(flt(r.per_ordered)) },
-				], (await this.openMRs(f)).slice(0, 15)));
-			});
-
-			await Promise.all(jobs);
-		}
-
-		// ====================================================== TAB 2: DELIVERY & FLEET
-		async tab_delivery($p, f) {
-			const $k = this.kpi_row($p);
-			const $g = this.grid($p);
-			const jobs = this.K($k, [
-				[__('Trips in Range'), 'route', async () => {
-					const pf = this.prevF(f);
-					const [t, p] = await Promise.all([this.trips(f), this.cnt('Delivery Trip', this.bf(pf, { co: 'company', date: 'custom_delivery_date', wh: 'custom_source_warehouse', extra: [['docstatus', '<', 2]] }))]);
-					return { num: t.length, sub: this.delta(t.length, p, __('vs prev period')) };
-				}, ['List', 'Delivery Trip']],
-				[__('Completion Rate'), 'check', async () => {
-					const t = await this.trips(f);
-					const d = t.filter((r) => r.status === 'Completed').length;
-					return { num: t.length ? (d / t.length) * 100 : 0, dec: 0, suffix: '%', sub: `${fmt(d)} ${__('completed')}${d === 0 && t.length ? ' · ' + __('trip status not updated in ERP') : ''}` };
-				}],
-				[__('Delivered Rate'), 'truck', async () => {
-					const t = await this.trips(f);
-					const d = t.filter((r) => r.delivery_status === 'Delivered').length;
-					return { num: t.length ? (d / t.length) * 100 : 0, suffix: '%', sub: `${fmt(d)} ${__('delivered')}` };
-				}],
-				[__('Trip Earnings'), 'cash', async () => {
-					const pf = this.prevF(f);
-					const [t, p] = await Promise.all([this.trips(f), this.sumq('Delivery Trip', 'custom_total_amount_earned', this.bf(pf, { co: 'company', date: 'custom_delivery_date', wh: 'custom_source_warehouse', extra: [['docstatus', '<', 2]] }))]);
-					const n = t.reduce((a, r) => a + flt(r.custom_total_amount_earned), 0);
-					const dnE = t.filter((r) => r.custom_trip_type_ === 'Delivery Note').reduce((a, r) => a + flt(r.custom_total_amount_earned), 0); return { num: n, sub: this.delta(n, p, __('vs prev period')) + ' · ' + __('Delivery trips only') + ' ' + fmt(dnE) };
-				}],
-				[__('Active Drivers'), 'users', async () => ({ num: new Set((await this.trips(f)).map((r) => r.driver_name).filter(Boolean)).size, sub: __('with trips') })],
-				[__('Vehicles Used'), 'truck', async () => ({ num: new Set((await this.trips(f)).map((r) => r.vehicle).filter(Boolean)).size, sub: __('distinct') })],
-				[__('Tonnage Delivered'), 'scale', async () => {
-					const pf = this.prevF(f);
-					const [d, p] = await Promise.all([this.dns(f), this.sumq('Delivery Note', 'total_net_weight', this.bf(pf, { co: 'company', date: 'posting_date', wh: 'set_warehouse', extra: [['docstatus', '=', 1], ['is_return', '=', 0]] }))]);
-					const n = d.reduce((a, r) => a + flt(r.total_net_weight), 0) / 1000;
-					return { num: n, dec: 1, suffix: ' t', sub: this.delta(n, p / 1000, __('vs prev period')) };
-				}],
-				[__('Unassigned DNs'), 'alert', async () => {
-					const u = await this.unassigned(f);
-					return { num: u.length, sub: __('need a trip'), tone: u.length ? 'orange' : 'green' };
-				}],
-			]);
-
-			this.panel($g, __('Unassigned Deliveries Queue'), { span: 12 }, async ($b) => {
-				const u = await this.unassigned(f);
-				this.sub($b, __('{0} vehicle DNs with no trip', [u.length]));
-				$b.html(table([
-					{ l: __('Delivery Note'), v: (r) => link('Delivery Note', r.name) },
-					{ l: __('Customer'), v: (r) => blank(r.customer) },
-					{ l: __('Date'), v: (r) => blank(r.posting_date) },
-					{ l: __('Age (h)'), cls: 'num', v: (r) => fmt(r.age_h) },
-					{ l: __('Net Wt (kg)'), cls: 'num', v: (r) => fmt(r.total_net_weight, 1) },
-					{ l: __('Value'), cls: 'num', v: (r) => fmt(r.grand_total) },
-					{ l: __('Mode'), v: (r) => blank(r.delivery_mode) },
-					{ l: __('Location'), v: (r) => blank(r.location) },
-					{ l: __('Sales Person'), v: (r) => blank(r.custom_sales_person) },
-				], u.slice(0, 50), { empty: __('Every vehicle delivery has a trip — nothing waiting') }));
-				$(`<div class="dmo-more"><a href="#" class="dmo-newtrip">+ ${__('New Delivery Trip')}</a></div>`).appendTo($b).on('click', 'a', (ev) => {
-					ev.preventDefault();
-					frappe.new_doc('Delivery Trip', f.company ? { company: f.company } : {});
-				});
-			});
-
-			this.panel($g, __('Trips per Driver per Day'), { span: 6 }, async ($b) => {
-				const t = await this.trips(f);
-				const ds = dates(f.from, f.to, 31);
-				const top = sortedEntries(tally(t, (r) => r.driver_name || '—'), 8).map((x) => x[0]);
-				this.chart($b, { type: 'bar', data: { labels: ds.map((d) => d.slice(5)), datasets: top.map((d) => ({ name: d, values: ds.map((day) => t.filter((r) => (r.driver_name || '—') === d && r.custom_delivery_date === day).length) })) }, barOptions: { stacked: 1 } });
-			});
-			this.cp($g, __('Trip Types'), 3, 'donut', async () => tally(await this.trips(f), (r) => r.custom_trip_type_ || '—'));
-			this.cp($g, __('Trip Status'), 3, 'donut', async () => tally(await this.trips(f), (r) => r.status || '—'));
-
-			this.cp($g, __('Delivery Status'), 3, 'percentage', async () => tally(await this.trips(f), (r) => r.delivery_status || '—'));
-			this.cp($g, __('Delivery Vehicle'), 3, 'donut', async () => tally(await this.dns(f), (r) => r.custom_delivery_by || '—'));
-			this.panel($g, __('Avg Idle per Trip (min)'), { span: 6 }, async ($b) => {
-				const t = await this.trips(f);
-				const mins = (a, b) => (a && b ? moment(b).diff(moment(a), 'minutes') : null);
-				const per = {}; let skipped = 0;
-				t.forEach((r) => {
-					const w = mins(r.custom_driver_reporting_time__at_warehouse, r.departure_time);
-					const s = mins(r.custom_delivered_time, r.custom_driver__out_of_site);
-					if (w === null || s === null || w < 0 || s < 0 || w > 720 || s > 720) { skipped++; return; }
-					const k = r.driver_name || '—';
-					per[k] = per[k] || { w: 0, s: 0, n: 0 };
-					per[k].w += w; per[k].s += s; per[k].n++;
-				});
-				const names = Object.keys(per).sort((a, b) => (per[b].w + per[b].s) / per[b].n - (per[a].w + per[a].s) / per[a].n).slice(0, 10);
-				this.sub($b, skipped ? __('{0} trips skipped (bad times)', [skipped]) : '');
-				this.chart($b, { type: 'bar', barOptions: { stacked: 1 }, data: { labels: names, datasets: [
-					{ name: __('Warehouse idle'), values: names.map((n) => Math.round(per[n].w / per[n].n)) },
-					{ name: __('Site idle'), values: names.map((n) => Math.round(per[n].s / per[n].n)) },
-				] } });
-			});
-
-			this.panel($g, __('Driver Scoreboard'), { span: 6, sub: __('range') }, async ($b) => {
-				const per = {};
-				(await this.trips(f)).forEach((r) => {
-					const k = r.driver_name || '—';
-					per[k] = per[k] || { d: k, n: 0, done: 0, amt: 0, days: new Set() };
-					per[k].n++; if (r.status === 'Completed') per[k].done++;
-					per[k].amt += flt(r.custom_total_amount_earned); per[k].days.add(r.custom_delivery_date);
-				});
-				$b.html(table([
-					{ l: __('Driver'), v: (r) => blank(r.d) },
-					{ l: __('Trips'), cls: 'num', v: (r) => fmt(r.n) },
-					{ l: __('Days'), cls: 'num', v: (r) => r.days.size },
-					{ l: __('Completed'), v: (r) => progress((r.done / r.n) * 100) },
-					{ l: __('Earned'), cls: 'num', v: (r) => fmt(r.amt) },
-					{ l: __('Avg/Trip'), cls: 'num', v: (r) => fmt(r.amt / r.n) },
-				], Object.values(per).sort((a, b) => b.n - a.n)));
-			});
-			this.panel($g, __('Vehicle Scoreboard'), { span: 6, sub: __('range') }, async ($b) => {
-				const per = {};
-				(await this.trips(f)).forEach((r) => {
-					const k = r.vehicle || '—';
-					per[k] = per[k] || { v: k, n: 0, amt: 0, days: new Set(), drivers: new Set() };
-					per[k].n++; per[k].amt += flt(r.custom_total_amount_earned); per[k].days.add(r.custom_delivery_date); if (r.driver_name) per[k].drivers.add(r.driver_name);
-				});
-				$b.html(table([
-					{ l: __('Vehicle'), v: (r) => blank(r.v) },
-					{ l: __('Trips'), cls: 'num', v: (r) => fmt(r.n) },
-					{ l: __('Days Used'), cls: 'num', v: (r) => r.days.size },
-					{ l: __('Drivers'), cls: 'num', v: (r) => r.drivers.size },
-					{ l: __('Earned'), cls: 'num', v: (r) => fmt(r.amt) },
-				], Object.values(per).sort((a, b) => b.n - a.n)));
-			});
-
-			this.ts($g, __('Trip Earnings per Day'), 6, f, 'bar', async (ds) => [{ name: __('SAR'), values: this.perDay(await this.trips(f), 'custom_delivery_date', (r) => flt(r.custom_total_amount_earned))(ds).map(Math.round) }], { marker: this.targets().earn_day });
-			this.cp($g, __('Trips by Source Warehouse'), 3, 'donut', async () => tally(await this.trips(f), (r) => r.custom_source_warehouse || '—'), { n: 6 });
-			this.cp($g, __('Trips by Destination'), 3, 'donut', async () => tally(await this.trips(f), (r) => r.custom_delivery_to_warehouse || '—'), { n: 6 });
-
-			this.panel($g, __('Top Routes'), { span: 6, sub: __('from → to') }, async ($b) => {
-				const per = tally(await this.trips(f), (r) => `${r.custom_source_warehouse || '—'} → ${r.custom_delivery_to_warehouse || '—'}`);
-				$b.html(table([
-					{ l: __('Route'), v: (r) => blank(r[0]) },
-					{ l: __('Trips'), cls: 'num', v: (r) => fmt(r[1]) },
-				], sortedEntries(per, 12)));
-			});
-			this.cp($g, __('Departures by Hour'), 6, 'bar', async () => {
-				const m = new Map();
-				for (let h = 5; h <= 22; h++) m.set(String(h).padStart(2, '0'), 0);
-				(await this.trips(f)).forEach((r) => { const h = r.departure_time ? moment(r.departure_time).format('HH') : ''; if (m.has(h)) m.set(h, m.get(h) + 1); });
-				return m;
-			}, { name: __('Trips'), n: 20 });
-
-			this.cp($g, __('Delivery Mode'), 3, 'bar', async () => tally(await this.dns(f), (r) => r.delivery_mode || '—'), { name: __('Delivery Notes'), n: 8 });
-			this.cp($g, __('Tonnage by Location'), 3, 'bar', async () => tally(await this.dns(f), (r) => r.location || '—', (r) => Math.round(flt(r.total_net_weight) / 100) / 10), { name: __('Tonnes'), n: 8 });
-			this.cp($g, __('Top Customers by Value'), 3, 'bar', async () => tally(await this.dns(f), (r) => r.customer || '—', (r) => Math.round(flt(r.grand_total))), { name: __('SAR'), n: 8 });
-			this.cp($g, __('By Sales Person'), 3, 'donut', async () => tally(await this.dns(f), (r) => r.custom_sales_person || '—'), { n: 6 });
-
-			this.panel($g, __('Vehicle Utilisation (trips per day)'), { span: 12 }, async ($b) => {
-				const t = await this.trips(f);
-				const days = dates(f.from, f.to, 14);
-				const rows = sortedEntries(tally(t, (r) => r.vehicle || '—'), 12).map((x) => {
-					const cells = days.map((d) => t.filter((r) => (r.vehicle || '—') === x[0] && r.custom_delivery_date === d).length);
-					return { v: x[0], cells: cells, tot: cells.reduce((a, b) => a + b, 0) };
-				});
-				this.sub($b, __('last {0} days in range', [days.length]));
-				const head = `<th>${__('Vehicle')}</th>` + days.map((d) => `<th class="num">${d.slice(8)}</th>`).join('') + `<th class="num">${__('Total')}</th>`;
-				const body = rows.map((r) => `<tr><td>${esc(r.v)}</td>${r.cells.map((n) => `<td class="h" style="${n ? `background:rgba(65,105,225,${Math.min(0.18 + 0.14 * n, 0.9)});color:${n > 3 ? '#fff' : 'inherit'}` : ''}">${n || ''}</td>`).join('')}<td class="num"><b>${r.tot}</b></td></tr>`).join('');
-				$b.html(rows.length ? `<div class="dmo-scroll"><table class="dmo-t dmo-heat"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>` : `<div class="dmo-empty">${__('No trips in range')}</div>`);
-			});
-
-			this.panel($g, __('Trip Log'), { span: 12, sub: __('latest 50') }, async ($b) => {
-				$b.html(table([
-					{ l: __('Trip'), v: (r) => link('Delivery Trip', r.name) },
-					{ l: __('Date'), v: (r) => blank(r.custom_delivery_date) },
-					{ l: __('Type'), v: (r) => blank(r.custom_trip_type_) },
-					{ l: __('Driver'), v: (r) => blank(r.driver_name) },
-					{ l: __('Vehicle'), v: (r) => blank(r.vehicle) },
-					{ l: __('From → To'), v: (r) => `${blank(r.custom_source_warehouse)} → ${blank(r.custom_delivery_to_warehouse)}` },
-					{ l: __('Status'), v: (r) => badge(r.status) },
-					{ l: __('Delivered?'), v: (r) => badge(r.delivery_status) },
-					{ l: __('Amount'), cls: 'num', v: (r) => fmt(flt(r.custom_total_amount_earned)) },
-				], (await this.trips(f)).slice(0, 50)));
-			});
-			await Promise.all(jobs);
-		}
-
-		// ====================================================== TAB 3: WAREHOUSE & FORKLIFT
-		async tab_forklift($p, f) {
-			const $k = this.kpi_row($p);
-			const $g = this.grid($p);
-			const load = (r) => flt(r.loading_trailer) + flt(r.loading_dayana) + flt(r.loading_pickup) + flt(r.loading_container);
-			const unload = (r) => flt(r.unloading_trailer) + flt(r.unloading_dayana) + flt(r.unloading_pickup) + flt(r.unloading_container);
-			const expense = (r) => flt(r.trailer_expense) + flt(r.dayana_expense) + flt(r.pickup_expense) + flt(r.container_expense);
-			const wash = (r) => flt(r.trailer_cleaning) + flt(r.dayana_cleaning) + flt(r.pickup_cleaning) + flt(r.container_cleaning);
-			const latestMap = (rows) => { const l = {}; rows.forEach((r) => { l[r.forklift_no || r.name] = r; }); return l; };
-			const statusCount = async (s) => Object.values(latestMap(await this.forklifts(f))).filter((r) => r.status === s).length;
-
-			const jobs = this.K($k, [
-				[__('Active Forklifts'), 'check', async () => ({ num: await statusCount('Active'), sub: __('latest status') })],
-				[__('Idle Forklifts'), 'clock', async () => ({ num: await statusCount('Idle'), sub: __('latest status') })],
-				[__('In Workshop'), 'tool', async () => { const n = await statusCount('Workshop'); return { num: n, sub: __('latest status'), tone: n ? 'red' : 'green' }; }],
-				[__('Total Loaded'), 'box', async () => ({ num: (await this.forklifts(f)).reduce((a, r) => a + load(r), 0), sub: __('vehicles loaded') })],
-				[__('Total Unloaded'), 'stack', async () => ({ num: (await this.forklifts(f)).reduce((a, r) => a + unload(r), 0), sub: __('vehicles unloaded') })],
-				[__('Forklift Expenses'), 'cash', async () => { const n = (await this.forklifts(f)).reduce((a, r) => a + expense(r), 0); return { num: n, sub: n ? __('SAR · range') : __('no entries recorded in range') }; }],
-				[__('Washings'), 'drop', async () => { const n = (await this.forklifts(f)).reduce((a, r) => a + wash(r), 0); return { num: n, sub: n ? __('vehicles washed') : __('no entries recorded in range') }; }],
-				[__('Operators'), 'users', async () => ({ num: new Set((await this.forklifts(f)).map((r) => r.driver_name).filter(Boolean)).size, sub: __('with records') })],
-			]);
-
-			this.panel($g, __('Forklift Status'), { span: 3 }, async ($b) => {
-				const l = latestMap(await this.forklifts(f));
-				const c = { Active: 0, Idle: 0, Workshop: 0 };
-				Object.values(l).forEach((r) => { if (c[r.status] !== undefined) c[r.status]++; });
-				const total = await this.cnt('Forklift list', {});
-				this.sub($b, __('{0} registered', [total]));
-				$b.html(`<div class="dmo-trio"><div class="g"><b>${c.Active}</b><span>${__('Active')}</span></div><div class="o"><b>${c.Idle}</b><span>${__('Idle')}</span></div><div class="r"><b>${c.Workshop}</b><span>${__('Workshop')}</span></div></div>`);
-			});
-			this.ts($g, __('Daily Movements'), 3, f, 'line', async (ds) => [{ name: __('Movements'), values: this.perDay(await this.forklifts(f), 'date', (r) => load(r) + unload(r))(ds) }]);
-			this.panel($g, __('Loading vs Unloading by Warehouse'), { span: 6 }, async ($b) => {
-				const rows = await this.forklifts(f);
-				const L = tally(rows, (r) => r.warehouse || '—', load), U = tally(rows, (r) => r.warehouse || '—', unload);
-				const names = sortedEntries(L, 10).map((x) => x[0]);
-				this.chart($b, { type: 'bar', data: { labels: names, datasets: [{ name: __('Loading'), values: names.map((n) => L.get(n) || 0) }, { name: __('Unloading'), values: names.map((n) => U.get(n) || 0) }] } });
-			});
-
-			this.ts($g, __('Handled by Vehicle Type per Day'), 6, f, 'bar', async (ds) => {
-				const rows = await this.forklifts(f);
-				const s = (a, b) => this.perDay(rows, 'date', (r) => flt(r[a]) + flt(r[b]))(ds);
-				return [{ name: __('Trailer'), values: s('loading_trailer', 'unloading_trailer') }, { name: __('Dayana'), values: s('loading_dayana', 'unloading_dayana') }, { name: __('Pick Up'), values: s('loading_pickup', 'unloading_pickup') }, { name: __('Container'), values: s('loading_container', 'unloading_container') }];
-			}, { stacked: true });
-			this.panel($g, __('Operator Productivity'), { span: 6 }, async ($b) => {
-				const per = {};
-				(await this.forklifts(f)).forEach((r) => {
-					const k = (r.driver_name || '—') + '|' + (r.forklift_no || '—');
-					per[k] = per[k] || { driver: r.driver_name, fk: r.forklift_no, wh: r.warehouse, l: 0, u: 0, days: new Set() };
-					per[k].l += load(r); per[k].u += unload(r); per[k].days.add(r.date);
-				});
-				$b.html(table([
-					{ l: __('Operator'), v: (r) => blank(r.driver) },
-					{ l: __('Forklift'), v: (r) => blank(r.fk) },
-					{ l: __('Warehouse'), v: (r) => blank(r.wh) },
-					{ l: __('Load'), cls: 'num', v: (r) => fmt(r.l) },
-					{ l: __('Unload'), cls: 'num', v: (r) => fmt(r.u) },
-					{ l: __('Total'), cls: 'num', v: (r) => `<b>${fmt(r.l + r.u)}</b>` },
-					{ l: __('Days'), cls: 'num', v: (r) => r.days.size },
-					{ l: __('Avg/day'), cls: 'num', v: (r) => fmt((r.l + r.u) / (r.days.size || 1), 1) },
-				], Object.values(per).sort((a, b) => b.l + b.u - (a.l + a.u))));
-			});
-
-			const byType = (fn) => new Map([[__('Trailer'), fn('trailer')], [__('Dayana'), fn('dayana')], [__('Pick Up'), fn('pickup')], [__('Container'), fn('container')]]);
-			this.cp($g, __('Expenses by Vehicle Type'), 3, 'donut', async () => { const r = await this.forklifts(f); return byType((k) => r.reduce((a, x) => a + flt(x[k + '_expense']), 0)); });
-			this.cp($g, __('Washings by Vehicle Type'), 3, 'donut', async () => { const r = await this.forklifts(f); return byType((k) => r.reduce((a, x) => a + flt(x[k + '_cleaning']), 0)); });
-			this.cp($g, __('Handled by Vehicle Type'), 3, 'donut', async () => { const r = await this.forklifts(f); return byType((k) => r.reduce((a, x) => a + flt(x['loading_' + k]) + flt(x['unloading_' + k]), 0)); });
-			this.cp($g, __('Setting'), 3, 'donut', async () => tally((await this.forklifts(f)).filter((r) => r.setting), (r) => r.setting));
-
-			this.ts($g, __('Expenses per Day'), 6, f, 'bar', async (ds) => [{ name: __('SAR'), values: this.perDay(await this.forklifts(f), 'date', expense)(ds) }]);
-			this.cp($g, __('Top Operators by Volume'), 6, 'bar', async () => tally(await this.forklifts(f), (r) => r.driver_name || '—', (r) => load(r) + unload(r)), { name: __('Vehicles handled'), n: 10 });
-
-			this.ts($g, __('Loading vs Unloading per Day'), 6, f, 'line', async (ds) => {
-				const rows = await this.forklifts(f);
-				return [{ name: __('Loading'), values: this.perDay(rows, 'date', load)(ds) }, { name: __('Unloading'), values: this.perDay(rows, 'date', unload)(ds) }];
-			});
-			this.panel($g, __('Warehouse Summary'), { span: 6 }, async ($b) => {
-				const per = {};
-				(await this.forklifts(f)).forEach((r) => {
-					const k = r.warehouse || '—';
-					per[k] = per[k] || { w: k, l: 0, u: 0, e: 0, ws: 0, fk: new Set() };
-					per[k].l += load(r); per[k].u += unload(r); per[k].e += expense(r); per[k].ws += wash(r); if (r.forklift_no) per[k].fk.add(r.forklift_no);
-				});
-				$b.html(table([
-					{ l: __('Warehouse'), v: (r) => blank(r.w) },
-					{ l: __('Forklifts'), cls: 'num', v: (r) => r.fk.size },
-					{ l: __('Load'), cls: 'num', v: (r) => fmt(r.l) },
-					{ l: __('Unload'), cls: 'num', v: (r) => fmt(r.u) },
-					{ l: __('Expense'), cls: 'num', v: (r) => fmt(r.e) },
-					{ l: __('Washes'), cls: 'num', v: (r) => fmt(r.ws) },
-				], Object.values(per).sort((a, b) => b.l + b.u - (a.l + a.u))));
-			});
-
-			this.panel($g, __('Forklift Registry'), { span: 6 }, async ($b) => {
-				const [reg, rows] = await Promise.all([this.gl('Forklift list', ['name', 'forklift_no', 'driver_name', 'vehicle_maker', 'vehicle_model'], [], { limit: 200 }), this.forklifts(f)]);
-				const l = latestMap(rows);
-				$b.html(table([
-					{ l: __('Forklift'), v: (r) => blank(r.forklift_no || r.name) },
-					{ l: __('Maker / Model'), v: (r) => blank([r.vehicle_maker, r.vehicle_model].filter(Boolean).join(' ')) },
-					{ l: __('Assigned Driver'), v: (r) => blank(r.driver_name) },
-					{ l: __('Last Status'), v: (r) => badge((l[r.forklift_no] || {}).status) },
-					{ l: __('Last Seen'), v: (r) => blank((l[r.forklift_no] || {}).date) },
-				], reg));
-			});
-			this.panel($g, __('Forklift Utilisation'), { span: 6, sub: __('days with records') }, async ($b) => {
-				const per = {};
-				(await this.forklifts(f)).forEach((r) => {
-					const k = r.forklift_no || '—';
-					per[k] = per[k] || { k: k, days: new Set(), active: new Set(), mv: 0 };
-					per[k].days.add(r.date); if (r.status === 'Active') per[k].active.add(r.date); per[k].mv += load(r) + unload(r);
-				});
-				const span = Math.max(1, daysBetween(f.from, f.to) + 1);
-				$b.html(table([
-					{ l: __('Forklift'), v: (r) => blank(r.k) },
-					{ l: __('Active Days'), cls: 'num', v: (r) => r.active.size },
-					{ l: __('Movements'), cls: 'num', v: (r) => fmt(r.mv) },
-					{ l: __('Utilisation'), v: (r) => progress((r.active.size / span) * 100) },
-				], Object.values(per).sort((a, b) => b.active.size - a.active.size)));
-			});
-			await Promise.all(jobs);
-		}
-
-		// ====================================================== TAB 4: PRODUCTION
-		async tab_production($p, f) {
-			const $k = this.kpi_row($p);
-			const $g = this.grid($p);
-			const jobs = this.K($k, [
-				[__('Work Orders'), 'cog', async () => ({ num: (await this.woRange(f)).length, sub: __('planned in range') }), ['List', 'Work Order']],
-				[__('In Process'), 'tool', async () => ({ num: (await this.woRange(f)).filter((w) => w.status === 'In Process').length, sub: __('in range') })],
-				[__('Completed'), 'check', async () => ({ num: (await this.woRange(f)).filter((w) => w.status === 'Completed').length, sub: __('in range') })],
-				[__('Produced Qty'), 'box', async () => ({ num: (await this.woRange(f)).reduce((a, w) => a + flt(w.produced_qty), 0), sub: __('across WOs') })],
-				[__('Plan Attainment'), 'trend', async () => {
-					const w = await this.woRange(f);
-					const q = w.reduce((a, x) => a + flt(x.qty), 0), p = w.reduce((a, x) => a + flt(x.produced_qty), 0);
-					return { num: q ? (p / q) * 100 : 0, suffix: '%', sub: __('produced / planned') };
-				}],
-				[__('Process Loss'), 'alert', async () => { const n = (await this.woRange(f)).reduce((a, w) => a + flt(w.process_loss_qty), 0); return { num: n, sub: n ? __('qty lost') : __('no entries recorded in range') }; }],
-				[__('Open Job Cards'), 'clip', async () => ({ num: (await this.jobCards(f)).filter((j) => ['Open', 'Work In Progress', 'On Hold'].includes(j.status)).length, sub: __('in range') })],
-				[__('Operating Cost'), 'cash', async () => ({ num: (await this.woRange(f)).reduce((a, w) => a + flt(w.total_operating_cost), 0), sub: __('SAR · total') })],
-			]);
-
-			this.panel($g, __('Work Order Pipeline'), { span: 6, sub: __('open: all-time · rest: in range') }, async ($b) => {
-				const [inRange, open] = await Promise.all([
-					this.gl('Work Order', ['status', 'count(name) as c'], this.bf(f, { co: 'company', wh: 'fg_warehouse', date: 'planned_start_date', dt: true }), { group_by: 'status', limit: 0 }),
-					this.gl('Work Order', ['status', 'count(name) as c'], this.bf(f, { co: 'company', wh: 'fg_warehouse', extra: [['status', 'in', OPEN_WO]] }), { group_by: 'status', limit: 0 }),
-				]);
-				const m = new Map();
-				inRange.forEach((r) => m.set(r.status, r.c)); open.forEach((r) => m.set(r.status, r.c));
-				this.chart_map($b, 'bar', m, __('Work Orders'), 8);
-			});
-			this.cp($g, __('Job Card Status'), 3, 'donut', async () => tally(await this.jobCards(f), (r) => r.status || '—'));
-			this.cp($g, __('Attendance Split'), 3, 'percentage', async () => tally((await this.fdp(f)).filter((r) => r.type), (r) => r.type));
-
-			this.panel($g, __('Work Orders In Process'), { span: 6 }, async ($b) => {
-				const w = await this.gl('Work Order', ['name', 'production_item', 'item_name', 'qty', 'produced_qty', 'planned_end_date'],
-					this.bf(f, { co: 'company', wh: 'fg_warehouse', extra: [['status', '=', 'In Process']] }), { order_by: 'planned_end_date asc', limit: 50 });
-				$b.html(table([
-					{ l: __('Work Order'), v: (r) => link('Work Order', r.name) },
-					{ l: __('Item'), v: (r) => blank(r.item_name || r.production_item) },
-					{ l: __('Done / Qty'), cls: 'num', v: (r) => `${fmt(r.produced_qty)} / ${fmt(r.qty)}` },
-					{ l: __('Progress'), v: (r) => progress(flt(r.qty) ? (flt(r.produced_qty) / flt(r.qty)) * 100 : 0) },
-					{ l: __('Due'), v: (r) => blank(String(r.planned_end_date || '').slice(0, 10)) },
-				], w, { empty: __('No work orders in process') }));
-			});
-			this.cp($g, __('Job Card Time by Operation'), 6, 'bar', async () => tally(await this.jobCards(f), (r) => r.operation || '—', (r) => Math.round(flt(r.total_time_in_mins))), { name: __('Minutes'), n: 10, sub: __('minutes') });
-
-			this.panel($g, __('Stale Work Orders'), { span: 6 }, async ($b) => {
-				const w = await this.staleWOs(f);
-				this.sub($b, __('{0} not started, start date passed', [w.length]));
-				$b.html(table([
-					{ l: __('Work Order'), v: (r) => link('Work Order', r.name) },
-					{ l: __('Item'), v: (r) => blank(r.item_name || r.production_item) },
-					{ l: __('Qty'), cls: 'num', v: (r) => fmt(r.qty) },
-					{ l: __('Planned'), v: (r) => blank(String(r.planned_start_date || '').slice(0, 10)) },
-					{ l: __('Days'), cls: 'num', v: (r) => `<span class="dmo-b red">${daysBetween(r.planned_start_date)}</span>` },
-				], w.slice(0, 50), { empty: __('No stale work orders') }));
-			});
-			this.panel($g, __('Productivity by Activity'), { span: 6, sub: __('avg %, worked days') }, async ($b) => {
-				const rows = (await this.fdp(f)).filter((r) => r.activity && flt(r.productivity) > 0);
-				const sum = tally(rows, (r) => r.activity, (r) => flt(r.productivity)), n = tally(rows, (r) => r.activity);
-				this.chart_map($b, 'bar', new Map(Array.from(sum.entries()).map(([k, v]) => [k, Math.round(v / n.get(k))])), __('Productivity %'), 12);
-			});
-
-			this.panel($g, __('Daily Output by Factory'), { span: 6, sub: __('completed qty') }, async ($b) => {
-				const rows = await this.dpu(f); const ds = dates(f.from, f.to, 31);
-				const fa = Array.from(new Set(rows.map((r) => r.factory || '—')));
-				this.chart($b, { type: 'line', data: { labels: ds.map((d) => d.slice(5)), datasets: fa.map((x) => ({ name: x, values: ds.map((d) => rows.filter((r) => r.date === d && (r.factory || '—') === x).reduce((a, r) => a + flt(r.completed_qty), 0)) })) } });
-			});
-			this.ts($g, __('Overtime Hours'), 6, f, 'line', async (ds) => [{ name: __('OT hours'), values: this.perDay(await this.dpu(f), 'date', (r) => flt(r.ot_hours))(ds) }]);
-
-			this.panel($g, __('Output vs Target'), { span: 12 }, async ($b) => {
-				const [rows, tg] = await Promise.all([this.dpu(f), this.gl('Manufacturing Production Target', ['target_date', 'target_qty'], this.bf(f, { co: 'company', date: 'target_date', extra: [['docstatus', '<', 2]] }), { limit: 3000 })]);
-				if (!tg.length) { $b.html(`<div class="dmo-empty">${__('No production targets set for this range')}</div>`); return; }
-				const ds = dates(f.from, f.to, 31);
-				this.chart($b, { type: 'line', data: { labels: ds.map((d) => d.slice(5)), datasets: [
-					{ name: __('Output'), values: this.perDay(rows, 'date', (r) => flt(r.completed_qty))(ds) },
-					{ name: __('Target'), values: this.perDay(tg, 'target_date', (r) => flt(r.target_qty))(ds) },
-				] } });
-			});
-
-			this.cp($g, __('Top Items by Planned Qty'), 6, 'bar', async () => tally(await this.woRange(f), (r) => r.item_name || r.production_item || '—', (r) => flt(r.qty)), { name: __('Qty'), n: 8 });
-			this.panel($g, __('Planned vs Produced by Item'), { span: 6, sub: __('top 8') }, async ($b) => {
-				const w = await this.woRange(f);
-				const P = tally(w, (r) => r.item_name || r.production_item || '—', (r) => flt(r.qty)), D = tally(w, (r) => r.item_name || r.production_item || '—', (r) => flt(r.produced_qty));
-				const names = sortedEntries(P, 8).map((x) => x[0]);
-				this.chart($b, { type: 'bar', data: { labels: names, datasets: [{ name: __('Planned'), values: names.map((n) => P.get(n)) }, { name: __('Produced'), values: names.map((n) => D.get(n) || 0) }] } });
-			});
-
-			this.cp($g, __('Work Orders by Warehouse'), 4, 'donut', async () => tally(await this.woRange(f), (r) => r.fg_warehouse || '—'), { n: 6 });
-			this.cp($g, __('Process Loss by Item'), 4, 'bar', async () => tally((await this.woRange(f)).filter((r) => flt(r.process_loss_qty) > 0), (r) => r.item_name || r.production_item || '—', (r) => flt(r.process_loss_qty)), { name: __('Qty'), n: 6 });
-			this.cp($g, __('Job Cards by Workstation'), 4, 'bar', async () => tally(await this.jobCards(f), (r) => r.workstation || '—'), { name: __('Job Cards'), n: 8 });
-
-			this.panel($g, __('Operating Cost by Item'), { span: 6, sub: __('planned vs actual · top 6') }, async ($b) => {
-				const w = await this.woRange(f); const k = (r) => r.item_name || r.production_item || '—';
-				const P = tally(w, k, (r) => flt(r.planned_operating_cost)), A = tally(w, k, (r) => flt(r.actual_operating_cost));
-				const names = sortedEntries(tally(w, k, (r) => flt(r.total_operating_cost)), 6).map((x) => x[0]);
-				this.chart($b, { type: 'bar', data: { labels: names, datasets: [{ name: __('Planned'), values: names.map((n) => Math.round(P.get(n) || 0)) }, { name: __('Actual'), values: names.map((n) => Math.round(A.get(n) || 0)) }] } });
-			});
-			this.cp($g, __('Completed Qty by Operation'), 6, 'bar', async () => tally(await this.jobCards(f), (r) => r.operation || '—', (r) => flt(r.total_completed_qty)), { name: __('Qty'), n: 10 });
-
-			this.panel($g, __('Open Job Cards'), { span: 6 }, async ($b) => {
-				const j = (await this.jobCards(f)).filter((x) => ['Open', 'Work In Progress', 'On Hold'].includes(x.status));
-				this.sub($b, __('{0} open', [j.length]));
-				$b.html(table([
-					{ l: __('Job Card'), v: (r) => link('Job Card', r.name) },
-					{ l: __('Operation'), v: (r) => blank(r.operation) },
-					{ l: __('Workstation'), v: (r) => blank(r.workstation) },
-					{ l: __('Done / Qty'), cls: 'num', v: (r) => `${fmt(r.total_completed_qty)} / ${fmt(r.for_quantity)}` },
-					{ l: __('Status'), v: (r) => badge(r.status) },
-				], j.slice(0, 40), { empty: __('No open job cards') }));
-			});
-			this.panel($g, __('Recent Daily Production Updates'), { span: 6, sub: __('latest 15') }, async ($b) => {
-				const r = (await this.dpu(f)).slice().reverse().slice(0, 15);
-				$b.html(table([
-					{ l: __('Update'), v: (x) => link('Daily Production Update', x.name) },
-					{ l: __('Date'), v: (x) => blank(x.date) },
-					{ l: __('Factory'), v: (x) => blank(x.factory) },
-					{ l: __('Completed'), cls: 'num', v: (x) => fmt(x.completed_qty) },
-					{ l: __('OT hrs'), cls: 'num', v: (x) => fmt(x.ot_hours, 1) },
-				], r));
-			});
-
-			this.ts($g, __('OT Amount per Day'), 6, f, 'bar', async (ds) => [{ name: __('SAR'), values: this.perDay(await this.fdp(f), 'date', (r) => flt(r.ot_amount))(ds).map(Math.round) }]);
-			this.panel($g, __('Target vs Actual by Activity'), { span: 6 }, async ($b) => {
-				const rows = (await this.fdp(f)).filter((r) => r.activity);
-				const T = tally(rows, (r) => r.activity, (r) => flt(r.daily_target_qty || r.target_qty)), A = tally(rows, (r) => r.activity, (r) => flt(r.actual_qty));
-				const names = sortedEntries(A, 8).map((x) => x[0]);
-				this.chart($b, { type: 'bar', data: { labels: names, datasets: [{ name: __('Target'), values: names.map((n) => Math.round(T.get(n) || 0)) }, { name: __('Actual'), values: names.map((n) => Math.round(A.get(n) || 0)) }] } });
-			});
-
-			this.panel($g, __('Top Employees by Productivity'), { span: 6, sub: __('avg %, worked days') }, async ($b) => {
-				const per = {};
-				(await this.fdp(f)).filter((r) => r.employee && flt(r.productivity) > 0).forEach((r) => {
-					per[r.employee] = per[r.employee] || { e: r.employee, n: 0, p: 0, q: 0, ot: 0 };
-					per[r.employee].n++; per[r.employee].p += flt(r.productivity); per[r.employee].q += flt(r.actual_qty); per[r.employee].ot += flt(r.ot_hrs);
-				});
-				$b.html(table([
-					{ l: __('Employee'), v: (r) => link('Employee', r.e) },
-					{ l: __('Days'), cls: 'num', v: (r) => r.n },
-					{ l: __('Qty'), cls: 'num', v: (r) => fmt(r.q) },
-					{ l: __('OT hrs'), cls: 'num', v: (r) => fmt(r.ot, 1) },
-					{ l: __('Avg %'), v: (r) => progress(r.p / r.n) },
-				], Object.values(per).sort((a, b) => b.p / b.n - a.p / a.n).slice(0, 25)));
-			});
-			this.panel($g, __('Workplace Summary'), { span: 6, sub: __('by branch') }, async ($b) => {
-				const per = {};
-				(await this.fdp(f)).forEach((r) => {
-					const k = r.branch || '—';
-					per[k] = per[k] || { b: k, q: 0, duty: 0, ot: 0, amt: 0 };
-					per[k].q += flt(r.actual_qty); per[k].duty += flt(r.duty_hours); per[k].ot += flt(r.ot_hrs); per[k].amt += flt(r.ot_amount);
-				});
-				$b.html(table([
-					{ l: __('Branch'), v: (r) => blank(r.b) },
-					{ l: __('Actual Qty'), cls: 'num', v: (r) => fmt(r.q) },
-					{ l: __('Duty hrs'), cls: 'num', v: (r) => fmt(r.duty) },
-					{ l: __('OT hrs'), cls: 'num', v: (r) => fmt(r.ot, 1) },
-					{ l: __('OT SAR'), cls: 'num', v: (r) => fmt(r.amt) },
-				], Object.values(per).sort((a, b) => b.q - a.q)));
-			});
-			await Promise.all(jobs);
-		}
-
-		// ====================================================== TAB 5: SUPPLY & STOCK
-		async tab_supply($p, f) {
-			const $k = this.kpi_row($p);
-			const $g = this.grid($p);
-			const jobs = this.K($k, [
-				[__('Open Mat. Requests'), 'clip', async () => ({ num: (await this.openMRs(f)).length, sub: __('pending / partial') }), ['List', 'Material Request']],
-				[__('Overdue MRs'), 'clock', async () => { const n = (await this.openMRs(f)).filter((m) => m.schedule_date && m.schedule_date < f.today).length; return { num: n, sub: __('past due date'), tone: n ? 'red' : 'green' }; }],
-				[__('Pending Item Lines'), 'layers', async () => ({ num: (await this.mrItems(f)).length, sub: __('still to receive') })],
-				[__('Items in Shortage'), 'flame', async () => { const n = (await this.shortBins(f)).length; return { num: n, sub: __('projected qty < 0'), tone: n ? 'red' : 'green' }; }],
-				[__('Stock Value'), 'cash', async () => ({ num: (await this.binAgg(f, 'warehouse')).reduce((a, r) => a + flt(r.v), 0), sub: __('SAR · all bins') })],
-				[__('Warehouses'), 'warehouse', async () => ({ num: ((await this.whs(f)) || []).length, sub: __('leaf warehouses') })],
-				[__('Receipts in Range'), 'box', async () => ({ num: (await this.receipts(f)).length, sub: __('purchase receipts') })],
-				[__('Stock Entries'), 'stack', async () => ({ num: (await this.stockEntries(f)).length, sub: __('submitted in range') })],
-			]);
-
-			this.cp($g, __('Open MRs by Purpose'), 4, 'donut', async () => tally(await this.openMRs(f), (r) => r.material_request_type || '—'));
-			this.cp($g, __('By Workflow State'), 4, 'bar', async () => tally(await this.openMRs(f), (r) => r.workflow_state || '—'), { name: __('Material Requests'), n: 8 });
-			this.cp($g, __('By Priority'), 4, 'bar', async () => tally(await this.openMRs(f), (r) => r.custom_priority || __('(none)')), { name: __('Material Requests'), n: 4 });
-
-			this.cp($g, __('Open MR Ageing'), 6, 'bar', async () => {
-				const b = { '0–7': 0, '8–30': 0, '31–90': 0, '90+': 0 };
-				(await this.openMRs(f)).forEach((r) => { const d = daysBetween(r.transaction_date || f.today); b[d <= 7 ? '0–7' : d <= 30 ? '8–30' : d <= 90 ? '31–90' : '90+']++; });
-				return new Map(Object.entries(b));
-			}, { name: __('Material Requests'), n: 4, sub: __('days since request') });
-			this.panel($g, __('Overdue Material Requests'), { span: 6 }, async ($b) => {
-				const rows = (await this.openMRs(f)).filter((r) => r.schedule_date && r.schedule_date < f.today);
-				this.sub($b, __('{0} overdue', [rows.length]));
-				$b.html(table([
-					{ l: __('MR'), v: (r) => link('Material Request', r.name) },
-					{ l: __('Purpose'), v: (r) => blank(r.material_request_type) },
-					{ l: __('Priority'), v: (r) => blank(r.custom_priority) },
-					{ l: __('State'), v: (r) => badge(r.workflow_state || r.status) },
-					{ l: __('Days'), cls: 'num', v: (r) => `<span class="dmo-b red">${daysBetween(r.schedule_date)}</span>` },
-					{ l: __('% Ordered'), v: (r) => progress(flt(r.per_ordered)) },
-				], rows.slice(0, 50), { empty: __('No overdue material requests') }));
-			});
-
-			this.panel($g, __('Top Pending Items'), { span: 6, sub: __('qty still to receive') }, async ($b) => {
-				const per = {};
-				(await this.mrItems(f)).forEach((r) => {
-					per[r.item_code] = per[r.item_code] || { c: r.item_code, n: r.item_name, b: r.brand, q: 0, mrs: new Set() };
-					per[r.item_code].q += r.pend; per[r.item_code].mrs.add(r.parent);
-				});
-				$b.html(table([
-					{ l: __('Item'), v: (r) => blank(r.c) },
-					{ l: __('Name'), v: (r) => blank(r.n) },
-					{ l: __('Brand'), v: (r) => blank(r.b) },
-					{ l: __('Pending'), cls: 'num', v: (r) => `<b>${fmt(r.q)}</b>` },
-					{ l: __('MRs'), cls: 'num', v: (r) => r.mrs.size },
-				], Object.values(per).sort((a, b) => b.q - a.q).slice(0, 25), { empty: __('Nothing pending') }));
-			});
-			this.cp($g, __('Pending Qty by Brand'), 6, 'bar', async () => tally(await this.mrItems(f), (r) => r.brand || __('(no brand)'), (r) => r.pend), { name: __('Qty'), n: 10 });
-
-			this.cp($g, __('Pending Qty by Item Group'), 6, 'bar', async () => tally(await this.mrItems(f), (r) => r.item_group || '—', (r) => r.pend), { name: __('Qty'), n: 10 });
-			this.cp($g, __('Pending Qty by Warehouse'), 6, 'bar', async () => tally(await this.mrItems(f), (r) => r.warehouse || '—', (r) => r.pend), { name: __('Qty'), n: 10 });
-
-			this.panel($g, __('Shortage Items'), { span: 6, sub: __('projected qty < 0') }, async ($b) => {
-				const s = await this.shortBins(f);
-				$b.html(table([
-					{ l: __('Item'), v: (r) => blank(r.item_code) },
-					{ l: __('Warehouse'), v: (r) => blank(r.warehouse) },
-					{ l: __('Actual'), cls: 'num', v: (r) => fmt(r.actual_qty) },
-					{ l: __('Reserved'), cls: 'num', v: (r) => fmt(r.reserved_qty) },
-					{ l: __('Ordered'), cls: 'num', v: (r) => fmt(r.ordered_qty) },
-					{ l: __('Projected'), cls: 'num', v: (r) => `<span class="dmo-b red">${fmt(r.projected_qty)}</span>` },
-				], s.slice(0, 40), { empty: __('No item is short') }));
-			});
-			this.cp($g, __('Shortage Lines by Warehouse'), 6, 'bar', async () => tally(await this.shortBins(f), (r) => r.warehouse || '—'), { name: __('Items'), n: 10 });
-
-			this.cp($g, __('Stock Value by Warehouse'), 6, 'bar', async () => new Map((await this.binAgg(f, 'warehouse')).map((r) => [r.warehouse, Math.round(flt(r.v))])), { name: __('SAR'), n: 10 });
-			this.cp($g, __('Stock Value Share'), 3, 'donut', async () => new Map((await this.binAgg(f, 'warehouse')).filter((r) => flt(r.v) > 0).map((r) => [r.warehouse, Math.round(flt(r.v))])), { n: 6 });
-			this.cp($g, __('Reserved Qty by Warehouse'), 3, 'donut', async () => new Map((await this.binAgg(f, 'warehouse')).filter((r) => flt(r.r) > 0).map((r) => [r.warehouse, Math.round(flt(r.r))])), { n: 6 });
-
-			this.panel($g, __('Top Items by Stock Value'), { span: 6 }, async ($b) => {
-				const rows = (await this.binAgg(f, 'item_code')).sort((a, b) => flt(b.v) - flt(a.v)).slice(0, 25);
-				$b.html(table([
-					{ l: __('Item'), v: (r) => blank(r.item_code) },
-					{ l: __('On Hand'), cls: 'num', v: (r) => fmt(r.q) },
-					{ l: __('Reserved'), cls: 'num', v: (r) => fmt(r.r) },
-					{ l: __('Value'), cls: 'num', v: (r) => `<b>${fmt(r.v)}</b>` },
-				], rows));
-			});
-			this.panel($g, __('On Hand vs Reserved — Top Items'), { span: 6, sub: __('top 8 by qty') }, async ($b) => {
-				const rows = (await this.binAgg(f, 'item_code')).sort((a, b) => flt(b.q) - flt(a.q)).slice(0, 8);
-				this.chart($b, { type: 'bar', data: { labels: rows.map((r) => r.item_code), datasets: [{ name: __('On hand'), values: rows.map((r) => Math.round(flt(r.q))) }, { name: __('Reserved'), values: rows.map((r) => Math.round(flt(r.r))) }] } });
-			});
-
-			this.ts($g, __('Stock Entries per Day'), 6, f, 'bar', async (ds) => {
-				const se = await this.stockEntries(f);
-				const types = sortedEntries(tally(se, (r) => r.stock_entry_type || r.purpose || '—'), 5).map((x) => x[0]);
-				return types.map((t) => ({ name: t, values: this.perDay(se.filter((r) => (r.stock_entry_type || r.purpose || '—') === t), 'posting_date')(ds) }));
-			}, { stacked: true });
-			this.cp($g, __('Stock Entry Types'), 3, 'donut', async () => tally(await this.stockEntries(f), (r) => r.stock_entry_type || r.purpose || '—'), { n: 6 });
-			this.cp($g, __('Receipt Status'), 3, 'donut', async () => tally(await this.receipts(f), (r) => r.status || '—'));
-
-			this.ts($g, __('Purchase Receipts per Day'), 6, f, 'line', async (ds) => [{ name: __('Receipts'), values: this.perDay(await this.receipts(f), 'posting_date')(ds) }]);
-			this.cp($g, __('Top Suppliers by Value'), 6, 'bar', async () => tally(await this.receipts(f), (r) => r.supplier || '—', (r) => Math.round(flt(r.grand_total))), { name: __('SAR'), n: 8 });
-
-			this.panel($g, __('Recent Purchase Receipts'), { span: 6, sub: __('latest 15') }, async ($b) => {
-				$b.html(table([
-					{ l: __('Receipt'), v: (r) => link('Purchase Receipt', r.name) },
-					{ l: __('Supplier'), v: (r) => blank(r.supplier) },
-					{ l: __('Date'), v: (r) => blank(r.posting_date) },
-					{ l: __('Value'), cls: 'num', v: (r) => fmt(r.grand_total) },
-					{ l: __('Billed'), v: (r) => progress(flt(r.per_billed)) },
-				], (await this.receipts(f)).slice(0, 15)));
-			});
-			this.panel($g, __('Recent Stock Entries'), { span: 6, sub: __('latest 15') }, async ($b) => {
-				$b.html(table([
-					{ l: __('Entry'), v: (r) => link('Stock Entry', r.name) },
-					{ l: __('Type'), v: (r) => blank(r.stock_entry_type) },
-					{ l: __('Date'), v: (r) => blank(r.posting_date) },
-					{ l: __('Value'), cls: 'num', v: (r) => fmt(r.total_amount) },
-				], (await this.stockEntries(f)).slice(0, 15)));
-			});
-			await Promise.all(jobs);
-		}
-	}
-
-	function boot($h) { return new DMOpsDashboard($h); }
-	boot($(root_element));
+  'use strict';
+  var APP = {
+    key: '__dmsOperations',
+    period: 'custom',
+    tabs: [
+      { id: 'overview', en: 'Overview', ar: 'نظرة عامة' }, { id: 'delivery', en: 'Delivery & fleet', ar: 'التوصيل والأسطول' }, { id: 'forklift', en: 'Warehouse & forklift', ar: 'المستودع والرافعات' },
+      { id: 'production', en: 'Production', ar: 'الإنتاج' }, { id: 'supply', en: 'Supply & stock', ar: 'التوريد والمخزون' }, { id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }
+    ],
+    filters: [
+      { k: 'company', en: 'Company', ar: 'الشركة', none: ['All companies', 'كل الشركات'], options: function () { return CO.map(function (c) { return c.name; }); } },
+      { k: 'wh', en: 'Warehouse', ar: 'المستودع', none: ['All warehouses', 'كل المستودعات'], dependsOn: 'company', options: function (dr) { var co = dr ? dr.company : F.company; return WH.filter(function (w) { return !co || w.company === co; }).map(function (w) { return w.name; }); } }
+    ],
+    sources: ['dns', 'trips', 'mrs'],
+    dtLabels: { 'Delivery Note': ['Delivery note', 'إشعار تسليم'], 'Delivery Trip': ['Trip', 'رحلة'], 'Material Request': ['Material request', 'طلب مواد'], 'Work Order': ['Work order', 'أمر عمل'], 'Item': ['Item', 'صنف'], 'ForkLift': ['Forklift log', 'سجل رافعة'] },
+    title: function () { return tr('Operations Dashboard', 'لوحة العمليات'); },
+    stamp: function () { return tr('Delivery, fleet, warehouse, production and supply', 'التوصيل والأسطول والمستودع والإنتاج والتوريد'); },
+    periodNote: function () { return tr('Delivery notes, trips, forklift logs, work orders, job cards, production updates, receipts and stock entries in the period. Open requests, stale work orders and stock are as of today.', 'إشعارات التسليم والرحلات وسجلات الرافعات وأوامر العمل وبطاقات العمل وتحديثات الإنتاج والاستلامات وقيود المخزون في الفترة. الطلبات المفتوحة وأوامر العمل المتأخرة والمخزون حتى اليوم.'); },
+    filterNote: function () { return tr('Warehouse applies to delivery notes (set warehouse), trips (source warehouse), forklift logs, requests, work orders (finished goods) and stock.', 'المستودع ينطبق على إشعارات التسليم ومستودع مصدر الرحلات وسجلات الرافعات والطلبات ومستودع المنتج التام والمخزون.'); },
+    boot: function () {
+      F.period = 'custom'; F.from = addDays(TODAY, -13); F.to = TODAY;
+      return Promise.all([getList({ doctype: 'Company', fields: ['name', 'default_currency'], order_by: 'name asc', limit_page_length: 0 }, null).catch(function () { return []; }), getList({ doctype: 'Warehouse', fields: ['name', 'company'], filters: [['is_group', '=', 0]], order_by: 'name asc', limit_page_length: 0 }, null).catch(function () { return []; })])
+        .then(function (r) { CO = r[0] || []; WH = r[1] || []; if (!F.company && CO.some(function (c) { return c.name === DEFAULT_COMPANY; })) { F.company = DEFAULT_COMPANY; } });
+    },
+    load: function () { loadAll(); loadTab(tab); },
+    onTab: function (id) { loadTab(id); },
+    actions: function () { return actModel(actSpecs(), 'act', actClient()); },
+    actSpecs: function () { return actSpecs(); },
+    banner: function () { return banner(); },
+    content: function (t, AM) { return ({ overview: tabOverview, delivery: tabDelivery, forklift: tabForklift, production: tabProduction, supply: tabSupply, actions: tabActions })[t](AM); },
+    drill: function (id) { return drill(id); },
+    onAct: function (a, v) { return onAct(a, v); }
+  };
+
+  /* ==== DMS kit v1 · generated from tools/erp/kit/dms-kit.js by build_kit.py — edit the kit, not this copy ==== */
+  /* Shared runtime for DM dashboards on the standard (toolbar, period, filters, tabs, tables, drill-downs, charts,
+     actions pending). Copied into each dashboard.js by tools/erp/kit/build_kit.py; the dashboard defines `APP` before
+     this block. Read-only helpers: frappe.client.get_list / frappe.desk.query_report.run under the viewer's permissions. */
+  var G = window;
+  var ROOT = (typeof root_element !== 'undefined' && root_element) ? root_element : document;
+  var HOST = ROOT.querySelector('[data-dms-root]');
+  if (!HOST) { return; }
+  if (G[APP.key] && typeof G[APP.key].destroy === 'function') { try { G[APP.key].destroy(); } catch (e) { /* ignore */ } }
+  var abort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  var SIG = abort ? { signal: abort.signal } : false;
+  var timers = [], destroyed = false, GEN = 0, BOOTED = false, LOADED = '';
+  G[APP.key] = { destroy: function () { destroyed = true; GEN++; if (abort) { abort.abort(); } timers.forEach(clearTimeout); timers = []; } };
+  var CFG = Object.assign({ conc: 6, pageSize: 25, modalPage: 15, weekStart: 0 }, APP.cfg || {});
+  var CUR = 'SAR';
+  try { CUR = (frappe.boot.sysdefaults && frappe.boot.sysdefaults.currency) || 'SAR'; } catch (e) { /* default */ }
+  var LANG = 'en';
+  try { var sv = G.localStorage.getItem('dms_lang'); if (sv === 'ar' || sv === 'en') { LANG = sv; } } catch (e) { /* storage unavailable */ }
+  function tr(en, ar) { return LANG === 'ar' ? ar : en; }
+
+  /* ---------- helpers ---------- */
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function clean(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+  function plain(s, n) { return clean(String(s || '').replace(/<[^>]*>/g, ' ')).slice(0, n || 90); }
+  function $(sel) { return HOST.querySelector(sel); }
+  function later(fn, ms) { var id = setTimeout(function () { if (!destroyed) { fn(); } }, ms); timers.push(id); return id; }
+  function bdi(s) { return '<bdi>' + esc(s) + '</bdi>'; }
+  function num(n) { return (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString('en-US'); }
+  function money(v) {
+    if (v == null || isNaN(v)) { return '—'; }
+    var a = Math.abs(v), s = v < 0 ? '-' : '';
+    if (a >= 1e9) { return s + (a / 1e9).toFixed(2) + 'B'; }
+    if (a >= 1e6) { return s + (a / 1e6).toFixed(2) + 'M'; }
+    if (a >= 1e4) { return s + (a / 1e3).toFixed(1) + 'K'; }
+    return s + Math.round(a).toLocaleString('en-US');
+  }
+  function amt(v) { return (v == null || isNaN(v)) ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function moneyS(v, cur) { return (cur || CUR) + ' ' + money(v); }
+  function moneyB(v, cur) { return '<bdi>' + esc(moneyS(v, cur)) + '</bdi>'; }
+  function moneyFull(v, cur) { return (v == null || isNaN(v)) ? '' : (cur || CUR) + ' ' + amt(v); }
+  function cur$(v, cur) { return '<bdi>' + esc(money(v)) + '<small>' + esc(cur || CUR) + '</small></bdi>'; }
+  function pct(n, d, dp) { return (d > 0 && n != null) ? (n / d * 100).toFixed(dp == null ? 1 : dp) + '%' : tr('N/A', 'غير متاح'); }
+  function sum(arr, f) { var t = 0; for (var i = 0; i < arr.length; i++) { t += (f ? f(arr[i]) : arr[i]) || 0; } return t; }
+  function vals(o) { return Object.keys(o).map(function (k) { return o[k]; }); }
+  function uniq(a) { var m = {}; a.forEach(function (x) { if (x) { m[x] = 1; } }); return Object.keys(m).sort(function (x, y) { return x.localeCompare(y); }); }
+  function rep(s, n) { var o = ''; for (var i = 0; i < n; i++) { o += s; } return o; }
+  function one(r) { return (r && r[0]) || {}; }
+  function groupBy(rows, f) { var m = {}; rows.forEach(function (r) { var k = f(r); (m[k] || (m[k] = [])).push(r); }); return m; }
+  var NAtxt = function () { return tr('Not assigned', 'غير مُعيَّن'); };
+
+  /* ---------- dates (ERP site time zone, calendar arithmetic) ---------- */
+  function siteTz() {
+    try {
+      if (G.frappe && frappe.boot) {
+        if (frappe.boot.time_zone && frappe.boot.time_zone.system) { return frappe.boot.time_zone.system; }
+        if (frappe.boot.sysdefaults && frappe.boot.sysdefaults.time_zone) { return frappe.boot.sysdefaults.time_zone; }
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+  function siteParts() {
+    var tz = siteTz(), o = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }, p;
+    if (tz) { o.timeZone = tz; }
+    try { p = new Intl.DateTimeFormat('en-CA', o).formatToParts(new Date()); } catch (e) { delete o.timeZone; p = new Intl.DateTimeFormat('en-CA', o).formatToParts(new Date()); }
+    var m = {}; p.forEach(function (x) { m[x.type] = x.value; }); if (m.hour === '24') { m.hour = '00'; } return m;
+  }
+  function parseISO(s) {
+    if (!s || typeof s !== 'string') { return null; }
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s); if (!m) { return null; }
+    var y = +m[1], mo = +m[2], d = +m[3], ms = Date.UTC(y, mo - 1, d), dt = new Date(ms);
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) { return null; }
+    return ms;
+  }
+  function isoOf(ms) { var d = new Date(ms); return d.getUTCFullYear() + '-' + ('0' + (d.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + d.getUTCDate()).slice(-2); }
+  function addDays(iso, n) { return isoOf(parseISO(iso) + n * 86400000); }
+  function diffDays(a, b) { return Math.round((parseISO(b) - parseISO(a)) / 86400000); }
+  var TODAY = '', STAMP = '';
+  function setToday() { var p = siteParts(); TODAY = p.year + '-' + p.month + '-' + p.day; STAMP = p.hour + ':' + p.minute; }
+  function monthStart(iso) { return iso.slice(0, 8) + '01'; }
+  function monthEnd(iso) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7); return isoOf(Date.UTC(y, m, 0)); }
+  function addMonths(iso, n) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n; return isoOf(Date.UTC(y, m, 1)); }
+  function weekStartOf(iso) { var dow = new Date(parseISO(iso)).getUTCDay(); return addDays(iso, -((dow - CFG.weekStart + 7) % 7)); }
+  function quarterStart(iso) { var m = +iso.slice(5, 7); return iso.slice(0, 5) + ('0' + (Math.floor((m - 1) / 3) * 3 + 1)).slice(-2) + '-01'; }
+  function shiftMonths(iso, n) {
+    var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n, d = +iso.slice(8, 10), last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    return isoOf(Date.UTC(y, m, Math.min(d, last)));
+  }
+  function periodRange(key, cf, ct) {
+    var t = TODAY, y = t.slice(0, 4), ws = weekStartOf(t), qs = quarterStart(t), lm = addMonths(monthStart(t), -1);
+    switch (key) {
+      case 'today': return [t, t];
+      case 'yesterday': return [addDays(t, -1), addDays(t, -1)];
+      case 'week': return [ws, addDays(ws, 6)];
+      case 'lastWeek': return [addDays(ws, -7), addDays(ws, -1)];
+      case 'month': return [monthStart(t), monthEnd(t)];
+      case 'lastMonth': return [lm, monthEnd(lm)];
+      case 'quarter': return [qs, monthEnd(addMonths(qs, 2))];
+      case 'year': return [y + '-01-01', y + '-12-31'];
+      case 'prevYear': return [(y - 1) + '-01-01', (y - 1) + '-12-31'];
+      case 'custom': return [cf, ct];
+      default: return [y + '-01-01', t];   // ytd
+    }
+  }
+  /* Comparison window: the same span one preset unit earlier; custom ranges compare with the equally long range before. */
+  function prevRange(key, from, to) {
+    switch (key) {
+      case 'today': case 'yesterday': return [addDays(from, -1), addDays(to, -1)];
+      case 'week': case 'lastWeek': return [addDays(from, -7), addDays(to, -7)];
+      case 'month': case 'lastMonth': return [shiftMonths(from, -1), shiftMonths(to, -1)];
+      case 'quarter': return [shiftMonths(from, -3), shiftMonths(to, -3)];
+      case 'ytd': case 'year': case 'prevYear': return [shiftMonths(from, -12), shiftMonths(to, -12)];
+      default: var n = diffDays(from, to) + 1; return [addDays(from, -n), addDays(from, -1)];
+    }
+  }
+  /* In-progress periods stop at today, so this month to date compares with the same days of last month. */
+  function clip(r) { return [r[0], r[1] > TODAY && r[0] <= TODAY ? TODAY : r[1]]; }
+  function cmpRanges() { var c = clip(PERIOD); return { cur: c, prev: prevRange(F.period, c[0], c[1]) }; }
+  function monthList(from, to) { var out = [], cur = monthStart(from); for (var i = 0; i < 72 && cur <= to; i++) { out.push(cur.slice(0, 7)); cur = addMonths(cur, 1); } return out; }
+  function locale() { return LANG === 'ar' ? 'ar-SA-u-nu-latn-ca-gregory' : 'en-GB'; }
+  function fmtDate(iso, yr) {
+    try { var o = { day: 'numeric', month: 'short', timeZone: 'UTC' }; if (yr) { o.year = 'numeric'; } return new Intl.DateTimeFormat(locale(), o).format(new Date(parseISO(String(iso).slice(0, 10)))); } catch (e) { return iso; }
+  }
+  function rangeLabel(r) {
+    if (!r || !r[0] || !r[1]) { return ''; }
+    return r[0] === r[1] ? fmtDate(r[0], true) : fmtDate(r[0], r[0].slice(0, 4) !== r[1].slice(0, 4)) + ' – ' + fmtDate(r[1], true);
+  }
+  var PLR = null;
+  function daysTxt(n) {
+    if (LANG !== 'ar') { return num(n) + (n === 1 ? ' day' : ' days'); }
+    var c = 'other'; try { c = (PLR || (PLR = new Intl.PluralRules('ar'))).select(n); } catch (e) { /* generic form */ }
+    return c === 'one' ? 'يوم واحد' : c === 'two' ? 'يومان' : c === 'few' ? n + ' أيام' : c === 'many' ? n + ' يومًا' : n + ' يوم';
+  }
+  function ageOf(iso) { var d = iso ? diffDays(String(iso).slice(0, 10), TODAY) : 0; return isNaN(d) ? 0 : Math.max(0, d); }
+  function lateTxt(iso) {
+    var d = diffDays(String(iso).slice(0, 10), TODAY); if (isNaN(d)) { return ''; }
+    return d > 0 ? tr(daysTxt(d) + ' overdue', 'متأخر ' + daysTxt(d)) : d === 0 ? tr('Due today', 'مستحق اليوم') : tr('Due in ' + daysTxt(-d), 'مستحق خلال ' + daysTxt(-d));
+  }
+  function agoTxt(iso, en, ar) { var a = ageOf(iso); return a ? tr((en || 'Waiting') + ' ' + daysTxt(a), (ar || 'منذ') + ' ' + daysTxt(a)) : tr('Today', 'اليوم'); }
+
+  /* ---------- ERP read-only API layer (bounded concurrency, one retry, cancellation) ---------- */
+  var REQ_TIMEOUT = 90000;
+  function callP(method, args) {
+    return new Promise(function (resolve, reject) {
+      var done = false, ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var timer = setTimeout(function () { if (done) { return; } done = true; if (ctl) { try { ctl.abort(); } catch (x) { /* ignore */ } } var te = new Error('Request timed out'); te.timeout = true; reject(te); }, REQ_TIMEOUT);
+      var body = new URLSearchParams();
+      Object.keys(args || {}).forEach(function (k) { var v = args[k]; if (v === undefined || v === null) { return; } body.append(k, (typeof v === 'object') ? JSON.stringify(v) : String(v)); });
+      fetch('/api/method/' + method, { method: 'POST', credentials: 'same-origin', signal: ctl ? ctl.signal : undefined,
+        headers: { 'X-Frappe-CSRF-Token': (G.frappe && frappe.csrf_token) || '', 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' }, body: body.toString() })
+        .then(function (r) { return r.text().then(function (txt) { return { r: r, txt: txt }; }); })
+        .then(function (o) {
+          if (done) { return; } done = true; clearTimeout(timer);
+          var j = null; try { j = JSON.parse(o.txt); } catch (x) { /* ignore */ }
+          if (o.r.ok && j && !j.exc) { resolve(j.message === undefined ? null : j.message); return; }
+          var ex = String((j && (j.exception || j.exc_type)) || '');
+          var perm = o.r.status === 401 || o.r.status === 403 || /permission/i.test(ex);
+          var e = new Error((perm ? 'No access to ' + ((args && (args.doctype || args.report_name)) || method) : (ex.split(':').slice(-1)[0].trim() || ('HTTP ' + o.r.status))));
+          e.status = perm ? 403 : o.r.status; reject(e);
+        })
+        .catch(function (err) { if (done) { return; } done = true; clearTimeout(timer); reject(err || new Error('request failed')); });
+    });
+  }
+  var active = 0, queue = [];
+  function pump() {
+    while (active < CFG.conc && queue.length) {
+      var j = queue.shift(); active++;
+      j.fn().then(j.res, j.rej).then(function () { active--; pump(); });
+    }
+  }
+  function limited(fn) { return new Promise(function (res, rej) { queue.push({ fn: fn, res: res, rej: rej }); pump(); }); }
+  function guarded(chk, method, args) {
+    return limited(function () {
+      if (destroyed || (chk && !chk())) { return Promise.resolve(null); }
+      return callP(method, args).catch(function (e) { if (e && (e.status === 403 || e.timeout || e.status === 417)) { throw e; } return new Promise(function (r) { setTimeout(r, 400); }).then(function () { return callP(method, args); }); });
+    });
+  }
+  function errKind(e) {
+    var txt = ''; try { txt = (e && (e.responseText || e.statusText || e.message)) || ''; } catch (x) { /* ignore */ }
+    return (/PermissionError|not permitted|No access|403/i.test(String(txt)) || (e && e.status === 403)) ? 'perm' : 'tech';
+  }
+  function getList(args, chk) { return guarded(chk, 'frappe.client.get_list', args); }
+  function getCount(dt, filters, chk) { return getList({ doctype: dt, fields: ['count(name) as n'], filters: filters || [], limit_page_length: 1 }, chk).then(function (r) { return +one(r).n || 0; }); }
+  /* All rows of a bounded list (paged); rejects with e.tooLarge when the source exceeds `cap`. */
+  function fetchAll(args, chk, cap) {
+    cap = cap || 20000;
+    return getCount(args.doctype, args.filters, chk).then(function (n) {
+      if (n > cap) { var e = new Error('too large'); e.tooLarge = n; throw e; }
+      var jobs = []; for (var i = 0; i < Math.ceil(n / 500); i++) { jobs.push(getList(Object.assign({}, args, { order_by: args.order_by || 'name asc', limit_start: i * 500, limit_page_length: 500 }), chk)); }
+      return Promise.all(jobs).then(function (res) { var out = []; res.forEach(function (r) { if (r) { out = out.concat(r); } }); return out; });
+    });
+  }
+  function docUrl(dt, name) {
+    try { if (G.frappe && frappe.utils && frappe.utils.get_form_link) { return frappe.utils.get_form_link(dt, name); } } catch (e) { /* fall through */ }
+    return '/app/' + dt.toLowerCase().replace(/ /g, '-') + '/' + encodeURIComponent(name);
+  }
+  function docLink(dt, name, label) { return '<a class="dms-link" href="' + esc(docUrl(dt, name)) + '" target="_blank" rel="noopener noreferrer"><bdi>' + esc(label || name) + '</bdi> ↗</a>'; }
+
+  /* ---------- data store: each source loads and renders independently; stale generations are dropped ---------- */
+  var D = {};
+  var softT = null;
+  function soon() { if (softT) { return; } softT = later(function () { softT = null; renderSoft(); }, 40); }
+  function run(key, fn) {
+    var g = GEN, chk = function () { return g === GEN && !destroyed; }, tok = {};
+    D[key] = null; D[key + 'Err'] = null; D[key + 'Tok'] = tok;
+    var mine = function () { return chk() && D[key + 'Tok'] === tok; };
+    fn(mine).then(function (v) { if (!mine()) { return; } D[key] = v; if (APP.afterLoad) { APP.afterLoad(key); } soon(); },
+      function (e) { if (!mine()) { return; } D[key + 'Err'] = e && e.tooLarge ? 'large:' + e.tooLarge : errKind(e); if (G.console && e && !e.status && !e.tooLarge) { console.error(APP.key, key, e); } soon(); });
+  }
+  function busy() { return !BOOTED || (APP.sources || []).some(function (k) { return D[k] == null && D[k + 'Err'] == null; }); }
+  function errText(kind) { return /^large:/.test(String(kind)) ? tr('too many records (' + num(+String(kind).slice(6)) + ') — narrow the filters or period', 'عدد كبير من السجلات (' + num(+String(kind).slice(6)) + ') — ضيّق المرشحات أو الفترة') : kind === 'perm' ? tr('permission denied for your user', 'لا تملك صلاحية القراءة') : tr('technical error while reading', 'خطأ تقني أثناء القراءة'); }
+
+  /* ---------- UI primitives ---------- */
+  var ICO = {
+    refresh: '<path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/>', filter: '<path d="M4 5h16l-6.2 7.6V19l-3.6 1.6v-8z"/>',
+    cal: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/>', down: '<path d="m6 9 6 6 6-6"/>',
+    prev: '<path d="m15 6-6 6 6 6"/>', next: '<path d="m9 6 6 6-6 6"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
+    up: '<path d="M12 19V6M6.5 11.5 12 6l5.5 5.5"/>', dn: '<path d="M12 5v13M6.5 12.5 12 18l5.5-5.5"/>', dl: '<path d="M12 4v11M7 10.5 12 15.5l5-5M5 20h14"/>'
+  };
+  function ico(n, cls) { return '<svg class="dms-ico' + (cls ? ' ' + cls : '') + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + ICO[n] + '</svg>'; }
+  function kpi(o) {
+    var inner = '<span class="dms-kpi-h"><span class="dms-kpi-l">' + (o.dot ? '<i class="dms-dot" style="--dms-c:' + o.dot + '"></i>' : '') + esc(o.label) + '</span>' + (o.top || '') + '</span>' +
+      '<span class="dms-kpi-n">' + o.val + '</span>' + (o.sub ? '<span class="dms-kpi-s">' + o.sub + '</span>' : '') + (o.foot != null ? '<span class="dms-kpi-f">' + o.foot + '</span>' : '');
+    var t = o.tip ? ' title="' + esc(o.tip) + '"' : '';
+    return o.act ? '<button type="button" class="dms-kpi" data-act="kpi" data-v="' + esc(o.act) + '"' + t + '>' + inner + '</button>' : '<div class="dms-kpi"' + t + '>' + inner + '</div>';
+  }
+  function kpis(list, ov) { return '<div class="dms-grid dms-kpis' + (ov ? ' dms-ov-kpis' : '') + '">' + list.join('') + '</div>'; }
+  function tagc(txt) { return '<span class="dms-tag">' + txt + '</span>'; }
+  function stat(k, txt) { return '<span class="dms-stat dms-stat-' + k + '">' + esc(txt) + '</span>'; }
+  function ctx(html) { return '<span class="dms-kpi-ctx">' + html + '</span>'; }
+  function badge(txt, color) { return '<span class="dms-badge" style="--dms-c:' + color + '">' + esc(txt) + '</span>'; }
+  function wait() { return '<span class="dms-sm">' + esc(tr('Calculating…', 'جارٍ الحساب…')) + '</span>'; }
+  function asOf() { return tagc(esc(tr('As of today', 'حتى اليوم'))); }
+  /* Value of a source-backed KPI: '…' while loading, '—' when the source failed (never a false zero). */
+  function kv(key, f) { return D[key + 'Err'] ? '—' : D[key] == null ? '…' : f(D[key]); }
+  function ks(key, f) { return D[key + 'Err'] ? esc(tr('Unavailable', 'غير متاح')) : D[key] == null ? wait() : f(D[key]); }
+  function spark(vs) {
+    var n = vs.length, real = vs.filter(function (v) { return v != null; }), pts = [];
+    if (n < 3 || real.length < 3 || !real.some(function (v) { return v > 0; })) { return ''; }
+    var max = Math.max.apply(null, real), min = Math.min(0, Math.min.apply(null, real)), rng = (max - min) || 1;
+    vs.forEach(function (v, i) { if (v != null) { pts.push([(i / (n - 1) * 100).toFixed(2), (26 - (v - min) / rng * 23).toFixed(2)]); } });
+    var line = pts.map(function (p) { return p.join(','); }).join(' L');
+    return '<svg class="dms-spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path class="dms-spark-a" d="M' + pts[0][0] + ',28 L' + line + ' L' + pts[pts.length - 1][0] + ',28 Z"/><path class="dms-spark-l" d="M' + line + '"/></svg>';
+  }
+  /* Change vs the comparison window. fmt formats values; small count bases show "was N" instead of a percentage. */
+  function deltaChip(cur, prev, R, fmt, isCount, lowerIsBetter) {
+    if (cur == null || prev == null || !R) { return ''; }
+    fmt = fmt || moneyS;
+    var tip = tr('This period', 'هذه الفترة') + ' (' + rangeLabel(R[0]) + '): ' + fmt(cur) + '\n' + tr('Previous', 'السابقة') + ' (' + rangeLabel(R[1]) + '): ' + fmt(prev);
+    var sr = '<span class="dms-sr"> ' + esc(tr('vs previous period', 'مقارنة بالفترة السابقة')) + '</span>';
+    if (prev === 0 || (isCount && prev < 5)) { return '<span class="dms-delta dms-flat" data-tip="' + esc(tip) + '">' + esc(tr('was', 'كان')) + ' <bdi>' + esc(fmt(prev)) + '</bdi>' + sr + '</span>'; }
+    var p = (cur - prev) / prev * 100, a = Math.abs(p), k = a < 0.05 ? 'flat' : p > 0 ? 'up' : 'down', tone = k === 'flat' ? 'flat' : ((k === 'up') !== !!lowerIsBetter ? 'up' : 'down');
+    var txt = a > 999 ? '10×+' : (a < 10 ? a.toFixed(1) : Math.round(a)) + '%';
+    return '<span class="dms-delta dms-' + tone + '" data-tip="' + esc(tip) + '">' + (k === 'flat' ? '' : ico(k === 'up' ? 'up' : 'dn')) + '<bdi>' + (k === 'down' ? '−' : '') + txt + '</bdi>' + sr + '</span>';
+  }
+  function panel(title, body, extra, meta) {
+    return '<section class="dms-panelbox ' + (extra || '') + '"><div class="dms-ph"><h3 class="dms-h3">' + esc(title) + '</h3>' + (meta ? '<span class="dms-ph-meta">' + meta + '</span>' : '') + '</div>' + body + '</section>';
+  }
+  function note(txt) { return '<p class="dms-note">' + txt + '</p>'; }
+  function alertBox(kind, html) { return '<div class="dms-alert dms-alert-' + kind + '" role="' + (kind === 'err' ? 'alert' : 'status') + '">' + html + '</div>'; }
+  function empty(txt) { return '<div class="dms-empty">' + esc(txt || tr('No data for the current filters.', 'لا توجد بيانات للمرشحات الحالية.')) + '</div>'; }
+  function srcErr(kind, what) { return alertBox('err', '<b>' + esc(tr('Source unavailable', 'المصدر غير متاح')) + ':</b> ' + esc(what) + ' — ' + esc(errText(kind))); }
+  function skel(n, cls) { return rep('<div class="dms-skel ' + (cls || '') + '"></div>', n); }
+  /* Body for a panel backed by source `key`: skeleton while loading, named error on failure, else f(data). */
+  function src(key, what, f) { return D[key + 'Err'] ? srcErr(D[key + 'Err'], what) : D[key] == null ? skel(1, 'dms-skel-panel') : f(D[key]); }
+
+  /* ---------- charts (HTML/CSS; hover details via the shared tooltip, data-tip) ---------- */
+  function niceMax(v) { if (!(v > 0)) { return 1; } var p = Math.pow(10, Math.floor(Math.log(v) / Math.LN10)), f = v / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
+  function axisFmt(v) { var a = Math.abs(v); return a >= 1e9 ? +(v / 1e9).toFixed(1) + 'B' : a >= 1e6 ? +(v / 1e6).toFixed(1) + 'M' : a >= 1e3 ? +(v / 1e3).toFixed(1) + 'K' : String(a < 10 ? +v.toFixed(2) : Math.round(v)); }
+  function bucketLabel(k, g, short) {
+    if (g === 'cat') { return String(k); }
+    if (g === 'week' && !short) { return tr('Week of ', 'أسبوع ') + fmtDate(k, true); }
+    if (g !== 'month') { return fmtDate(k, !short); }
+    try { return new Intl.DateTimeFormat(locale(), { month: 'short', year: '2-digit', timeZone: 'UTC' }).format(new Date(parseISO(k + '-01'))); } catch (e) { return k; }
+  }
+  /* Count charts get whole-number ticks (top is a multiple of 4), so small counts never show 0, 1, 1, 2, 2. */
+  function countTop(max, fmt) { var t = niceMax(max); return fmt === num ? Math.max(4, Math.ceil(t / 4) * 4) : t; }
+  function granName(g) { return g === 'day' ? tr('by day', 'يوميًا') : g === 'week' ? tr('by week', 'أسبوعيًا') : tr('by month', 'شهريًا'); }
+  /* Time buckets for a range: daily up to 45 days, weekly up to 120 days, monthly beyond; stops at today. */
+  function buckets(range) {
+    var from = range[0], to = clip(range)[1], span = diffDays(from, to) + 1, g = span <= 45 ? 'day' : span <= 120 ? 'week' : 'month', keys = [], cur, i;
+    function keyOf(iso) { iso = String(iso).slice(0, 10); return g === 'day' ? iso : g === 'week' ? weekStartOf(iso) : iso.slice(0, 7); }
+    if (to < from) { return { keys: [], gran: g, keyOf: keyOf }; }
+    if (g === 'month') { keys = monthList(from, to); } else { cur = keyOf(from); for (i = 0; i < 200 && cur <= to; i++) { keys.push(cur); cur = addDays(cur, g === 'day' ? 1 : 7); } }
+    return { keys: keys, gran: g, keyOf: keyOf };
+  }
+  /* Grouped rows (one per date) folded into buckets: rows[dateField], rows[valField]. */
+  function series(range, rows, dateF, valF) {
+    var B = buckets(range), d = {}; B.keys.forEach(function (k) { d[k] = { v: 0, n: 0 }; });
+    (rows || []).forEach(function (r) { var k = B.keyOf(r[dateF]); if (d[k]) { d[k].v += valF ? (+r[valF] || 0) : 1; d[k].n += +r.n || (valF ? 0 : 1); } });
+    B.d = d; return B;
+  }
+  function legend(series) { return '<div class="dms-legend">' + series.map(function (s) { return '<span><i style="--dms-c:' + s.color + '"></i>' + esc(s.label) + '</span>'; }).join('') + '</div>'; }
+  /* Column chart. ser = [{label, color, val: function (key) {}}]; fmt formats values (default money). */
+  function barChart(keys, gran, ser, fmt, extraTip, emptyTxt) {
+    if (!Array.isArray(ser)) { ser = [ser]; }
+    fmt = fmt || moneyFull; var max = 0;
+    keys.forEach(function (k) { ser.forEach(function (s) { max = Math.max(max, s.val(k) || 0); }); });
+    if (!keys.length || !max) { return empty(emptyTxt || tr('Nothing in this range.', 'لا شيء في هذا النطاق.')); }
+    var top = countTop(max, fmt), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, gran) + ser.map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k) || 0); }).join('') + (extraTip ? extraTip(k) : '');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '">' + ser.map(function (s) { var v = s.val(k) || 0; return '<i class="dms-bar' + (v ? '' : ' dms-bar-0') + '" style="height:' + (v / top * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i>'; }).join('') + '</div>';
+    }).join('');
+    var aria = ser.map(function (s) { return s.label + ': ' + keys.map(function (k) { return bucketLabel(k, gran, true) + ' ' + fmt(s.val(k) || 0); }).join(', '); }).join('; ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + (ser.length > 1 ? legend(ser) : '');
+  }
+  /* Line chart for balances (may go negative). ser = [{label, color, val(key), dash?}]; the first series is the main line. */
+  function lineChart(keys, gran, ser, fmt) {
+    fmt = fmt || moneyFull; var all = [];
+    keys.forEach(function (k) { ser.forEach(function (s) { var v = s.val(k); if (v != null) { all.push(v); } }); });
+    if (!keys.length || !all.length) { return empty(); }
+    var mx = Math.max.apply(null, all), mn = Math.min.apply(null, all), hi = mx > 0 ? niceMax(mx) : 0, lo = mn < 0 ? -niceMax(-mn) : 0;
+    if (hi === lo) { hi = lo + 1; }
+    var y = function (v) { return (100 - (v - lo) / (hi - lo) * 100).toFixed(2); }, x = function (i) { return (keys.length < 2 ? 50 : i / (keys.length - 1) * 100).toFixed(2); };
+    var ticks = [0, 0.25, 0.5, 0.75, 1].map(function (t) { return lo + (hi - lo) * t; });
+    var paths = ser.map(function (s) { var pts = keys.map(function (k, i) { var v = s.val(k); return v == null ? null : x(i) + ',' + y(v); }).filter(Boolean); return '<polyline class="dms-line' + (s.dash ? ' dms-line-ref' : '') + '" style="--dms-c:' + s.color + '" points="' + pts.join(' ') + '"/>'; }).join('');
+    var zero = lo < 0 ? '<i class="dms-gl dms-gl-0" style="bottom:' + ((0 - lo) / (hi - lo) * 100).toFixed(2) + '%"></i>' : '';
+    var hits = keys.map(function (k) { return '<div class="dms-col dms-col-hit" data-tip="' + esc(bucketLabel(k, gran) + ser.map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k)); }).join('')) + '"></div>'; }).join('');
+    var aria = ser[0].label + ': ' + keys.map(function (k) { return bucketLabel(k, gran, true) + ' ' + fmt(ser[0].val(k)); }).join(', ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (v, i) { return '<span style="bottom:' + i * 25 + '%">' + axisFmt(v) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + [0, 25, 50, 75, 100].map(function (b) { return '<i class="dms-gl" style="bottom:' + b + '%"></i>'; }).join('') + zero + '<svg class="dms-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">' + paths + '</svg><div class="dms-cols">' + hits + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + (ser.length > 1 ? legend(ser) : '');
+  }
+  /* Stacked columns (one bar per key, segments per series). */
+  function stackChart(keys, gran, ser, fmt) {
+    fmt = fmt || num; var tot = {}, max = 0;
+    keys.forEach(function (k) { tot[k] = sum(ser, function (s) { return s.val(k) || 0; }); max = Math.max(max, tot[k]); });
+    if (!keys.length || !max) { return empty(); }
+    var top = countTop(max, fmt), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, gran) + ser.filter(function (s) { return s.val(k); }).map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k)); }).join('');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '"><span class="dms-stackbar" style="height:' + (tot[k] / top * 100).toFixed(2) + '%">' + ser.map(function (s) { var v = s.val(k) || 0; return v ? '<i style="flex:' + v + ' 0 0;background:' + s.color + '"></i>' : ''; }).join('') + '</span></div>';
+    }).join('');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(ser.map(function (s) { return s.label; }).join(', ')) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + legend(ser);
+  }
+  function fitChartLabels() {
+    HOST.querySelectorAll('.dms-xaxis').forEach(function (axis) {
+      var labels = axis.querySelectorAll('span'), widest = 0;
+      labels.forEach(function (label) { var range = document.createRange(); range.selectNodeContents(label); widest = Math.max(widest, range.getBoundingClientRect().width); });
+      var slots = Math.max(1, Math.min(8, Math.floor(axis.clientWidth / (widest + 16)))), step = Math.max(1, Math.ceil(labels.length / slots));
+      labels.forEach(function (label, i) { label.style.visibility = i % step ? 'hidden' : 'visible'; });
+    });
+  }
+  /* Share rows: label · bar · value · %. items = [{label, value, color, act?, tip?}]; ordered=true keeps the given order. */
+  function shareList(items, head, fmt, ordered) {
+    fmt = fmt || num; var tot = sum(items, function (s) { return s.value; }), rows = items.filter(function (s) { return s.value; });
+    if (!ordered) { rows = rows.slice().sort(function (a, b) { return b.value - a.value; }); }
+    if (!tot) { return empty(); }
+    return (head ? '<div class="dms-share-t">' + head + '</div>' : '') + rows.map(function (s) {
+      var tip = s.tip || (s.label + ': ' + fmt(s.value) + ' (' + pct(s.value, tot) + ')');
+      var inner = '<span class="dms-share-l"><i class="dms-dot" style="--dms-c:' + s.color + '"></i>' + bdi(s.label) + '</span><span class="dms-share-b"><i style="width:' + (s.value / tot * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i></span>' +
+        '<span class="dms-num">' + esc(fmt(s.value)) + '</span><span class="dms-share-p dms-num">' + pct(s.value, tot, 0) + '</span>';
+      return s.act ? '<button type="button" class="dms-share dms-share-btn" data-act="kpi" data-v="' + esc(s.act) + '" data-tip="' + esc(tip) + '">' + inner + '</button>' : '<div class="dms-share" data-tip="' + esc(tip) + '">' + inner + '</div>';
+    }).join('');
+  }
+  /* Ranked horizontal bars: items = [{label, value, color?, act?}]. */
+  function hbars(items, fmt, color) {
+    if (!items.length) { return empty(); }
+    var max = Math.max.apply(null, items.map(function (i) { return Math.abs(i.value); }).concat([1])); fmt = fmt || num;
+    return items.map(function (i) {
+      var inner = '<span class="dms-split-l">' + bdi(i.label) + '</span><span class="dms-split"><i style="width:' + (Math.abs(i.value) / max * 100).toFixed(2) + '%;background:' + (i.color || color || 'var(--dms-royal)') + '"></i></span><span class="dms-num dms-split-v">' + esc(fmt(i.value)) + '</span>';
+      var tip = ' data-tip="' + esc(i.label + ': ' + fmt(i.value)) + '"';
+      return i.act ? '<button type="button" class="dms-stack-row dms-split-row" data-act="kpi" data-v="' + esc(i.act) + '"' + tip + '>' + inner + '</button>' : '<div class="dms-stack-row dms-split-row"' + tip + '>' + inner + '</div>';
+    }).join('');
+  }
+  /* Two-part bars ranked by total: items = [{label, total, part, act?}]; parts = [{label, color}] for part and remainder. */
+  function splitBars(items, parts, fmt) {
+    if (!items.length) { return empty(); }
+    fmt = fmt || money; var max = Math.max.apply(null, items.map(function (i) { return i.total; }).concat([1]));
+    return items.map(function (i) {
+      var tip = i.label + '\n' + parts[0].label + ': ' + fmt(i.part) + '\n' + parts[1].label + ': ' + fmt(i.total - i.part);
+      var bar = '<span class="dms-split"><i style="width:' + (i.part / max * 100).toFixed(2) + '%;background:' + parts[0].color + '"></i><i style="width:' + (Math.max(0, i.total - i.part) / max * 100).toFixed(2) + '%;background:' + parts[1].color + '"></i></span>';
+      var inner = '<span class="dms-split-l">' + bdi(i.label) + '</span>' + bar + '<span class="dms-num dms-split-v">' + esc(fmt(i.total)) + '</span>';
+      return i.act ? '<button type="button" class="dms-stack-row dms-split-row" data-act="kpi" data-v="' + esc(i.act) + '" data-tip="' + esc(tip) + '">' + inner + '</button>' : '<div class="dms-stack-row dms-split-row" data-tip="' + esc(tip) + '">' + inner + '</div>';
+    }).join('') + legend(parts);
+  }
+  function mixBar(segs) {
+    var tot = sum(segs, function (s) { return s.value; }); if (!tot) { return ''; }
+    return '<span class="dms-mix"><span class="dms-mix-b">' + segs.map(function (s) { return s.value ? '<i style="width:' + (s.value / tot * 100).toFixed(2) + '%;background:' + s.color + '" data-tip="' + esc(s.label + ': ' + (s.fmt || num)(s.value)) + '"></i>' : ''; }).join('') + '</span></span>';
+  }
+  var PAL = ['var(--dms-royal)', '#6b8be0', '#1f8a5b', '#d97a1e', '#8a97a8', '#a3b4ef', '#c2412d', '#d6a419', '#4b5a6e', '#b6bfca'];
+
+  /* ---------- tables: client-side (search / sort / pagination / CSV) and server-side (paginated, sortable, CSV) ---------- */
+  var TBL = {}, TS = {}, SS = {}, focusId = null;
+  function regTable(spec) { TBL[spec.id] = spec; return '<div class="dms-tbl" data-tbl="' + esc(spec.id) + '"></div>'; }
+  function fillTables(scope) { var els = (scope || HOST).querySelectorAll('[data-tbl]'); for (var i = 0; i < els.length; i++) { fillTable(els[i].getAttribute('data-tbl'), els[i]); } }
+  function clientRows(sp, st) {
+    var rows = sp.rows, q = st.q.trim().toLowerCase();
+    if (q) { rows = rows.filter(function (r) { return sp.text(r).toLowerCase().indexOf(q) >= 0; }); }
+    if (st.sk) { var col = sp.cols.filter(function (c) { return c.k === st.sk; })[0]; if (col && col.s) { rows = rows.slice().sort(function (a, b) { var x = col.s(a), y = col.s(b); return (x < y ? -1 : x > y ? 1 : 0) * st.dir; }); } }
+    return rows;
+  }
+  function thead(sp, sk, dir, act, id) {
+    return '<thead><tr>' + sp.cols.map(function (c) {
+      var key = act === 'ssort' ? c.sf : c.k, can = act === 'ssort' ? !!c.sf : !!c.s, on = can && sk === key;
+      return '<th class="' + (can ? 'dms-th-s' : '') + (c.num ? ' dms-th-n' : '') + '"' + (can ? ' data-act="' + act + '" data-id="' + esc(id) + '" data-v="' + esc(key) + '" tabindex="0" aria-sort="' + (on ? (dir > 0 ? 'ascending' : 'descending') : 'none') + '"' : '') + '>' + esc(c.h) + (on ? (dir > 0 ? ' ▲' : ' ▼') : '') + '</th>';
+    }).join('') + '</tr></thead>';
+  }
+  function tcells(sp, r) { return '<tr>' + sp.cols.map(function (c) { return '<td' + (c.num ? ' class="dms-td-n"' : '') + '>' + c.r(r) + '</td>'; }).join('') + '</tr>'; }
+  function fillTable(id, el) {
+    var sp = TBL[id]; el = el || HOST.querySelector('[data-tbl="' + id + '"]'); if (!sp || !el) { return; }
+    if (sp.server) { return fillServer(id, el); }
+    var st = TS[id] || (TS[id] = { q: '', page: 1, sk: sp.sk || '', dir: sp.dir || 1 }), rows = clientRows(sp, st);
+    var ps = sp.pageSize || CFG.pageSize, pages = Math.max(1, Math.ceil(rows.length / ps)); if (st.page > pages) { st.page = pages; }
+    var slice = rows.slice((st.page - 1) * ps, st.page * ps);
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(tr('Search this table…', 'ابحث في الجدول…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search this table', 'ابحث في الجدول')) + '"><span class="dms-tb-r"><span class="dms-sm">' + num(rows.length) + ' ' + esc(rows.length === 1 ? tr('row', 'سجل') : tr('rows', 'سجل')) + (st.q ? ' / ' + num(sp.rows.length) : '') + '</span>' +
+      (rows.length ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csv" data-id="' + esc(id) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    if (sp.notice) { h += sp.notice; }
+    if (!rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
+    h += '<div class="dms-tablewrap"><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'tsort', id) + '<tbody>' + slice.map(function (r) { return tcells(sp, r); }).join('') + '</tbody>' + (sp.foot ? '<tfoot>' + sp.foot(rows) + '</tfoot>' : '') + '</table></div>';
+    h += pager(id, 'tpage', st.page, pages, rows.length, ps);
+    el.innerHTML = h; restoreFocus(el, id);
+  }
+  function pager(id, act, pg, pages, total, ps) {
+    if (total <= ps) { return ''; }
+    return '<div class="dms-pager"><span>' + esc(tr('Showing', 'عرض')) + ' ' + num((pg - 1) * ps + 1) + '–' + num(Math.min(pg * ps, total)) + ' / ' + num(total) + '</span><span><button type="button" class="dms-btn" data-act="' + act + '" data-id="' + esc(id) + '" data-v="-1"' + (pg <= 1 ? ' disabled' : '') + '>‹ ' + esc(tr('Previous', 'السابق')) + '</button> ' +
+      esc(tr('Page', 'صفحة')) + ' ' + pg + ' ' + esc(tr('of', 'من')) + ' ' + pages + ' <button type="button" class="dms-btn" data-act="' + act + '" data-id="' + esc(id) + '" data-v="1"' + (pg >= pages ? ' disabled' : '') + '>' + esc(tr('Next', 'التالي')) + ' ›</button></span></div>';
+  }
+  function restoreFocus(el, id) { if (focusId === id) { var i = el.querySelector('[data-tq]'); if (i) { i.focus(); try { i.setSelectionRange(i.value.length, i.value.length); } catch (e) { /* ignore */ } } } }
+  function srvArgs(sp, st) {
+    var q = st.q.trim(), base = { doctype: sp.dt, filters: sp.filters };
+    if (sp.parent) { base.parent = sp.parent; }
+    if (q && sp.search) { base.or_filters = sp.search.map(function (f) { return [sp.dt, f, 'like', '%' + q + '%']; }); }
+    return base;
+  }
+  function srvOrder(sp, st) { return st.sk ? st.sk + (st.dir > 0 ? ' asc' : ' desc') : sp.order; }
+  function fillServer(id, el) {
+    var sp = TBL[id], st = SS[id] || (SS[id] = { q: '', page: 1, total: null, rows: null, loading: false, err: null, req: 0, sk: '', dir: 1 });
+    if (!st.dirty && st.rows && st.key === JSON.stringify(sp.filters)) { return paintServer(id, el); }
+    st.dirty = false; st.key = JSON.stringify(sp.filters);
+    var req = ++st.req; st.loading = true; st.err = null;
+    var ps = sp.pageSize || CFG.modalPage, base = srvArgs(sp, st);
+    paintServer(id, el);
+    var chk = function () { return !destroyed && SS[id] && SS[id].req === req; };
+    if (sp.loader) { sp.loader(st.page - 1, ps, st.q.trim(), srvOrder(sp, st)).then(function (res) { if (!chk()) { return; } st.total = res.total; st.rows = res.rows || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); }, function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } }); return; }
+    var cnt = getList(Object.assign({}, base, { fields: ['count(name) as n'], limit_page_length: 1 }), chk).then(function (r) { return r ? +one(r).n || 0 : null; });
+    var rows = getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: (st.page - 1) * ps, limit_page_length: ps }), chk);
+    Promise.all([cnt, rows]).then(function (res) {
+      if (!chk()) { return; } st.total = res[0]; st.rows = res[1] || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]'));
+    }).catch(function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } });
+  }
+  function paintServer(id, el) {
+    if (!el) { return; } var sp = TBL[id], st = SS[id], ps = sp.pageSize || CFG.modalPage;
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(sp.searchHint || tr('Search…', 'بحث…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search', 'بحث')) + '"><span class="dms-tb-r"><span class="dms-sm">' + (st.total == null ? '' : num(st.total) + ' ' + esc(st.total === 1 ? tr('record', 'سجل') : tr('records', 'سجل'))) + '</span>' +
+      (st.total ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csvall" data-id="' + esc(id) + '" title="' + esc(tr('Export up to 5,000 rows', 'تصدير حتى 5,000 سجل')) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    if (st.err) { el.innerHTML = h + alertBox('err', esc(st.err === 'perm' ? tr('Permission denied for your user.', 'لا تملك صلاحية القراءة.') : tr('Technical error while reading this list.', 'خطأ تقني أثناء قراءة القائمة.')) + ' <button type="button" class="dms-linkbtn" data-act="sretry" data-id="' + esc(id) + '">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>'); return restoreFocus(el, id); }
+    if (st.loading && !st.rows) { el.innerHTML = h + '<div class="dms-skel"></div>'; return restoreFocus(el, id); }
+    if (!st.rows || !st.rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
+    var pages = Math.max(1, Math.ceil((st.total || 0) / ps));
+    h += '<div class="dms-tablewrap" style="opacity:' + (st.loading ? .55 : 1) + '"' + (st.loading ? ' aria-busy="true"' : '') + '><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'ssort', id) + '<tbody>' + st.rows.map(function (r) { return tcells(sp, r); }).join('') + '</tbody></table></div>' + pager(id, 'spage', st.page, pages, st.total || 0, ps);
+    el.innerHTML = h; restoreFocus(el, id);
+  }
+  function csvCell(v) { v = v == null ? '' : String(v); if (/^[=+\-@\t\r]/.test(v) && !/^-?[\d.,]+$/.test(v)) { v = "'" + v; } return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  function download(name, sp, rows) {
+    var cols = sp.cols.filter(function (c) { return c.c; }), lines = [cols.map(function (c) { return csvCell(c.h); }).join(',')].concat(rows.map(function (r) { return cols.map(function (c) { return csvCell(c.c(r)); }).join(','); }));
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+    a.download = String(name).replace(/[^\w-]+/g, '_') + '_' + TODAY + '.csv'; HOST.appendChild(a); a.click(); later(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+  function exportServer(id) {
+    var sp = TBL[id], st = SS[id], out = [], step = 500, base = srvArgs(sp, st), g = GEN;
+    if (sp.loader) { toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…')); var acc = [], pg = function (p) { return sp.loader(p, 500, st.q.trim(), srvOrder(sp, st)).then(function (res) { acc = acc.concat(res.rows || []); return (res.rows || []).length === 500 && acc.length < 5000 ? pg(p + 1) : acc; }); }; pg(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); }); return; }
+    function next(s) {
+      return getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: s, limit_page_length: step }), function () { return g === GEN; }).then(function (r) {
+        out = out.concat(r || []); return (r && r.length === step && out.length < 5000) ? next(s + step) : out;
+      });
+    }
+    toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…'));
+    next(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); });
+  }
+  function toast(msg, bad) { var e = document.createElement('div'); e.className = 'dms-toast' + (bad ? ' dms-toast-err' : ''); e.setAttribute('role', 'status'); e.textContent = msg; HOST.appendChild(e); later(function () { e.remove(); }, 3500); }
+  /* common cells */
+  function dtc(v) { return v ? '<span class="dms-num">' + esc(String(v).slice(0, 10)) + '</span>' : '<span class="dms-sm">—</span>'; }
+  function who(v) { return v ? bdi(v) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>'; }
+  function txt(v) { return v ? bdi(v) : '<span class="dms-sm">—</span>'; }
+  function amc(v) { return v == null || v === '' ? '<span class="dms-sm">—</span>' : '<span class="dms-num">' + esc(amt(v)) + '</span>'; }
+  function overdueTag(due) { var d = diffDays(String(due || TODAY).slice(0, 10), TODAY); return d > 0 ? '<span class="dms-days ' + (d > 90 ? 'dms-days-bad' : 'dms-days-warn') + '">' + num(d) + '</span>' : '<span class="dms-sm">—</span>'; }
+  function col(h, f, o) { o = o || {}; return Object.assign({ h: h, sf: o.sort === false ? undefined : f, r: function (x) { return o.fmt ? o.fmt(x[f], x) : txt(x[f]); }, c: function (x) { return x[f]; } }, o); }
+  function linkCol(h, dt, f, labelF) { return { h: h, sf: f, r: function (x) { return docLink(typeof dt === 'function' ? dt(x) : dt, x[f], labelF ? x[labelF] || x[f] : x[f]); }, c: function (x) { return x[f]; } }; }
+
+  /* ---------- actions pending ---------- */
+  var PRIO = { high: ['High', 'عالية'], med: ['Medium', 'متوسطة'], low: ['Low', 'منخفضة'] };
+  function score(p, amount, age) { return { high: 300, med: 200, low: 100 }[p] + Math.min(40, Math.log(1 + Math.abs(amount || 0)) / Math.LN10 * 6) + Math.min(20, (age || 0) / 10); }
+  /* Server specs ({id, server:true, dt, filters, fields, order, it(row) → item}) load count + 6 most urgent rows each. */
+  function loadActions(specs, key) {
+    run(key || 'act', function (chk) {
+      return Promise.all(specs.filter(function (s) { return s.server; }).map(function (s) {
+        var c = getList({ doctype: s.dt, fields: ['count(name) as n'], filters: s.filters, limit_page_length: 1 }, chk).then(function (r) { return +one(r).n || 0; }, function (e) { return 'ERR:' + errKind(e); });
+        var l = (s.rank ? fetchAll({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order }, chk, 2000) : getList({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order, limit_page_length: 6 }, chk)).then(function (r) { return r || []; }, function (e) { return 'ERR:' + errKind(e); });
+        return Promise.all([c, l]).then(function (x) { return { id: s.id, count: typeof x[1] === 'string' ? x[1] : x[0], rows: Array.isArray(x[1]) ? x[1] : [] }; });
+      })).then(function (res) { var o = {}; res.forEach(function (x) { o[x.id] = x; }); return o; });
+    });
+  }
+  /* client: {id: {rows, item}} for client specs, null while their sources load, or 'ERR:kind'. */
+  function actModel(specs, key, client) {
+    var counts = {}, items = [], A = D[key || 'act'], AE = D[(key || 'act') + 'Err'];
+    specs.forEach(function (s) {
+      if (s.client) {
+        var c = client == null ? null : typeof client === 'string' ? client : client[s.id];
+        if (typeof c === 'string') { counts[s.id] = c; }
+        else if (c) { counts[s.id] = c.count != null ? c.count : c.rows.length; c.rows.slice(0, 6).forEach(function (r) { items.push(c.item(r)); }); }
+        return;
+      }
+      if (AE) { counts[s.id] = 'ERR:' + AE; return; }
+      var x = A && A[s.id]; if (!x) { return; }
+      counts[s.id] = x.count;
+      x.rows.forEach(function (r) { var it = s.it(r); it.dt = it.dt || s.dt; it.name = it.name || r.name; items.push(it); });
+    });
+    items.sort(function (a, b) { return b.score - a.score; });
+    var seen = {}; items = items.filter(function (it) { var k = it.dt + '|' + it.name; if (seen[k]) { return false; } seen[k] = 1; return true; });   /* one row per record, under its most urgent category */
+    return { specs: specs, counts: counts, items: items, ready: specs.every(function (s) { return counts[s.id] !== undefined; }) };
+  }
+  function pendingTotal(AM) {
+    if (!AM) { return null; }
+    var t = 0, any = false; Object.keys(AM.counts).forEach(function (k) { var c = AM.counts[k]; if (typeof c === 'number') { t += c; any = true; } });
+    return any ? t : null;
+  }
+  function dtLabel(dt) { var L = APP.dtLabels && APP.dtLabels[dt]; return L ? tr(L[0], L[1]) : dt; }
+  function arow(it) {
+    return '<a class="dms-arow" href="' + esc(it.href || docUrl(it.dt, it.name)) + '" target="_blank" rel="noopener noreferrer">' +
+      '<span class="dms-prio dms-prio-' + it.p + '">' + esc(tr(PRIO[it.p][0], PRIO[it.p][1])) + '</span>' +
+      '<span class="dms-arow-main"><span class="dms-arow-t"><bdi>' + esc(it.title || it.name) + '</bdi><span class="dms-arow-dt">' + esc(dtLabel(it.dt)) + '</span></span><span class="dms-arow-d">' + bdi(it.desc || '') + '</span></span>' +
+      '<span class="dms-arow-who">' + (it.who ? bdi(it.who) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>') + '</span>' +
+      '<span class="dms-arow-due dms-tone-' + (it.tone || 'n') + '">' + esc(it.due || '') + '</span><span class="dms-sr"> (' + esc(tr('opens in a new tab', 'يفتح في علامة تبويب جديدة')) + ')</span></a>';
+  }
+  function drillId(s) { return s.drill || ((s.client ? 'cli:' : 'srv:') + s.id); }
+  function catBtn(s, c) {
+    var err = typeof c === 'string', inner = '<span class="dms-acat-t">' + esc(s.short) + '</span><b class="dms-num">' + (err || c == null ? '—' : num(c)) + '</b>';
+    return (!err && c) ? '<button type="button" class="dms-acat" data-act="kpi" data-v="' + esc(drillId(s)) + '" title="' + esc(s.title + ' — ' + tr('view all', 'عرض الكل')) + '">' + inner + '</button>'
+      : '<div class="dms-acat dms-acat-off" title="' + esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.title) + '">' + inner + '</div>';
+  }
+  function actionsPanel(AM) {
+    var tot = pendingTotal(AM);
+    var h = '<section class="dms-panelbox dms-actpanel" id="dms-pending" tabindex="-1" aria-labelledby="dms-pending-h"><div class="dms-ph"><h3 class="dms-h3" id="dms-pending-h">' + esc(tr('Actions pending', 'الإجراءات المعلقة')) +
+      (tot != null ? ' <span class="dms-h3-n dms-num">' + num(tot) + '</span>' : '') + '</h3><span class="dms-ph-meta">' + esc(tr('As of today · most urgent first', 'حتى اليوم · الأكثر إلحاحًا أولًا')) + '</span>' +
+      (tab !== 'actions' && APP.tabs.some(function (x) { return x.id === 'actions'; }) ? '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="goto:actions">' + esc(tr('View all', 'عرض الكل')) + '</button>' : '') + '</div>';
+    if (!AM) { return h + '<div class="dms-arows" aria-busy="true">' + skel(6, 'dms-skel-row') + '</div></section>'; }
+    var known = AM.specs.filter(function (s) { return AM.counts[s.id] !== undefined; });
+    if (!known.length) { return h + '<div class="dms-arows" aria-busy="true">' + skel(6, 'dms-skel-row') + '</div></section>'; }
+    var errs = known.filter(function (s) { return typeof AM.counts[s.id] === 'string'; });
+    if (AM.ready && errs.length === AM.specs.length) { return h + alertBox('err', esc(tr('Pending actions could not be loaded.', 'تعذر تحميل الإجراءات المعلقة.')) + ' <button type="button" class="dms-linkbtn" data-act="refresh">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>') + '</section>'; }
+    var items = AM.items.slice(0, CFG.actRows || 7);
+    h += items.length ? '<div class="dms-arows">' + items.map(arow).join('') + '</div>' : (AM.ready ? '<div class="dms-empty dms-empty-sm">' + esc(tr('Nothing pending for this selection.', 'لا توجد إجراءات معلقة لهذا الاختيار.')) + '</div>' : '<div class="dms-arows" aria-busy="true">' + skel(4, 'dms-skel-row') + '</div>');
+    h += '<div class="dms-acats">' + AM.specs.map(function (s) { return catBtn(s, AM.counts[s.id]); }).join('') + '</div>';
+    if (errs.length) { h += note(esc(tr('Could not load: ', 'تعذر التحميل: ') + errs.map(function (s) { return s.short; }).join(', '))); }
+    return h + '</section>';
+  }
+  function actionsTab(AM, info) {
+    var h = alertBox('info', esc(info || tr('Action lists are as of today and not filtered by the period. They follow the filters where the source supports them.', 'قوائم الإجراءات حتى اليوم وغير مرتبطة بالفترة، وتتبع المرشحات حيثما يدعمها المصدر.')));
+    h += kpis((AM ? AM.specs : []).map(function (s) {
+      var c = AM.counts[s.id], err = typeof c === 'string';
+      return kpi({ label: s.title, val: c === undefined ? '…' : err ? '—' : num(c), sub: esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.why), act: (!err && c) ? drillId(s) : null });
+    }));
+    return h + actionsPanel(AM);
+  }
+
+  /* ---------- drill-downs (overlay) ---------- */
+  var OVL = null;
+  function openDrill(id) {
+    if (id.indexOf('goto:') === 0) { goTab(id.slice(5)); return; }
+    var r = null;
+    if (id.indexOf('srv:') === 0 && APP.actSpecs) {
+      var s = APP.actSpecs().filter(function (x) { return x.id === id.slice(4); })[0];
+      if (s && s.table) { delete SS.drill; r = { title: s.title, sub: s.why, spec: Object.assign({ id: 'drill', server: true, dt: s.dt, filters: s.filters, order: s.order, file: s.id }, s.table()) }; }
+    }
+    if (!r && APP.drill) { r = APP.drill(id); }
+    if (!r || (!r.spec && r.body == null)) { return; }
+    if (r.spec) { r.spec.id = 'drill'; if (!r.spec.server && !r.spec.pageSize) { r.spec.pageSize = CFG.modalPage; } }
+    delete SS.drill; delete TS.drill;
+    var opener = OVL ? OVL.opener : activeEl();
+    OVL = Object.assign(r, { id: id, prev: OVL && r.stack !== false ? OVL : null, opener: opener, openerKey: OVL ? OVL.openerKey : opener && opener.getAttribute && opener.getAttribute('data-v') }); renderOverlay();
+  }
+  function overlayHTML() {
+    if (!OVL) { return ''; }
+    var link = OVL.link ? ' ' + docLink(OVL.link[0], OVL.link[1], OVL.link[2]) : '';
+    return '<div class="dms-overlay" data-act="ovbg"><div class="dms-modal" role="dialog" aria-modal="true" aria-labelledby="dms-dialog-title"><div class="dms-dhead"><div>' + (OVL.prev ? '<button type="button" class="dms-linkbtn" data-act="ovback">‹ ' + esc(tr('Back', 'رجوع')) + '</button>' : '') + '<h3 id="dms-dialog-title">' + esc(OVL.title) + '</h3>' + (OVL.sub || link ? '<p class="dms-sm">' + esc(OVL.sub || '') + link + '</p>' : '') + '</div><button type="button" class="dms-x" data-act="closeov" aria-label="' + esc(tr('Close', 'إغلاق')) + '">×</button></div>' + (OVL.body || '') + (OVL.spec ? regTable(OVL.spec) : '') + '</div></div>';
+  }
+  function renderOverlay() { var el = $('[data-ref="overlay"]'); if (!el) { return; } var app = $('.dms-app'); if (app) { app.inert = !!OVL; } if (!OVL) { Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { delete TBL[k]; } }); } else { delete TBL.drill; } el.innerHTML = overlayHTML(); fillTables(el); var x = el.querySelector('.dms-x'); if (x) { x.focus(); } }
+  function closeOverlay() {
+    var previous = OVL; OVL = null; renderOverlay(); delete SS.drill; delete TS.drill;
+    if (!previous) { return; }
+    var opener = previous.opener;
+    if (!opener || !opener.isConnected) { opener = Array.prototype.find.call(HOST.querySelectorAll('[data-act="kpi"]'), function (el) { return el.getAttribute('data-v') === previous.openerKey; }); }
+    if (opener) { opener.focus({ preventScroll: true }); }
+  }
+
+  /* ---------- filters, period, toolbar, tabs ---------- */
+  var F = { period: APP.period || 'month', from: '', to: '' }, PERIOD = [];
+  (APP.filters || []).forEach(function (f) { F[f.k] = ''; });
+  var tab = APP.tabs[0].id, POP = null, FD = null, FS = {}, CAL = null, ANIM = false, built = false, AMC = null;
+  var PERIODS = [['today', 'Today', 'اليوم'], ['yesterday', 'Yesterday', 'أمس'], ['week', 'This week', 'هذا الأسبوع'], ['lastWeek', 'Last week', 'الأسبوع الماضي'],
+    ['month', 'This month', 'هذا الشهر'], ['lastMonth', 'Last month', 'الشهر الماضي'], ['quarter', 'This quarter', 'هذا الربع'], ['ytd', 'Year to date', 'السنة حتى اليوم'],
+    ['year', 'This year', 'هذه السنة'], ['prevYear', 'Previous year', 'السنة الماضية'], ['custom', 'Custom range', 'نطاق مخصص']];
+  var PGROUPS = [['today', 'yesterday'], ['week', 'lastWeek'], ['month', 'lastMonth'], ['quarter', 'ytd', 'year', 'prevYear'], ['custom']];
+  function curPeriod() { return periodRange(F.period, F.from, F.to); }
+  function periodName(k) { var p = PERIODS.filter(function (x) { return x[0] === k; })[0]; return p ? tr(p[1], p[2]) : k; }
+  function filterCount() { return (APP.filters || []).filter(function (f) { return F[f.k]; }).length; }
+  function optList(f, draft) { var l = f.options ? f.options(draft || F) : []; return (l || []).map(function (x) { return typeof x === 'string' ? { v: x, l: x } : x; }); }
+  function optLabel(f, v) { var o = optList(f).filter(function (x) { return x.v === v; })[0]; return o ? o.l : (f.label ? f.label(v) : v); }
+  function pendingBtnHTML() {
+    var n = pendingTotal(AMC), lbl = n == null ? (AMC && AMC.ready ? '—' : '…') : num(n);
+    return '<button type="button" class="dms-pend' + (n ? ' dms-pend-on' : '') + '" data-act="pending" data-fk="pending" title="' + esc(tr('Pending actions as of today — show the list', 'الإجراءات المعلقة حتى اليوم — عرض القائمة')) + '">' +
+      '<i class="dms-pend-dot" aria-hidden="true"></i><b class="dms-num">' + lbl + '</b><span class="dms-pend-l">' + esc(tr('pending', 'معلّقة')) + '</span></button>';
+  }
+  function opt(v, label, cur) { return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(label) + '</option>'; }
+  function ffield(f) {
+    if (f.type === 'text' || f.type === 'date') { return '<div class="dms-ff"><label for="dms-fd-' + f.k + '">' + esc(tr(f.en, f.ar)) + '</label><input type="' + (f.type === 'date' ? 'date' : 'search') + '" id="dms-fd-' + f.k + '" class="dms-input" data-fd="' + f.k + '" data-fk="fd:' + f.k + '" value="' + esc(FD[f.k] || '') + '" placeholder="' + esc(f.ph ? tr(f.ph[0], f.ph[1]) : '') + '" autocomplete="off"></div>'; }
+    var list = optList(f, FD), label = tr(f.en, f.ar), k = f.k;
+    var q = clean(FS[k]).toLowerCase(), cur = FD[k], shown = list.filter(function (x) { return !q || String(x.l).toLowerCase().indexOf(q) >= 0 || String(x.v).toLowerCase().indexOf(q) >= 0; }), more = shown.length > 200;
+    shown = shown.slice(0, 200);
+    if (cur && !shown.some(function (x) { return x.v === cur; })) { shown.unshift({ v: cur, l: optLabel(f, cur) }); }
+    var h = '<div class="dms-ff"><label for="dms-fd-' + k + '">' + esc(label) + '</label>';
+    if (list.length > 8) { h += '<input type="search" class="dms-input" data-fs="' + k + '" data-fk="fs:' + k + '" value="' + esc(FS[k] || '') + '" placeholder="' + esc(tr('Search ' + num(list.length) + ' options', 'ابحث في ' + num(list.length) + ' خيار')) + '" aria-label="' + esc(tr('Search', 'بحث') + ' — ' + label) + '" autocomplete="off">'; }
+    h += '<select id="dms-fd-' + k + '" class="dms-input" data-fd="' + k + '" data-fk="fd:' + k + '">' + opt('', f.none ? tr(f.none[0], f.none[1]) : tr('All', 'الكل'), cur) + shown.map(function (x) { return opt(x.v, x.l, cur); }).join('') + '</select>';
+    if (q && !shown.length) { h += '<span class="dms-ff-hint">' + esc(tr('No matches', 'لا نتائج')) + '</span>'; }
+    else if (more) { h += '<span class="dms-ff-hint">' + esc(tr('First 200 matches — type to narrow', 'أول 200 نتيجة — اكتب للتضييق')) + '</span>'; }
+    return h + '</div>';
+  }
+  function filtersPopHTML() {
+    var n = APP.filterNote ? APP.filterNote() : '';
+    return '<div class="dms-pop dms-pop-filters" role="dialog" aria-label="' + esc(tr('Filters', 'المرشحات')) + '"><div class="dms-pop-b">' + APP.filters.map(ffield).join('') + '</div>' +
+      (n ? '<p class="dms-pop-note">' + esc(n) + '</p>' : '') +
+      '<div class="dms-pop-f"><button type="button" class="dms-btn" data-act="fclear" data-fk="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button><button type="button" class="dms-btn dms-btn-primary" data-act="fapply" data-fk="fapply">' + esc(tr('Apply', 'تطبيق')) + '</button></div></div>';
+  }
+  function calendarHTML() {
+    var v = CAL.view, first = weekStartOf(v), mon = v.slice(0, 7), fdy = CAL.focus && CAL.focus.slice(0, 7) === mon ? CAL.focus : (CAL.from && CAL.from.slice(0, 7) === mon ? CAL.from : v), wd = '', rows = '', r, c, d;
+    for (c = 0; c < 7; c++) { try { wd += '<span role="columnheader">' + esc(new Intl.DateTimeFormat(locale(), { weekday: 'narrow', timeZone: 'UTC' }).format(new Date(parseISO(addDays(first, c))))) + '</span>'; } catch (e) { wd += '<span></span>'; } }
+    for (r = 0; r < 6; r++) {
+      rows += '<div role="row" class="dms-cal-row">';
+      for (c = 0; c < 7; c++) {
+        d = addDays(first, r * 7 + c);
+        var end = d === CAL.from || d === CAL.to, inR = CAL.from && CAL.to && d > CAL.from && d < CAL.to;
+        rows += '<button type="button" role="gridcell" class="dms-day' + (d.slice(0, 7) !== mon ? ' dms-out' : '') + (d === TODAY ? ' dms-today' : '') + (inR ? ' dms-in' : '') + (end ? ' dms-end' : '') +
+          (CAL.from && CAL.to && d === CAL.from && d !== CAL.to ? ' dms-s' : '') + (CAL.from && CAL.to && d === CAL.to && d !== CAL.from ? ' dms-e' : '') + '" data-act="calday" data-v="' + d + '" data-fk="day:' + d + '" tabindex="' + (d === fdy ? 0 : -1) +
+          '" aria-pressed="' + end + '" aria-label="' + esc(fmtDate(d, true)) + '"><bdi>' + (+d.slice(8, 10)) + '</bdi></button>';
+      }
+      rows += '</div>';
+    }
+    var ok = CAL.from && CAL.to, msg = ok ? '<bdi>' + esc(rangeLabel([CAL.from, CAL.to])) + '</bdi> · ' + esc(daysTxt(diffDays(CAL.from, CAL.to) + 1)) : esc(CAL.from ? tr('Select an end date', 'اختر تاريخ النهاية') : tr('Select a start date', 'اختر تاريخ البداية'));
+    var title = v; try { title = new Intl.DateTimeFormat(locale(), { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(parseISO(v))); } catch (e) { /* ISO fallback */ }
+    return '<div class="dms-cal"><div class="dms-cal-h"><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="-1" data-fk="calprev" aria-label="' + esc(tr('Previous month', 'الشهر السابق')) + '">' + ico('prev', 'dms-flip') + '</button>' +
+      '<b aria-live="polite">' + esc(title) + '</b><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="1" data-fk="calnext" aria-label="' + esc(tr('Next month', 'الشهر التالي')) + '">' + ico('next', 'dms-flip') + '</button></div>' +
+      '<div class="dms-cal-g" role="grid" aria-label="' + esc(title) + '"><div class="dms-cal-wd" role="row">' + wd + '</div>' + rows + '</div>' +
+      '<div class="dms-cal-f"><span class="dms-cal-msg" aria-live="polite">' + msg + '</span><span class="dms-cal-btns"><button type="button" class="dms-btn" data-act="popclose" data-fk="calcancel">' + esc(tr('Cancel', 'إلغاء')) + '</button>' +
+      '<button type="button" class="dms-btn dms-btn-primary" data-act="calapply" data-fk="calapply"' + (ok ? '' : ' disabled') + '>' + esc(tr('Apply', 'تطبيق')) + '</button></span></div></div>';
+  }
+  function periodPopHTML() {
+    var n = APP.periodNote ? APP.periodNote() : '';
+    return '<div class="dms-pop dms-pop-period' + (CAL ? ' dms-has-cal' : '') + '" role="dialog" aria-label="' + esc(tr('Select period', 'اختر الفترة')) + '"><div class="dms-presets">' +
+      PGROUPS.map(function (g) {
+        return '<div class="dms-pgroup">' + g.map(function (k) {
+          var on = CAL ? k === 'custom' : F.period === k;
+          return '<button type="button" class="dms-preset' + (on ? ' dms-on' : '') + '" aria-pressed="' + on + '" data-act="preset" data-v="' + k + '" data-fk="preset:' + k + '"><span>' + esc(periodName(k)) + '</span>' +
+            (k !== 'custom' ? '<small><bdi>' + esc(rangeLabel(periodRange(k))) + '</bdi></small>' : '') + '</button>';
+        }).join('') + '</div>';
+      }).join('') + '</div>' + (CAL ? calendarHTML() : '') + (n ? '<p class="dms-pop-note dms-pop-note-p">' + esc(n) + '</p>' : '') + '</div>';
+  }
+  function toolbarHTML() {
+    var ac = filterCount(), R = PERIOD, hasF = APP.filters && APP.filters.length;
+    return '<div class="dms-topbar"><div class="dms-tb-title"><h2 class="dms-title">' + esc(APP.title()) + '</h2><p class="dms-sub" data-ref="stamp"></p></div>' +
+      '<div class="dms-tb-ctrls"><div class="dms-pendwrap" data-ref="pendwrap">' + pendingBtnHTML() + '</div>' +
+      (APP.period === false ? '' : '<div class="dms-anchor"><button type="button" class="dms-btn dms-period" data-act="pop" data-v="period" data-fk="pop:period" aria-haspopup="dialog" aria-expanded="' + (POP === 'period') + '" aria-label="' + esc(tr('Period', 'الفترة') + ': ' + periodName(F.period) + ' ' + rangeLabel(R)) + '">' + ico('cal') +
+        '<span class="dms-period-t"><b>' + esc(periodName(F.period)) + '</b><span class="dms-period-r"><bdi>' + esc(rangeLabel(R)) + '</bdi></span></span>' + ico('down', 'dms-chev') + '</button>' + (POP === 'period' ? periodPopHTML() : '') + '</div>') +
+      (hasF ? '<div class="dms-anchor"><button type="button" class="dms-btn' + (ac ? ' dms-btn-on' : '') + '" data-act="pop" data-v="filters" data-fk="pop:filters" aria-haspopup="dialog" aria-expanded="' + (POP === 'filters') + '">' + ico('filter') +
+        '<span class="dms-btn-t">' + esc(tr('Filters', 'المرشحات')) + '</span>' + (ac ? '<span class="dms-count" aria-label="' + esc(ac + ' ' + tr('active', 'نشط')) + '">' + ac + '</span>' : '') + '</button>' + (POP === 'filters' ? filtersPopHTML() : '') + '</div>' : '') +
+      '<button type="button" class="dms-btn dms-icobtn" data-act="refresh" data-ref="refresh" data-fk="refresh" aria-label="' + esc(tr('Refresh data', 'تحديث البيانات')) + '" title="' + esc(tr('Refresh data (keeps filters)', 'تحديث البيانات (مع الإبقاء على المرشحات)')) + '">' + ico('refresh') + '</button></div>' +
+      '<div class="dms-lang" role="group" aria-label="Language / اللغة"><button type="button" data-act="lang" data-v="en" data-fk="lang:en" lang="en" aria-pressed="' + (LANG === 'en') + '"' + (LANG === 'en' ? ' class="dms-on"' : '') + '>English</button>' +
+        '<button type="button" data-act="lang" data-v="ar" data-fk="lang:ar" lang="ar" aria-pressed="' + (LANG === 'ar') + '"' + (LANG === 'ar' ? ' class="dms-on"' : '') + '>العربية</button></div></div>';
+  }
+  function chipsHTML() {
+    var a = (APP.filters || []).filter(function (f) { return F[f.k]; }); if (!a.length) { return ''; }
+    return '<div class="dms-chips">' + a.map(function (f) {
+      var v = optLabel(f, F[f.k]), lab = tr(f.en, f.ar);
+      return '<span class="dms-chip"><span class="dms-chip-k">' + esc(lab) + '</span><bdi>' + esc(v) + '</bdi><button type="button" class="dms-chip-x" data-act="rmf" data-v="' + f.k + '" data-fk="rmf:' + f.k + '" aria-label="' + esc(tr('Remove filter', 'إزالة المرشح') + ' ' + lab + ': ' + v) + '">' + ico('x') + '</button></span>';
+    }).join('') + (a.length > 1 ? '<button type="button" class="dms-linkbtn" data-act="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button>' : '') + '</div>';
+  }
+  function tabsHTML() {
+    var pend = pendingTotal(AMC);
+    return '<div class="dms-tabs" role="tablist" aria-label="' + esc(tr('Sections', 'الأقسام')) + '">' + APP.tabs.map(function (x) {
+      var on = x.id === tab, lbl = tr(x.en, x.ar), b = x.id === 'actions' && pend ? '<span class="dms-tab-n dms-num" title="' + esc(tr('Pending actions as of today', 'الإجراءات المعلقة حتى اليوم')) + '">' + num(pend) + '</span>' : '';
+      return '<button class="dms-tab' + (on ? ' dms-on' : '') + '" role="tab" id="dms-tab-' + x.id + '" aria-selected="' + on + '" aria-controls="dms-panel" tabindex="' + (on ? 0 : -1) + '" data-act="tab" data-v="' + x.id + '" data-fk="tab:' + x.id + '" title="' + esc(lbl) + '" type="button"><span>' + esc(lbl) + '</span>' + b + '</button>';
+    }).join('') + '</div>';
+  }
+
+  /* ---------- rendering: a fixed skeleton whose regions repaint independently (focus kept via data-fk) ---------- */
+  function activeEl() { try { return ROOT.activeElement || null; } catch (e) { return null; } }
+  function paint(el, html) {
+    if (!el) { return; }
+    var a = activeEl(), fk = a && el.contains(a) && a.getAttribute ? a.getAttribute('data-fk') : null, ss = null;
+    if (fk && typeof a.selectionStart === 'number') { try { ss = [a.selectionStart, a.selectionEnd]; } catch (e) { /* not a text input */ } }
+    el.innerHTML = html;
+    if (fk) { focusFk(fk); if (ss) { var n = activeEl(); try { n.setSelectionRange(ss[0], ss[1]); } catch (e) { /* ignore */ } } }
+  }
+  function focusFk(k) { var n = HOST.querySelector('[data-fk="' + k + '"]'); if (n) { try { n.focus({ preventScroll: true }); } catch (e) { n.focus(); } } }
+  function skeleton() {
+    HOST.innerHTML = '<div class="dms-app"><div data-ref="tb"></div><div data-ref="chips"></div><div data-ref="tabs"></div><div class="dms-sheet" role="tabpanel" id="dms-panel" data-ref="sheet"><div data-ref="banner"></div><div class="dms-content" data-ref="content"></div></div>' +
+      '<div class="dms-tip" data-ref="tip" role="tooltip" hidden></div></div><div data-ref="overlay"></div>';
+    built = true;
+  }
+  function renderHeaderState() {
+    var b = $('[data-ref="refresh"]'), s = $('[data-ref="stamp"]'), bz = busy();
+    if (b) { b.classList.toggle('dms-busy', bz); b.setAttribute('aria-busy', String(bz)); }
+    if (s) { s.textContent = (APP.stamp ? APP.stamp() : tr('Read-only', 'للقراءة فقط')) + (LOADED ? ' · ' + tr('Updated ', 'آخر تحديث ') + LOADED : '') + (bz ? ' · ' + tr('loading…', 'جارٍ التحميل…') : ''); }
+    paint($('[data-ref="pendwrap"]'), pendingBtnHTML());
+    paint($('[data-ref="tabs"]'), tabsHTML());
+  }
+  function renderToolbar() { paint($('[data-ref="tb"]'), toolbarHTML()); paint($('[data-ref="chips"]'), chipsHTML()); renderHeaderState(); }
+  function contentHTML() {
+    if (!BOOTED) {
+      return '<div class="dms-grid dms-kpis dms-ov-kpis" aria-busy="true">' + skel(CFG.kpiCount || 6, 'dms-skel-kpi') + '</div><div class="dms-main2"><div class="dms-skel dms-skel-panel"></div><div class="dms-skel dms-skel-panel"></div></div>' +
+        note(esc(tr('Loading from ERPNext…', 'جارٍ التحميل من ERPNext…')));
+    }
+    if (APP.period !== false && (!PERIOD[0] || PERIOD[0] > PERIOD[1])) { return alertBox('err', esc(tr('Choose a valid date range.', 'اختر نطاق تاريخ صحيحًا.'))); }
+    return APP.content(tab, AMC);
+  }
+  function renderSoft() {
+    PERIOD = curPeriod(); AMC = APP.actions ? APP.actions() : null;
+    var keep = {}; Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { keep[k] = TBL[k]; } }); TBL = keep;
+    var b = $('[data-ref="banner"]'), c = $('[data-ref="content"]'), sh = $('[data-ref="sheet"]');
+    if (b) { b.innerHTML = BOOTED && APP.banner ? APP.banner() : ''; }
+    if (c) { paint(c, contentHTML()); c.classList.remove('dms-enter'); if (ANIM) { void c.offsetWidth; c.classList.add('dms-enter'); } ANIM = false; fillTables(c); fitChartLabels(); if (APP.afterRender) { APP.afterRender(c); } }
+    if (sh) { sh.setAttribute('aria-labelledby', 'dms-tab-' + tab); }
+    renderHeaderState();
+  }
+  function renderAll() {
+    HOST.setAttribute('dir', LANG === 'ar' ? 'rtl' : 'ltr'); HOST.setAttribute('lang', LANG);
+    if (!built) { skeleton(); }
+    PERIOD = curPeriod(); renderToolbar(); renderSoft();
+  }
+  /* Full reload (filters, refresh): new generation, empty store, tables back to page 1. */
+  function reload() {
+    setToday(); PERIOD = curPeriod(); GEN++; D = {}; LOADED = STAMP;
+    Object.keys(SS).forEach(function (k) { SS[k].dirty = true; SS[k].page = 1; }); Object.keys(TS).forEach(function (k) { TS[k].page = 1; });
+    APP.load(); ANIM = true; renderAll();
+  }
+
+  /* ---------- navigation and popovers ---------- */
+  function goTab(id, focusTab, force) {
+    if (tab !== id || force) { tab = id; ANIM = true; if (APP.onTab) { APP.onTab(id); } renderAll(); }
+    var t = $('#dms-tab-' + id); if (!t) { return; }
+    try { t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) { /* ignore */ }
+    if (focusTab) { t.focus(); }
+  }
+  function openPop(w) {
+    POP = w; CAL = null;
+    if (w === 'filters') { FD = {}; APP.filters.forEach(function (f) { FD[f.k] = F[f.k]; }); FS = {}; }
+    else if (F.period === 'custom' && F.from && F.to) { CAL = { from: F.from, to: F.to, view: monthStart(F.from), focus: F.from }; }
+    renderToolbar(); focusFk(w === 'filters' ? 'fd:' + APP.filters[0].k : CAL ? 'day:' + CAL.focus : 'preset:' + F.period);
+  }
+  function closePop(restore) { var w = POP; if (!w) { return; } POP = null; CAL = null; renderToolbar(); if (restore) { focusFk('pop:' + w); } }
+  function applyFilters(next) {
+    var prev = {}; APP.filters.forEach(function (f) { prev[f.k] = F[f.k]; F[f.k] = (next && next[f.k]) || ''; }); POP = null;
+    if (APP.onFilters) { APP.onFilters(prev); }
+    reload();
+  }
+  function applyPeriod(key, from, to) {
+    F.period = key; if (key === 'custom') { F.from = from; F.to = to; }
+    POP = null; CAL = null; setToday(); PERIOD = curPeriod();
+    Object.keys(SS).forEach(function (k) { if (TBL[k] && TBL[k].period) { SS[k].dirty = true; SS[k].page = 1; } });
+    if (APP.onPeriod) { APP.onPeriod(); } else { reload(); return; }
+    ANIM = true; renderAll(); focusFk('pop:period');
+  }
+  function calPick(d) {
+    if (!CAL.from || CAL.to) { CAL.from = d; CAL.to = null; } else if (d < CAL.from) { CAL.to = CAL.from; CAL.from = d; } else { CAL.to = d; }
+    CAL.focus = d;
+  }
+  function calMove(d) { CAL.focus = d; if (d.slice(0, 7) !== CAL.view.slice(0, 7)) { CAL.view = monthStart(d); } renderToolbar(); focusFk('day:' + d); }
+
+  /* ---------- tooltip (one shared element; positioned against the dashboard, clamped to its width) ---------- */
+  function showTip(n) {
+    var tip = $('[data-ref="tip"]'), app = $('.dms-app'); if (!tip || !app) { return; }
+    tip.textContent = n.getAttribute('data-tip'); tip.hidden = false;
+    var a = app.getBoundingClientRect(), r = n.getBoundingClientRect(), w = tip.offsetWidth, hgt = tip.offsetHeight;
+    var x = Math.max(4, Math.min(r.left - a.left + r.width / 2 - w / 2, a.width - w - 4)), y = r.top - a.top - hgt - 8;
+    if (y < 0) { y = r.bottom - a.top + 8; }
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  }
+  function hideTip() { var tip = $('[data-ref="tip"]'); if (tip) { tip.hidden = true; } }
+  function onOver(ev) { var n = ev.target.closest ? ev.target.closest('[data-tip]') : null; if (n && HOST.contains(n)) { showTip(n); } else { hideTip(); } }
+
+  /* ---------- events (single delegated set, removed on destroy) ---------- */
+  function onClick(ev) {
+    var n = ev.target.closest ? ev.target.closest('[data-act]') : null;
+    if (POP && !(ev.target.closest && ev.target.closest('.dms-anchor'))) { closePop(false); }
+    if (!n || !HOST.contains(n)) { return; }
+    var a = n.getAttribute('data-act'), v = n.getAttribute('data-v'), id = n.getAttribute('data-id');
+    if (APP.onAct && APP.onAct(a, v, n, id) === true) { return; }
+    if (a === 'ovbg') { if (ev.target === n) { closeOverlay(); } return; }
+    if (a === 'closeov') { closeOverlay(); return; }
+    if (a === 'ovback' && OVL && OVL.prev) { var pv = OVL.prev; delete SS.drill; delete TS.drill; OVL = pv; if (OVL.spec) { regTable(OVL.spec); } renderOverlay(); return; }
+    if (a === 'tab') { goTab(v); return; }
+    if (a === 'lang') { if (LANG !== v) { LANG = v; try { G.localStorage.setItem('dms_lang', LANG); } catch (e) { /* ignore */ } POP = null; CAL = null; renderAll(); if (OVL) { var o = OVL; OVL = null; renderOverlay(); openDrill(o.id); } focusFk('lang:' + v); } return; }
+    if (a === 'refresh') { if (APP.onRefresh) { APP.onRefresh(); } reload(); return; }
+    if (a === 'pop') { if (POP === v) { closePop(true); } else { openPop(v); } return; }
+    if (a === 'popclose') { closePop(true); return; }
+    if (a === 'preset') {
+      if (v !== 'custom') { applyPeriod(v); return; }
+      var r0 = PERIOD[0] || TODAY, r1 = PERIOD[1] || TODAY; CAL = { from: r0, to: r1, view: monthStart(r1 > TODAY ? TODAY : r1), focus: r1 > TODAY ? TODAY : r1 };
+      renderToolbar(); focusFk('day:' + CAL.focus); return;
+    }
+    if (a === 'calnav' && CAL) { CAL.view = addMonths(CAL.view, +v); CAL.focus = CAL.view; renderToolbar(); return; }
+    if (a === 'calday' && CAL) { calPick(v); renderToolbar(); focusFk('day:' + v); return; }
+    if (a === 'calapply' && CAL && CAL.from && CAL.to) { applyPeriod('custom', CAL.from, CAL.to); return; }
+    if (a === 'fapply') { applyFilters(FD); focusFk('pop:filters'); return; }
+    if (a === 'fclear') { applyFilters(null); focusFk('pop:filters'); return; }
+    if (a === 'rmf') { var nf = {}; APP.filters.forEach(function (f) { nf[f.k] = F[f.k]; }); nf[v] = ''; applyFilters(nf); focusFk('pop:filters'); return; }
+    if (a === 'pending') {
+      goTab(APP.tabs[0].id); var p = $('#dms-pending');
+      if (p) { var still = G.matchMedia && G.matchMedia('(prefers-reduced-motion: reduce)').matches; try { p.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' }); } catch (e) { p.scrollIntoView(); } p.focus({ preventScroll: true }); }
+      return;
+    }
+    if (a === 'kpi') { openDrill(v); return; }
+    if (a === 'tpage') { TS[id].page = Math.max(1, TS[id].page + (+v)); fillTable(id); return; }
+    if (a === 'tsort') { var st = TS[id]; if (st.sk === v) { st.dir = -st.dir; } else { st.sk = v; st.dir = 1; } st.page = 1; fillTable(id); focusHead(id, v); return; }
+    if (a === 'spage') { var ss = SS[id]; ss.page = Math.max(1, ss.page + (+v)); ss.dirty = true; fillTable(id); return; }
+    if (a === 'ssort') { var s2 = SS[id]; if (s2.sk === v) { s2.dir = -s2.dir; } else { s2.sk = v; s2.dir = 1; } s2.page = 1; s2.dirty = true; fillTable(id); focusHead(id, v); return; }
+    if (a === 'sretry') { SS[id].dirty = true; fillTable(id); return; }
+    if (a === 'csv') { var sp = TBL[id]; download(sp.file || id, sp, clientRows(sp, TS[id])); return; }
+    if (a === 'csvall') { exportServer(id); return; }
+  }
+  function focusHead(id, v) { var th = HOST.querySelector('[data-tbl="' + id + '"] th[data-v="' + v + '"]'); if (th) { th.focus(); } }
+  function onInput(ev) {
+    var n = ev.target; if (!n || !n.getAttribute || !HOST.contains(n)) { return; }
+    var fs = n.getAttribute('data-fs'), fd = n.getAttribute('data-fd'), tq = n.getAttribute('data-tq');
+    if (APP.onInput && APP.onInput(n, ev) === true) { return; }
+    if (fs) { if (FS[fs] === n.value) { return; } FS[fs] = n.value; renderToolbar(); return; }
+    if (fd) { if (!FD || FD[fd] === n.value) { return; } FD[fd] = n.value; if (n.type === 'search') { return; } if (APP.filters.some(function (f) { return f.dependsOn === fd; })) { APP.filters.forEach(function (f) { if (f.dependsOn === fd && FD[f.k] && !optList(f, FD).some(function (x) { return x.v === FD[f.k]; })) { FD[f.k] = ''; } }); renderToolbar(); } return; }
+    if (tq) {
+      focusId = tq; var spx = TBL[tq]; if (!spx) { return; }
+      if (spx.server) { var s2 = SS[tq]; if (s2.q === n.value) { return; } s2.q = n.value; s2.page = 1; clearTimeout(onInput.t); onInput.t = later(function () { s2.dirty = true; fillTable(tq); }, 350); }
+      else { var s1 = TS[tq] || (TS[tq] = { q: '', page: 1, sk: spx.sk || '', dir: spx.dir || 1 }); if (s1.q === n.value) { return; } s1.q = n.value; s1.page = 1; fillTable(tq); }
+    }
+  }
+  function onKey(ev) {
+    var t = ev.target, act = t && t.getAttribute ? t.getAttribute('data-act') : null, rtl = LANG === 'ar', k = ev.key;
+    if (k === 'Escape') {
+      if (POP) { ev.preventDefault(); closePop(true); return; }
+      if (OVL) { closeOverlay(); }
+      return;
+    }
+    if ((k === 'Enter' || k === ' ') && (act === 'tsort' || act === 'ssort')) { ev.preventDefault(); t.click(); return; }
+    if (k === 'Tab' && OVL) {
+      var modal = $('.dms-modal'), controls = Array.prototype.filter.call(modal.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), [tabindex="0"]'), function (el) { return el.getClientRects().length; });
+      var first = controls[0], last = controls[controls.length - 1];
+      if (ev.shiftKey && t === first) { ev.preventDefault(); last.focus(); }
+      else if (!ev.shiftKey && t === last) { ev.preventDefault(); first.focus(); }
+    }
+    if (act === 'tab' && /^(ArrowLeft|ArrowRight|Home|End)$/.test(k)) {
+      var ids = APP.tabs.map(function (x) { return x.id; }), i = ids.indexOf(t.getAttribute('data-v')), L = ids.length;
+      var d = k === 'Home' ? -i : k === 'End' ? L - 1 - i : ((k === 'ArrowRight') !== rtl ? 1 : -1);
+      ev.preventDefault(); goTab(ids[(i + d + L) % L], true); return;
+    }
+    if (act === 'calday' && CAL) {
+      var cur = t.getAttribute('data-v'), step = { ArrowRight: rtl ? -1 : 1, ArrowLeft: rtl ? 1 : -1, ArrowUp: -7, ArrowDown: 7 }[k];
+      if (step) { ev.preventDefault(); calMove(addDays(cur, step)); return; }
+      if (k === 'PageUp' || k === 'PageDown') { ev.preventDefault(); calMove(shiftMonths(cur, k === 'PageUp' ? -1 : 1)); return; }
+      if (k === 'Home' || k === 'End') { ev.preventDefault(); calMove(k === 'Home' ? weekStartOf(cur) : addDays(weekStartOf(cur), 6)); }
+    }
+  }
+  /* Start: wire events, render the skeleton, run APP.boot (reference lists), then the first load. */
+  function start() {
+    HOST.addEventListener('click', onClick, SIG);
+    HOST.addEventListener('input', onInput, SIG);
+    HOST.addEventListener('change', onInput, SIG);
+    HOST.addEventListener('keydown', onKey, SIG);
+    HOST.addEventListener('pointerover', onOver, SIG);
+    HOST.addEventListener('pointerleave', hideTip, SIG);
+    HOST.addEventListener('focusin', function (ev) { var n = ev.target.closest && ev.target.closest('[data-tip]'); if (n) { showTip(n); } }, SIG);
+    HOST.addEventListener('focusout', hideTip, SIG);
+    document.addEventListener('pointerdown', function (ev) {
+      if (!POP) { return; } var p = ev.composedPath ? ev.composedPath() : [];
+      for (var i = 0; i < p.length; i++) { if (p[i] === HOST) { return; } }
+      closePop(false);
+    }, SIG);
+    if (!G.frappe || !frappe.call) { HOST.innerHTML = '<div class="dms-empty">Frappe client API not available.</div>'; return; }
+    setToday(); PERIOD = curPeriod();
+    var chartResize = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fitChartLabels) : null;
+    if (chartResize) { chartResize.observe(HOST); if (abort) { abort.signal.addEventListener('abort', function () { chartResize.disconnect(); }); } }
+    if (document.fonts) { document.fonts.ready.then(function () { if (!destroyed) { fitChartLabels(); } }); }
+    renderAll();
+    var g = GEN, chk = function () { return g === GEN && !destroyed; };
+    Promise.resolve(APP.boot ? APP.boot(chk) : null).catch(function (e) { if (G.console) { console.error(APP.key, 'boot', e); } }).then(function () { if (destroyed) { return; } BOOTED = true; reload(); });
+  }
+  /* ==== end DMS kit ==== */
+
+  /* ============================================================ v4 definitions */
+  var DEFAULT_COMPANY = 'Durar Masagh Trading Company';
+  var OPEN_MR = ['Pending', 'Partially Ordered', 'Partially Received'], OPEN_WO = ['Not Started', 'In Process'], OPEN_JC = ['Open', 'Work In Progress', 'On Hold'];
+  var TRIP_NEEDED_VIA = ['DM Vehicle', 'Rented Vehicle'];
+  var VT = [['trailer', 'Trailer', 'مقطورة'], ['dayana', 'Dayana', 'دينا'], ['pickup', 'Pick up', 'بيك أب'], ['container', 'Container', 'حاوية']];
+  var CO = [], WH = [];
+  function n0(v) { return Number(v) || 0; }
+  function d10(v) { return String(v || '').slice(0, 10); }
+  function dash(v) { return v == null || v === '' ? '—' : v; }
+  function stampOf(v) { var m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)) : NaN; }
+  function riyadhNow() { try { var p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date()), g = function (k) { return (p.filter(function (x) { return x.type === k; })[0] || {}).value; }; return stampOf(g('year') + '-' + g('month') + '-' + g('day') + ' ' + (g('hour') === '24' ? '00' : g('hour')) + ':' + g('minute')); } catch (e) { return stampOf(TODAY + ' 12:00'); } }
+  function mins(a, b) { var x = stampOf(a), y = stampOf(b); return isFinite(x) && isFinite(y) ? Math.round((y - x) / 60000) : null; }
+  function load(r) { return n0(r.loading_trailer) + n0(r.loading_dayana) + n0(r.loading_pickup) + n0(r.loading_container); }
+  function unload(r) { return n0(r.unloading_trailer) + n0(r.unloading_dayana) + n0(r.unloading_pickup) + n0(r.unloading_container); }
+  function expense(r) { return n0(r.trailer_expense) + n0(r.dayana_expense) + n0(r.pickup_expense) + n0(r.container_expense); }
+  function wash(r) { return n0(r.trailer_cleaning) + n0(r.dayana_cleaning) + n0(r.pickup_cleaning) + n0(r.container_cleaning); }
+  function latest(rows) { var l = {}; rows.forEach(function (r) { var k = r.forklift_no || r.name, c = l[k]; if (!c || String(r.date) >= String(c.date)) { l[k] = r; } }); return l; }
+  function tl(rows, keyFn, valFn) { var m = {}; rows.forEach(function (r) { var k = keyFn(r); m[k] = (m[k] || 0) + (valFn ? valFn(r) : 1); }); return Object.keys(m).map(function (k) { return [k, m[k]]; }).sort(function (a, b) { return b[1] - a[1] || a[0].localeCompare(b[0]); }); }
+  var NS = function () { return tr('Not set', 'غير محدد'); };
+
+  /* targets: per-browser convenience, same key as v4 so saved targets carry over */
+  function targets() { var d = { dns_day: 0, trips_day: 0, tons_day: 0, earn_day: 0 }; try { return Object.assign(d, JSON.parse(G.localStorage.getItem('dmo_targets') || '{}')); } catch (e) { return d; } }
+  function ofTarget(cur, t) { return n0(t) > 0 ? ' · ' + Math.round(cur / n0(t) * 100) + tr('% of target', '% من الهدف') : ''; }
+
+  /* currency scope */
+  function coCur(name) { var c = CO.filter(function (x) { return x.name === name; })[0]; return (c && c.default_currency) || CUR; }
+  function vCur() { return F.company ? coCur(F.company) : CUR; }
+  function inScope(co) { return F.company ? true : !co || coCur(co) === CUR; }
+  function whCo(w) { var x = WH.filter(function (y) { return y.name === w; })[0]; return x ? x.company : ''; }
+  function others() { return CO.filter(function (c) { return (c.default_currency || CUR) !== CUR; }); }
+  function svSum(rows, f) { return rows.filter(function (r) { return inScope(r.company); }).reduce(function (a, r) { return a + n0(typeof f === 'function' ? f(r) : r[f]); }, 0); }
+
+  /* ============================================================ loading */
+  function bf(o) {
+    var a = [];
+    if (o.co && F.company) { a.push([o.co, '=', F.company]); }
+    if (o.date) { var R = o.range || PERIOD; a.push([o.date, '>=', R[0] + (o.dt ? ' 00:00:00' : '')]); a.push([o.date, '<=', R[1] + (o.dt ? ' 23:59:59' : '')]); }
+    if (o.wh && F.wh) { a.push([o.wh, '=', F.wh]); }
+    return a.concat(o.extra || []);
+  }
+  function opPrev() { var len = diffDays(PERIOD[0], PERIOD[1]) + 1; return [addDays(PERIOD[0], -len), addDays(PERIOD[0], -1)]; }
+  function whScope(valueOnly) { if (F.wh) { return [['warehouse', '=', F.wh]]; } var ws = WH.filter(function (w) { return F.company ? w.company === F.company : valueOnly && others().length ? coCur(w.company) === CUR : false; }).map(function (w) { return w.name; }); return F.company || (valueOnly && others().length) ? [['warehouse', 'in', ws.length ? ws : ['__none__']]] : []; }
+  function grp(dt, fields, filters, group) { return getList({ doctype: dt, fields: fields, filters: filters, group_by: group, limit_page_length: 0 }, null); }
+  function cnt(dt, filters) { return getCount(dt, filters, null); }
+  function inChunks(names, size, f) { var parts = []; for (var i = 0; i < names.length; i += size) { parts.push(names.slice(i, i + size)); } return Promise.all(parts.map(f)).then(function (r) { return [].concat.apply([], r); }); }
+  function dnFilters(o) { return bf(Object.assign({ co: 'company', wh: 'set_warehouse', extra: [['docstatus', '=', 1], ['is_return', '=', 0]].concat((o && o.extra) || []) }, o || {}, { extra: [['docstatus', '=', 1], ['is_return', '=', 0]].concat((o && o.extra) || []) })); }
+  function tripFilters(o) { return bf(Object.assign({ co: 'company', wh: 'custom_source_warehouse' }, o || {}, { extra: [['docstatus', '<', 2]].concat((o && o.extra) || []) })); }
+  function loadAll() {
+    var pDn = fetchAll({ doctype: 'Delivery Note', fields: ['name', 'company', 'posting_date', 'posting_time', 'customer', 'customer_name', 'custom_delivery_by', 'delivery_mode', 'total_net_weight', 'location', 'custom_sales_person', 'base_grand_total', 'status'], filters: dnFilters({ date: 'posting_date' }), order_by: 'posting_date desc' }, null, 20000);
+    run('dns', function () { return pDn; });
+    run('unas', function () {
+      return pDn.then(function (dns) {
+        var need = dns.filter(function (d) { return TRIP_NEEDED_VIA.indexOf(d.custom_delivery_by) > -1; }); if (!need.length) { return []; }
+        return inChunks(need.map(function (d) { return d.name; }), 400, function (c) { return getList({ doctype: 'Delivery Stop', parent: 'Delivery Trip', fields: ['delivery_note'], filters: [['delivery_note', 'in', c]], limit_page_length: 0 }, null); }).then(function (stops) {
+          var used = {}, now = riyadhNow(); stops.forEach(function (s) { used[s.delivery_note] = 1; });
+          return need.filter(function (d) { return !used[d.name]; }).map(function (d) { return Object.assign({}, d, { age: Math.max(0, Math.floor((now - stampOf(d.posting_date + ' ' + (d.posting_time || '00:00'))) / 36e5)) }); }).sort(function (a, b) { return b.age - a.age; });
+        });
+      });
+    });
+    run('trips', function () { return fetchAll({ doctype: 'Delivery Trip', fields: ['name', 'company', 'custom_trip_type_', 'custom_delivery_date', 'driver_name', 'vehicle', 'status', 'delivery_status', 'custom_source_warehouse', 'custom_delivery_to_warehouse', 'custom_total_amount_earned', 'custom_driver_reporting_time__at_warehouse', 'departure_time', 'custom_delivered_time', 'custom_driver__out_of_site'], filters: tripFilters({ date: 'custom_delivery_date' }), order_by: 'custom_delivery_date desc' }, null, 20000); });
+    run('fk', function () { return fetchAll({ doctype: 'ForkLift', fields: ['name', 'date', 'warehouse', 'forklift_no', 'driver_name', 'status', 'setting'].concat([].concat.apply([], VT.map(function (t) { return ['loading_' + t[0], 'unloading_' + t[0], t[0] + '_expense', t[0] + '_cleaning']; }))), filters: bf({ date: 'date', wh: 'warehouse', extra: [['docstatus', '<', 2]] }), order_by: 'date asc' }, null, 20000); });
+    run('mrs', function () { return fetchAll({ doctype: 'Material Request', fields: ['name', 'company', 'material_request_type', 'status', 'workflow_state', 'custom_priority', 'transaction_date', 'schedule_date', 'per_ordered'], filters: bf({ co: 'company', wh: 'set_warehouse', extra: [['status', 'in', OPEN_MR], ['docstatus', '<', 2]] }), order_by: 'schedule_date asc' }, null, 20000); });
+    run('stale', function () { return fetchAll({ doctype: 'Work Order', fields: ['name', 'production_item', 'item_name', 'qty', 'planned_start_date', 'fg_warehouse'], filters: bf({ co: 'company', wh: 'fg_warehouse', extra: [['status', '=', 'Not Started'], ['planned_start_date', '<', TODAY + ' 00:00:00'], ['docstatus', '=', 1]] }), order_by: 'planned_start_date asc' }, null, 20000); });
+    run('short', function () { return fetchAll({ doctype: 'Bin', fields: ['name', 'item_code', 'warehouse', 'actual_qty', 'projected_qty', 'reserved_qty', 'ordered_qty'], filters: whScope(false).concat([['projected_qty', '<', 0]]), order_by: 'projected_qty asc' }, null, 20000); });
+    run('today', function () {
+      var Y = addDays(TODAY, -1), dnG = function (d) { return grp('Delivery Note', ['company', 'count(name) as n', 'sum(total_net_weight) as w', 'sum(base_grand_total) as v'], dnFilters({ extra: [['posting_date', '=', d]] }), 'company'); };
+      var opt = function (p) { return p.then(function (v) { return v; }, function () { return null; }); };
+      return Promise.all([dnG(TODAY), dnG(Y), grp('Delivery Trip', ['company', 'status', 'count(name) as n', 'sum(custom_total_amount_earned) as e'], tripFilters({ extra: [['custom_delivery_date', '=', TODAY]] }), 'company, status'), cnt('Delivery Trip', tripFilters({ extra: [['custom_delivery_date', '=', Y]] })),
+        opt(cnt('Delivery Note', bf({ co: 'company', wh: 'set_warehouse', extra: [['docstatus', '=', 0]] }))), opt(cnt('Delivery Note', dnFilters({ date: 'posting_date', extra: [['status', '=', 'To Bill']] }))), opt(cnt('Material Request', bf({ co: 'company', extra: [['transaction_date', '=', TODAY], ['docstatus', '<', 2]] }))),
+        opt(cnt('Job Card', bf({ co: 'company', extra: [['status', 'in', OPEN_JC], ['docstatus', '<', 2]] }))), opt(cnt('Purchase Receipt', bf({ co: 'company', extra: [['posting_date', '=', TODAY], ['docstatus', '=', 1]] }))), opt(cnt('Stock Entry', bf({ co: 'company', extra: [['posting_date', '=', TODAY], ['docstatus', '=', 1]] }))),
+        opt(cnt('Work Order', bf({ co: 'company', wh: 'fg_warehouse', extra: [['status', '=', 'In Process']] })))])
+        .then(function (r) { return { dn: r[0] || [], dnY: r[1] || [], trip: r[2] || [], tripY: r[3], draftDn: r[4], toBill: r[5], mrToday: r[6], openJc: r[7], prToday: r[8], seToday: r[9], woProc: r[10] }; });
+    });
+    run('prev', function () { var P = opPrev(); return Promise.all([grp('Delivery Note', ['count(name) as n', 'sum(total_net_weight) as w'], dnFilters({ date: 'posting_date', range: P }), null), grp('Delivery Trip', ['company', 'count(name) as n', 'sum(custom_total_amount_earned) as e'], tripFilters({ date: 'custom_delivery_date', range: P }), 'company')]).then(function (r) { var d = (r[0] || [])[0] || {}; return { dn: n0(d.n), w: n0(d.w), trips: (r[1] || []).reduce(function (a, x) { return a + n0(x.n); }, 0), earn: svSum(r[1] || [], 'e') }; }); });
+    loadActions(actSpecs());
+  }
+  function ensure(key, fn) { if (!((key + 'Tok') in D)) { run(key, fn); } }
+  function loadTab(id) {
+    if (id === 'forklift') { ensure('reg', function () { return Promise.all([getList({ doctype: 'Forklift list', fields: ['name', 'forklift_no', 'driver_name', 'vehicle_maker', 'vehicle_model'], order_by: 'name asc', limit_page_length: 500 }, null), cnt('Forklift list', [])]).then(function (r) { return { rows: r[0] || [], n: r[1] }; }); }); }
+    if (id === 'production') {
+      ensure('wo', function () { return fetchAll({ doctype: 'Work Order', fields: ['name', 'company', 'production_item', 'item_name', 'qty', 'produced_qty', 'status', 'fg_warehouse', 'planned_start_date', 'planned_end_date', 'planned_operating_cost', 'actual_operating_cost', 'total_operating_cost', 'process_loss_qty'], filters: bf({ co: 'company', wh: 'fg_warehouse', date: 'planned_start_date', dt: true, extra: [['docstatus', '=', 1]] }), order_by: 'planned_start_date desc' }, null, 20000); });
+      ensure('wopipe', function () { return Promise.all([grp('Work Order', ['status', 'count(name) as n'], bf({ co: 'company', wh: 'fg_warehouse', date: 'planned_start_date', dt: true }), 'status'), grp('Work Order', ['status', 'count(name) as n'], bf({ co: 'company', wh: 'fg_warehouse', extra: [['status', 'in', OPEN_WO]] }), 'status')]).then(function (r) { var m = {}; r[0].forEach(function (x) { m[x.status] = n0(x.n); }); r[1].forEach(function (x) { m[x.status] = n0(x.n); }); return m; }); });
+      ensure('woproc', function () { return getList({ doctype: 'Work Order', fields: ['name', 'production_item', 'item_name', 'qty', 'produced_qty', 'planned_end_date'], filters: bf({ co: 'company', wh: 'fg_warehouse', extra: [['status', '=', 'In Process']] }), order_by: 'planned_end_date asc', limit_page_length: 200 }, null); });
+      ensure('jc', function () { return fetchAll({ doctype: 'Job Card', fields: ['name', 'workstation', 'operation', 'status', 'for_quantity', 'total_completed_qty', 'process_loss_qty', 'total_time_in_mins', 'posting_date'], filters: bf({ co: 'company', date: 'posting_date', extra: [['docstatus', '<', 2]] }), order_by: 'posting_date desc' }, null, 20000); });
+      ensure('dpu', function () { return fetchAll({ doctype: 'Daily Production Update', fields: ['name', 'date', 'factory', 'completed_qty', 'ot_hours'], filters: bf({ date: 'date', extra: [['docstatus', '<', 2]] }), order_by: 'date asc' }, null, 20000); });
+      ensure('fdp', function () { return getList({ doctype: 'Daily Production Table', parent: 'Factory Daily Production', fields: ['date', 'employee', 'branch', 'worked_item', 'target_qty', 'daily_target_qty', 'actual_qty', 'productivity', 'duty_hours', 'ot_hrs', 'ot_amount', 'activity', 'type'], filters: [['date', '>=', PERIOD[0]], ['date', '<=', PERIOD[1]]], limit_page_length: 0 }, null); });
+      ensure('mpt', function () { return getList({ doctype: 'Manufacturing Production Target', fields: ['target_date', 'target_qty'], filters: bf({ co: 'company', date: 'target_date', extra: [['docstatus', '<', 2]] }), limit_page_length: 0 }, null); });
+    }
+    if (id === 'supply') {
+      ensure('mri', function () { return waitFor('mrs').then(function (mrs) { if (!mrs.length) { return []; } return inChunks(mrs.map(function (m) { return m.name; }), 400, function (c) { return getList({ doctype: 'Material Request Item', parent: 'Material Request', fields: ['parent', 'item_code', 'item_name', 'brand', 'item_group', 'qty', 'received_qty', 'warehouse'], filters: [['parent', 'in', c]], limit_page_length: 0 }, null); }).then(function (rows) { return rows.map(function (r) { return Object.assign({}, r, { pend: Math.max(0, n0(r.qty) - n0(r.received_qty)) }); }).filter(function (r) { return r.pend > 0; }); }); }); });
+      ensure('binw', function () { return grp('Bin', ['warehouse', 'sum(actual_qty) as q', 'sum(stock_value) as v', 'sum(reserved_qty) as r'], whScope(false), 'warehouse'); });
+      ensure('bini', function () { return grp('Bin', ['item_code', 'sum(actual_qty) as q', 'sum(stock_value) as v', 'sum(reserved_qty) as r'], whScope(true), 'item_code'); });
+      ensure('se', function () { return fetchAll({ doctype: 'Stock Entry', fields: ['name', 'company', 'posting_date', 'stock_entry_type', 'purpose', 'total_amount'], filters: bf({ co: 'company', date: 'posting_date', extra: [['docstatus', '=', 1]] }), order_by: 'posting_date desc' }, null, 20000); });
+      ensure('pr', function () { return fetchAll({ doctype: 'Purchase Receipt', fields: ['name', 'company', 'posting_date', 'supplier', 'supplier_name', 'status', 'base_grand_total', 'per_billed'], filters: bf({ co: 'company', date: 'posting_date', extra: [['docstatus', '=', 1]] }), order_by: 'posting_date desc' }, null, 20000); });
+    }
+  }
+  /* resolves with D[key] once its run settles (same generation); used by sources that depend on another */
+  function waitFor(key) { var g = GEN; return new Promise(function (res, rej) { (function poll() { if (g !== GEN) { rej(new Error('stale')); return; } if (D[key] != null) { res(D[key]); return; } if (D[key + 'Err']) { rej({ status: D[key + 'Err'] === 'perm' ? 403 : 500 }); return; } later(poll, 60); })(); }); }
+
+  /* ============================================================ actions pending */
+  function sp(id, p, dt, filters, order, fields, short, title, why, it, cols) {
+    return { id: id, server: true, dt: dt, filters: filters, order: order, fields: fields, short: short, title: title, why: why, it: it,
+      table: function () { return { fields: fields, search: ['name'], cols: cols, pageSize: 15 }; } };
+  }
+  function actSpecs() {
+    var ago = function (n) { return addDays(TODAY, -n); }, co = F.company ? [['company', '=', F.company]] : [];
+    var tripCols = [linkCol(tr('Trip', 'الرحلة'), 'Delivery Trip', 'name'), col(tr('Delivery date', 'تاريخ التسليم'), 'custom_delivery_date', { fmt: dtc }), col(tr('Driver', 'السائق'), 'driver_name'), col(tr('Vehicle', 'المركبة'), 'vehicle'), col(tr('Source', 'المصدر'), 'custom_source_warehouse')];
+    var tripIt = function (p, tone) { return function (r) { return { p: p, score: score(p, 0, ageOf(d10(r.custom_delivery_date))), title: r.name, desc: [r.custom_trip_type_, r.custom_source_warehouse].filter(Boolean).join(' · '), who: r.driver_name || null, due: tr('Delivery ', 'التسليم ') + d10(r.custom_delivery_date), tone: tone }; }; };
+    var mrCols = [linkCol(tr('Request', 'الطلب'), 'Material Request', 'name'), col(tr('Purpose', 'الغرض'), 'material_request_type'), col(tr('Requested', 'تاريخ الطلب'), 'transaction_date', { fmt: dtc }), col(tr('Required', 'مطلوب بتاريخ'), 'schedule_date', { fmt: dtc }), col(tr('Status', 'الحالة'), 'status')];
+    var mrIt = function (p, tone, f) { return function (r) { return { p: p, score: score(p, 0, ageOf(d10(r[f]))), title: r.name, desc: [r.material_request_type, r.status].filter(Boolean).join(' · '), who: r.custom_priority || null, due: (f === 'schedule_date' ? tr('Required ', 'مطلوب ') : tr('Requested ', 'طُلب ')) + d10(r[f]), tone: tone }; }; };
+    var woCols = [linkCol(tr('Work order', 'أمر العمل'), 'Work Order', 'name'), col(tr('Item', 'الصنف'), 'item_name', { fmt: function (v, x) { return bdi(v || x.production_item); } }), col(tr('Qty', 'الكمية'), 'qty', { num: 1, fmt: function (v) { return num(v); } }), col(tr('Planned start', 'البدء المخطط'), 'planned_start_date', { fmt: dtc })];
+    var woIt = function (p) { return function (r) { return { p: p, score: score(p, 0, ageOf(d10(r.planned_start_date))), title: r.item_name || r.production_item || r.name, desc: r.name + ' · ' + num(r.qty), who: r.fg_warehouse || null, due: tr('Planned ', 'مخطط ') + d10(r.planned_start_date), tone: 'bad' }; }; };
+    var MRF = ['name', 'material_request_type', 'status', 'custom_priority', 'transaction_date', 'schedule_date'], TF = ['name', 'custom_trip_type_', 'custom_delivery_date', 'driver_name', 'vehicle', 'custom_source_warehouse'], WOF = ['name', 'production_item', 'item_name', 'qty', 'planned_start_date', 'fg_warehouse'];
+    return [
+      sp('a_trip_sched', 'high', 'Delivery Trip', co.concat([['status', '=', 'Scheduled'], ['docstatus', '=', 1], ['custom_delivery_date', '<', ago(1)]]), 'custom_delivery_date asc', TF, tr('Trips never completed', 'رحلات لم تكتمل'), tr('Trips submitted but never completed', 'رحلات مرحّلة ولم تكتمل'), tr('Set the trip status to In Transit or Completed so delivery figures are real.', 'حدّث حالة الرحلة إلى في الطريق أو مكتملة لتصبح أرقام التسليم صحيحة.'), tripIt('high', 'bad'), tripCols),
+      { id: 'a_dn_notrip', client: true, short: tr('Delivery notes without a trip', 'إشعارات بلا رحلة'), title: tr('Delivery notes with no trip for over 24 hours', 'إشعارات تسليم بلا رحلة لأكثر من 24 ساعة'), why: tr('DM or rented-vehicle deliveries in the period that are not on any Delivery Trip. Create or link a trip.', 'تسليمات بمركبة الشركة أو مستأجرة في الفترة ليست على أي رحلة. أنشئ رحلة أو اربطها.') },
+      sp('a_mr_old', 'high', 'Material Request', co.concat([['status', 'in', OPEN_MR], ['docstatus', '<', 2], ['transaction_date', '<', ago(90)]]), 'transaction_date asc', MRF, tr('Requests over 90 days', 'طلبات أقدم من 90 يومًا'), tr('Open requests older than 90 days', 'طلبات مفتوحة أقدم من 90 يومًا'), tr('Order, receive or close them; stale requests hide real demand.', 'اطلبها أو استلمها أو أغلقها؛ الطلبات القديمة تخفي الطلب الحقيقي.'), mrIt('high', 'bad', 'transaction_date'), mrCols),
+      sp('a_wo_stale', 'high', 'Work Order', co.concat([['status', '=', 'Not Started'], ['docstatus', '=', 1], ['planned_start_date', '<', TODAY + ' 00:00:00']]), 'planned_start_date asc', WOF, tr('Work orders not started', 'أوامر عمل لم تبدأ'), tr('Work orders not started and overdue', 'أوامر عمل لم تبدأ ومتأخرة'), tr('Start, re-plan or cancel.', 'ابدأ أو أعد التخطيط أو ألغِ.'), woIt('high'), woCols),
+      sp('a_wo_stuck', 'high', 'Work Order', co.concat([['status', '=', 'In Process'], ['docstatus', '=', 1], ['planned_start_date', '<', ago(60) + ' 00:00:00']]), 'planned_start_date asc', WOF, tr('Work orders stuck', 'أوامر عمل عالقة'), tr('Work orders in process for over 60 days', 'أوامر عمل قيد التنفيذ أكثر من 60 يومًا'), tr('Complete, update progress or close.', 'أكمل أو حدّث التقدم أو أغلق.'), woIt('high'), woCols),
+      sp('a_trip_draft', 'med', 'Delivery Trip', co.concat([['status', '=', 'Draft'], ['docstatus', '=', 0], ['custom_delivery_date', '<', TODAY]]), 'custom_delivery_date asc', TF, tr('Old draft trips', 'رحلات مسودة قديمة'), tr('Draft trips from past days', 'رحلات مسودة من أيام سابقة'), tr('Submit or delete them.', 'رحّلها أو احذفها.'), tripIt('med', 'warn'), tripCols),
+      sp('a_mr_overdue', 'med', 'Material Request', co.concat([['status', 'in', OPEN_MR], ['docstatus', '<', 2], ['schedule_date', '<', TODAY], ['transaction_date', '>=', ago(90)]]), 'schedule_date asc', MRF, tr('Overdue requests', 'طلبات متأخرة'), tr('Overdue requests (last 90 days)', 'طلبات متأخرة (آخر 90 يومًا)'), tr('Follow up with purchasing or the requester.', 'تابع مع المشتريات أو مقدّم الطلب.'), mrIt('med', 'warn', 'schedule_date'), mrCols),
+      sp('a_dn_draft', 'med', 'Delivery Note', co.concat([['docstatus', '=', 0], ['posting_date', '<', TODAY]]), 'posting_date asc', ['name', 'customer', 'customer_name', 'posting_date'], tr('Old draft delivery notes', 'إشعارات مسودة قديمة'), tr('Draft delivery notes from past days', 'إشعارات تسليم مسودة من أيام سابقة'), tr('Submit or delete.', 'رحّلها أو احذفها.'),
+        function (r) { return { p: 'med', score: score('med', 0, ageOf(d10(r.posting_date))), title: r.customer_name || r.customer || r.name, desc: r.name, who: null, due: tr('Posted ', 'بتاريخ ') + d10(r.posting_date), tone: 'warn' }; },
+        [linkCol(tr('Delivery note', 'إشعار التسليم'), 'Delivery Note', 'name'), col(tr('Customer', 'العميل'), 'customer_name', { fmt: function (v, x) { return bdi(v || x.customer); } }), col(tr('Date', 'التاريخ'), 'posting_date', { fmt: dtc })]),
+      sp('a_bin_neg', 'med', 'Bin', whScope(false).concat([['projected_qty', '<', 0]]), 'projected_qty asc', ['name', 'item_code', 'warehouse', 'projected_qty'], tr('Negative projected stock', 'مخزون متوقع سالب'), tr('Items with negative projected stock', 'أصناف بمخزون متوقع سالب'), tr('Raise a purchase or transfer, or correct the stock.', 'أنشئ طلب شراء أو نقل، أو صحّح المخزون.'),
+        function (r) { return { p: 'med', score: score('med', -n0(r.projected_qty), 0), dt: 'Item', name: r.item_code, title: r.item_code, desc: r.warehouse, who: null, due: tr('Projected ', 'المتوقع ') + num(r.projected_qty), tone: 'warn' }; },
+        [linkCol(tr('Item', 'الصنف'), 'Item', 'item_code'), col(tr('Warehouse', 'المستودع'), 'warehouse'), col(tr('Projected', 'المتوقع'), 'projected_qty', { num: 1, fmt: function (v) { return '<span class="dms-tone-bad">' + esc(num(v)) + '</span>'; } })]),
+      sp('a_mr_stopped', 'low', 'Material Request', co.concat([['status', '=', 'Stopped'], ['docstatus', '=', 1]]), 'transaction_date asc', MRF, tr('Stopped requests', 'طلبات متوقفة'), tr('Stopped material requests', 'طلبات مواد متوقفة'), tr('Cancel them, or re-open if still needed.', 'ألغِها أو أعد فتحها إن كانت مطلوبة.'), mrIt('low', 'n', 'transaction_date'), mrCols),
+      { id: 'a_fk_shop', client: true, short: tr('Forklifts in workshop', 'رافعات في الورشة'), title: tr('Forklifts whose latest log says Workshop', 'رافعات آخر سجل لها في الورشة'), why: tr('Latest forklift log in the period.', 'آخر سجل رافعة في الفترة.') }
+    ];
+  }
+  function actClient() {
+    var o = {};
+    if (D.unasErr) { o.a_dn_notrip = 'ERR:' + D.unasErr; } else if (D.unas) { var u = D.unas.filter(function (d) { return d.age >= 24; }); o.a_dn_notrip = { rows: u, count: u.length, item: function (d) { return { p: 'high', score: score('high', n0(d.base_grand_total), Math.floor(d.age / 24)), dt: 'Delivery Note', name: d.name, title: d.customer_name || d.customer || d.name, desc: [d.name, d.custom_delivery_by, d.location].filter(Boolean).join(' · '), who: d.custom_sales_person || null, due: tr(num(d.age) + ' h without a trip', num(d.age) + ' ساعة بلا رحلة'), tone: 'bad' }; } }; }
+    if (D.fkErr) { o.a_fk_shop = 'ERR:' + D.fkErr; } else if (D.fk) { var s = vals2(latest(D.fk)).filter(function (r) { return r.status === 'Workshop'; }); o.a_fk_shop = { rows: s, count: s.length, item: function (r) { return { p: 'low', score: score('low', 0, ageOf(d10(r.date))), dt: 'ForkLift', name: r.name, title: r.forklift_no || r.name, desc: [r.warehouse, r.driver_name].filter(Boolean).join(' · '), who: null, due: tr('Since ', 'منذ ') + d10(r.date), tone: 'n' }; } }; }
+    return Object.keys(o).length ? o : null;
+  }
+  function vals2(o) { return Object.keys(o).map(function (k) { return o[k]; }); }
+
+  /* ============================================================ shared pieces */
+  function banner() {
+    var ot = others(); if (F.company || !ot.length) { return ''; }
+    return alertBox('info', esc(tr('Values are in ', 'القيم بعملة ') + CUR + tr('; companies in another currency are left out of value totals: ', '؛ الشركات بعملة أخرى مستبعدة من مجاميع القيم: ') + ot.map(function (c) { return c.name + ' (' + c.default_currency + ')'; }).join(', ') + tr('. Counts and quantities include every company.', '. الأعداد والكميات تشمل كل الشركات.')));
+  }
+  function hb(list, n, fmt, colr) { return list.length ? hbars(list.slice(0, n || 8).map(function (x) { return { label: x[0], value: x[1] }; }), fmt || num, colr) : empty(); }
+  function tsChart(rows, dateF, ser, fmt) {
+    var B = buckets(PERIOD), m = ser.map(function () { return {}; }), pal = ['var(--dms-royal)', 'var(--dms-ok)', 'var(--dms-age3)', '#8a97a8', '#6b8be0', 'var(--dms-bad)'];
+    rows.forEach(function (r) { var k = B.keyOf(d10(r[dateF])); ser.forEach(function (s, i) { m[i][k] = (m[i][k] || 0) + (s.v ? s.v(r) : 1); }); });
+    return barChart(B.keys, B.gran, ser.map(function (s, i) { return { label: s.label, color: s.color || pal[i], val: function (k) { return m[i][k] || 0; } }; }), fmt || num);
+  }
+  function facts(rows) { return '<div class="dms-facts op-facts">' + rows.map(function (r) { return '<div><span class="dms-sm">' + esc(r[0]) + '</span><b class="dms-num' + (r[2] ? ' dms-tone-' + r[2] : '') + '">' + r[1] + '</b>' + (r[3] ? '<span class="dms-sm">' + r[3] + '</span>' : '') + '</div>'; }).join('') + '</div>'; }
+  function deltaTxt(cur, prev, f) { if (prev == null) { return ''; } var d = cur - prev; return (d > 0 ? '▲ ' : d < 0 ? '▼ ' : '= ') + (f || num)(Math.abs(d)) + tr(' vs previous period', ' عن الفترة السابقة'); }
+  function tons(kg) { return (n0(kg) / 1000).toFixed(1) + tr(' t', ' طن'); }
+  function tbl(id, rows, cols, o) { o = o || {}; return regTable(Object.assign({ id: id, rows: rows, cols: cols, pageSize: o.pageSize || 8, file: o.file || id, text: o.text || function (r) { return cols.map(function (c) { return c.c ? c.c(r) : ''; }).join(' '); }, empty: o.empty }, o.x || {})); }
+  function c(k, h, f, o) { o = o || {}; return { k: k, h: h, num: o.num, s: o.s || function (r) { return f(r); }, r: o.r || function (r) { var v = f(r); return o.num ? '<span class="dms-num">' + esc(o.fmt ? o.fmt(v) : num(v)) + '</span>' : bdi(dash(v)); }, c: function (r) { return f(r); } }; }
+  function lk(k, h, dt, f, lab) { return { k: k, h: h, s: function (r) { return f(r); }, r: function (r) { return f(r) ? docLink(dt, f(r), lab ? lab(r) : null) : '—'; }, c: function (r) { return f(r); } }; }
+  function chip(s) { var t = /^(completed|delivered|active|received|transferred|issued|approved)$/i.test(s) ? 'ok' : /^(cancelled|stopped|workshop|on hold|closed)$/i.test(s) ? 'bad' : /^(pending|not started|open|partially|not delivered|idle|draft|to bill)/i.test(s) ? 'warn' : 'n'; return s ? stat(t, s) : '—'; }
+  function bar(p) { var x = Math.max(0, Math.min(100, Math.round(n0(p)))); return '<span class="op-prog" role="img" aria-label="' + x + '%"><i style="width:' + x + '%"></i></span><span class="dms-num op-pct">' + x + '%</span>'; }
+  function need(keys, what, f) { for (var i = 0; i < keys.length; i++) { if (D[keys[i] + 'Err']) { return srcErr(D[keys[i] + 'Err'], what); } } for (var j = 0; j < keys.length; j++) { if (D[keys[j]] == null) { return skel(1, 'dms-skel-panel'); } } return f(); }
+  function kval(v, key) { return D[key + 'Err'] ? '—' : D[key] == null ? '…' : v(); }
+  function two(a, b) { return '<div class="dms-cols-2 dms-grid">' + a + b + '</div>'; }
+  function hours(rows, f, from, to) { var m = {}; rows.forEach(function (r) { var h = f(r); if (h != null && h >= from && h <= to) { m[h] = (m[h] || 0) + 1; } }); return Object.keys(m).map(Number).sort(function (a, b) { return a - b; }).map(function (h) { return [String(h).padStart(2, '0') + ':00', m[h]]; }); }
+
+  /* ============================================================ overview */
+  function tabOverview(AM) {
+    if (D.dnsErr) { return srcErr(D.dnsErr, 'Delivery Note') + actionsPanel(AM); }
+    var T = targets(), dns = D.dns, trips = D.trips, P = D.prev;
+    var k = [
+      kpi({ label: tr('Delivery notes', 'إشعارات التسليم'), dot: 'var(--dms-navy)', val: kval(function () { return num(dns.length); }, 'dns'), sub: esc(dns && P ? deltaTxt(dns.length, P.dn) : tr('Submitted, excluding returns', 'مرحّلة دون المرتجعات')) }),
+      kpi({ label: tr('Tonnage delivered', 'الأطنان المسلّمة'), dot: 'var(--dms-royal)', val: kval(function () { return tons(sum(dns, function (r) { return n0(r.total_net_weight); })); }, 'dns'), sub: esc(dns && P ? deltaTxt(sum(dns, function (r) { return n0(r.total_net_weight); }) / 1000, P.w / 1000, function (v) { return v.toFixed(1) + tr(' t', ' طن'); }) : tr('Net weight of delivery notes', 'الوزن الصافي للإشعارات')) }),
+      kpi({ label: tr('Trips', 'الرحلات'), dot: 'var(--dms-royal)', val: kval(function () { return num(trips.length); }, 'trips'), sub: esc(trips ? num(trips.filter(function (r) { return r.status === 'Completed'; }).length) + tr(' completed', ' مكتملة') : ''), act: 'goto:delivery' }),
+      kpi({ label: tr('Delivery notes without a trip', 'إشعارات بلا رحلة'), dot: 'var(--dms-age3)', val: kval(function () { return num(D.unas.length); }, 'unas'), sub: esc(tr('DM or rented vehicle', 'مركبة الشركة أو مستأجرة')), act: 'goto:delivery' }),
+      kpi({ label: tr('Open material requests', 'طلبات المواد المفتوحة'), dot: 'var(--dms-age3)', val: kval(function () { return num(D.mrs.length); }, 'mrs'), sub: esc(D.mrs ? num(D.mrs.filter(function (m) { return m.schedule_date && m.schedule_date < TODAY; }).length) + tr(' past required date', ' تجاوزت تاريخ الاحتياج') : ''), act: 'goto:supply' }),
+      kpi({ label: tr('Stale work orders', 'أوامر عمل متأخرة'), dot: 'var(--dms-bad)', val: kval(function () { return num(D.stale.length); }, 'stale'), sub: esc(tr('Not started, start date passed', 'لم تبدأ وتجاوزت تاريخ البدء')), act: 'goto:production' })
+    ];
+    var h = kpis(k, true);
+    h += '<div class="dms-main2">' + actionsPanel(AM) + '<div class="dms-stackcol">' + panel(tr('Today', 'اليوم'), todayBody(T), '', esc(TODAY) + ' · <button type="button" class="dms-linkbtn" data-act="kpi" data-v="targets">' + esc(tr('Daily targets', 'الأهداف اليومية')) + '</button>') +
+      panel(tr('Delivery notes per period', 'إشعارات التسليم حسب الفترة'), need(['dns'], 'Delivery Note', function () { return tsChart(dns, 'posting_date', [{ label: tr('Delivery notes', 'إشعارات التسليم') }]); })) + '</div></div>';
+    h += two(panel(tr('Delivery value', 'قيمة التسليم'), need(['dns'], 'Delivery Note', function () { return tsChart(dns.filter(function (r) { return inScope(r.company); }), 'posting_date', [{ label: vCur(), v: function (r) { return n0(r.base_grand_total); } }], function (v) { return moneyFull(v, vCur()); }); })),
+      panel(tr('Tonnage delivered', 'الأطنان المسلّمة'), need(['dns'], 'Delivery Note', function () { return tsChart(dns, 'posting_date', [{ label: tr('Tonnes', 'أطنان'), color: 'var(--dms-ok)', v: function (r) { return n0(r.total_net_weight) / 1000; } }], function (v) { return v.toFixed(1) + tr(' t', ' طن'); }); })));
+    h += two(panel(tr('Delivery note status', 'حالة إشعارات التسليم'), need(['dns'], 'Delivery Note', function () { return hb(tl(dns, function (r) { return r.status || NS(); })); })), panel(tr('Delivery notes by location', 'إشعارات التسليم حسب الموقع'), need(['dns'], 'Delivery Note', function () { return hb(tl(dns, function (r) { return r.location || NS(); }), 8); })));
+    h += two(panel(tr('Top customers by tonnage', 'أعلى العملاء حسب الأطنان'), need(['dns'], 'Delivery Note', function () { return hb(tl(dns, function (r) { return r.customer_name || r.customer || NS(); }, function (r) { return n0(r.total_net_weight) / 1000; }), 8, function (v) { return v.toFixed(1) + tr(' t', ' طن'); }); })),
+      panel(tr('Top sales persons by value', 'أفضل مندوبي المبيعات حسب القيمة'), need(['dns'], 'Delivery Note', function () { return hb(tl(dns.filter(function (r) { return inScope(r.company); }), function (r) { return r.custom_sales_person || NS(); }, function (r) { return n0(r.base_grand_total); }), 8, function (v) { return moneyS(v, vCur()); }); })));
+    h += two(panel(tr('Delivery notes by hour', 'إشعارات التسليم حسب الساعة'), need(['dns'], 'Delivery Note', function () { return hb(hours(dns, function (r) { var x = parseInt(String(r.posting_time || '').slice(0, 2), 10); return isNaN(x) ? null : x; }, 6, 22), 17); }), '', esc(tr('Posting time, 06:00 to 22:00', 'وقت الترحيل من 06:00 إلى 22:00'))),
+      panel(tr('Open material requests', 'طلبات المواد المفتوحة'), need(['mrs'], 'Material Request', function () { return mrTable('t_ovmr', D.mrs); }), '', esc(tr('By required date', 'حسب تاريخ الاحتياج'))));
+    return h + panel(tr('Latest delivery notes', 'أحدث إشعارات التسليم'), need(['dns'], 'Delivery Note', function () { return dnTable('t_dn', dns); }));
+  }
+  function todayBody(T) {
+    var x = D.today; if (D.todayErr) { return srcErr(D.todayErr, tr('Today counts', 'أعداد اليوم')); } if (!x) { return skel(1, 'dms-skel-panel'); }
+    var s = function (rows, f) { return rows.reduce(function (a, r) { return a + n0(r[f]); }, 0); }, dnN = s(x.dn, 'n'), dnY = s(x.dnY, 'n'), w = s(x.dn, 'w') / 1000, wY = s(x.dnY, 'w') / 1000, tN = s(x.trip, 'n'), tDone = s(x.trip.filter(function (r) { return r.status === 'Completed'; }), 'n'), earn = svSum(x.trip, 'e'), val = svSum(x.dn, 'v'), valY = svSum(x.dnY, 'v'), sh = function (v) { return v == null ? '—' : num(v); };
+    var dl = function (a, b, f) { var d = a - b; return esc((d > 0 ? '▲ ' : d < 0 ? '▼ ' : '= ') + (f || num)(Math.abs(d)) + tr(' vs yesterday', ' عن الأمس')); };
+    return facts([[tr('Delivery notes', 'إشعارات التسليم'), esc(num(dnN)), '', dl(dnN, dnY) + esc(ofTarget(dnN, T.dns_day))], [tr('Trips', 'الرحلات'), esc(num(tN)), '', esc(num(tDone) + tr(' done · ', ' منجزة · ')) + dl(tN, n0(x.tripY)) + esc(ofTarget(tN, T.trips_day))], [tr('Tonnage', 'الأطنان'), esc(w.toFixed(1) + tr(' t', ' طن')), '', dl(w, wY, function (v) { return v.toFixed(1) + tr(' t', ' طن'); }) + esc(ofTarget(w, T.tons_day))],
+      [tr('Delivery value', 'قيمة التسليم'), cur$(val, vCur()), '', dl(val, valY, money)], [tr('Trip earnings', 'أرباح الرحلات'), cur$(earn, vCur()), '', esc(ofTarget(earn, T.earn_day))], [tr('Requests created', 'طلبات أنشئت'), esc(sh(x.mrToday))], [tr('Purchase receipts', 'إيصالات الشراء'), esc(sh(x.prToday))], [tr('Stock entries', 'قيود المخزون'), esc(sh(x.seToday))],
+      [tr('Draft delivery notes', 'إشعارات مسودة'), esc(sh(x.draftDn)), x.draftDn ? 'warn' : '', esc(tr('All dates', 'كل التواريخ'))], [tr('Delivery notes to bill', 'إشعارات للفوترة'), esc(sh(x.toBill)), '', esc(tr('In the period', 'في الفترة'))], [tr('Open job cards', 'بطاقات عمل مفتوحة'), esc(sh(x.openJc))], [tr('Work orders in process', 'أوامر عمل قيد التنفيذ'), esc(sh(x.woProc))]]);
+  }
+  function dnTable(id, rows) { return tbl(id, rows, [lk('dn', tr('Delivery note', 'إشعار التسليم'), 'Delivery Note', function (r) { return r.name; }), c('cu', tr('Customer', 'العميل'), function (r) { return r.customer_name || r.customer; }), c('d', tr('Date', 'التاريخ'), function (r) { return r.posting_date; }), c('w', tr('Net weight (kg)', 'الوزن الصافي (كجم)'), function (r) { return n0(r.total_net_weight); }, { num: 1 }), c('v', tr('Value', 'القيمة'), function (r) { return n0(r.base_grand_total); }, { num: 1, fmt: money }), { k: 'st', h: tr('Status', 'الحالة'), s: function (r) { return r.status; }, r: function (r) { return chip(r.status); }, c: function (r) { return r.status; } }], { file: 'delivery_notes' }); }
+  function mrTable(id, rows, late) { return tbl(id, rows, [lk('mr', tr('Request', 'الطلب'), 'Material Request', function (r) { return r.name; }), c('p', tr('Purpose', 'الغرض'), function (r) { return r.material_request_type; }), c('pr', tr('Priority', 'الأولوية'), function (r) { return r.custom_priority; }), c('due', tr('Required', 'مطلوب بتاريخ'), function (r) { return r.schedule_date; }), late ? { k: 'late', h: tr('Days late', 'أيام التأخير'), num: 1, s: function (r) { return diffDays(r.schedule_date, TODAY); }, r: function (r) { return overdueTag(r.schedule_date); }, c: function (r) { return diffDays(r.schedule_date, TODAY); } } : { k: 'st', h: tr('State', 'الحالة'), s: function (r) { return r.workflow_state || r.status; }, r: function (r) { return chip(r.workflow_state || r.status); }, c: function (r) { return r.workflow_state || r.status; } }, { k: 'o', h: tr('Ordered', 'المطلوب'), s: function (r) { return n0(r.per_ordered); }, r: function (r) { return bar(r.per_ordered); }, c: function (r) { return n0(r.per_ordered); } }], { file: 'material_requests' }); }
+
+  /* ============================================================ delivery & fleet */
+  function tabDelivery() {
+    if (D.tripsErr) { return srcErr(D.tripsErr, 'Delivery Trip'); } if (!D.trips) { return '<div class="dms-grid dms-kpis" aria-busy="true">' + skel(6, 'dms-skel-kpi') + '</div><div class="dms-skel dms-skel-panel"></div>'; }
+    var t = D.trips, P = D.prev, done = t.filter(function (r) { return r.status === 'Completed'; }).length, dlv = t.filter(function (r) { return r.delivery_status === 'Delivered'; }).length, earn = svSum(t, 'custom_total_amount_earned'), dnE = svSum(t.filter(function (r) { return r.custom_trip_type_ === 'Delivery Note'; }), 'custom_total_amount_earned');
+    var h = kpis([
+      kpi({ label: tr('Trips', 'الرحلات'), val: num(t.length), sub: esc(P ? deltaTxt(t.length, P.trips) : '') }),
+      kpi({ label: tr('Completion rate', 'نسبة الإنجاز'), val: pct(done, t.length, 0), sub: esc(num(done) + tr(' completed', ' مكتملة') + (t.length && !done ? tr(' · trip status not updated in ERP', ' · حالة الرحلة لم تُحدَّث') : '')) }),
+      kpi({ label: tr('Delivered rate', 'نسبة التسليم'), val: pct(dlv, t.length, 0), sub: esc(num(dlv) + tr(' delivered', ' مسلّمة')) }),
+      kpi({ label: tr('Trip earnings', 'أرباح الرحلات'), val: cur$(earn, vCur()), sub: esc((P ? deltaTxt(earn, P.earn, money) + ' · ' : '') + tr('Delivery trips ', 'رحلات التسليم ') + money(dnE)) }),
+      kpi({ label: tr('Active drivers', 'السائقون النشطون'), val: num(uniq(t.map(function (r) { return r.driver_name; })).length), sub: esc(tr('With trips', 'لهم رحلات')) }),
+      kpi({ label: tr('Vehicles used', 'المركبات المستخدمة'), val: num(uniq(t.map(function (r) { return r.vehicle; })).length), sub: esc(tr('Distinct', 'مميزة')) })
+    ]);
+    h += panel(tr('Delivery notes without a trip', 'إشعارات تسليم بلا رحلة'), need(['unas'], 'Delivery Stop', function () { return tbl('t_unas', D.unas, [lk('dn', tr('Delivery note', 'إشعار التسليم'), 'Delivery Note', function (r) { return r.name; }), c('cu', tr('Customer', 'العميل'), function (r) { return r.customer_name || r.customer; }), c('d', tr('Date', 'التاريخ'), function (r) { return r.posting_date; }), c('age', tr('Age (h)', 'العمر (ساعة)'), function (r) { return r.age; }, { num: 1 }), c('w', tr('Net weight (kg)', 'الوزن (كجم)'), function (r) { return n0(r.total_net_weight); }, { num: 1 }), c('v', tr('Value', 'القيمة'), function (r) { return n0(r.base_grand_total); }, { num: 1, fmt: money }), c('by', tr('Vehicle', 'المركبة'), function (r) { return r.custom_delivery_by; }), c('loc', tr('Location', 'الموقع'), function (r) { return r.location; }), c('sp', tr('Sales person', 'المندوب'), function (r) { return r.custom_sales_person; })], { file: 'delivery_notes_without_trip', empty: tr('Every vehicle delivery has a trip.', 'كل تسليم بمركبة له رحلة.') }); }),
+      '', esc(tr('DM or rented vehicle, not on any Delivery Trip stop; oldest first', 'مركبة الشركة أو مستأجرة وليست على أي رحلة؛ الأقدم أولًا')) + ' · <a class="dms-link" href="/app/delivery-trip/new" target="_blank" rel="noopener noreferrer">' + esc(tr('New delivery trip', 'رحلة توصيل جديدة')) + ' ↗</a>');
+    var per = {}; t.forEach(function (r) { var w = mins(r.custom_driver_reporting_time__at_warehouse, r.departure_time), s = mins(r.custom_delivered_time, r.custom_driver__out_of_site); if (w === null || s === null || w < 0 || s < 0 || w > 720 || s > 720) { per._skip = (per._skip || 0) + 1; return; } var k = r.driver_name || NS(), x = per[k] || (per[k] = { w: 0, s: 0, n: 0 }); x.w += w; x.s += s; x.n++; });
+    var idle = Object.keys(per).filter(function (k) { return k !== '_skip'; }).map(function (k) { var x = per[k]; return { label: k, part: Math.round(x.w / x.n), total: Math.round((x.w + x.s) / x.n) }; }).sort(function (a, b) { return b.total - a.total; }).slice(0, 10);
+    h += two(panel(tr('Trips per period', 'الرحلات حسب الفترة'), tsChart(t, 'custom_delivery_date', [{ label: tr('Completed', 'مكتملة'), color: 'var(--dms-ok)', v: function (r) { return r.status === 'Completed' ? 1 : 0; } }, { label: tr('Other', 'أخرى'), color: '#8a97a8', v: function (r) { return r.status === 'Completed' ? 0 : 1; } }])),
+      panel(tr('Average idle per trip', 'متوسط الخمول لكل رحلة'), idle.length ? splitBars(idle, [{ label: tr('Warehouse idle', 'خمول المستودع'), color: 'var(--dms-royal)' }, { label: tr('Site idle', 'خمول الموقع'), color: 'var(--dms-age3)' }], function (v) { return num(v) + tr(' min', ' د'); }) : empty(), '', esc(tr('Minutes per driver: report → departure, then arrival → site exit', 'دقائق لكل سائق: الحضور ← المغادرة ثم الوصول ← الخروج') + (per._skip ? ' · ' + num(per._skip) + tr(' trips skipped (missing or bad times)', ' رحلة مستبعدة (أوقات ناقصة أو خاطئة)') : ''))));
+    h += two(panel(tr('Trip types', 'أنواع الرحلات'), hb(tl(t, function (r) { return r.custom_trip_type_ || NS(); }))), panel(tr('Trip status', 'حالة الرحلات'), hb(tl(t, function (r) { return r.status || NS(); }))));
+    h += two(panel(tr('Delivery status', 'حالة التسليم'), hb(tl(t, function (r) { return r.delivery_status || NS(); }))), panel(tr('Delivery vehicle', 'مركبة التوصيل'), need(['dns'], 'Delivery Note', function () { return hb(tl(D.dns, function (r) { return r.custom_delivery_by || NS(); })); }), '', esc(tr('Delivery notes', 'إشعارات التسليم'))));
+    var dr = {}, vh = {}; t.forEach(function (r) { var a = dr[r.driver_name || NS()] || (dr[r.driver_name || NS()] = { k: r.driver_name || NS(), n: 0, done: 0, amt: 0, days: {} }), b = vh[r.vehicle || NS()] || (vh[r.vehicle || NS()] = { k: r.vehicle || NS(), n: 0, amt: 0, days: {}, drv: {} }); a.n++; b.n++; if (r.status === 'Completed') { a.done++; } if (inScope(r.company)) { a.amt += n0(r.custom_total_amount_earned); b.amt += n0(r.custom_total_amount_earned); } a.days[r.custom_delivery_date] = 1; b.days[r.custom_delivery_date] = 1; if (r.driver_name) { b.drv[r.driver_name] = 1; } });
+    h += two(panel(tr('Driver scoreboard', 'لوحة أداء السائقين'), tbl('t_drv', vals2(dr), [c('k', tr('Driver', 'السائق'), function (r) { return r.k; }), c('n', tr('Trips', 'الرحلات'), function (r) { return r.n; }, { num: 1 }), c('d', tr('Days', 'الأيام'), function (r) { return Object.keys(r.days).length; }, { num: 1 }), { k: 'c', h: tr('Completed', 'مكتملة'), s: function (r) { return r.done / r.n; }, r: function (r) { return bar(r.done / r.n * 100); }, c: function (r) { return r.done; } }, c('e', tr('Earned', 'المكتسب'), function (r) { return r.amt; }, { num: 1, fmt: money }), c('a', tr('Per trip', 'لكل رحلة'), function (r) { return r.amt / r.n; }, { num: 1, fmt: money })], { file: 'drivers', x: { sk: 'n', dir: -1 } })),
+      panel(tr('Vehicle scoreboard', 'لوحة أداء المركبات'), tbl('t_veh', vals2(vh), [c('k', tr('Vehicle', 'المركبة'), function (r) { return r.k; }), c('n', tr('Trips', 'الرحلات'), function (r) { return r.n; }, { num: 1 }), c('d', tr('Days used', 'أيام الاستخدام'), function (r) { return Object.keys(r.days).length; }, { num: 1 }), c('dr', tr('Drivers', 'السائقون'), function (r) { return Object.keys(r.drv).length; }, { num: 1 }), c('e', tr('Earned', 'المكتسب'), function (r) { return r.amt; }, { num: 1, fmt: money })], { file: 'vehicles', x: { sk: 'n', dir: -1 } })));
+    h += two(panel(tr('Trip earnings', 'أرباح الرحلات'), tsChart(t.filter(function (r) { return inScope(r.company); }), 'custom_delivery_date', [{ label: vCur(), v: function (r) { return n0(r.custom_total_amount_earned); } }], function (v) { return moneyFull(v, vCur()); })),
+      panel(tr('Departures by hour', 'المغادرات حسب الساعة'), hb(hours(t, function (r) { var x = parseInt(String(r.departure_time || '').slice(11, 13), 10); return isNaN(x) ? null : x; }, 5, 22), 18)));
+    h += two(panel(tr('Trips by source warehouse', 'الرحلات حسب مستودع المصدر'), hb(tl(t, function (r) { return r.custom_source_warehouse || NS(); }), 8)), panel(tr('Trips by destination', 'الرحلات حسب الوجهة'), hb(tl(t, function (r) { return r.custom_delivery_to_warehouse || NS(); }), 8)));
+    h += two(panel(tr('Top routes', 'أبرز المسارات'), tbl('t_routes', tl(t, function (r) { return (r.custom_source_warehouse || '—') + ' → ' + (r.custom_delivery_to_warehouse || '—'); }), [c('r', tr('Route', 'المسار'), function (x) { return x[0]; }), c('n', tr('Trips', 'الرحلات'), function (x) { return x[1]; }, { num: 1 })], { file: 'routes', x: { sk: 'n', dir: -1 } })),
+      panel(tr('Delivery mode', 'طريقة التسليم'), need(['dns'], 'Delivery Note', function () { return hb(tl(D.dns, function (r) { return r.delivery_mode || NS(); })); })));
+    h += two(panel(tr('Tonnage by location', 'الأطنان حسب الموقع'), need(['dns'], 'Delivery Note', function () { return hb(tl(D.dns, function (r) { return r.location || NS(); }, function (r) { return n0(r.total_net_weight) / 1000; }), 8, function (v) { return v.toFixed(1) + tr(' t', ' طن'); }); })),
+      panel(tr('Top customers by value', 'أعلى العملاء حسب القيمة'), need(['dns'], 'Delivery Note', function () { return hb(tl(D.dns.filter(function (r) { return inScope(r.company); }), function (r) { return r.customer_name || r.customer || NS(); }, function (r) { return n0(r.base_grand_total); }), 8, function (v) { return moneyS(v, vCur()); }); })));
+    h += panel(tr('Delivery notes by sales person', 'إشعارات التسليم حسب المندوب'), need(['dns'], 'Delivery Note', function () { return hb(tl(D.dns, function (r) { return r.custom_sales_person || NS(); }), 10); }));
+    h += panel(tr('Vehicle utilisation', 'استخدام المركبات'), heat(t), '', esc(tr('Trips per vehicle per day, last 14 days of the period; top 12 vehicles', 'رحلات كل مركبة يوميًا لآخر 14 يومًا من الفترة؛ أعلى 12 مركبة')));
+    return h + panel(tr('Trip log', 'سجل الرحلات'), tbl('t_trips', t, [lk('t', tr('Trip', 'الرحلة'), 'Delivery Trip', function (r) { return r.name; }), c('d', tr('Date', 'التاريخ'), function (r) { return r.custom_delivery_date; }), c('ty', tr('Type', 'النوع'), function (r) { return r.custom_trip_type_; }), c('dr', tr('Driver', 'السائق'), function (r) { return r.driver_name; }), c('v', tr('Vehicle', 'المركبة'), function (r) { return r.vehicle; }), c('rt', tr('From → to', 'من ← إلى'), function (r) { return (r.custom_source_warehouse || '—') + ' → ' + (r.custom_delivery_to_warehouse || '—'); }), { k: 'st', h: tr('Status', 'الحالة'), s: function (r) { return r.status; }, r: function (r) { return chip(r.status) + ' ' + chip(r.delivery_status); }, c: function (r) { return r.status + ' / ' + (r.delivery_status || ''); } }, c('e', tr('Earned', 'المكتسب'), function (r) { return n0(r.custom_total_amount_earned); }, { num: 1, fmt: money })], { file: 'trips', pageSize: 10 }));
+  }
+  function heat(t) {
+    var to = PERIOD[1] > TODAY ? TODAY : PERIOD[1], days = []; for (var d = addDays(to, -13); d <= to; d = addDays(d, 1)) { if (d >= PERIOD[0]) { days.push(d); } }
+    var top = tl(t, function (r) { return r.vehicle || NS(); }).slice(0, 12); if (!top.length || !days.length) { return empty(); }
+    var cell = {}; t.forEach(function (r) { var k = (r.vehicle || NS()) + '|' + r.custom_delivery_date; cell[k] = (cell[k] || 0) + 1; });
+    return '<div class="dms-tablewrap"><table class="dms-table op-heat"><thead><tr><th scope="col">' + esc(tr('Vehicle', 'المركبة')) + '</th>' + days.map(function (x) { return '<th scope="col" class="dms-num">' + esc(x.slice(8)) + '</th>'; }).join('') + '<th scope="col" class="dms-num">' + esc(tr('Total', 'الإجمالي')) + '</th></tr></thead><tbody>' +
+      top.map(function (v) { var tot = 0; return '<tr><th scope="row">' + bdi(v[0]) + '</th>' + days.map(function (x) { var n = cell[v[0] + '|' + x] || 0; tot += n; return '<td class="dms-num" data-n="' + Math.min(n, 4) + '">' + (n || '') + '</td>'; }).join('') + '<td class="dms-num"><b>' + tot + '</b></td></tr>'; }).join('') + '</tbody></table></div>';
+  }
+
+  /* ============================================================ warehouse & forklift */
+  function tabForklift() {
+    if (D.fkErr) { return srcErr(D.fkErr, 'ForkLift'); } if (!D.fk) { return '<div class="dms-grid dms-kpis" aria-busy="true">' + skel(6, 'dms-skel-kpi') + '</div><div class="dms-skel dms-skel-panel"></div>'; }
+    var r = D.fk, L = vals2(latest(r)), st = function (s) { return L.filter(function (x) { return x.status === s; }).length; }, ex = sum(r, expense), ws = sum(r, wash), ops = uniq(r.map(function (x) { return x.driver_name; })).length;
+    var h = kpis([kpi({ label: tr('Active forklifts', 'رافعات نشطة'), dot: 'var(--dms-ok)', val: num(st('Active')), sub: esc(tr('Latest status', 'آخر حالة')) }), kpi({ label: tr('Idle forklifts', 'رافعات خاملة'), dot: '#8a97a8', val: num(st('Idle')), sub: esc(tr('Latest status', 'آخر حالة')) }), kpi({ label: tr('In workshop', 'في الورشة'), dot: 'var(--dms-bad)', val: num(st('Workshop')), sub: esc(tr('Latest status', 'آخر حالة')) }),
+      kpi({ label: tr('Vehicles loaded', 'مركبات محمّلة'), val: num(sum(r, load)) }), kpi({ label: tr('Vehicles unloaded', 'مركبات مفرّغة'), val: num(sum(r, unload)) }), kpi({ label: tr('Forklift expenses', 'مصروفات الرافعات'), val: cur$(ex, CUR), sub: esc(ex ? tr('In the period', 'في الفترة') : tr('No expenses recorded in the period', 'لا مصروفات مسجلة في الفترة')) })]);
+    h += two(panel(tr('Forklift status', 'حالة الرافعات'), facts([[tr('Active', 'نشطة'), esc(num(st('Active'))), 'ok'], [tr('Idle', 'خاملة'), esc(num(st('Idle')))], [tr('Workshop', 'الورشة'), esc(num(st('Workshop'))), st('Workshop') ? 'bad' : ''], [tr('Registered', 'المسجلة'), esc(D.reg ? num(D.reg.n) : D.regErr ? '—' : '…')], [tr('Washings', 'الغسيل'), esc(num(ws))], [tr('Operators', 'المشغّلون'), esc(num(ops))]]), '', esc(tr('Latest log per forklift in the period', 'آخر سجل لكل رافعة في الفترة'))),
+      panel(tr('Daily movements', 'الحركات اليومية'), tsChart(r, 'date', [{ label: tr('Loading', 'التحميل'), v: load }, { label: tr('Unloading', 'التفريغ'), color: 'var(--dms-ok)', v: unload }])));
+    var byW = {}; r.forEach(function (x) { var k = x.warehouse || NS(), o = byW[k] || (byW[k] = { label: k, part: 0, total: 0 }); o.part += load(x); o.total += load(x) + unload(x); });
+    h += two(panel(tr('Loading and unloading by warehouse', 'التحميل والتفريغ حسب المستودع'), splitBars(vals2(byW).sort(function (a, b) { return b.total - a.total; }).slice(0, 10), [{ label: tr('Loading', 'التحميل'), color: 'var(--dms-royal)' }, { label: tr('Unloading', 'التفريغ'), color: 'var(--dms-ok)' }], num)),
+      panel(tr('Handled by vehicle type', 'المناولة حسب نوع المركبة'), tsChart(r, 'date', VT.map(function (t) { return { label: tr(t[1], t[2]), v: function (x) { return n0(x['loading_' + t[0]]) + n0(x['unloading_' + t[0]]); } }; }))));
+    var op = {}; r.forEach(function (x) { var k = (x.driver_name || NS()) + '|' + (x.forklift_no || NS()), o = op[k] || (op[k] = { d: x.driver_name || NS(), f: x.forklift_no || NS(), w: x.warehouse || NS(), l: 0, u: 0, days: {} }); o.l += load(x); o.u += unload(x); o.days[x.date] = 1; });
+    h += panel(tr('Operator productivity', 'إنتاجية المشغّلين'), tbl('t_ops', vals2(op), [c('d', tr('Operator', 'المشغّل'), function (o) { return o.d; }), c('f', tr('Forklift', 'الرافعة'), function (o) { return o.f; }), c('w', tr('Warehouse', 'المستودع'), function (o) { return o.w; }), c('l', tr('Loaded', 'تحميل'), function (o) { return o.l; }, { num: 1 }), c('u', tr('Unloaded', 'تفريغ'), function (o) { return o.u; }, { num: 1 }), c('t', tr('Total', 'الإجمالي'), function (o) { return o.l + o.u; }, { num: 1 }), c('dy', tr('Days', 'الأيام'), function (o) { return Object.keys(o.days).length; }, { num: 1 }), c('a', tr('Per day', 'في اليوم'), function (o) { return (o.l + o.u) / (Object.keys(o.days).length || 1); }, { num: 1, fmt: function (v) { return v.toFixed(1); } })], { file: 'operators', x: { sk: 't', dir: -1 } }));
+    var byT = function (f) { return VT.map(function (t) { return [tr(t[1], t[2]), sum(r, function (x) { return f(x, t[0]); })]; }).filter(function (x) { return x[1]; }); };
+    h += two(panel(tr('Expenses by vehicle type', 'المصروفات حسب نوع المركبة'), hb(byT(function (x, k) { return n0(x[k + '_expense']); }), 4, function (v) { return moneyS(v, CUR); })), panel(tr('Washings by vehicle type', 'الغسيل حسب نوع المركبة'), hb(byT(function (x, k) { return n0(x[k + '_cleaning']); }), 4)));
+    h += two(panel(tr('Handled by vehicle type, total', 'المناولة حسب نوع المركبة، الإجمالي'), hb(byT(function (x, k) { return n0(x['loading_' + k]) + n0(x['unloading_' + k]); }), 4)), panel(tr('Setting', 'الإعداد'), hb(tl(r.filter(function (x) { return x.setting; }), function (x) { return x.setting; }))));
+    h += two(panel(tr('Expenses', 'المصروفات'), tsChart(r, 'date', [{ label: CUR, color: 'var(--dms-age3)', v: expense }], function (v) { return moneyFull(v, CUR); })), panel(tr('Top operators by volume', 'أعلى المشغّلين حسب الحجم'), hb(tl(r, function (x) { return x.driver_name || NS(); }, function (x) { return load(x) + unload(x); }), 10)));
+    var wh = {}; r.forEach(function (x) { var k = x.warehouse || NS(), o = wh[k] || (wh[k] = { w: k, l: 0, u: 0, e: 0, s: 0, f: {} }); o.l += load(x); o.u += unload(x); o.e += expense(x); o.s += wash(x); if (x.forklift_no) { o.f[x.forklift_no] = 1; } });
+    var span = Math.max(1, diffDays(PERIOD[0], PERIOD[1] > TODAY ? TODAY : PERIOD[1]) + 1), ut = {}; r.forEach(function (x) { var k = x.forklift_no || NS(), o = ut[k] || (ut[k] = { k: k, a: {}, m: 0 }); if (x.status === 'Active') { o.a[x.date] = 1; } o.m += load(x) + unload(x); });
+    h += two(panel(tr('Warehouse summary', 'ملخص المستودع'), tbl('t_whs', vals2(wh), [c('w', tr('Warehouse', 'المستودع'), function (o) { return o.w; }), c('f', tr('Forklifts', 'الرافعات'), function (o) { return Object.keys(o.f).length; }, { num: 1 }), c('l', tr('Loaded', 'تحميل'), function (o) { return o.l; }, { num: 1 }), c('u', tr('Unloaded', 'تفريغ'), function (o) { return o.u; }, { num: 1 }), c('e', tr('Expense', 'المصروف'), function (o) { return o.e; }, { num: 1, fmt: money }), c('s', tr('Washes', 'الغسلات'), function (o) { return o.s; }, { num: 1 })], { file: 'forklift_warehouses', x: { sk: 'l', dir: -1 } })),
+      panel(tr('Forklift utilisation', 'استخدام الرافعات'), tbl('t_util', vals2(ut), [c('k', tr('Forklift', 'الرافعة'), function (o) { return o.k; }), c('a', tr('Active days', 'أيام النشاط'), function (o) { return Object.keys(o.a).length; }, { num: 1 }), c('m', tr('Movements', 'الحركات'), function (o) { return o.m; }, { num: 1 }), { k: 'u', h: tr('Utilisation', 'الاستخدام'), s: function (o) { return Object.keys(o.a).length; }, r: function (o) { return bar(Object.keys(o.a).length / span * 100); }, c: function (o) { return Math.round(Object.keys(o.a).length / span * 100) + '%'; } }], { file: 'forklift_utilisation', x: { sk: 'a', dir: -1 } }), '', esc(tr('Days with an Active log out of ', 'أيام بسجل نشط من ') + num(span) + tr(' days', ' يومًا'))));
+    var lt = latest(r);
+    return h + panel(tr('Forklift registry', 'سجل الرافعات'), need(['reg'], 'Forklift list', function () { return tbl('t_reg', D.reg.rows, [c('f', tr('Forklift', 'الرافعة'), function (o) { return o.forklift_no || o.name; }), c('m', tr('Maker and model', 'الصانع والطراز'), function (o) { return [o.vehicle_maker, o.vehicle_model].filter(Boolean).join(' '); }), c('d', tr('Assigned driver', 'السائق المكلّف'), function (o) { return o.driver_name; }), { k: 's', h: tr('Latest status', 'آخر حالة'), s: function (o) { return (lt[o.forklift_no] || {}).status || ''; }, r: function (o) { return chip((lt[o.forklift_no] || {}).status); }, c: function (o) { return (lt[o.forklift_no] || {}).status; } }, c('ls', tr('Last log', 'آخر سجل'), function (o) { return (lt[o.forklift_no] || {}).date; })], { file: 'forklift_registry' }); }));
+  }
+
+  /* ============================================================ production */
+  function tabProduction() {
+    var keys = ['wo', 'jc', 'dpu', 'fdp', 'mpt', 'wopipe', 'woproc'];
+    if (D.woErr) { return srcErr(D.woErr, 'Work Order'); } if (!D.wo) { return '<div class="dms-grid dms-kpis" aria-busy="true">' + skel(6, 'dms-skel-kpi') + '</div><div class="dms-skel dms-skel-panel"></div>'; }
+    var w = D.wo, q = sum(w, function (x) { return n0(x.qty); }), p = sum(w, function (x) { return n0(x.produced_qty); }), loss = sum(w, function (x) { return n0(x.process_loss_qty); }), item = function (x) { return x.item_name || x.production_item || NS(); };
+    var h = kpis([kpi({ label: tr('Work orders', 'أوامر العمل'), val: num(w.length), sub: esc(tr('Planned to start in the period', 'مخطط بدؤها في الفترة')) }), kpi({ label: tr('In process', 'قيد التنفيذ'), dot: 'var(--dms-royal)', val: num(w.filter(function (x) { return x.status === 'In Process'; }).length) }), kpi({ label: tr('Completed', 'مكتملة'), dot: 'var(--dms-ok)', val: num(w.filter(function (x) { return x.status === 'Completed'; }).length) }),
+      kpi({ label: tr('Plan attainment', 'تحقيق الخطة'), val: pct(p, q, 0), sub: esc(num(p) + ' / ' + num(q) + tr(' produced', ' منتج')) }), kpi({ label: tr('Process loss', 'فاقد التصنيع'), dot: loss ? 'var(--dms-age3)' : null, val: num(loss), sub: esc(loss ? tr('Qty lost', 'الكمية المفقودة') : tr('None recorded', 'لا شيء مسجل')) }),
+      kpi({ label: tr('Open job cards', 'بطاقات عمل مفتوحة'), val: kval(function () { return num(D.jc.filter(function (j) { return OPEN_JC.indexOf(j.status) > -1; }).length); }, 'jc'), sub: esc(tr('In the period', 'في الفترة')) })]);
+    h += two(panel(tr('Work order pipeline', 'مراحل أوامر العمل'), need(['wopipe'], 'Work Order', function () { return hb(Object.keys(D.wopipe).map(function (k) { return [k, D.wopipe[k]]; }).sort(function (a, b) { return b[1] - a[1]; })); }), '', esc(tr('Not started and in process: all dates; others: in the period', 'لم تبدأ وقيد التنفيذ: كل التواريخ؛ الباقي: في الفترة'))),
+      panel(tr('Job card status', 'حالة بطاقات العمل'), need(['jc'], 'Job Card', function () { return hb(tl(D.jc, function (x) { return x.status || NS(); })); })));
+    h += two(panel(tr('Work orders in process', 'أوامر العمل قيد التنفيذ'), need(['woproc'], 'Work Order', function () { return tbl('t_wip', D.woproc, [lk('wo', tr('Work order', 'أمر العمل'), 'Work Order', function (x) { return x.name; }), c('i', tr('Item', 'الصنف'), item), c('q', tr('Done / qty', 'المنجز / الكمية'), function (x) { return num(x.produced_qty) + ' / ' + num(x.qty); }), c('due', tr('Due', 'الاستحقاق'), function (x) { return d10(x.planned_end_date); }), { k: 'p', h: tr('Progress', 'التقدم'), s: function (x) { return n0(x.qty) ? n0(x.produced_qty) / n0(x.qty) : 0; }, r: function (x) { return bar(n0(x.qty) ? n0(x.produced_qty) / n0(x.qty) * 100 : 0); }, c: function (x) { return x.produced_qty; } }], { file: 'work_orders_in_process', empty: tr('No work orders in process.', 'لا أوامر عمل قيد التنفيذ.') }); })),
+      panel(tr('Stale work orders', 'أوامر عمل متأخرة'), need(['stale'], 'Work Order', function () { return tbl('t_stale', D.stale, [lk('wo', tr('Work order', 'أمر العمل'), 'Work Order', function (x) { return x.name; }), c('i', tr('Item', 'الصنف'), item), c('q', tr('Qty', 'الكمية'), function (x) { return n0(x.qty); }, { num: 1 }), c('pl', tr('Planned start', 'البدء المخطط'), function (x) { return d10(x.planned_start_date); }), { k: 'd', h: tr('Days late', 'أيام التأخير'), num: 1, s: function (x) { return diffDays(d10(x.planned_start_date), TODAY); }, r: function (x) { return overdueTag(x.planned_start_date); }, c: function (x) { return diffDays(d10(x.planned_start_date), TODAY); } }], { file: 'stale_work_orders', empty: tr('No stale work orders.', 'لا أوامر عمل متأخرة.') }); }), '', esc(tr('Not started, start date passed', 'لم تبدأ وتجاوزت تاريخ البدء'))));
+    h += two(panel(tr('Job card time by operation', 'وقت بطاقات العمل حسب العملية'), need(['jc'], 'Job Card', function () { return hb(tl(D.jc, function (x) { return x.operation || NS(); }, function (x) { return n0(x.total_time_in_mins); }), 10, function (v) { return num(v) + tr(' min', ' د'); }); })),
+      panel(tr('Attendance split', 'توزيع الحضور'), need(['fdp'], 'Factory Daily Production', function () { var a = tl(D.fdp.filter(function (x) { return x.type; }), function (x) { return x.type; }); return a.length ? mixBar(a.map(function (x, i) { return { label: x[0], value: x[1], color: ['var(--dms-ok)', 'var(--dms-royal)', 'var(--dms-bad)', 'var(--dms-age3)'][i % 4] }; })) + hb(a) : empty(); })));
+    h += two(panel(tr('Productivity by activity', 'الإنتاجية حسب النشاط'), need(['fdp'], 'Factory Daily Production', function () { var rows = D.fdp.filter(function (x) { return x.activity && n0(x.productivity) > 0; }), s = {}, n = {}; rows.forEach(function (x) { s[x.activity] = (s[x.activity] || 0) + n0(x.productivity); n[x.activity] = (n[x.activity] || 0) + 1; }); return hb(Object.keys(s).map(function (k) { return [k, Math.round(s[k] / n[k])]; }).sort(function (a, b) { return b[1] - a[1]; }), 12, function (v) { return v + '%'; }); }), '', esc(tr('Average %, worked days', 'متوسط %، أيام العمل'))),
+      panel(tr('Daily output by factory', 'الإنتاج اليومي حسب المصنع'), need(['dpu'], 'Daily Production Update', function () { var fa = uniq(D.dpu.map(function (x) { return x.factory || NS(); })).slice(0, 5); return tsChart(D.dpu, 'date', fa.map(function (f) { return { label: f, v: function (x) { return (x.factory || NS()) === f ? n0(x.completed_qty) : 0; } }; })); }), '', esc(tr('Completed qty', 'الكمية المنجزة'))));
+    h += two(panel(tr('Overtime hours', 'ساعات العمل الإضافي'), need(['dpu'], 'Daily Production Update', function () { return tsChart(D.dpu, 'date', [{ label: tr('OT hours', 'ساعات إضافية'), color: 'var(--dms-age3)', v: function (x) { return n0(x.ot_hours); } }], function (v) { return v.toFixed(1); }); })),
+      panel(tr('Output against target', 'المخرجات مقابل الهدف'), need(['dpu', 'mpt'], 'Manufacturing Production Target', function () { return D.mpt.length ? tsChart(D.dpu.map(function (x) { return { d: x.date, o: n0(x.completed_qty), t: 0 }; }).concat(D.mpt.map(function (x) { return { d: x.target_date, o: 0, t: n0(x.target_qty) }; })), 'd', [{ label: tr('Output', 'المخرجات'), v: function (x) { return x.o; } }, { label: tr('Target', 'الهدف'), color: '#8a97a8', v: function (x) { return x.t; } }]) : empty(tr('No production targets set for this period.', 'لم تُحدد أهداف إنتاج لهذه الفترة.')); })));
+    var pi = {}; w.forEach(function (x) { var k = item(x), o = pi[k] || (pi[k] = { k: k, q: 0, p: 0, pl: 0, ac: 0, tot: 0, loss: 0, wh: 0 }); o.q += n0(x.qty); o.p += n0(x.produced_qty); o.loss += n0(x.process_loss_qty); if (inScope(x.company)) { o.pl += n0(x.planned_operating_cost); o.ac += n0(x.actual_operating_cost); o.tot += n0(x.total_operating_cost); } });
+    h += two(panel(tr('Top items by planned qty', 'أعلى الأصناف حسب الكمية المخططة'), hb(tl(w, item, function (x) { return n0(x.qty); }), 8)),
+      panel(tr('Planned and produced by item', 'المخطط والمنتج حسب الصنف'), tbl('t_pvp', vals2(pi), [c('k', tr('Item', 'الصنف'), function (o) { return o.k; }), c('q', tr('Planned', 'المخطط'), function (o) { return o.q; }, { num: 1 }), c('p', tr('Produced', 'المنتج'), function (o) { return o.p; }, { num: 1 }), { k: 'a', h: tr('Attainment', 'التحقيق'), s: function (o) { return o.q ? o.p / o.q : 0; }, r: function (o) { return bar(o.q ? o.p / o.q * 100 : 0); }, c: function (o) { return o.q ? Math.round(o.p / o.q * 100) + '%' : ''; } }], { file: 'planned_vs_produced', x: { sk: 'q', dir: -1 } })));
+    h += two(panel(tr('Work orders by warehouse', 'أوامر العمل حسب المستودع'), hb(tl(w, function (x) { return x.fg_warehouse || NS(); }), 6)), panel(tr('Process loss by item', 'فاقد التصنيع حسب الصنف'), hb(tl(w.filter(function (x) { return n0(x.process_loss_qty) > 0; }), item, function (x) { return n0(x.process_loss_qty); }), 6)));
+    h += two(panel(tr('Job cards by workstation', 'بطاقات العمل حسب محطة العمل'), need(['jc'], 'Job Card', function () { return hb(tl(D.jc, function (x) { return x.workstation || NS(); }), 8); })), panel(tr('Completed qty by operation', 'الكمية المنجزة حسب العملية'), need(['jc'], 'Job Card', function () { return hb(tl(D.jc, function (x) { return x.operation || NS(); }, function (x) { return n0(x.total_completed_qty); }), 10); })));
+    h += panel(tr('Operating cost by item', 'تكلفة التشغيل حسب الصنف'), tbl('t_cost', vals2(pi).filter(function (o) { return o.tot || o.pl || o.ac; }), [c('k', tr('Item', 'الصنف'), function (o) { return o.k; }), c('pl', tr('Planned', 'المخطط'), function (o) { return o.pl; }, { num: 1, fmt: money }), c('ac', tr('Actual', 'الفعلي'), function (o) { return o.ac; }, { num: 1, fmt: money }), c('t', tr('Total', 'الإجمالي'), function (o) { return o.tot; }, { num: 1, fmt: money })], { file: 'operating_cost', x: { sk: 't', dir: -1 }, empty: tr('No operating cost recorded.', 'لا تكلفة تشغيل مسجلة.') }), '', esc(vCur()));
+    h += two(panel(tr('Open job cards', 'بطاقات العمل المفتوحة'), need(['jc'], 'Job Card', function () { return tbl('t_jc', D.jc.filter(function (x) { return OPEN_JC.indexOf(x.status) > -1; }), [lk('jc', tr('Job card', 'بطاقة العمل'), 'Job Card', function (x) { return x.name; }), c('o', tr('Operation', 'العملية'), function (x) { return x.operation; }), c('ws', tr('Workstation', 'محطة العمل'), function (x) { return x.workstation; }), c('q', tr('Done / qty', 'المنجز / الكمية'), function (x) { return num(x.total_completed_qty) + ' / ' + num(x.for_quantity); }), { k: 's', h: tr('Status', 'الحالة'), s: function (x) { return x.status; }, r: function (x) { return chip(x.status); }, c: function (x) { return x.status; } }], { file: 'open_job_cards', empty: tr('No open job cards.', 'لا بطاقات عمل مفتوحة.') }); })),
+      panel(tr('Recent daily production updates', 'أحدث تحديثات الإنتاج اليومي'), need(['dpu'], 'Daily Production Update', function () { return tbl('t_dpu', D.dpu.slice().reverse(), [lk('u', tr('Update', 'التحديث'), 'Daily Production Update', function (x) { return x.name; }), c('d', tr('Date', 'التاريخ'), function (x) { return x.date; }), c('f', tr('Factory', 'المصنع'), function (x) { return x.factory; }), c('q', tr('Completed', 'المنجز'), function (x) { return n0(x.completed_qty); }, { num: 1 }), c('ot', tr('OT hours', 'ساعات إضافية'), function (x) { return n0(x.ot_hours); }, { num: 1, fmt: function (v) { return v.toFixed(1); } })], { file: 'daily_production_updates' }); })));
+    var fdpWait = function (f) { return need(['fdp'], 'Factory Daily Production', f); };
+    h += two(panel(tr('Overtime amount', 'مبلغ العمل الإضافي'), fdpWait(function () { return tsChart(D.fdp, 'date', [{ label: CUR, color: 'var(--dms-age3)', v: function (x) { return n0(x.ot_amount); } }], function (v) { return moneyFull(v, CUR); }); })),
+      panel(tr('Target and actual by activity', 'الهدف والفعلي حسب النشاط'), fdpWait(function () { var a = {}; D.fdp.filter(function (x) { return x.activity; }).forEach(function (x) { var o = a[x.activity] || (a[x.activity] = { k: x.activity, t: 0, a: 0 }); o.t += n0(x.daily_target_qty || x.target_qty); o.a += n0(x.actual_qty); }); return tbl('t_act', vals2(a), [c('k', tr('Activity', 'النشاط'), function (o) { return o.k; }), c('t', tr('Target', 'الهدف'), function (o) { return o.t; }, { num: 1 }), c('a', tr('Actual', 'الفعلي'), function (o) { return o.a; }, { num: 1 }), { k: 'p', h: '%', s: function (o) { return o.t ? o.a / o.t : 0; }, r: function (o) { return bar(o.t ? o.a / o.t * 100 : 0); }, c: function (o) { return o.t ? Math.round(o.a / o.t * 100) + '%' : ''; } }], { file: 'activity_target_actual', x: { sk: 'a', dir: -1 } }); })));
+    var em = {}, br = {}; (D.fdp || []).forEach(function (x) { if (x.employee && n0(x.productivity) > 0) { var e = em[x.employee] || (em[x.employee] = { e: x.employee, n: 0, p: 0, q: 0, ot: 0 }); e.n++; e.p += n0(x.productivity); e.q += n0(x.actual_qty); e.ot += n0(x.ot_hrs); } var b = br[x.branch || NS()] || (br[x.branch || NS()] = { b: x.branch || NS(), q: 0, d: 0, ot: 0, amt: 0 }); b.q += n0(x.actual_qty); b.d += n0(x.duty_hours); b.ot += n0(x.ot_hrs); b.amt += n0(x.ot_amount); });
+    return h + two(panel(tr('Top employees by productivity', 'أعلى الموظفين إنتاجية'), fdpWait(function () { return tbl('t_emp', vals2(em), [lk('e', tr('Employee', 'الموظف'), 'Employee', function (o) { return o.e; }), c('n', tr('Days', 'الأيام'), function (o) { return o.n; }, { num: 1 }), c('q', tr('Qty', 'الكمية'), function (o) { return o.q; }, { num: 1 }), c('ot', tr('OT hours', 'ساعات إضافية'), function (o) { return o.ot; }, { num: 1, fmt: function (v) { return v.toFixed(1); } }), { k: 'p', h: tr('Average %', 'المتوسط %'), s: function (o) { return o.p / o.n; }, r: function (o) { return bar(o.p / o.n); }, c: function (o) { return Math.round(o.p / o.n) + '%'; } }], { file: 'employee_productivity', x: { sk: 'p', dir: -1 } }); }), '', esc(tr('Average %, worked days', 'متوسط %، أيام العمل'))),
+      panel(tr('Workplace summary', 'ملخص مكان العمل'), fdpWait(function () { return tbl('t_br', vals2(br), [c('b', tr('Branch', 'الفرع'), function (o) { return o.b; }), c('q', tr('Actual qty', 'الكمية الفعلية'), function (o) { return o.q; }, { num: 1 }), c('d', tr('Duty hours', 'ساعات العمل'), function (o) { return o.d; }, { num: 1 }), c('ot', tr('OT hours', 'ساعات إضافية'), function (o) { return o.ot; }, { num: 1, fmt: function (v) { return v.toFixed(1); } }), c('amt', tr('OT amount', 'مبلغ الإضافي'), function (o) { return o.amt; }, { num: 1, fmt: money })], { file: 'workplace_summary', x: { sk: 'q', dir: -1 } }); }), '', esc(tr('By branch', 'حسب الفرع'))));
+  }
+
+  /* ============================================================ supply & stock */
+  function tabSupply() {
+    if (D.mrsErr) { return srcErr(D.mrsErr, 'Material Request'); } if (!D.mrs) { return '<div class="dms-grid dms-kpis" aria-busy="true">' + skel(6, 'dms-skel-kpi') + '</div><div class="dms-skel dms-skel-panel"></div>'; }
+    var m = D.mrs, late = m.filter(function (x) { return x.schedule_date && x.schedule_date < TODAY; }), stockV = function () { return sum(D.binw.filter(function (x) { return inScope(whCo(x.warehouse)); }), function (x) { return n0(x.v); }); };
+    var h = kpis([kpi({ label: tr('Open material requests', 'طلبات المواد المفتوحة'), val: num(m.length), sub: esc(tr('Pending or partial', 'معلقة أو جزئية')) }), kpi({ label: tr('Past required date', 'تجاوزت تاريخ الاحتياج'), dot: late.length ? 'var(--dms-bad)' : null, val: num(late.length) }), kpi({ label: tr('Pending item lines', 'بنود معلقة'), val: kval(function () { return num(D.mri.length); }, 'mri'), sub: esc(tr('Still to receive', 'متبقٍ للاستلام')) }),
+      kpi({ label: tr('Items in shortage', 'أصناف في عجز'), dot: 'var(--dms-bad)', val: kval(function () { return num(D.short.length); }, 'short'), sub: esc(tr('Projected qty below zero', 'الكمية المتوقعة أقل من صفر')) }), kpi({ label: tr('Stock value', 'قيمة المخزون'), val: kval(function () { return cur$(stockV(), vCur()); }, 'binw'), sub: esc(tr('All bins, as of today', 'كل المواقع حتى اليوم')) }), kpi({ label: tr('Purchase receipts', 'إيصالات الشراء'), val: kval(function () { return num(D.pr.length); }, 'pr'), sub: esc(tr('In the period', 'في الفترة')) })]);
+    var ages = [['0 to 7 days', '0–7 أيام', 0, 7], ['8 to 30 days', '8–30 يومًا', 8, 30], ['31 to 90 days', '31–90 يومًا', 31, 90], ['Over 90 days', 'أكثر من 90 يومًا', 91, 1e9]].map(function (a, i) { return { label: tr(a[0], a[1]), value: m.filter(function (x) { var d = diffDays(d10(x.transaction_date) || TODAY, TODAY); return d >= a[2] && d <= a[3]; }).length, color: i === 3 ? 'var(--dms-bad)' : i === 2 ? 'var(--dms-age3)' : null }; });
+    h += two(panel(tr('Open requests by purpose', 'الطلبات المفتوحة حسب الغرض'), hb(tl(m, function (x) { return x.material_request_type || NS(); }))), panel(tr('By workflow state', 'حسب حالة سير العمل'), hb(tl(m, function (x) { return x.workflow_state || NS(); }), 8)));
+    h += two(panel(tr('By priority', 'حسب الأولوية'), hb(tl(m, function (x) { return x.custom_priority || NS(); }))), panel(tr('Open request age', 'أعمار الطلبات المفتوحة'), hbars(ages, num), '', esc(tr('Days since the request date', 'أيام منذ تاريخ الطلب'))));
+    h += panel(tr('Requests past their required date', 'طلبات تجاوزت تاريخ الاحتياج'), mrTable('t_late', late, true));
+    var mi = function (f) { return need(['mri'], 'Material Request Item', f); };
+    h += two(panel(tr('Top pending items', 'أعلى الأصناف المعلقة'), mi(function () { var a = {}; D.mri.forEach(function (x) { var o = a[x.item_code] || (a[x.item_code] = { c: x.item_code, n: x.item_name, b: x.brand, q: 0, mr: {} }); o.q += x.pend; o.mr[x.parent] = 1; }); return tbl('t_pend', vals2(a), [lk('c', tr('Item', 'الصنف'), 'Item', function (o) { return o.c; }), c('n', tr('Name', 'الاسم'), function (o) { return o.n; }), c('b', tr('Brand', 'العلامة'), function (o) { return o.b; }), c('q', tr('Pending', 'المعلق'), function (o) { return o.q; }, { num: 1 }), c('mr', tr('Requests', 'الطلبات'), function (o) { return Object.keys(o.mr).length; }, { num: 1 })], { file: 'pending_items', x: { sk: 'q', dir: -1 }, empty: tr('Nothing pending.', 'لا شيء معلق.') }); }), '', esc(tr('Qty still to receive', 'الكمية المتبقية للاستلام'))),
+      panel(tr('Pending qty by brand', 'الكمية المعلقة حسب العلامة'), mi(function () { return hb(tl(D.mri, function (x) { return x.brand || tr('No brand', 'بلا علامة'); }, function (x) { return x.pend; }), 10); })));
+    h += two(panel(tr('Pending qty by item group', 'الكمية المعلقة حسب المجموعة'), mi(function () { return hb(tl(D.mri, function (x) { return x.item_group || NS(); }, function (x) { return x.pend; }), 10); })), panel(tr('Pending qty by warehouse', 'الكمية المعلقة حسب المستودع'), mi(function () { return hb(tl(D.mri, function (x) { return x.warehouse || NS(); }, function (x) { return x.pend; }), 10); })));
+    h += two(panel(tr('Shortage items', 'أصناف العجز'), need(['short'], 'Bin', function () { return tbl('t_short', D.short, [lk('i', tr('Item', 'الصنف'), 'Item', function (x) { return x.item_code; }), { k: 'p', h: tr('Projected', 'المتوقع'), num: 1, s: function (x) { return n0(x.projected_qty); }, r: function (x) { return '<span class="dms-num dms-tone-bad">' + esc(num(x.projected_qty)) + '</span>'; }, c: function (x) { return x.projected_qty; } }, c('w', tr('Warehouse', 'المستودع'), function (x) { return x.warehouse; }), c('a', tr('Actual', 'الفعلي'), function (x) { return n0(x.actual_qty); }, { num: 1 }), c('r', tr('Reserved', 'المحجوز'), function (x) { return n0(x.reserved_qty); }, { num: 1 }), c('o', tr('Ordered', 'المطلوب'), function (x) { return n0(x.ordered_qty); }, { num: 1 })], { file: 'shortage_items', empty: tr('No item is short.', 'لا صنف في عجز.') }); }), '', esc(tr('Projected qty below zero', 'الكمية المتوقعة أقل من صفر'))),
+      panel(tr('Shortage lines by warehouse', 'بنود العجز حسب المستودع'), need(['short'], 'Bin', function () { return hb(tl(D.short, function (x) { return x.warehouse || NS(); }), 10); })));
+    var bw = function (f) { return need(['binw'], 'Bin', f); }, bi = function (f) { return need(['bini'], 'Bin', f); };
+    h += two(panel(tr('Stock value by warehouse', 'قيمة المخزون حسب المستودع'), bw(function () { return hb(D.binw.filter(function (x) { return inScope(whCo(x.warehouse)) && n0(x.v); }).map(function (x) { return [x.warehouse, n0(x.v)]; }).sort(function (a, b) { return b[1] - a[1]; }), 10, function (v) { return moneyS(v, vCur()); }); })),
+      panel(tr('Reserved qty by warehouse', 'الكمية المحجوزة حسب المستودع'), bw(function () { return hb(D.binw.filter(function (x) { return n0(x.r) > 0; }).map(function (x) { return [x.warehouse, n0(x.r)]; }).sort(function (a, b) { return b[1] - a[1]; }), 10); })));
+    h += two(panel(tr('Top items by stock value', 'أعلى الأصناف حسب قيمة المخزون'), bi(function () { return tbl('t_val', D.bini.filter(function (x) { return n0(x.v); }), [lk('i', tr('Item', 'الصنف'), 'Item', function (x) { return x.item_code; }), c('v', tr('Value', 'القيمة'), function (x) { return n0(x.v); }, { num: 1, fmt: money }), c('q', tr('On hand', 'المتوفر'), function (x) { return n0(x.q); }, { num: 1 }), c('r', tr('Reserved', 'المحجوز'), function (x) { return n0(x.r); }, { num: 1 })], { file: 'stock_value_by_item', x: { sk: 'v', dir: -1 } }); }), '', esc(vCur())),
+      panel(tr('On hand and reserved, top items', 'المتوفر والمحجوز، أعلى الأصناف'), bi(function () { return splitBars(D.bini.slice().sort(function (a, b) { return n0(b.q) - n0(a.q); }).slice(0, 8).map(function (x) { return { label: x.item_code, part: Math.min(n0(x.r), n0(x.q)), total: n0(x.q) }; }), [{ label: tr('Reserved', 'المحجوز'), color: 'var(--dms-age3)' }, { label: tr('Free', 'غير محجوز'), color: 'var(--dms-royal)' }], num); }), '', esc(tr('Top 8 by qty on hand', 'أعلى 8 حسب الكمية المتوفرة'))));
+    var se = function (f) { return need(['se'], 'Stock Entry', f); }, pr = function (f) { return need(['pr'], 'Purchase Receipt', f); }, seType = function (x) { return x.stock_entry_type || x.purpose || NS(); };
+    h += two(panel(tr('Stock entries', 'قيود المخزون'), se(function () { var types = tl(D.se, seType).slice(0, 4).map(function (x) { return x[0]; }); return tsChart(D.se, 'posting_date', types.map(function (t) { return { label: t, v: function (x) { return seType(x) === t ? 1 : 0; } }; })); }), '', esc(tr('Top 4 types', 'أعلى 4 أنواع'))), panel(tr('Stock entry types', 'أنواع قيود المخزون'), se(function () { return hb(tl(D.se, seType), 8); })));
+    h += two(panel(tr('Purchase receipts', 'إيصالات الشراء'), pr(function () { return tsChart(D.pr, 'posting_date', [{ label: tr('Receipts', 'الإيصالات'), color: 'var(--dms-ok)' }]); })), panel(tr('Receipt status', 'حالة الإيصالات'), pr(function () { return hb(tl(D.pr, function (x) { return x.status || NS(); })); })));
+    h += two(panel(tr('Top suppliers by value', 'أعلى الموردين حسب القيمة'), pr(function () { return hb(tl(D.pr.filter(function (x) { return inScope(x.company); }), function (x) { return x.supplier_name || x.supplier || NS(); }, function (x) { return n0(x.base_grand_total); }), 8, function (v) { return moneyS(v, vCur()); }); })),
+      panel(tr('Recent purchase receipts', 'أحدث إيصالات الشراء'), pr(function () { return tbl('t_pr', D.pr, [lk('pr', tr('Receipt', 'الإيصال'), 'Purchase Receipt', function (x) { return x.name; }), c('s', tr('Supplier', 'المورد'), function (x) { return x.supplier_name || x.supplier; }), c('d', tr('Date', 'التاريخ'), function (x) { return x.posting_date; }), c('v', tr('Value', 'القيمة'), function (x) { return n0(x.base_grand_total); }, { num: 1, fmt: money }), { k: 'b', h: tr('Billed', 'المفوتر'), s: function (x) { return n0(x.per_billed); }, r: function (x) { return bar(x.per_billed); }, c: function (x) { return n0(x.per_billed); } }], { file: 'purchase_receipts' }); })));
+    return h + panel(tr('Recent stock entries', 'أحدث قيود المخزون'), se(function () { return tbl('t_se', D.se, [lk('se', tr('Entry', 'القيد'), 'Stock Entry', function (x) { return x.name; }), c('t', tr('Type', 'النوع'), seType), c('d', tr('Date', 'التاريخ'), function (x) { return x.posting_date; }), c('v', tr('Value', 'القيمة'), function (x) { return n0(x.total_amount); }, { num: 1, fmt: money })], { file: 'stock_entries' }); }), '', esc(tr('Stock entry value is in each company\'s currency', 'قيمة القيد بعملة كل شركة')));
+  }
+  function tabActions(AM) { return actionsTab(AM, tr('Trips, requests, work orders, draft delivery notes and stock as of today; delivery notes without a trip and forklift logs from the period.', 'الرحلات والطلبات وأوامر العمل والإشعارات المسودة والمخزون حتى اليوم؛ الإشعارات بلا رحلة وسجلات الرافعات من الفترة.')); }
+
+  /* ============================================================ targets dialog, drills and events */
+  function targetsBody() {
+    var T = targets(), f = [['dns_day', tr('Delivery notes per day', 'إشعارات التسليم في اليوم')], ['trips_day', tr('Trips per day', 'الرحلات في اليوم')], ['tons_day', tr('Tonnes per day', 'أطنان في اليوم')], ['earn_day', tr('Trip earnings per day', 'أرباح الرحلات في اليوم') + ' (' + CUR + ')']];
+    return '<p class="dms-sm">' + esc(tr('Saved in this browser only, like v4. Set 0 to hide a target.', 'تُحفظ في هذا المتصفح فقط كما في الإصدار 4. اكتب 0 لإخفاء الهدف.')) + '</p><div class="op-form">' + f.map(function (x) { return '<label><span>' + esc(x[1]) + '</span><input class="dms-input" type="number" min="0" step="any" data-tg="' + x[0] + '" value="' + esc(String(n0(T[x[0]]))) + '"></label>'; }).join('') + '</div><div class="dms-actions-row"><button type="button" class="dms-btn dms-btn-primary" data-act="tsave">' + esc(tr('Save', 'حفظ')) + '</button></div>';
+  }
+  function drill(id) {
+    if (id === 'targets') { return { title: tr('Daily targets', 'الأهداف اليومية'), sub: tr('Shown as a share of target in the Today panel', 'تظهر كنسبة من الهدف في لوحة اليوم'), body: targetsBody() }; }
+    if (id.indexOf('cli:') === 0) {
+      var k = id.slice(4), cc = actClient(), x = cc && cc[k], s = actSpecs().filter(function (y) { return y.id === k; })[0];
+      if (!x || typeof x === 'string' || !s) { return null; }
+      return { title: s.title, sub: s.why, spec: { rows: x.rows.map(x.item), file: k, text: function (it) { return [it.title, it.desc, it.who].join(' '); }, cols: [
+        { h: tr('Record', 'السجل'), r: function (it) { return docLink(it.dt, it.name, it.title); }, c: function (it) { return it.name; } },
+        { h: tr('Details', 'التفاصيل'), r: function (it) { return '<span class="dms-sm">' + bdi(it.desc) + '</span>'; }, c: function (it) { return it.desc; } },
+        { h: tr('Who', 'المسؤول'), r: function (it) { return bdi(it.who || '—'); }, c: function (it) { return it.who; } },
+        { h: tr('When', 'متى'), r: function (it) { return '<span class="dms-tone-' + it.tone + '">' + esc(it.due) + '</span>'; }, c: function (it) { return it.due; } }] } };
+    }
+    return null;
+  }
+  function onAct(a, v) {
+    if (a === 'kpi' && v.indexOf('goto:') === 0) { goTab(v.slice(5), false, true); return true; }
+    if (a === 'tsave') { var o = {}; Array.prototype.forEach.call(HOST.querySelectorAll('[data-tg]'), function (i) { o[i.getAttribute('data-tg')] = Math.max(0, Number(i.value) || 0); }); try { G.localStorage.setItem('dmo_targets', JSON.stringify(o)); } catch (e) { /* storage unavailable: targets stay as they were */ } closeOverlay(); renderSoft(); return true; }
+    return false;
+  }
+
+  start();
+})();
+
+/* ==== DM theme sync (same as tools/erp/shell/dark_theme.py output; maintained here since this block is built on the standard) ==== */
+;(function () {
+  var r = typeof root_element !== 'undefined' ? root_element : null, h = r && r.host;
+  if (!h || h.__dmsTheme) return; h.__dmsTheme = 1;
+  var s = function () { h.setAttribute('data-dms-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'); };
+  s(); new MutationObserver(s).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 })();

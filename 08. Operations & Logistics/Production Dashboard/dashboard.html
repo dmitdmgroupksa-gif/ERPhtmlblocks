@@ -1,34 +1,3 @@
-<div class="pcc">
-<input class="pcc-toggle" type="radio" name="pcc-language" id="pcc-en" checked><input class="pcc-toggle" type="radio" name="pcc-language" id="pcc-ar">
-<input class="pcc-toggle" type="radio" name="pcc-tab" id="pcc-overview" checked>
-<input class="pcc-toggle" type="radio" name="pcc-tab" id="pcc-output">
-<input class="pcc-toggle" type="radio" name="pcc-tab" id="pcc-workorders">
-<input class="pcc-toggle" type="radio" name="pcc-tab" id="pcc-jobs">
-<input class="pcc-toggle" type="radio" name="pcc-tab" id="pcc-cost">
-<input class="pcc-toggle" type="radio" name="pcc-tab" id="pcc-materials">
-<input class="pcc-toggle" type="radio" name="pcc-tab" id="pcc-workforce">
-<input class="pcc-toggle" type="radio" name="pcc-tab" id="pcc-planning">
-<input class="pcc-toggle" type="radio" name="pcc-tab" id="pcc-quality">
-<div class="pcc-shell"><header class="pcc-header"><div><div class="pcc-eyebrow">DM GROUP KSA</div><h2><span class="en">Production Command Center</span><span class="ar">مركز قيادة الإنتاج</span></h2><p><span class="en">Live manufacturing records · verified factory mappings</span><span class="ar">سجلات التصنيع المباشرة · ربط المصانع الموثق</span></p></div><div class="pcc-head-actions"><button type="button" class="pcc-refresh-live">Refresh</button><div class="pcc-language"><label for="pcc-en" tabindex="0">English</label><label for="pcc-ar" tabindex="0">العربية</label></div></div></header>
-<div class="pcc-filterbar"><label><span class="en">Factory</span><span class="ar">المصنع</span><select aria-label="Factory" data-filter="factory"><option value="all">All factories</option></select></label><label><span class="en">Reporting period</span><span class="ar">فترة التقرير</span><select aria-label="Reporting period" data-filter="period"><option value="month">This month</option><option value="today">Today</option><option value="week">This week</option><option value="year">This year</option><option value="custom">Custom</option></select></label><label><span class="en">From date</span><span class="ar">من تاريخ</span><input aria-label="From date" type="date"></label><label><span class="en">To date</span><span class="ar">إلى تاريخ</span><input aria-label="To date" type="date"></label><div class="pcc-filter-info"><span class="en">Date basis is identified in each panel. Only submitted source documents are included.</span><span class="ar">أساس التاريخ موضح في كل لوحة. تشمل البيانات المستندات المعتمدة فقط.</span></div></div>
-<nav class="pcc-nav" role="tablist">
-<label role="tab" tabindex="0" for="pcc-overview"><span class="en">Overview</span><span class="ar">نظرة عامة</span></label>
-<label role="tab" tabindex="0" for="pcc-output"><span class="en">Production output</span><span class="ar">الإنتاج الفعلي</span></label>
-<label role="tab" tabindex="0" for="pcc-workorders"><span class="en">Work orders</span><span class="ar">أوامر التصنيع</span></label>
-<label role="tab" tabindex="0" for="pcc-jobs"><span class="en">Factory jobs</span><span class="ar">أوامر عمل المصنع</span></label>
-<label role="tab" tabindex="0" for="pcc-cost"><span class="en">Recorded costs</span><span class="ar">التكاليف المسجلة</span></label>
-<label role="tab" tabindex="0" for="pcc-materials"><span class="en">Materials & scrap</span><span class="ar">المواد والخردة</span></label>
-<label role="tab" tabindex="0" for="pcc-workforce"><span class="en">Workforce activity</span><span class="ar">نشاط العاملين</span></label>
-<label role="tab" tabindex="0" for="pcc-planning"><span class="en">Planning</span><span class="ar">التخطيط</span></label>
-<label role="tab" tabindex="0" for="pcc-quality"><span class="en">Quality & data checks</span><span class="ar">الجودة والتحقق</span></label>
-</nav><main class="pcc-main"><div class="pcc-notice"><span class="en">Choose a factory and period. Quantities remain separate by item/UOM; recorded costs are distinct from reconciled ledger costs.</span><span class="ar">اختر المصنع والفترة. تُفصل الكميات حسب الصنف ووحدة القياس؛ والتكاليف المسجلة مستقلة عن مطابقة دفتر الأستاذ.</span></div>
-<section class="pcc-page pcc-page-overview" role="tabpanel"><div class="pcc-section-head"><h3><span class="en">Overview</span><span class="ar">نظرة عامة</span></h3></div><div class="pcc-live-container" aria-live="polite"><p><span class="en">Loading source records…</span><span class="ar">جار تحميل السجلات…</span></p></div></section>
-<section class="pcc-page pcc-page-output" role="tabpanel"><div class="pcc-section-head"><h3><span class="en">Production output</span><span class="ar">الإنتاج الفعلي</span></h3></div><div class="pcc-live-container" aria-live="polite"><p><span class="en">Loading source records…</span><span class="ar">جار تحميل السجلات…</span></p></div></section>
-<section class="pcc-page pcc-page-workorders" role="tabpanel"><div class="pcc-section-head"><h3><span class="en">Work orders</span><span class="ar">أوامر التصنيع</span></h3></div><div class="pcc-live-container" aria-live="polite"><p><span class="en">Loading source records…</span><span class="ar">جار تحميل السجلات…</span></p></div></section>
-<section class="pcc-page pcc-page-jobs" role="tabpanel"><div class="pcc-section-head"><h3><span class="en">Factory jobs</span><span class="ar">أوامر عمل المصنع</span></h3></div><div class="pcc-live-container" aria-live="polite"><p><span class="en">Loading source records…</span><span class="ar">جار تحميل السجلات…</span></p></div></section>
-<section class="pcc-page pcc-page-cost" role="tabpanel"><div class="pcc-section-head"><h3><span class="en">Recorded costs</span><span class="ar">التكاليف المسجلة</span></h3></div><div class="pcc-live-container" aria-live="polite"><p><span class="en">Loading source records…</span><span class="ar">جار تحميل السجلات…</span></p></div></section>
-<section class="pcc-page pcc-page-materials" role="tabpanel"><div class="pcc-section-head"><h3><span class="en">Materials & scrap</span><span class="ar">المواد والخردة</span></h3></div><div class="pcc-live-container" aria-live="polite"><p><span class="en">Loading source records…</span><span class="ar">جار تحميل السجلات…</span></p></div></section>
-<section class="pcc-page pcc-page-workforce" role="tabpanel"><div class="pcc-section-head"><h3><span class="en">Workforce activity</span><span class="ar">نشاط العاملين</span></h3></div><div class="pcc-live-container" aria-live="polite"><p><span class="en">Loading source records…</span><span class="ar">جار تحميل السجلات…</span></p></div></section>
-<section class="pcc-page pcc-page-planning" role="tabpanel"><div class="pcc-section-head"><h3><span class="en">Planning</span><span class="ar">التخطيط</span></h3></div><div class="pcc-live-container" aria-live="polite"><p><span class="en">Loading source records…</span><span class="ar">جار تحميل السجلات…</span></p></div></section>
-<section class="pcc-page pcc-page-quality" role="tabpanel"><div class="pcc-section-head"><h3><span class="en">Quality & data checks</span><span class="ar">الجودة والتحقق</span></h3></div><div class="pcc-live-container" aria-live="polite"><p><span class="en">Loading source records…</span><span class="ar">جار تحميل السجلات…</span></p></div></section>
-</main></div></div>
+<div class="dms-root" data-dms-root dir="ltr">
+  <div class="dms-boot">Loading Production…</div>
+</div>

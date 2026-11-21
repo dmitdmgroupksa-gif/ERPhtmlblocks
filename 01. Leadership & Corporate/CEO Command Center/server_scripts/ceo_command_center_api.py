@@ -400,7 +400,9 @@ def run(src, dept, label, doctypes, fields_by_dt, fn):
     except Exception as e:
         while len(ACTIONS) > before:
             ACTIONS.pop()
-        st, msg = classify(e)
+        unpacked = classify(e)
+        st = unpacked[0]
+        msg = unpacked[1]
         entry["state"] = st
         entry["message"] = msg
     entry["rows"] = len(ACTIONS) - before
@@ -471,7 +473,10 @@ def workflow_pending():
 def src_workflows():
     problems = []
     for w in workflow_pending():
-        dt, sfield, pending = w["doctype"], w["sfield"], w["pending"]
+        unpacked = w["doctype"], w["sfield"], w["pending"]
+        dt = unpacked[0]
+        sfield = unpacked[1]
+        pending = unpacked[2]
         dept = WF_DEPT.get(dt) or "people"
         if not want(dept):
             continue
@@ -494,10 +499,14 @@ def src_workflows():
         if scope == "unscoped":
             continue
         try:
-            rows, complete = fetch(dt, fields, filters, "modified asc", cap=2000)
+            unpacked = fetch(dt, fields, filters, "modified asc", cap=2000)
+            rows = unpacked[0]
+            complete = unpacked[1]
             prime_assign(rows)
         except Exception as e:
-            st, msg = classify(e)
+            unpacked = classify(e)
+            st = unpacked[0]
+            msg = unpacked[1]
             problems.append(dt + " (" + st + ")")
             continue
         WF_STATE["pending_states"] = WF_STATE["pending_states"] + len(pending)
@@ -527,10 +536,14 @@ def src_workflows():
             elif p["others"]:
                 age = days_between(today, dstr(r.modified))
                 if age is not None and age > POLICY["stale_days"]:
-                    o, ob = owner_of(r)
+                    unpacked = owner_of(r)
+                    o = unpacked[0]
+                    ob = unpacked[1]
                     roles = sorted(list(set(p["others"])))
                     if not o:
-                        o, ob = " / ".join(roles[:2]) + " (role)", "Workflow role"
+                        unpacked = " / ".join(roles[:2]) + " (role)", "Workflow role"
+                        o = unpacked[0]
+                        ob = unpacked[1]
                     row = act("workflow", dt, r.name, "stalled_approval", dept, "followup", "pending", title,
                               "Pending at '" + r.wf_state + "' for " + str(age) + " days without change. Next action belongs to: " + ", ".join(roles[:4]) + ".",
                               owner=o, owner_basis=ob, due_basis="No due date; age since last change",
@@ -553,8 +566,12 @@ def src_workflows():
 
 # ----------------------------------------------------------------------------- 2. sales
 def src_lead_allocation():
-    leads, c1 = fetch("Leads Generation List", ["name", "customer_name", "date", "creation"], [["docstatus", "<", 2]], "creation asc", cap=10000)
-    allocs, c2 = fetch("Lead Allocation", ["name", "lead", "status"], [["lead", "is", "set"]], "creation asc", cap=20000)
+    unpacked = fetch("Leads Generation List", ["name", "customer_name", "date", "creation"], [["docstatus", "<", 2]], "creation asc", cap=10000)
+    leads = unpacked[0]
+    c1 = unpacked[1]
+    unpacked = fetch("Lead Allocation", ["name", "lead", "status"], [["lead", "is", "set"]], "creation asc", cap=20000)
+    allocs = unpacked[0]
+    c2 = unpacked[1]
     active = {}
     for a in allocs:
         if a.status != "Unassigned":
@@ -583,14 +600,20 @@ def src_lead_allocation():
 
 def src_lead_followup():
     act_states = ["Assigned", "Contacted", "Follow Up", "Interested", "Quotation Required", "No Response"]
-    rows, complete = fetch("Lead Allocation", ["name", "customer_name", "assigned_user", "sales_person", "next_follow_up", "priority", "status", "creation"],
+    unpacked = fetch("Lead Allocation", ["name", "customer_name", "assigned_user", "sales_person", "next_follow_up", "priority", "status", "creation"],
                            [["status", "in", act_states], ["next_follow_up", "<", now_s]], "next_follow_up asc", cap=5000)
+    rows = unpacked[0]
+    complete = unpacked[1]
     prime("User", [r.assigned_user for r in rows])
     prime("Employee", [r.sales_person for r in rows])
     for r in rows:
-        o, ob = owner_of(r, "assigned_user", "User", "Lead Allocation.assigned_user")
+        unpacked = owner_of(r, "assigned_user", "User", "Lead Allocation.assigned_user")
+        o = unpacked[0]
+        ob = unpacked[1]
         if not o:
-            o, ob = owner_of(r, "sales_person", "Employee", "Lead Allocation.sales_person")
+            unpacked = owner_of(r, "sales_person", "Employee", "Lead Allocation.sales_person")
+            o = unpacked[0]
+            ob = unpacked[1]
         hi = r.priority in ["High", "Urgent"]
         act("lead_followup", "Lead Allocation", r.name, "followup_overdue", "sales", "escalation" if hi else "followup", "overdue",
             r.customer_name or r.name, "Lead follow-up date has passed while status is '" + (r.status or "") + "'.",
@@ -603,8 +626,10 @@ def src_dms():
     open_f = [["follow_up_status", "not in", ["Won", "Lost"]]]
     total_open = count("DMS Project", open_f)
     unalloc = count("DMS Project", open_f + [["allocation_status", "=", "Unallocated"]])
-    raw, complete = fetch("DMS Project", ["name", "sales_person", "next_follow_up_date"],
+    unpacked = fetch("DMS Project", ["name", "sales_person", "next_follow_up_date"],
                           open_f + [["next_follow_up_date", "<", today], ["allocation_status", "!=", "Unallocated"]], "next_follow_up_date asc", cap=10000)
+    raw = unpacked[0]
+    complete = unpacked[1]
     overdue_rows = group_rows(raw, ["sales_person"], date_field="next_follow_up_date")
     prime("Employee", [g["sales_person"] for g in overdue_rows])
     indicator("sales", "dms_open", "Open DMS projects", total_open, "DMS Project follow-up status not Won/Lost")
@@ -630,12 +655,16 @@ def src_dms():
 def src_sales_orders():
     filters = [["Sales Order", "docstatus", "=", 1], ["Sales Order", "status", "in", ["To Deliver and Bill", "To Deliver"]], ["Sales Order", "delivery_date", "<", today]]
     company_filter("Sales Order", filters)
-    rows, complete = fetch("Sales Order", ["name", "customer_name", "company", "delivery_date", "per_delivered", "base_grand_total", "sales_persons", "_assign", "transaction_date"],
+    unpacked = fetch("Sales Order", ["name", "customer_name", "company", "delivery_date", "per_delivered", "base_grand_total", "sales_persons", "_assign", "transaction_date"],
                            filters, "delivery_date asc", cap=3000)
+    rows = unpacked[0]
+    complete = unpacked[1]
     prime_assign(rows)
     old = []
     for r in rows:
-        o, ob = owner_of(r, "sales_persons", "Text", "Sales Order.sales_persons")
+        unpacked = owner_of(r, "sales_persons", "Text", "Sales Order.sales_persons")
+        o = unpacked[0]
+        ob = unpacked[1]
         od = days_between(today, dstr(r.delivery_date)) or 0
         row = act("sales_orders", "Sales Order", r.name, "delivery_overdue", "sales", "followup", "overdue", r.customer_name or r.name,
                   "Planned delivery date passed; " + str(round(frappe.utils.flt(r.per_delivered), 1)) + "% delivered.",
@@ -734,7 +763,9 @@ def src_material_requests():
                 filters + [["Material Request", "schedule_date", ">=", cutoff]], order_by="schedule_date asc", limit=500)
     prime_assign(recent)
     for r in recent:
-        o, ob = owner_of(r)
+        unpacked = owner_of(r)
+        o = unpacked[0]
+        ob = unpacked[1]
         act("material_requests", "Material Request", r.name, "order_overdue", "procurement", "escalation" if r.custom_priority == "High" else "followup", "overdue",
             r.title or r.name, "Required-by date passed; " + str(round(frappe.utils.flt(r.per_ordered), 1)) + "% ordered.",
             owner=o, owner_basis=ob, due=r.schedule_date, due_basis="Material Request.schedule_date", company_name=r.company, status=r.status, age_from=r.transaction_date)
@@ -754,14 +785,20 @@ def src_material_requests():
 def src_purchase_orders():
     filters = [["Purchase Order", "docstatus", "=", 1], ["Purchase Order", "status", "in", ["To Receive and Bill", "To Receive"]], ["Purchase Order", "schedule_date", "<", today]]
     company_filter("Purchase Order", filters)
-    rows, complete = fetch("Purchase Order", ["name", "supplier_name", "company", "schedule_date", "transaction_date", "per_received", "base_grand_total",
+    unpacked = fetch("Purchase Order", ["name", "supplier_name", "company", "schedule_date", "transaction_date", "per_received", "base_grand_total",
                                               "custom_po_in_charge_", "custom_purchaser_name", "custom_shipment_status", "_assign"], filters, "schedule_date asc", cap=3000)
+    rows = unpacked[0]
+    complete = unpacked[1]
     prime_assign(rows)
     old = []
     for r in rows:
-        o, ob = owner_of(r, "custom_po_in_charge_", "Text", "Purchase Order.custom_po_in_charge_")
+        unpacked = owner_of(r, "custom_po_in_charge_", "Text", "Purchase Order.custom_po_in_charge_")
+        o = unpacked[0]
+        ob = unpacked[1]
         if not o:
-            o, ob = owner_of(r, "custom_purchaser_name", "Text", "Purchase Order.custom_purchaser_name")
+            unpacked = owner_of(r, "custom_purchaser_name", "Text", "Purchase Order.custom_purchaser_name")
+            o = unpacked[0]
+            ob = unpacked[1]
         od = days_between(today, dstr(r.schedule_date)) or 0
         row = act("purchase_orders", "Purchase Order", r.name, "receipt_overdue", "procurement", "escalation" if od > POLICY["ap_escalation_days"] else "followup", "overdue",
                   r.supplier_name or r.name, "Expected receipt date passed; " + str(round(frappe.utils.flt(r.per_received), 1)) + "% received" +
@@ -788,7 +825,9 @@ def src_shipments():
     in_customs = 0
     for r in rows:
         late = r.custom_estimated_arrival_time and dstr(r.custom_estimated_arrival_time) < today
-        o, ob = owner_of(r, "custom_po_in_charge_", "Text", "Purchase Order.custom_po_in_charge_")
+        unpacked = owner_of(r, "custom_po_in_charge_", "Text", "Purchase Order.custom_po_in_charge_")
+        o = unpacked[0]
+        ob = unpacked[1]
         if r.custom_shipment_status == "In Customs":
             in_customs = in_customs + 1
             if r.custom_clearing_document_status in [None, "", "Documents in courier"]:
@@ -825,7 +864,9 @@ def src_receivables():
     cut = str(frappe.utils.add_days(today, -POLICY["ar_followup_days"]))
     f = [["Sales Invoice", "docstatus", "=", 1], ["Sales Invoice", "outstanding_amount", ">", 0], ["Sales Invoice", "due_date", "<", cut]]
     company_filter("Sales Invoice", f)
-    raw, complete = fetch("Sales Invoice", ["name", "customer", "customer_name", "company", "party_account_currency", "outstanding_amount", "due_date"], f, "due_date asc", cap=20000)
+    unpacked = fetch("Sales Invoice", ["name", "customer", "customer_name", "company", "party_account_currency", "outstanding_amount", "due_date"], f, "due_date asc", cap=20000)
+    raw = unpacked[0]
+    complete = unpacked[1]
     rows = group_rows(raw, ["customer", "customer_name", "company", "party_account_currency"], "outstanding_amount", "due_date")
     custs = list(set([r["customer"] for r in rows]))
     owners = {}
@@ -891,7 +932,9 @@ def src_credit_limits():
 def src_payables():
     f = [["Purchase Invoice", "docstatus", "=", 1], ["Purchase Invoice", "outstanding_amount", ">", 0], ["Purchase Invoice", "due_date", "<=", horizon]]
     company_filter("Purchase Invoice", f)
-    raw, complete = fetch("Purchase Invoice", ["name", "supplier", "supplier_name", "company", "party_account_currency", "on_hold", "outstanding_amount", "due_date"], f, "due_date asc", cap=20000)
+    unpacked = fetch("Purchase Invoice", ["name", "supplier", "supplier_name", "company", "party_account_currency", "on_hold", "outstanding_amount", "due_date"], f, "due_date asc", cap=20000)
+    raw = unpacked[0]
+    complete = unpacked[1]
     rows = group_rows([r for r in raw if dstr(r.due_date) < today], ["supplier", "supplier_name", "company", "party_account_currency", "on_hold"], "outstanding_amount", "due_date")
     for r in rows:
         od = days_between(today, r["oldest"]) or 0
@@ -914,7 +957,9 @@ def src_soa():
               [["status", "in", ["Failed", "Needs Review"]], ["docstatus", "<", 2]], order_by="creation asc", limit=500)
     prime("User", [r.reviewed_by for r in rows])
     for r in rows:
-        o, ob = owner_of(r, "reviewed_by", "User", "SOA Request.reviewed_by")
+        unpacked = owner_of(r, "reviewed_by", "User", "SOA Request.reviewed_by")
+        o = unpacked[0]
+        ob = unpacked[1]
         act("soa", "SOA Request", r.name, "soa_" + (r.status or "").lower().replace(" ", "_"), "finance", "followup", "pending", r.customer_name or r.name,
             ("SOA generation failed: " + str(r.error or "")[:120]) if r.status == "Failed" else "Statement needs finance review before sending.",
             owner=o, owner_basis=ob, status=r.status, age_from=r.creation)
@@ -1101,9 +1146,13 @@ def src_submittals():
               [["docstatus", "<", 2], ["status", "in", ["Requested", "In Preparation", "Revision Required"]]], order_by="required_date asc", limit=1000)
     prime("Employee", [r.submitted_by for r in rows] + [r.sales_person for r in rows])
     for r in rows:
-        o, ob = owner_of(r, "submitted_by", "Employee", "DMS Technical Submittal.submitted_by")
+        unpacked = owner_of(r, "submitted_by", "Employee", "DMS Technical Submittal.submitted_by")
+        o = unpacked[0]
+        ob = unpacked[1]
         if not o:
-            o, ob = owner_of(r, "sales_person", "Employee", "DMS Technical Submittal.sales_person (requester side)")
+            unpacked = owner_of(r, "sales_person", "Employee", "DMS Technical Submittal.sales_person (requester side)")
+            o = unpacked[0]
+            ob = unpacked[1]
         ds = dstr(r.required_date)
         title = (r.project_name or r.name)[:120]
         if ds and ds < today:
@@ -1136,7 +1185,9 @@ def src_tasks():
     rows = gl("Task", ["name", "subject", "project", "status", "exp_end_date", "priority", "company", "_assign", "creation"], f, order_by="exp_end_date asc", limit=1000)
     prime_assign(rows)
     for r in rows:
-        o, ob = owner_of(r)
+        unpacked = owner_of(r)
+        o = unpacked[0]
+        ob = unpacked[1]
         ds = dstr(r.exp_end_date)
         if ds < today:
             act("tasks", "Task", r.name, "task_overdue", "projects", "escalation" if r.priority in ["High", "Urgent"] else "followup", "overdue", r.subject or r.name,
@@ -1160,7 +1211,9 @@ def src_vehicle_issues():
               [["status", "in", ["Open", "In Progress"]]], order_by="report_datetime asc", limit=1000)
     prime("User", [r.fleet_supervisor for r in rows])
     for r in rows:
-        o, ob = owner_of(r, "fleet_supervisor", "User", "Driver Vehicle Issue Request.fleet_supervisor")
+        unpacked = owner_of(r, "fleet_supervisor", "User", "Driver Vehicle Issue Request.fleet_supervisor")
+        o = unpacked[0]
+        ob = unpacked[1]
         crit = r.severity in ["High", "Critical"]
         act("vehicle_issues", "Driver Vehicle Issue Request", r.name, "vehicle_issue", "operations", "escalation" if crit else "followup", "critical" if r.severity == "Critical" else ("overdue" if crit else "pending"),
             (r.vehicle or "") + " · " + (r.issue_category or "Issue"), (r.severity or "") + " severity issue reported by " + (r.driver_name or "driver") + "; status " + (r.status or "") + ".",
@@ -1176,7 +1229,9 @@ def src_vehicle_maintenance():
                 base + [["date", "<", now_s], ["date", ">=", cutoff]], order_by="date asc", limit=500)
     prime_assign(recent)
     for r in recent:
-        o, ob = owner_of(r)
+        unpacked = owner_of(r)
+        o = unpacked[0]
+        ob = unpacked[1]
         act("vehicle_maintenance", "Vehicle Maintenance Schedule", r.name, "maintenance_overdue", "operations", "followup", "overdue", (r.vehicle or r.name),
             "Scheduled maintenance date has passed while status is '" + (r.status or "") + "'.", owner=o or (r.employee_name or ""), owner_basis=ob if o else ("Vehicle Maintenance Schedule.employee_name" if r.employee_name else "unassigned"),
             due=r.date, due_basis="Vehicle Maintenance Schedule.date", status=r.status)
@@ -1265,7 +1320,9 @@ def src_work_orders():
               order_by="expected_delivery_date asc", limit=1000)
     prime_assign(rows)
     for r in rows:
-        o, ob = owner_of(r)
+        unpacked = owner_of(r)
+        o = unpacked[0]
+        ob = unpacked[1]
         act("work_orders", "Work Order", r.name, "wo_overdue", "manufacturing", "followup", "overdue", r.item_name or r.production_item,
             "Produced " + str(frappe.utils.flt(r.produced_qty)) + " of " + str(frappe.utils.flt(r.qty)) + " " + (r.stock_uom or "") + " after expected delivery date.",
             owner=o, owner_basis=ob, due=r.expected_delivery_date, due_basis="Work Order.expected_delivery_date", company_name=r.company, status=r.status, age_from=r.creation)
@@ -1284,7 +1341,9 @@ def src_job_orders():
     over = 0
     for r in rows:
         title = (r.branch or "") + " · " + (r.jo_type or "Job order")
-        o, ob = owner_of(r, "prepared_by", "Employee", "Factory Job Order.prepared_by (preparer)")
+        unpacked = owner_of(r, "prepared_by", "Employee", "Factory Job Order.prepared_by (preparer)")
+        o = unpacked[0]
+        ob = unpacked[1]
         ds = dstr(r.end_date)
         if ds and ds < today:
             over = over + 1
@@ -1304,7 +1363,9 @@ def src_job_orders():
 
 def src_production_reporting():
     since = str(frappe.utils.add_days(today, -30))
-    raw, complete = fetch("Factory Daily Production", ["name", "branch", "date"], [["date", ">=", since], ["docstatus", "<", 2]], "date asc", cap=5000)
+    unpacked = fetch("Factory Daily Production", ["name", "branch", "date"], [["date", ">=", since], ["docstatus", "<", 2]], "date asc", cap=5000)
+    raw = unpacked[0]
+    complete = unpacked[1]
     rows = group_rows(raw, ["branch"], date_field="date")
     factories = gl("Manufacturing Factory", ["name"], [], order_by="name asc", limit=50)
     for r in rows:
@@ -1331,7 +1392,9 @@ def src_it_tickets():
               [["docstatus", "<", 2], ["status", "not in", ["Resolved", "Rejected"]]], order_by="due_date asc", limit=1000)
     prime("User", [r.assigned_technician for r in rows])
     for r in rows:
-        o, ob = owner_of(r, "assigned_technician", "User", "IT Help Desk Request.assigned_technician")
+        unpacked = owner_of(r, "assigned_technician", "User", "IT Help Desk Request.assigned_technician")
+        o = unpacked[0]
+        ob = unpacked[1]
         late = r.due_date and str(r.due_date)[:19] < now_s
         hi = r.priority in ["High", "Critical"]
         grp = "escalation" if (hi and late) or r.priority == "Critical" else "followup"
@@ -1369,7 +1432,9 @@ def src_assets():
     f = [["Asset Repair", "repair_status", "=", "Pending"], ["Asset Repair", "docstatus", "<", 2]]
     company_filter("Asset Repair", f)
     for r in gl("Asset Repair", ["name", "asset_name", "asset", "failure_date", "company", "_assign"], f, order_by="failure_date asc", limit=500):
-        o, ob = owner_of(r)
+        unpacked = owner_of(r)
+        o = unpacked[0]
+        ob = unpacked[1]
         act("assets", "Asset Repair", r.name, "repair", "it", "followup", "pending", r.asset_name or r.asset, "Repair pending since failure on " + dstr(r.failure_date) + ".",
             owner=o, owner_basis=ob, company_name=r.company, status="Pending", age_from=r.failure_date)
     indicator("it", "asset_requests", "Asset requests awaiting approval", len(rows), "Asset Acquisition Records approval_status = Pending")
@@ -1541,7 +1606,10 @@ def build_approvals():
     items = []
     problems = []
     for w in workflow_pending():
-        dt, sfield, pending = w["doctype"], w["sfield"], w["pending"]
+        unpacked = w["doctype"], w["sfield"], w["pending"]
+        dt = unpacked[0]
+        sfield = unpacked[1]
+        pending = unpacked[2]
         mine = {}
         for st in pending:
             if pending[st]["mine"]:
@@ -1571,7 +1639,9 @@ def build_approvals():
         if company and has_co:
             filters.append([dt, "company", "=", company])
         try:
-            rows, complete = fetch(dt, fields, filters, "modified asc", cap=1000)
+            unpacked = fetch(dt, fields, filters, "modified asc", cap=1000)
+            rows = unpacked[0]
+            complete = unpacked[1]
         except Exception as e:
             problems.append(dt + " (" + classify(e)[0] + ")")
             continue
@@ -1776,6 +1846,128 @@ REGISTRY = [
 PERF = [["sales", perf_sales], ["procurement", perf_procurement], ["finance", perf_finance], ["people", perf_people], ["projects", perf_projects], ["operations", perf_operations]]
 
 
+# ----------------------------------------------------------------------------- executive performance (department Performance tabs)
+# The measures each department's own dashboard leads with, read as grouped server aggregates (no row downloads, no row cap).
+# Values use verified company-currency base fields and are kept per currency, never added across currencies.
+# Spec: [doctype, status field, date field ("" = current snapshot), value field ("" = counts only), submitted only (1/0),
+#        title, source dashboard, value label]
+# Sandbox rules (live Server Script): no tuple-unpacking assignment and no augmented assignment; use x = x + y.
+EXECUTIVE_SOURCES = {
+    "sales": [["Quotation", "workflow_state", "transaction_date", "base_grand_total", 0, "Quotation pipeline", "Quotation & SO Tracker", "Quoted value"],
+              ["Sales Order", "status", "transaction_date", "base_grand_total", 1, "Sales orders booked", "Quotation & SO Tracker", "Order value"]],
+    "procurement": [["Purchase Order", "status", "transaction_date", "base_grand_total", 1, "Purchase orders placed", "Pre-Procurement", "PO value"],
+                    ["Purchase Receipt", "status", "posting_date", "base_grand_total", 1, "Goods received", "DN & GRN Tracker", "Received value"]],
+    "finance": [["Sales Invoice", "status", "posting_date", "base_grand_total", 1, "Customer invoices", "Credit Controller", "Invoiced value"],
+                ["Purchase Invoice", "status", "posting_date", "base_grand_total", 1, "Supplier invoices", "Accounts Payable", "Supplier billing"]],
+    "people": [["Employee", "status", "", "", 0, "Workforce", "Admin HR", ""],
+               ["Leave Application", "status", "from_date", "", 0, "Leave applications", "Employee Vacation Tracker", ""]],
+    "projects": [["DMS Technical Submittal", "status", "creation", "", 0, "Technical submittals", "DMS Technical Department", ""],
+                 ["Task", "status", "creation", "", 0, "Project tasks", "Technical Department", ""]],
+    "operations": [["Delivery Trip", "status", "departure_time", "", 0, "Delivery trips", "Logistics", ""],
+                   ["Vehicle", "custom_vehicle_status", "", "", 0, "Fleet availability", "Fleet", ""]],
+    "manufacturing": [["Work Order", "status", "planned_start_date", "", 0, "Work orders", "Manufacturing", ""],
+                      ["Factory Job Order", "jo_status", "start_date", "", 0, "Factory job orders", "Manufacturing", ""]],
+    "it": [["IT Help Desk Request", "status", "creation", "", 0, "IT help-desk requests", "IT Platforms Expiry", ""],
+           ["Asset Acquisition Records", "approval_status", "creation", "", 0, "Asset requests", "IT Asset Acquisition", ""]],
+    "legal": [["Legal Case List", "legal_case_status", "creation", "", 0, "Legal cases", "Legal / Taradhi", ""],
+              ["Document Record", "status", "creation", "", 0, "Controlled documents", "Document Control", ""]],
+}
+# meta.fields does not list standard columns, so their types are declared here.
+EXEC_STD_TYPES = {"creation": "Datetime", "modified": "Datetime"}
+
+
+def exec_months():
+    out = []
+    cursor = p_from[:7] + "-01"
+    while cursor <= p_to:
+        out.append(cursor[:7])
+        cursor = str(frappe.utils.add_months(cursor, 1))[:10]
+    return out
+
+
+def exec_buckets(dt, mf, base, with_value):
+    """Value sums need one query per company currency; counts-only sources use the normal company scope."""
+    if not with_value or mf.get("company") != "Link":
+        return [["", base, company_filter(dt, base)]]
+    groups = {}
+    for c in companies:
+        if company and c.name != company:
+            continue
+        cur = c.default_currency or ""
+        groups[cur] = (groups.get(cur) or []) + [c.name]
+    return [[cur, base + [[dt, "company", "in", groups[cur]]], "company" if company else "all"] for cur in sorted(groups.keys())]
+
+
+def exec_add(store, key_, cur, n, v):
+    entry = store.get(key_) or {"label": key_, "count": 0, "values": {}}
+    entry["count"] = entry["count"] + n
+    if cur:
+        entry["values"][cur] = (entry["values"].get(cur) or 0) + v
+    store[key_] = entry
+
+
+def executive_performance(dept):
+    sections = []
+    months = exec_months()
+    for spec in EXECUTIVE_SOURCES.get(dept, []):
+        dt = spec[0]
+        sf = spec[1]
+        df = spec[2]
+        vf = spec[3]
+        section = {"title": spec[5], "source": spec[6], "doctype": dt, "date_field": df, "value_label": spec[7], "state": "complete", "scope": "all"}
+        try:
+            mf = meta_fields(dt)
+            dtype = EXEC_STD_TYPES.get(df) or ((mf or {}).get(df) if df else "")
+            if mf is None:
+                section.update({"state": "not_configured", "message": dt + " is not installed on this site."})
+            elif sf not in mf or (df and dtype not in ["Date", "Datetime"]):
+                section.update({"state": "not_configured", "message": "Required fields are not installed: " + ", ".join([f for f in [sf, df] if f and f not in mf and f not in EXEC_STD_TYPES]) + "."})
+            else:
+                if vf and mf.get(vf) not in ["Currency", "Float"]:
+                    vf = ""
+                base = [[dt, "docstatus", "=", 1]] if spec[4] else [[dt, "docstatus", "<", 2]]
+                if df:
+                    base.append([dt, df, "between", [p_from, p_to + " 23:59:59"] if dtype == "Datetime" else [p_from, p_to]])
+                statuses = {}
+                trend = {}
+                totals = {}
+                total = 0
+                for b in exec_buckets(dt, mf, base, bool(vf)):
+                    cur = b[0]
+                    flt_ = b[1]
+                    section["scope"] = b[2]
+                    agg = ["count(name) as n"] + (["sum(" + vf + ") as v"] if vf else [])
+                    for r in gl(dt, [sf] + agg, flt_, order_by=sf + " asc", group_by=sf, limit=500):
+                        n = frappe.utils.cint(r.get("n"))
+                        v = frappe.utils.flt(r.get("v")) if vf else 0
+                        total = total + n
+                        exec_add(statuses, str(r.get(sf) or "Not set"), cur, n, v)
+                        if cur:
+                            totals[cur] = (totals.get(cur) or 0) + v
+                    if not df:
+                        continue
+                    if dtype == "Date":   # one row per day (period is at most 400 days), folded into months here
+                        for r in gl(dt, [df] + agg, flt_, order_by=df + " asc", group_by=df, limit=500):
+                            exec_add(trend, str(r.get(df) or "")[:7], cur, frappe.utils.cint(r.get("n")), frappe.utils.flt(r.get("v")) if vf else 0)
+                    else:                 # datetime columns: one grouped-free aggregate per month
+                        for m in months:
+                            last = str(frappe.utils.get_last_day(m + "-01"))[:10]
+                            lo = p_from if m == p_from[:7] else m + "-01"
+                            hi = p_to if m == p_to[:7] else last
+                            rows = gl(dt, agg, [x for x in flt_ if x[1] != df] + [[dt, df, "between", [lo, hi + " 23:59:59"]]], order_by="creation asc", limit=1)
+                            if rows:
+                                exec_add(trend, m, cur, frappe.utils.cint(rows[0].get("n")), frappe.utils.flt(rows[0].get("v")) if vf else 0)
+                section.update({
+                    "total": total, "values": totals, "currencies": sorted(totals.keys()),
+                    "statuses": sorted(statuses.values(), key=lambda s: -s["count"]),
+                    "trend": [trend.get(m) or {"label": m, "count": 0, "values": {}} for m in months] if df else [],
+                })
+        except Exception as e:
+            classified = classify(e)
+            section.update({"state": classified[0], "message": classified[1]})
+        sections.append(section)
+    perf(dept, "executive", {"sections": sections, "period": [p_from, p_to]})
+
 def execute(with_perf):
     for spec in REGISTRY:
         if spec[1] and not want(spec[1]):
@@ -1787,8 +1979,12 @@ def execute(with_perf):
                 try:
                     p[1]()
                 except Exception as e:
-                    st, msg = classify(e)
+                    unpacked = classify(e)
+                    st = unpacked[0]
+                    msg = unpacked[1]
                     perf(p[0], "error", {"state": st, "message": msg})
+    if with_perf and action == "department":
+        executive_performance(dept_arg)
     # De-duplicate by stable key: a record/action pair counts once even if two sources raise it.
     seen = {}
     out = []
@@ -1873,7 +2069,9 @@ if action == "bootstrap":
         "groups": GROUPS, "roles": [r for r in user_roles if r in VIEW_ROLES or r in ["CEO", "Final Approver", "Executive Manager"]],
     })
 elif action == "approvals":
-    appr, problems = build_approvals()
+    unpacked = build_approvals()
+    appr = unpacked[0]
+    problems = unpacked[1]
     respond({"items": appr, "summary": approval_summary(appr), "policy_approvals": APPROVAL_POLICY, "categories": CAT_LABEL,
              "problems": problems, "user_roles": [r for r in user_roles if r in ["CEO", "Final Approver", "Executive Manager"]]})
 elif action == "approval_detail":
@@ -1905,7 +2103,9 @@ elif action == "drilldown":
     })
 else:
     rows = execute(action in ["overview", "department"])
-    total, matrix = summarize(rows)
+    unpacked = summarize(rows)
+    total = unpacked[0]
+    matrix = unpacked[1]
     if action == "source_health":
         respond(health(SOURCES))
     elif action == "actions":

@@ -22,14 +22,28 @@ today = U.getdate(U.nowdate())
 buffer_amt = U.flt(frappe.db.get_single_value("Treasury Dashboard", "min_cash_buffer"))
 excl_raw = frappe.db.get_single_value("Treasury Dashboard", "excluded_companies") or ""
 excluded = [x.strip() for x in excl_raw.split(",") if x.strip()]
-all_companies = [c for c in frappe.get_all("Company", pluck="name") if c not in excluded]
+co_cur = {}
+for c in frappe.get_all("Company", fields=["name", "default_currency"]):
+    co_cur[c.name] = c.default_currency or ""
+all_companies = [c for c in co_cur if c not in excluded]
 if not all_companies:
     frappe.throw("No companies available for the treasury dashboard")
 
+# Amounts are company-currency GL / base values, so one view never adds two currencies:
+# a selected company uses its own currency; the group view covers companies in the system currency only.
+sys_cur = frappe.db.get_default("currency") or "SAR"
 sel = fd.get("company") or ""
-companies = [sel] if sel in all_companies else all_companies
+if sel in all_companies:
+    companies = [sel]
+    cur = co_cur.get(sel) or sys_cur
+else:
+    cur = sys_cur
+    companies = [c for c in all_companies if (co_cur.get(c) or sys_cur) == cur]
+    if not companies:
+        companies = [all_companies[0]]
+        cur = co_cur.get(all_companies[0]) or sys_cur
+other_currency = [c for c in all_companies if c not in companies and not sel]
 cparam = tuple(companies)
-cur = frappe.db.get_value("Company", companies[0], "default_currency") or "SAR"
 
 lookback = min(int(fd.get("lookback") or 30), 90)
 horizon = min(int(fd.get("horizon") or 30), 91)
@@ -207,7 +221,9 @@ try:
                 payroll_rows.append({"company": comp, "date": U.cstr(pd), "amount": latest[comp][1], "est": 1})
             pd = U.get_last_day(U.add_months(pd, 1))
     for key in pay:
-        comp, ds = key.split("|")
+        unpacked = key.split("|")
+        comp = unpacked[0]
+        ds = unpacked[1]
         pd = U.getdate(ds)
         if pd < today:
             continue
@@ -347,7 +363,7 @@ if aging["overdue"] > 0:
 
 result = {
     "currency": cur, "as_of": U.cstr(today), "companies": all_companies, "selected": sel if sel in all_companies else "",
-    "excluded": excluded,
+    "excluded": excluded, "company_currency": co_cur, "other_currency_companies": other_currency,
     "summary": {
         "total_balance": U.flt(total_bal, 2), "restricted": U.flt(total_restricted, 2),
         "available": U.flt(available, 2), "buffer": U.flt(buffer_amt, 2),

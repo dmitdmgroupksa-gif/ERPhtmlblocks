@@ -1,427 +1,1140 @@
+/* ===== DM Group KSA — Manufacturing Dashboard — SCRIPT field · v3 =====
+   Moves v2 onto the DM dashboard standard. Read-only. All figures come from the unchanged Server Script APIs
+   mfg_dashboard_performance, mfg_dashboard_plan and mfg_dashboard_jobs (confirmed factories only, permission-checked on the
+   server). Kept from v2: production cost = total value difference of submitted Manufacture stock entries, output per UOM
+   (never added across units), material cost, labour / process cost from Factory Daily Production (approved and unapproved
+   apart), the cost-target comparison, labour earnings and check-in hours per employee, the daily production plan (scheduled,
+   carryover with ageing, schedule review, drafts) and the jobs lists. The kit period is sent to the APIs as a custom range.
+   The shared runtime between the "DMS kit" markers is generated from tools/erp/kit/dms-kit.js (edit the kit, not the copy). */
 (function () {
-  var root = root_element;
-  function q(id) { return root.querySelector('[data-id="' + id + '"]'); }
-  function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-  function nf(v, d) { if (v == null || isNaN(v)) return '—'; return Number(v).toLocaleString('en-US', { minimumFractionDigits: d || 0, maximumFractionDigits: d || 0 }); }
-  function sar(v) { return v == null ? '—' : 'SAR ' + nf(v, 2); }
-  function link(dt, name, label) { if (!name) return esc(label || ''); return '<a href="/app/' + dt + '/' + encodeURIComponent(name) + '" target="_blank" rel="noopener">' + esc(label || name) + '</a>'; }
-  function riyadh(offsetDays) {
-    var p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-    var d = new Date(p + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + (offsetDays || 0)); return d.toISOString().slice(0, 10);
-  }
-  function fmtDate(s) { if (!s) return '—'; var d = new Date(s + 'T00:00:00Z'); return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }); }
-  function canCreateTarget() { try { return (frappe.boot.user.can_create || []).indexOf('Manufacturing Production Target') >= 0; } catch (e) { return false; } }
+  'use strict';
+  var APP = {
+    key: '__dmsManufacturing',
+    period: 'today',
+    tabs: [{ id: 'overview', en: 'Production overview', ar: 'نظرة عامة على الإنتاج' }, { id: 'labour', en: 'Labour earnings & hours', ar: 'أجور وساعات العمالة' }, { id: 'jobs', en: 'Jobs', ar: 'الأعمال' }, { id: 'plan', en: 'Daily production plan', ar: 'خطة الإنتاج اليومية' }, { id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }],
+    filters: [
+      { k: 'company', en: 'Company', ar: 'الشركة', none: ['Default company', 'الشركة الافتراضية'], options: function () { return COS.slice(); } },
+      { k: 'factory', en: 'Factory', ar: 'المصنع', none: ['All factories', 'كل المصانع'], dependsOn: 'company', options: function () { return FACS.map(function (f) { return { v: f.name, l: f.label }; }); } }
+    ],
+    sources: ['perf'],
+    dtLabels: { 'Factory Job Order': ['Factory job order', 'أمر عمل المصنع'], 'Stock Entry': ['Stock entry', 'قيد مخزون'], 'Employee': ['Employee', 'موظف'] },
+    title: function () { return tr('Manufacturing Dashboard', 'لوحة التصنيع'); },
+    stamp: function () { var r = D.perf; return r && r.scope_label ? r.scope_label : tr('Production, labour and plan', 'الإنتاج والعمالة والخطة'); },
+    periodNote: function () { return tr('Output, cost and labour follow the period (sent as a custom range; at most 367 days). Jobs overlap the same dates. The production plan has its own dates in its tab.', 'الإنتاج والتكلفة والعمالة تتبع الفترة (كنطاق مخصص؛ 367 يومًا كحد أقصى). الأعمال تتداخل مع نفس التواريخ. لخطة الإنتاج تواريخها في تبويبها.'); },
+    filterNote: function () { return tr('Only factories with a confirmed warehouse mapping are listed. Reports filed under the combined 28/34 branch appear under All factories only.', 'تُعرض فقط المصانع ذات ربط مستودعات مؤكد. التقارير تحت الفرع المجمّع 28/34 تظهر تحت كل المصانع فقط.'); },
+    boot: function () { return Promise.all([getList({ doctype: 'Manufacturing Factory', fields: ['company'], limit_page_length: 200 }, null).then(function (r) { COS = uniq((r || []).map(function (x) { return x.company; })); }, function () { COS = []; }), getList({ doctype: 'Company', fields: ['name', 'default_currency'], limit_page_length: 0 }, null).then(function (r) { CO = r || []; }, function () { CO = []; })]); },
+    load: function () { loadAll(); },
+    afterLoad: function (k) { if (k === 'perf' && D.perf) { FACS = D.perf.factory_options || FACS; if (D.perf.company && COS.indexOf(D.perf.company) < 0) { COS.unshift(D.perf.company); } } },
+    actions: function () { return actModel(actSpecs(), 'act', actClient()); },
+    banner: function () { return banner(); },
+    content: function (t, AM) { return ({ overview: tabOverview, labour: tabLabour, jobs: tabJobs, plan: tabPlan, actions: tabActions })[t](AM); },
+    drill: function (id) { return drill(id); },
+    onAct: function (a, v) { return onAct(a, v); }
+  };
 
-  var st = { period: 'Daily', from: riyadh(0), to: riyadh(0), company: '', factory: '', ttab: 'Achieved', pmode: 'tomorrow', pstart: riyadh(1), pend: riyadh(1), ptab: 'scheduled', uom: null, perf: null, plan: null, age: 'All' };
-  var seqP = 0, seqL = 0;
-  q('from').value = st.from; q('to').value = st.to; q('pstart').value = st.pstart; q('pend').value = st.pend;
+  /* ==== DMS kit v1 · generated from tools/erp/kit/dms-kit.js by build_kit.py — edit the kit, not this copy ==== */
+  /* Shared runtime for DM dashboards on the standard (toolbar, period, filters, tabs, tables, drill-downs, charts,
+     actions pending). Copied into each dashboard.js by tools/erp/kit/build_kit.py; the dashboard defines `APP` before
+     this block. Read-only helpers: frappe.client.get_list / frappe.desk.query_report.run under the viewer's permissions. */
+  var G = window;
+  var ROOT = (typeof root_element !== 'undefined' && root_element) ? root_element : document;
+  var HOST = ROOT.querySelector('[data-dms-root]');
+  if (!HOST) { return; }
+  if (G[APP.key] && typeof G[APP.key].destroy === 'function') { try { G[APP.key].destroy(); } catch (e) { /* ignore */ } }
+  var abort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  var SIG = abort ? { signal: abort.signal } : false;
+  var timers = [], destroyed = false, GEN = 0, BOOTED = false, LOADED = '';
+  G[APP.key] = { destroy: function () { destroyed = true; GEN++; if (abort) { abort.abort(); } timers.forEach(clearTimeout); timers = []; } };
+  var CFG = Object.assign({ conc: 6, pageSize: 25, modalPage: 15, weekStart: 0 }, APP.cfg || {});
+  var CUR = 'SAR';
+  try { CUR = (frappe.boot.sysdefaults && frappe.boot.sysdefaults.currency) || 'SAR'; } catch (e) { /* default */ }
+  var LANG = 'en';
+  try { var sv = G.localStorage.getItem('dms_lang'); if (sv === 'ar' || sv === 'en') { LANG = sv; } } catch (e) { /* storage unavailable */ }
+  function tr(en, ar) { return LANG === 'ar' ? ar : en; }
 
-  function call(method, args) {
-    return new Promise(function (resolve, reject) {
-      frappe.call({ method: method, args: args, type: 'POST', freeze: false,
-        callback: function (r) { resolve(r.message); },
-        error: function (e) { reject(e); } });
-    });
+  /* ---------- helpers ---------- */
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function clean(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+  function plain(s, n) { return clean(String(s || '').replace(/<[^>]*>/g, ' ')).slice(0, n || 90); }
+  function $(sel) { return HOST.querySelector(sel); }
+  function later(fn, ms) { var id = setTimeout(function () { if (!destroyed) { fn(); } }, ms); timers.push(id); return id; }
+  function bdi(s) { return '<bdi>' + esc(s) + '</bdi>'; }
+  function num(n) { return (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString('en-US'); }
+  function money(v) {
+    if (v == null || isNaN(v)) { return '—'; }
+    var a = Math.abs(v), s = v < 0 ? '-' : '';
+    if (a >= 1e9) { return s + (a / 1e9).toFixed(2) + 'B'; }
+    if (a >= 1e6) { return s + (a / 1e6).toFixed(2) + 'M'; }
+    if (a >= 1e4) { return s + (a / 1e3).toFixed(1) + 'K'; }
+    return s + Math.round(a).toLocaleString('en-US');
   }
-  function errText(e) {
-    try { var m = e && e.responseJSON && e.responseJSON._server_messages; if (m) { return JSON.parse(JSON.parse(m)[0]).message; } } catch (x) {}
-    return 'Could not load data. Check your access or try Refresh.';
-  }
+  function amt(v) { return (v == null || isNaN(v)) ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function moneyS(v, cur) { return (cur || CUR) + ' ' + money(v); }
+  function moneyB(v, cur) { return '<bdi>' + esc(moneyS(v, cur)) + '</bdi>'; }
+  function moneyFull(v, cur) { return (v == null || isNaN(v)) ? '' : (cur || CUR) + ' ' + amt(v); }
+  function cur$(v, cur) { return '<bdi>' + esc(money(v)) + '<small>' + esc(cur || CUR) + '</small></bdi>'; }
+  function pct(n, d, dp) { return (d > 0 && n != null) ? (n / d * 100).toFixed(dp == null ? 1 : dp) + '%' : tr('N/A', 'غير متاح'); }
+  function sum(arr, f) { var t = 0; for (var i = 0; i < arr.length; i++) { t += (f ? f(arr[i]) : arr[i]) || 0; } return t; }
+  function vals(o) { return Object.keys(o).map(function (k) { return o[k]; }); }
+  function uniq(a) { var m = {}; a.forEach(function (x) { if (x) { m[x] = 1; } }); return Object.keys(m).sort(function (x, y) { return x.localeCompare(y); }); }
+  function rep(s, n) { var o = ''; for (var i = 0; i < n; i++) { o += s; } return o; }
+  function one(r) { return (r && r[0]) || {}; }
+  function groupBy(rows, f) { var m = {}; rows.forEach(function (r) { var k = f(r); (m[k] || (m[k] = [])).push(r); }); return m; }
+  var NAtxt = function () { return tr('Not assigned', 'غير مُعيَّن'); };
 
-  function barChart(el, labels, series, opts) {
-    if (!labels.length) { el.innerHTML = '<div class="mfd-empty">No data for this range</div>'; return; }
-    var W = 560, H = 210, pl = 54, pr = 8, pt = 10, pb = 34;
-    var max = 0;
-    labels.forEach(function (_, i) { var s = 0; series.forEach(function (se) { s = Math.max(s, se.values[i] || 0); }); max = Math.max(max, s); });
-    if (max <= 0) max = 1;
-    var step = Math.pow(10, Math.floor(Math.log10(max))); var nice = Math.ceil(max / step) * step; if (nice / step > 6) { step *= 2; nice = Math.ceil(max / step) * step; }
-    var cw = (W - pl - pr) / labels.length; var groups = series.length; var bw = Math.max(1.5, Math.min(28, cw * 0.7 / groups));
-    var y = function (v) { return pt + (H - pt - pb) * (1 - v / nice); };
-    var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(opts.title) + '">';
-    for (var t = 0; t <= nice + 1e-9; t += step) { s += '<line x1="' + pl + '" x2="' + (W - pr) + '" y1="' + y(t) + '" y2="' + y(t) + '" stroke="#e5e7eb"/><text x="' + (pl - 6) + '" y="' + (y(t) + 4) + '" font-size="10" text-anchor="end" fill="#6b7280">' + esc(nf(t)) + '</text>'; }
-    var every = Math.ceil(labels.length / 10);
-    labels.forEach(function (lb, i) {
-      var cx = pl + cw * i + cw / 2;
-      series.forEach(function (se, j) {
-        var v = se.values[i] || 0; if (!v) return;
-        var x = cx - (bw * groups) / 2 + bw * j;
-        s += '<rect x="' + x + '" y="' + y(v) + '" width="' + bw + '" height="' + Math.max(0.5, y(0) - y(v)) + '" fill="' + se.color + '" rx="1.5"><title>' + esc(lb + ' · ' + se.name + ': ' + nf(v, opts.dec || 0)) + '</title></rect>';
-      });
-      if (i % every === 0) s += '<text x="' + cx + '" y="' + (H - pb + 14) + '" font-size="10" text-anchor="middle" fill="#6b7280">' + esc(lb.slice(5)) + '</text>';
-    });
-    s += '</svg><div class="mfd-leg">' + series.map(function (se) { return '<span><i style="background:' + se.color + '"></i>' + esc(se.name) + '</span>'; }).join('') + '</div>';
-    el.innerHTML = s;
-  }
-  function catChart(el, cats, note) {
-    var W = 560, H = 230, pl = 64, pr = 8, pt = 22, pb = 46;
-    var max = 0; cats.forEach(function (c) { if (c.v != null) max = Math.max(max, c.v); }); if (max <= 0) max = 1;
-    var step = Math.pow(10, Math.floor(Math.log10(max))); var nice = Math.ceil(max / step) * step; if (nice / step > 6) { step *= 2; nice = Math.ceil(max / step) * step; }
-    var y = function (v) { return pt + (H - pt - pb) * (1 - v / nice); };
-    var cw = (W - pl - pr) / cats.length, bw = Math.min(64, cw * 0.55);
-    var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Production cost by category">';
-    for (var t = 0; t <= nice + 1e-9; t += step) { s += '<line x1="' + pl + '" x2="' + (W - pr) + '" y1="' + y(t) + '" y2="' + y(t) + '" stroke="#e5e7eb"/><text x="' + (pl - 6) + '" y="' + (y(t) + 4) + '" font-size="10" text-anchor="end" fill="#6b7280">' + esc(nf(t)) + '</text>'; }
-    s += '<text x="12" y="' + (pt + (H - pt - pb) / 2) + '" font-size="10" fill="#6b7280" transform="rotate(-90 12 ' + (pt + (H - pt - pb) / 2) + ')" text-anchor="middle">SAR</text>';
-    cats.forEach(function (c, i) {
-      var cx = pl + cw * i + cw / 2;
-      if (c.v == null) { s += '<text x="' + cx + '" y="' + (y(0) - 8) + '" font-size="10" text-anchor="middle" fill="#b45309">' + esc(c.na) + '<title>' + esc(c.name + ': ' + c.na + '. ' + c.tip) + '</title></text>'; }
-      else { var h = Math.max(c.v > 0 ? 1 : 0, y(0) - y(c.v)); s += '<rect x="' + (cx - bw / 2) + '" y="' + (y(0) - h) + '" width="' + bw + '" height="' + h + '" fill="' + c.color + '" rx="2"><title>' + esc(c.name + ': SAR ' + nf(c.v, 2) + '. ' + c.tip) + '</title></rect><text x="' + cx + '" y="' + (y(0) - h - 5) + '" font-size="10" font-weight="600" text-anchor="middle" fill="#1f2937">' + esc(nf(c.v, 2)) + '</text>'; }
-      var words = c.name.split(' — '); s += '<text x="' + cx + '" y="' + (H - pb + 14) + '" font-size="10" text-anchor="middle" fill="#374151">' + esc(words[0]) + '</text>' + (words[1] ? '<text x="' + cx + '" y="' + (H - pb + 27) + '" font-size="10" text-anchor="middle" fill="' + c.color + '">' + esc(words[1]) + '</text>' : '');
-    });
-    s += '</svg><div class="mfd-hint" style="margin-top:4px">' + esc(note) + '</div>';
-    el.innerHTML = s;
-  }
-  function daysBetween(a, b) { var out = [], d = new Date(a + 'T00:00:00Z'), e = new Date(b + 'T00:00:00Z'); while (d <= e) { out.push(d.toISOString().slice(0, 10)); d.setUTCDate(d.getUTCDate() + 1); } return out; }
-  function card(title, body, status) { return '<div class="mfd-k"><div class="mfd-kl">' + esc(title) + '</div>' + body + (status ? '<div class="mfd-ks">' + status + '</div>' : '') + '</div>'; }
-  function val(v, unit) { return '<div class="mfd-kv">' + v + (unit ? '<small>' + esc(unit) + '</small>' : '') + '</div>'; }
-  function badge(t, c) { return '<span class="mfd-badge ' + (c || '') + '">' + esc(t) + '</span>'; }
-
-  // Target production cost line on the Production Cost card (Manufacturing Production Target.target_cost).
-  function targetCostLine(tg, o) {
-    var c = tg && tg.cost;
-    if (!tg || tg.access !== 'ok' || !c) return '<div class="mfd-ks">Target cost: ' + badge('Unavailable', 'r') + '</div>';
-    if (!c.records) {
-      return '<div class="mfd-ks">Target cost: ' + badge('Target not set') +
-        (canCreateTarget() ? ' <a href="/app/manufacturing-production-target/new" target="_blank" rel="noopener">Set target</a>' : '') + '</div>';
-    }
-    var actual = (o && o.access === 'ok') ? (o.value_difference || 0) : null;
-    var html = '<div class="mfd-ks">Target cost: <b>' + nf(c.basis, 2) + '</b> SAR <span class="mfd-hint">(' + esc(c.basis_label) + ')</span>';
-    if (c.produced_without_cost_target_count || c.records_without_cost) {
-      html += ' ' + badge('Partial target coverage', 'w') + '<div class="mfd-hint">' +
-        c.produced_without_cost_target_count + ' produced item(s) have no cost target' +
-        (c.records_without_cost ? '; ' + c.records_without_cost + ' target record(s) have no Target Cost' : '') +
-        '. Variance is not comparable.</div>';
-    } else if (actual !== null && c.basis > 0) {
-      var v = actual - c.basis;
-      html += ' ' + badge((v > 0 ? 'Over target by ' : 'Under target by ') + nf(Math.abs(v), 2) + ' SAR (' +
-        nf(Math.abs(v) / c.basis * 100, 1) + '%)', v > 0 ? 'r' : 'g');
-    }
-    return html + '</div>';
-  }
-
-  // Labour earnings, hours and overtime per employee.
-  function renderLabour(r) {
-    var el = q('labour-body'); if (!el) return;
-    var lab = (r && r.labour) || {};
-    if (lab.access !== 'ok') { el.innerHTML = '<div class="mfd-empty">Factory Daily Production is not accessible for your account.</div>'; return; }
-    var list = lab.employees || [];
-    if (!list.length) { el.innerHTML = '<div class="mfd-empty">No Factory Daily Production rows for this period and factory.</div>'; return; }
-    var hoursOk = lab.hours_access === 'ok';
-    var t = { earn: 0, appr: 0, unap: 0, ach: 0, ot: 0, short: 0, hrs: 0, oth: 0, days: 0, inc: 0, fdpHrs: 0 };
-    var body = list.map(function (x) {
-      t.earn += x.earnings; t.appr += x.earn_approved; t.unap += x.earn_unapproved; t.ach += x.achieved;
-      t.ot += x.ot_amount; t.short += x.shortfall; t.fdpHrs += x.duty_hours || 0;
-      var flags = [];
-      if (hoursOk) {
-        t.hrs += x.ck_hours || 0; t.oth += x.ck_ot_hours || 0; t.days += x.ck_days || 0; t.inc += x.ck_incomplete_days || 0;
-        if (x.ck_incomplete_days) flags.push(badge(x.ck_incomplete_days + ' incomplete day' + (x.ck_incomplete_days === 1 ? '' : 's'), 'w'));
-        if (x.ck_long_days) flags.push(badge(x.ck_long_days + ' day' + (x.ck_long_days === 1 ? '' : 's') + ' over 13 h', 'w'));
-        if (x.ck_no_shift_days) flags.push(badge(x.ck_no_shift_days + ' day(s) without shift: OT not calculated', 'w'));
+  /* ---------- dates (ERP site time zone, calendar arithmetic) ---------- */
+  function siteTz() {
+    try {
+      if (G.frappe && frappe.boot) {
+        if (frappe.boot.time_zone && frappe.boot.time_zone.system) { return frappe.boot.time_zone.system; }
+        if (frappe.boot.sysdefaults && frappe.boot.sysdefaults.time_zone) { return frappe.boot.sysdefaults.time_zone; }
       }
-      return '<tr><td>' + (x.employee === '(No employee)' ? esc(x.employee) : link('employee', x.employee, x.employee)) + '</td>' +
-        '<td class="n"><b>' + nf(x.earnings, 2) + '</b><div class="mfd-hint">Appr. ' + nf(x.earn_approved, 2) +
-        ' · Unappr. ' + nf(x.earn_unapproved, 2) + '</div></td>' +
-        (hoursOk
-          ? '<td class="n">' + nf(x.ck_hours || 0, 1) + '</td><td class="n">' + nf(x.ck_ot_hours || 0, 1) + '</td><td class="n">' + nf(x.ck_days || 0) + '</td>'
-          : '<td class="n">—</td><td class="n">—</td><td class="n">—</td>') +
-        '<td class="n">' + nf(x.achieved, 2) + '</td>' +
-        '<td class="n">' + nf(x.ot_amount, 2) + '</td>' +
-        '<td class="n">' + (x.shortfall ? nf(x.shortfall, 2) : '—') + '</td>' +
-        '<td>' + (flags.join(' ') || '') + '</td></tr>';
-    }).join('');
-    var cardTotal = (lab.approved || 0) + (lab.unapproved || 0);
-    el.innerHTML =
-      '<div class="mfd-tw"><table><thead><tr><th>Employee</th>' +
-      '<th class="n">Total earned (SAR)</th><th class="n">Hours worked</th><th class="n">Overtime hours</th>' +
-      '<th class="n">Days counted</th><th class="n">Achieved amount (SAR)</th><th class="n">OT / incentive (SAR)</th>' +
-      '<th class="n">Shortfall (SAR, not deducted)</th><th>Check</th></tr></thead><tbody>' + body +
-      '</tbody><tfoot><tr><th>Total (' + list.length + ' employees)</th><th class="n">' + nf(t.earn, 2) + '<div class="mfd-hint">Appr. ' + nf(t.appr, 2) + ' · Unappr. ' + nf(t.unap, 2) +
-      '</div></th>' +
-      (hoursOk ? '<th class="n">' + nf(t.hrs, 1) + '</th><th class="n">' + nf(t.oth, 1) + '</th><th class="n">' + nf(t.days) + '</th>' : '<th></th><th></th><th></th>') +
-      '<th class="n">' + nf(t.ach, 2) + '</th><th class="n">' + nf(t.ot, 2) + '</th><th class="n">' + nf(t.short, 2) + '</th>' +
-      '<th>' + (t.inc ? badge(nf(t.inc) + ' incomplete days', 'w') : '') + '</th></tr></tfoot></table></div>' +
-      '<div class="mfd-hint" style="margin-top:8px">' +
-      'Achieved amount = Actual Qty × Rate per Factory Daily Production row (the "Total Achieved Amount" of the management print format). ' +
-      'Total earned = achieved amount + positive OT / incentive amounts; negative OT amounts are a shortfall, shown separately and not deducted. ' +
-      'Same records, factories and approval states as the Labour / Process Cost card' +
-      (Math.abs(t.ach - cardTotal) < 0.01 ? ' (achieved total reconciles with that card: ' + nf(cardTotal, 2) + ' SAR)' : ' (achieved total ' + nf(t.ach, 2) + ' vs card ' + nf(cardTotal, 2) + ')') + '. ' +
-      (hoursOk
-        ? 'Hours and overtime come from biometric Employee Checkin: first to last punch each day; overtime = hours beyond the employee\'s shift length. Days with a single punch or a span over 16 h are incomplete and not counted; days over 13 h are flagged for review. '
-        : 'Hours and overtime are unavailable: ' + esc(lab.hours_access || 'Employee Checkin not accessible') + '. ') +
-      (t.fdpHrs ? '' : 'Factory Daily Production has no Duty Hours or OT hours recorded for this period.') +
-      '</div>';
+    } catch (e) { /* ignore */ }
+    return null;
   }
-
-  function renderPerf() {
-    var r = st.perf; if (!r) return;
-    q('from').value = r.start; q('to').value = r.end; st.from = r.start; st.to = r.end;
-    root.querySelectorAll('[data-id="period"] button').forEach(function (x) { x.classList.toggle('on', x.getAttribute('data-v') === r.period); });
-    var days = daysBetween(r.start, r.end).length;
-    var rng = fmtDate(r.start) + (r.start !== r.end ? ' – ' + fmtDate(r.end) : '') + ' (' + days + (days === 1 ? ' day' : ' days') + ') · ' + esc(r.scope_label || '');
-    if (r.partial) rng += ' · ' + badge('In progress — data to ' + fmtDate(r.to_date_end));
-    if (r.future) rng += ' · ' + badge('Future range', 'w');
-    q('range').innerHTML = rng;
-    var msgs = [];
-    if (r.access) msgs.push(r.access);
-    ['output', 'labour'].forEach(function (k) { if (r[k] && r[k].access && r[k].access !== 'ok') msgs.push(r[k].access); });
-    (r.notes || []).forEach(function (n) { msgs.push(n); });
-    if (r.output && r.output.truncated) msgs.push('Output list truncated at 5,000 rows — narrow the range.');
-    q('perfmsg').innerHTML = msgs.map(esc).join('<br>');
-    var o = r.output || {}, lab = r.labour || {}, tg = r.targets || {};
-    var NA = badge('Access unavailable', 'r');
-    var k = [];
-    if (o.access !== 'ok') k.push(card('Production Cost', val('—'), NA));
-    else if (!o.entries) k.push(card('Production Cost', val('—'), badge('No entries')));
-    else k.push(card('Production Cost', val(nf(o.value_difference || 0, 2), 'SAR'), (o.negative_value_difference_entries || []).length ? badge(nf(o.negative_value_difference_entries.length) + ' negative ' + (o.negative_value_difference_entries.length === 1 ? 'entry' : 'entries'), 'w') : ''));
-    k[k.length - 1] = k[k.length - 1].replace(/<\/div>$/, targetCostLine(tg, o) + '</div>');
-    if (o.access !== 'ok') k.push(card('Production Output', val('—'), NA));
-    else if (!(o.by_uom || []).length) k.push(card('Production Output', val('0'), badge('No data')));
-    else k.push(card('Production Output', o.by_uom.map(function (u) { return val(nf(u.qty), u.uom); }).join(''), ''));
-    if (o.access !== 'ok') k.push(card('Material Cost', val('—'), NA));
-    else k.push(card('Material Cost', val(nf(o.material_cost, 2), 'SAR'), ''));
-    if (lab.access !== 'ok') k.push(card('Labour / Process Cost', val('—'), NA));
-    else if (!lab.records) k.push(card('Labour / Process Cost', val('—'), lab.combined_not_attributable ? badge('Combined 28/34 only — view All Factories', 'w') : badge('No records')));
-    else k.push(card('Labour / Process Cost',
-      '<div class="mfd-kv2"><span>' + nf(lab.approved, 2) + '<small>SAR</small></span>' + badge('Approved', 'g') + '</div>' +
-      '<div class="mfd-kv2"><span>' + nf(lab.unapproved, 2) + '<small>SAR</small></span>' + badge('Unapproved', 'w') + '</div>', ''));
-    k = k.concat(jobCards());
-    q('kpis').innerHTML = k.join('');
-    renderLabour(r);
-
-    var det = [];
-    det.push('<b>Categories</b>: finished-item Item Group saved on Stock Entry Detail. Output sums finished-row stock quantities, separately by UOM. Cost counts each Stock Entry value difference once; differing finished-item groups use Multiple categories, missing groups use Unclassified. Multiple-category entries: ' + nf(o.multiple_category_count || 0) + '; unclassified entries: ' + nf(o.unclassified_count || 0) + '.');
-    det.push('<b>Output</b>: finished-goods quantity from submitted Manufacture stock entries, dated by stock-entry posting date, confirmed factory warehouses only' + (o.entries != null ? ' (' + nf(o.entries) + ' entries)' : '') + '.');
-    det.push('<b>Production Cost</b>: incoming inventory value minus outgoing inventory value, as defined by management — the sum of “Total Value Difference (Incoming - Outgoing)” (value_difference) on submitted Manufacture stock entries in confirmed factory warehouses, by posting date: ' + sar(o.value_difference) + ' from ' + nf(o.entries || 0) + ' entries (incoming ' + sar(o.fg_valuation) + ' − outgoing ' + sar(o.material_cost) + '). Negative differences are kept as they are' + ((o.negative_value_difference_entries || []).length ? ' — for review: ' + o.negative_value_difference_entries.map(function (x) { return link('stock-entry', x.se, x.se) + ' (' + fmtDate(x.date) + ') ' + sar(x.value_difference); }).join('; ') : ' (none in this range)') + '. Materials, additional costs and labour are not added to this figure.');
-    det.push('<b>Additional costs</b> (operating cost per Work Order / BOM): ' + ((o.additional_cost_entries || []).length ? (o.additional_cost_entries || []).map(function (x) { return link('stock-entry', x.se, x.se) + ' ' + sar(x.amount); }).join('; ') + ((o.additional_cost_entries || []).length >= 25 ? '; …' : '') : 'none in this range') + '.');
-    det.push('<b>Material Cost</b>: value of materials consumed on those entries. Additional costs on the same entries: ' + sar(o.additional_costs) + '. Finished-goods valuation (not a cost): ' + sar(o.fg_valuation) + '.');
-    det.push('<b>Labour / Process Cost</b>: Factory Daily Production “Total Achieved Amount” — for each daily report, the sum of Actual Qty × Rate over all rows, the same total as the “Factory Output and Overtime - Management” print format; dated by the report date, each report counted once. Approved = submitted with workflow state Approved (' + nf(lab.approved_records || 0) + ' reports); Unapproved = Draft or Pending Review (' + nf(lab.unapproved_records || 0) + ' reports); cancelled, Rejected and other states excluded' + (lab.excluded_records ? ' (' + nf(lab.excluded_records) + ' excluded)' : '') + '. Reports filed under the combined 28/34 branch are shown under All Factories only' + (lab.combined_not_attributable ? ' (' + nf(lab.combined_not_attributable) + ' not attributable to the selected factory)' : '') + (lab.invalid_text_dates ? '; ' + nf(lab.invalid_text_dates) + ' reports with text dates excluded' : '') + '. Not added to Production Cost.');
-    det.push('<b>Factories</b>: ' + (r.mapping || []).map(function (m) { return esc(m.factory) + ' = ' + esc(m.warehouse); }).join('; ') + '. Week starts ' + esc(r.week_start) + '; dates in Asia/Riyadh.');
-    if (r.is_admin && r.diagnostics) {
-      var dg = r.diagnostics;
-      var eo = (dg.excluded_output || []).map(function (x) { return esc(x.wh) + ': ' + nf(x.qty) + ' ' + esc(x.uom) + ' (' + nf(x.n) + ' entries, material ' + sar(x.mat) + ')'; });
-      var el = (dg.excluded_labour || []).map(function (x) { return esc(x.branch || '(blank)') + ': ' + nf(x.n) + ' records, ' + sar(x.amount); });
-      var ej = ((st.plan && st.plan.diagnostics && st.plan.diagnostics.excluded_job_orders) || []).map(function (x) { return esc(x.branch || '(blank)') + ' · docstatus ' + x.docstatus + ' · ' + esc(x.jo_status || 'no status') + ': ' + nf(x.n); });
-      det.push('<b>Administrator diagnostics</b> (System Manager only; excluded from all figures): output — ' + (eo.length ? eo.join('; ') : 'none') + '; labour — ' + (el.length ? el.join('; ') : 'none') + '; job orders — ' + (ej.length ? ej.join('; ') : 'none') + '.');
-    }
-    var dEl = q('details'); var wasOpen = dEl.open;
-    dEl.innerHTML = '<summary>Details &amp; definitions</summary><ul>' + det.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul>'; dEl.open = wasOpen;
-
-    var cdays = r.future ? [] : daysBetween(r.start, r.to_date_end || r.start);
-    var uoms = (o.by_uom || []).map(function (u) { return u.uom; });
-    if (!st.uom || uoms.indexOf(st.uom) < 0) { var best = (o.by_uom || []).slice().sort(function (a, b) { return b.qty - a.qty; })[0]; st.uom = best ? best.uom : null; }
-    q('uomsel').innerHTML = uoms.length > 1 ? '<select>' + uoms.map(function (u) { return '<option' + (u === st.uom ? ' selected' : '') + '>' + esc(u) + '</option>'; }).join('') + '</select>' : (st.uom ? '<span class="mfd-hint">' + esc(st.uom) + '</span>' : '');
-    var sel = q('uomsel').querySelector('select'); if (sel) sel.onchange = function () { st.uom = sel.value; renderPerf(); };
-    if(o.access !== 'ok') {q('chart-out').innerHTML='<div class="mfd-empty">Access unavailable</div>';q('chart-cost').innerHTML='<div class="mfd-empty">Access unavailable</div>';}
-    else {
-      var oc=(o.output_categories||[]).filter(function(x){return x.uom===st.uom;}).map(function(x){return {category:x.category,value:x.qty};}).sort(function(a,b){return b.value-a.value;});
-      var ut=(o.by_uom||[]).filter(function(x){return x.uom===st.uom;})[0];
-      categoryBars(q('chart-out'),oc,st.uom||'',false,ut?ut.qty:0);
-      var rvO=o.output_review_entries||[],unO=(o.output_unclassified_rows||[]).filter(function(x){return x.uom===st.uom;}),seL=function(n){return '<a href="/app/stock-entry/'+encodeURIComponent(n)+'" target="_blank">'+esc(n)+'</a>';};
-      if(rvO.length||unO.length){q('chart-out').insertAdjacentHTML('beforeend','<div class="mfd-msg">Review needed'+(rvO.length?' · '+rvO.length+' entr'+(rvO.length>1?'ies':'y')+' with finished items in different categories (each row counted once under its own Item Group): '+rvO.slice(0,10).map(function(x){return seL(x.se)+' ('+esc((x.groups||[]).join(', '))+')';}).join(', '):'')+(unO.length?' · '+unO.length+' finished row(s) without Item Group shown as Unclassified: '+unO.slice(0,10).map(function(x){return seL(x.se)+' '+esc(x.item||'');}).join(', '):'')+'</div>');}
-      categoryBars(q('chart-cost'),(o.categories||[]).map(function(x){return {category:x.category,value:x.value_difference};}),'SAR',true,o.value_difference);
-    }
-
-
-
+  function siteParts() {
+    var tz = siteTz(), o = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }, p;
+    if (tz) { o.timeZone = tz; }
+    try { p = new Intl.DateTimeFormat('en-CA', o).formatToParts(new Date()); } catch (e) { delete o.timeZone; p = new Intl.DateTimeFormat('en-CA', o).formatToParts(new Date()); }
+    var m = {}; p.forEach(function (x) { m[x.type] = x.value; }); if (m.hour === '24') { m.hour = '00'; } return m;
   }
+  function parseISO(s) {
+    if (!s || typeof s !== 'string') { return null; }
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s); if (!m) { return null; }
+    var y = +m[1], mo = +m[2], d = +m[3], ms = Date.UTC(y, mo - 1, d), dt = new Date(ms);
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) { return null; }
+    return ms;
+  }
+  function isoOf(ms) { var d = new Date(ms); return d.getUTCFullYear() + '-' + ('0' + (d.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + d.getUTCDate()).slice(-2); }
+  function addDays(iso, n) { return isoOf(parseISO(iso) + n * 86400000); }
+  function diffDays(a, b) { return Math.round((parseISO(b) - parseISO(a)) / 86400000); }
+  var TODAY = '', STAMP = '';
+  function setToday() { var p = siteParts(); TODAY = p.year + '-' + p.month + '-' + p.day; STAMP = p.hour + ':' + p.minute; }
+  function monthStart(iso) { return iso.slice(0, 8) + '01'; }
+  function monthEnd(iso) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7); return isoOf(Date.UTC(y, m, 0)); }
+  function addMonths(iso, n) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n; return isoOf(Date.UTC(y, m, 1)); }
+  function weekStartOf(iso) { var dow = new Date(parseISO(iso)).getUTCDay(); return addDays(iso, -((dow - CFG.weekStart + 7) % 7)); }
+  function quarterStart(iso) { var m = +iso.slice(5, 7); return iso.slice(0, 5) + ('0' + (Math.floor((m - 1) / 3) * 3 + 1)).slice(-2) + '-01'; }
+  function shiftMonths(iso, n) {
+    var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n, d = +iso.slice(8, 10), last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    return isoOf(Date.UTC(y, m, Math.min(d, last)));
+  }
+  function periodRange(key, cf, ct) {
+    var t = TODAY, y = t.slice(0, 4), ws = weekStartOf(t), qs = quarterStart(t), lm = addMonths(monthStart(t), -1);
+    switch (key) {
+      case 'today': return [t, t];
+      case 'yesterday': return [addDays(t, -1), addDays(t, -1)];
+      case 'week': return [ws, addDays(ws, 6)];
+      case 'lastWeek': return [addDays(ws, -7), addDays(ws, -1)];
+      case 'month': return [monthStart(t), monthEnd(t)];
+      case 'lastMonth': return [lm, monthEnd(lm)];
+      case 'quarter': return [qs, monthEnd(addMonths(qs, 2))];
+      case 'year': return [y + '-01-01', y + '-12-31'];
+      case 'prevYear': return [(y - 1) + '-01-01', (y - 1) + '-12-31'];
+      case 'custom': return [cf, ct];
+      default: return [y + '-01-01', t];   // ytd
+    }
+  }
+  /* Comparison window: the same span one preset unit earlier; custom ranges compare with the equally long range before. */
+  function prevRange(key, from, to) {
+    switch (key) {
+      case 'today': case 'yesterday': return [addDays(from, -1), addDays(to, -1)];
+      case 'week': case 'lastWeek': return [addDays(from, -7), addDays(to, -7)];
+      case 'month': case 'lastMonth': return [shiftMonths(from, -1), shiftMonths(to, -1)];
+      case 'quarter': return [shiftMonths(from, -3), shiftMonths(to, -3)];
+      case 'ytd': case 'year': case 'prevYear': return [shiftMonths(from, -12), shiftMonths(to, -12)];
+      default: var n = diffDays(from, to) + 1; return [addDays(from, -n), addDays(from, -1)];
+    }
+  }
+  /* In-progress periods stop at today, so this month to date compares with the same days of last month. */
+  function clip(r) { return [r[0], r[1] > TODAY && r[0] <= TODAY ? TODAY : r[1]]; }
+  function cmpRanges() { var c = clip(PERIOD); return { cur: c, prev: prevRange(F.period, c[0], c[1]) }; }
+  function monthList(from, to) { var out = [], cur = monthStart(from); for (var i = 0; i < 72 && cur <= to; i++) { out.push(cur.slice(0, 7)); cur = addMonths(cur, 1); } return out; }
+  function locale() { return LANG === 'ar' ? 'ar-SA-u-nu-latn-ca-gregory' : 'en-GB'; }
+  function fmtDate(iso, yr) {
+    try { var o = { day: 'numeric', month: 'short', timeZone: 'UTC' }; if (yr) { o.year = 'numeric'; } return new Intl.DateTimeFormat(locale(), o).format(new Date(parseISO(String(iso).slice(0, 10)))); } catch (e) { return iso; }
+  }
+  function rangeLabel(r) {
+    if (!r || !r[0] || !r[1]) { return ''; }
+    return r[0] === r[1] ? fmtDate(r[0], true) : fmtDate(r[0], r[0].slice(0, 4) !== r[1].slice(0, 4)) + ' – ' + fmtDate(r[1], true);
+  }
+  var PLR = null;
+  function daysTxt(n) {
+    if (LANG !== 'ar') { return num(n) + (n === 1 ? ' day' : ' days'); }
+    var c = 'other'; try { c = (PLR || (PLR = new Intl.PluralRules('ar'))).select(n); } catch (e) { /* generic form */ }
+    return c === 'one' ? 'يوم واحد' : c === 'two' ? 'يومان' : c === 'few' ? n + ' أيام' : c === 'many' ? n + ' يومًا' : n + ' يوم';
+  }
+  function ageOf(iso) { var d = iso ? diffDays(String(iso).slice(0, 10), TODAY) : 0; return isNaN(d) ? 0 : Math.max(0, d); }
+  function lateTxt(iso) {
+    var d = diffDays(String(iso).slice(0, 10), TODAY); if (isNaN(d)) { return ''; }
+    return d > 0 ? tr(daysTxt(d) + ' overdue', 'متأخر ' + daysTxt(d)) : d === 0 ? tr('Due today', 'مستحق اليوم') : tr('Due in ' + daysTxt(-d), 'مستحق خلال ' + daysTxt(-d));
+  }
+  function agoTxt(iso, en, ar) { var a = ageOf(iso); return a ? tr((en || 'Waiting') + ' ' + daysTxt(a), (ar || 'منذ') + ' ' + daysTxt(a)) : tr('Today', 'اليوم'); }
 
-
-  var seqJ = 0;
-  st.jtab = 'active'; st.jfollow = true; st.jobs = null;
-  function jobCards() {
-    var j = st.jobs, s = j && j.summary;
-    return ['active','pending'].map(function(t) {
-      return card(t === 'active' ? 'Active Jobs' : 'Pending Jobs', val(!j ? '…' : j.access ? '—' : nf((s||{})[t]||0)), j && j.access ? badge('Access unavailable','r') : badge('Jobs date range'));
+  /* ---------- ERP read-only API layer (bounded concurrency, one retry, cancellation) ---------- */
+  var REQ_TIMEOUT = 90000;
+  function callP(method, args) {
+    return new Promise(function (resolve, reject) {
+      var done = false, ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var timer = setTimeout(function () { if (done) { return; } done = true; if (ctl) { try { ctl.abort(); } catch (x) { /* ignore */ } } var te = new Error('Request timed out'); te.timeout = true; reject(te); }, REQ_TIMEOUT);
+      var body = new URLSearchParams();
+      Object.keys(args || {}).forEach(function (k) { var v = args[k]; if (v === undefined || v === null) { return; } body.append(k, (typeof v === 'object') ? JSON.stringify(v) : String(v)); });
+      fetch('/api/method/' + method, { method: 'POST', credentials: 'same-origin', signal: ctl ? ctl.signal : undefined,
+        headers: { 'X-Frappe-CSRF-Token': (G.frappe && frappe.csrf_token) || '', 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' }, body: body.toString() })
+        .then(function (r) { return r.text().then(function (txt) { return { r: r, txt: txt }; }); })
+        .then(function (o) {
+          if (done) { return; } done = true; clearTimeout(timer);
+          var j = null; try { j = JSON.parse(o.txt); } catch (x) { /* ignore */ }
+          if (o.r.ok && j && !j.exc) { resolve(j.message === undefined ? null : j.message); return; }
+          var ex = String((j && (j.exception || j.exc_type)) || '');
+          var perm = o.r.status === 401 || o.r.status === 403 || /permission/i.test(ex);
+          var e = new Error((perm ? 'No access to ' + ((args && (args.doctype || args.report_name)) || method) : (ex.split(':').slice(-1)[0].trim() || ('HTTP ' + o.r.status))));
+          e.status = perm ? 403 : o.r.status; reject(e);
+        })
+        .catch(function (err) { if (done) { return; } done = true; clearTimeout(timer); reject(err || new Error('request failed')); });
     });
   }
-  function renderJobs() {
-    var j = st.jobs; if(!j) return;
-    q('jmsg').textContent = j.access || ((j.truncated ? 'Results truncated; narrow the scope. ' : '') + 'Active: Assigned / Inprogress. Pending: Open. Counts are orders overlapping the jobs dates. Carryover uses current status.');
-    if(j.access) { q('jtabs').innerHTML='';q('jtable').innerHTML='<div class="mfd-empty">Access unavailable</div>';return; }
-    var ts=[['active','Active Jobs'],['pending','Pending Jobs'],['carryover','Carryover'],['schedule_review','Schedule Needs Review']];
-    q('jtabs').innerHTML=ts.map(function(t){return '<button data-j="'+t[0]+'" class="'+(st.jtab===t[0]?'on':'')+'">'+t[1]+' ('+(j[t[0]]||[]).length+')</button>';}).join('');
-    q('jtabs').querySelectorAll('button').forEach(function(b){b.onclick=function(){st.jtab=b.getAttribute('data-j');renderJobs();};});
-    var list=j[st.jtab]||[];
-    q('jtable').innerHTML=list.length ? '<table><thead><tr><th>Factory Job Order</th><th>Factory</th><th>Start Date</th><th>End Date</th><th>Status</th><th class="n">Activity rows</th><th class="n">Employees</th><th>Note</th></tr></thead><tbody>'+list.map(function(x){return '<tr><td>'+link('factory-job-order',x.jo)+'</td><td>'+esc(x.factory)+'</td><td>'+fmtDate(x.start_date)+'</td><td>'+fmtDate(x.end_date)+'</td><td>'+esc(x.status)+'</td><td class="n">'+nf(x.rows)+'</td><td class="n">'+nf(x.employees)+'</td><td>'+esc(x.issue || (st.jtab==='carryover' ? (x.days_overdue ? nf(x.days_overdue)+' days overdue today' : 'Potential carryover') : ''))+'</td></tr>';}).join('')+'</tbody></table>' : '<div class="mfd-empty">No orders in this group.</div>';
-  }
-  function loadJobs() {
-    var p=st.perf;if(!p)return;
-    if(st.jfollow){q('jstart').value=p.start;q('jend').value=p.end;}
-    var a=q('jstart').value,b=q('jend').value;
-    if(!a||!b||a>b){q('jmsg').textContent='Start Date must be on or before End Date.';return;}
-    if(daysBetween(a,b).length>367){q('jmsg').textContent='Date range cannot exceed 367 days.';return;}
-    var seq=++seqJ;st.jobs=null;q('jtable').innerHTML='<div class="mfd-empty">Loading…</div>';renderPerf();
-    return call('mfg_dashboard_jobs',{company:st.company,factory:st.factory,from_date:a,to_date:b}).then(function(j){if(seq!==seqJ)return;st.jobs=j;renderJobs();renderPerf();}).catch(function(e){if(seq!==seqJ)return;st.jobs={access:errText(e)};renderJobs();renderPerf();});
-  }
-  function categoryBars(el,rows,unit,isCost,total) {
-    if(!rows.length){el.innerHTML='<div class="mfd-empty">No entries for this range</div>';return;}
-    var W=680, left=230,right=100,rh=38,H=rows.length*rh+30;
-    var vals=rows.map(function(x){return Number(x.value)||0;}),lo=Math.min.apply(null,[0].concat(vals)),hi=Math.max.apply(null,[0].concat(vals));if(lo===hi)hi=lo+1;
-    var scale=function(v){return left+(W-left-right)*(v-lo)/(hi-lo);},zero=scale(0),sum=0;
-    var h='<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+(isCost?'Production Cost':'Production Output')+' by Category"><line x1="'+zero+'" x2="'+zero+'" y1="0" y2="'+(H-20)+'" stroke="#9ca3af"/>';
-    rows.forEach(function(x,i){var v=Number(x.value)||0;sum+=v;var y=i*rh+8,px=scale(v),name=x.category;
-      h+='<text x="'+(left-10)+'" y="'+(y+17)+'" text-anchor="end" font-size="12" fill="#374151">'+esc(name.length>31?name.slice(0,29)+'…':name)+'<title>'+esc(name)+'</title></text><rect x="'+Math.min(zero,px)+'" y="'+y+'" width="'+Math.max(v?1:0,Math.abs(px-zero))+'" height="24" rx="3" fill="'+(v<0?'#b45309':'#1f4e8c')+'"><title>'+esc(name+': '+nf(v,isCost?2:2)+' '+unit)+'</title></rect><text x="'+(W-4)+'" y="'+(y+17)+'" text-anchor="end" font-size="12" fill="#1f2937">'+esc(nf(v,isCost?2:2))+'</text>';});
-    h+='</svg><div class="mfd-hint">Category: finished-item Item Group · '+esc(unit)+'</div><div class="mfd-tw"><table><thead><tr><th>Category</th><th class="n">'+(isCost?'Production Cost (SAR)':'Produced Quantity')+'</th>'+(!isCost?'<th>UOM</th>':'')+'</tr></thead><tbody>'+rows.map(function(x){return '<tr><td>'+esc(x.category)+'</td><td class="n">'+nf(x.value,2)+'</td>'+(!isCost?'<td>'+esc(unit)+'</td>':'')+'</tr>';}).join('')+'<tr><th>Total</th><th class="n">'+nf(sum,2)+'</th>'+(!isCost?'<td>'+esc(unit)+'</td>':'')+'</tr></tbody></table></div>';
-    if(total!=null&&Math.abs(sum-total)>0.005)h+='<div class="mfd-msg err">Category total does not match the card. Review source classification.</div>';
-    el.innerHTML=h;
-  }
-
-  function loadPerf() {
-    var my = ++seqP; q('kpis').classList.add('mfd-loading');
-    q('refresh').disabled = true;
-    var a = { company: st.company, factory: st.factory, period: st.period };
-    if (st.period === 'Custom') { a.from_date = st.from; a.to_date = st.to; } else { a.ref_date = st.to || riyadh(0); }
-    return call('mfg_dashboard_performance', a).then(function (r) {
-      if (my !== seqP) return; st.perf = r; fillFilters(r); setFactories(r.factory_options || []); q('perfmsg').className = 'mfd-msg'; renderPerf(); loadJobs();
-      q('stamp').textContent = 'Updated ' + new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Riyadh', hour: '2-digit', minute: '2-digit' });
-    }).catch(function (e) {
-      if (my !== seqP) return; q('perfmsg').className = 'mfd-msg err'; q('perfmsg').innerHTML = esc(errText(e));
-    }).then(function () { if (my === seqP) { q('kpis').classList.remove('mfd-loading'); q('refresh').disabled = false; } });
-  }
-
-  var filtersFilled = false;
-  function fillFilters(r) {
-    if (filtersFilled) return; filtersFilled = true;
-    st.company = r.company;
-    frappe.db.get_list('Manufacturing Factory', { fields: ['company'], limit: 200 }).then(function (cs) {
-      var names = []; cs.forEach(function (c) { if (names.indexOf(c.company) < 0) names.push(c.company); }); if (names.indexOf(r.company) < 0) names.unshift(r.company);
-      q('company').innerHTML = names.map(function (n) { return '<option' + (n === r.company ? ' selected' : '') + '>' + esc(n) + '</option>'; }).join('');
-    }).catch(function () { q('company').innerHTML = '<option>' + esc(r.company) + '</option>'; });
-  }
-  function setFactories(list) {
-    var labels = list.map(function (f) { return f.label; });
-    q('factory').innerHTML = '<option value="">All Factories' + (labels.length ? ' (' + labels.length + ')' : '') + '</option>' + list.map(function (f) { return '<option value="' + esc(f.name) + '"' + (f.name === st.factory ? ' selected' : '') + '>' + esc(f.label) + '</option>'; }).join('');
-  }
-
-  function renderPlan() {
-    var r = st.plan; if (!r) return;
-    var prng = fmtDate(r.plan_start) + (r.plan_end !== r.plan_start ? ' – ' + fmtDate(r.plan_end) : ''); q('pdlabel').textContent = 'Plan range: ' + prng + ' (' + r.plan_days + (r.plan_days === 1 ? ' day' : ' days') + ')' + (r.plan_start === r.plan_end ? (r.plan_start === r.today ? ' · Today' : (r.plan_start === riyadh(1) ? ' · Tomorrow' : '')) : '');
-    var msgs = []; if (r.access) msgs.push(r.access); (r.notes || []).forEach(function (n) { msgs.push(n); }); if (r.truncated) msgs.push('Plan list truncated — narrow the filter.');
-    q('planmsg').innerHTML = msgs.map(esc).join('<br>');
-    var s = r.summary || { job_orders: 0, activity_rows: 0, unique_employees: 0, activities: [] };
-    q('psum').innerHTML = '<span class="mfd-pill">Factory Job Orders <b>' + nf(s.job_orders) + '</b></span><span class="mfd-pill">Activity rows <b>' + nf(s.activity_rows) + '</b></span><span class="mfd-pill">Unique employees <b>' + nf(s.unique_employees) + '</b></span>' +
-      (s.activities || []).map(function (a) { return '<span class="mfd-pill">' + esc(a.activity) + ' <b>' + nf(a.rows) + '</b></span>'; }).join('') +
-      (function () { var all = (r.scheduled || []).concat(r.draft_rows || []); var ft = all.filter(function (x) { return !x.item_code; }).length; return ft ? '<span class="mfd-pill mfd-hint">Data quality: ' + nf(ft) + ' of ' + nf(all.length) + ' rows use free-text items (no item code)</span>' : ''; })() +
-      '<span class="mfd-pill mfd-hint" title="' + esc((r.uom_note || '') + ' Quantities are not totalled across activities. Submitted job orders only.') + '">No UOM recorded · not totalled</span>';
-    var sched = r.scheduled || [], drafts = r.draft_rows || [], carry = r.carryover || [], rev = r.schedule_review || [];
-    var tabs = [['scheduled', 'Scheduled', nf(s.job_orders) + ' orders · ' + nf(sched.length) + ' rows'], ['carry', r.plan_is_future ? 'Carryover (incl. potential)' : 'Carryover', nf(carry.length) + ' orders'], ['review', 'Schedule needs review', nf(rev.length) + ' orders'], ['drafts', 'Draft Plans', nf(s.draft_job_orders || 0) + ' orders · ' + nf(drafts.length) + ' rows']];
-    q('ptabs').innerHTML = tabs.map(function (t) { return '<button data-t="' + t[0] + '" class="' + (st.ptab === t[0] ? 'on' : '') + '">' + t[1] + ' <span class="mfd-tc">' + t[2] + '</span></button>'; }).join('');
-    q('ptabs').querySelectorAll('button').forEach(function (b) { b.onclick = function () { st.ptab = b.getAttribute('data-t'); renderPlan(); }; });
-    if (r.access) { q('ptable').innerHTML = '<div class="mfd-empty">Access unavailable</div>'; return; }
-    function rowsTable(list, emptyMsg) {
-      if (!list.length) return '<div class="mfd-empty">' + emptyMsg + '</div>';
-      return '<table><thead><tr><th>Factory Job Order</th><th>Employee</th><th>Item</th><th>Size</th><th>Activity</th><th class="n">Order-period quantity</th><th>Start Date</th><th>End Date</th><th>JO Status</th></tr></thead><tbody>' +
-        list.map(function (x) {
-          var qty = x.qty_numeric ? nf(x.qty_req, 2) : (x.qty_req_text ? esc(x.qty_req_text) + ' ' + badge('not numeric', 'w') : '—');
-          return '<tr><td>' + link('factory-job-order', x.jo, x.jo) + '<div class="mfd-hint">' + esc(x.factory) + '</div></td><td>' + esc(x.employee) + '<div class="mfd-hint">' + esc(x.designation) + '</div></td><td>' + (x.item_code ? link('item', x.item_code, x.item) : esc(x.item)) + '</td><td>' + esc(x.size) + '</td><td>' + esc(x.activity) + '</td><td class="n">' + qty + ('<div class="mfd-hint">' + esc(x.qty_basis) + '</div>') + '</td><td>' + fmtDate(x.start_date) + '</td><td>' + fmtDate(x.end_date) + '</td><td>' + esc(x.jo_status) + (x.docstatus === 0 ? ' ' + badge('draft', 'w') : '') + '</td></tr>';
-        }).join('') + '</tbody></table>';
-    }
-    function joTable(list, showAge) {
-      return '<table><thead><tr><th>Factory Job Order</th><th>Factory</th><th>Start Date</th><th>End Date</th>' + (showAge ? '<th>Classification</th><th class="n">Days overdue</th><th>Ageing</th>' : '<th>Issue</th>') + '<th>JO Status</th><th class="n">Activity rows</th><th class="n">Unique employees</th><th>Activities</th></tr></thead><tbody>' +
-        list.map(function (c) { return '<tr><td>' + link('factory-job-order', c.jo, c.jo) + '</td><td>' + esc(c.factory) + '</td><td>' + fmtDate(c.start_date) + '</td><td>' + fmtDate(c.end_date) + '</td>' +
-          (showAge ? '<td>' + (c.kind === 'Overdue' ? badge('Overdue', 'r') : badge(c.kind)) + '</td><td class="n">' + (c.kind === 'Overdue' ? nf(c.days_overdue) : '—') + '</td><td>' + esc(c.ageing) + '</td>' : '<td>' + badge(c.reason, 'w') + '</td>') +
-          '<td>' + esc(c.jo_status) + '</td><td class="n">' + nf(c.activity_rows) + '</td><td class="n">' + nf(c.unique_employees) + '</td><td>' + esc((c.activities || []).join(', ')) + '</td></tr>'; }).join('') + '</tbody></table>';
-    }
-    if (st.ptab === 'scheduled') q('ptable').innerHTML = rowsTable(sched, 'No submitted, active Factory Job Order overlaps ' + prng + '.');
-    else if (st.ptab === 'drafts') q('ptable').innerHTML = '<div class="mfd-hint" style="margin-bottom:6px">Not submitted — excluded from Scheduled and Carryover. ' + nf(s.draft_job_orders || 0) + ' job orders · ' + nf(s.draft_activity_rows || 0) + ' activity rows · ' + nf(s.draft_unique_employees || 0) + ' unique employees.</div>' + rowsTable(drafts, 'No draft job orders for this date.');
-    else if (st.ptab === 'review') q('ptable').innerHTML = (rev.length ? joTable(rev, false) : '<div class="mfd-empty">Nothing needs schedule review.</div>');
-    else {
-      var buckets = ['All', '1-7 days', '8-30 days', '31-90 days', 'Over 90 days', 'Not yet overdue'];
-      var cnt = {}; carry.forEach(function (c) { cnt[c.ageing] = (cnt[c.ageing] || 0) + 1; });
-      var f = st.age || 'All';
-      var list = carry.filter(function (c) { return f === 'All' || c.ageing === f; });
-      q('ptable').innerHTML = '<div class="mfd-hint" style="margin-bottom:6px">Submitted, not Completed, ending before ' + fmtDate(r.plan_start) + '. Overdue is measured against today (' + fmtDate(r.today) + ').' + (r.plan_is_future ? ' For a future range, carryover is based on each order’s current status and may change before then.' : '') + ' Records are never changed automatically.</div>' +
-        '<div class="mfd-filters" style="margin-bottom:8px"><label>Ageing <select data-id="agesel">' + buckets.map(function (b) { return '<option value="' + esc(b) + '"' + (b === f ? ' selected' : '') + '>' + esc(b) + ' (' + (b === 'All' ? carry.length : (cnt[b] || 0)) + ')</option>'; }).join('') + '</select></label></div>' +
-        (list.length ? joTable(list, true) : '<div class="mfd-empty">Nothing to review.</div>');
-      var a = q('agesel'); if (a) a.onchange = function () { st.age = a.value; renderPlan(); };
+  var active = 0, queue = [];
+  function pump() {
+    while (active < CFG.conc && queue.length) {
+      var j = queue.shift(); active++;
+      j.fn().then(j.res, j.rej).then(function () { active--; pump(); });
     }
   }
-  function loadPlan() {
-    var my = ++seqL; var ps = st.pmode === 'today' ? riyadh(0) : (st.pmode === 'tomorrow' ? riyadh(1) : st.pstart); var pe = st.pmode === 'today' ? riyadh(0) : (st.pmode === 'tomorrow' ? riyadh(1) : st.pend);
-    q('plancard').classList.add('mfd-loading');
-    return call('mfg_dashboard_plan', { company: st.company, factory: st.factory, plan_start: ps, plan_end: pe }).then(function (r) {
-      if (my !== seqL) return; st.plan = r; q('planmsg').className = 'mfd-msg'; renderPlan(); renderPerf();
-    }).catch(function (e) { if (my !== seqL) return; q('planmsg').className = 'mfd-msg err'; q('planmsg').innerHTML = esc(errText(e)); q('ptable').innerHTML = ''; })
-      .then(function () { if (my === seqL) q('plancard').classList.remove('mfd-loading'); });
+  function limited(fn) { return new Promise(function (res, rej) { queue.push({ fn: fn, res: res, rej: rej }); pump(); }); }
+  function guarded(chk, method, args) {
+    return limited(function () {
+      if (destroyed || (chk && !chk())) { return Promise.resolve(null); }
+      return callP(method, args).catch(function (e) { if (e && (e.status === 403 || e.timeout || e.status === 417)) { throw e; } return new Promise(function (r) { setTimeout(r, 400); }).then(function () { return callP(method, args); }); });
+    });
+  }
+  function errKind(e) {
+    var txt = ''; try { txt = (e && (e.responseText || e.statusText || e.message)) || ''; } catch (x) { /* ignore */ }
+    return (/PermissionError|not permitted|No access|403/i.test(String(txt)) || (e && e.status === 403)) ? 'perm' : 'tech';
+  }
+  function getList(args, chk) { return guarded(chk, 'frappe.client.get_list', args); }
+  function getCount(dt, filters, chk) { return getList({ doctype: dt, fields: ['count(name) as n'], filters: filters || [], limit_page_length: 1 }, chk).then(function (r) { return +one(r).n || 0; }); }
+  /* All rows of a bounded list (paged); rejects with e.tooLarge when the source exceeds `cap`. */
+  function fetchAll(args, chk, cap) {
+    cap = cap || 20000;
+    return getCount(args.doctype, args.filters, chk).then(function (n) {
+      if (n > cap) { var e = new Error('too large'); e.tooLarge = n; throw e; }
+      var jobs = []; for (var i = 0; i < Math.ceil(n / 500); i++) { jobs.push(getList(Object.assign({}, args, { order_by: args.order_by || 'name asc', limit_start: i * 500, limit_page_length: 500 }), chk)); }
+      return Promise.all(jobs).then(function (res) { var out = []; res.forEach(function (r) { if (r) { out = out.concat(r); } }); return out; });
+    });
+  }
+  function docUrl(dt, name) {
+    try { if (G.frappe && frappe.utils && frappe.utils.get_form_link) { return frappe.utils.get_form_link(dt, name); } } catch (e) { /* fall through */ }
+    return '/app/' + dt.toLowerCase().replace(/ /g, '-') + '/' + encodeURIComponent(name);
+  }
+  function docLink(dt, name, label) { return '<a class="dms-link" href="' + esc(docUrl(dt, name)) + '" target="_blank" rel="noopener noreferrer"><bdi>' + esc(label || name) + '</bdi> ↗</a>'; }
+
+  /* ---------- data store: each source loads and renders independently; stale generations are dropped ---------- */
+  var D = {};
+  var softT = null;
+  function soon() { if (softT) { return; } softT = later(function () { softT = null; renderSoft(); }, 40); }
+  function run(key, fn) {
+    var g = GEN, chk = function () { return g === GEN && !destroyed; }, tok = {};
+    D[key] = null; D[key + 'Err'] = null; D[key + 'Tok'] = tok;
+    var mine = function () { return chk() && D[key + 'Tok'] === tok; };
+    fn(mine).then(function (v) { if (!mine()) { return; } D[key] = v; if (APP.afterLoad) { APP.afterLoad(key); } soon(); },
+      function (e) { if (!mine()) { return; } D[key + 'Err'] = e && e.tooLarge ? 'large:' + e.tooLarge : errKind(e); if (G.console && e && !e.status && !e.tooLarge) { console.error(APP.key, key, e); } soon(); });
+  }
+  function busy() { return !BOOTED || (APP.sources || []).some(function (k) { return D[k] == null && D[k + 'Err'] == null; }); }
+  function errText(kind) { return /^large:/.test(String(kind)) ? tr('too many records (' + num(+String(kind).slice(6)) + ') — narrow the filters or period', 'عدد كبير من السجلات (' + num(+String(kind).slice(6)) + ') — ضيّق المرشحات أو الفترة') : kind === 'perm' ? tr('permission denied for your user', 'لا تملك صلاحية القراءة') : tr('technical error while reading', 'خطأ تقني أثناء القراءة'); }
+
+  /* ---------- UI primitives ---------- */
+  var ICO = {
+    refresh: '<path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/>', filter: '<path d="M4 5h16l-6.2 7.6V19l-3.6 1.6v-8z"/>',
+    cal: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/>', down: '<path d="m6 9 6 6 6-6"/>',
+    prev: '<path d="m15 6-6 6 6 6"/>', next: '<path d="m9 6 6 6-6 6"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
+    up: '<path d="M12 19V6M6.5 11.5 12 6l5.5 5.5"/>', dn: '<path d="M12 5v13M6.5 12.5 12 18l5.5-5.5"/>', dl: '<path d="M12 4v11M7 10.5 12 15.5l5-5M5 20h14"/>'
+  };
+  function ico(n, cls) { return '<svg class="dms-ico' + (cls ? ' ' + cls : '') + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + ICO[n] + '</svg>'; }
+  function kpi(o) {
+    var inner = '<span class="dms-kpi-h"><span class="dms-kpi-l">' + (o.dot ? '<i class="dms-dot" style="--dms-c:' + o.dot + '"></i>' : '') + esc(o.label) + '</span>' + (o.top || '') + '</span>' +
+      '<span class="dms-kpi-n">' + o.val + '</span>' + (o.sub ? '<span class="dms-kpi-s">' + o.sub + '</span>' : '') + (o.foot != null ? '<span class="dms-kpi-f">' + o.foot + '</span>' : '');
+    var t = o.tip ? ' title="' + esc(o.tip) + '"' : '';
+    return o.act ? '<button type="button" class="dms-kpi" data-act="kpi" data-v="' + esc(o.act) + '"' + t + '>' + inner + '</button>' : '<div class="dms-kpi"' + t + '>' + inner + '</div>';
+  }
+  function kpis(list, ov) { return '<div class="dms-grid dms-kpis' + (ov ? ' dms-ov-kpis' : '') + '">' + list.join('') + '</div>'; }
+  function tagc(txt) { return '<span class="dms-tag">' + txt + '</span>'; }
+  function stat(k, txt) { return '<span class="dms-stat dms-stat-' + k + '">' + esc(txt) + '</span>'; }
+  function ctx(html) { return '<span class="dms-kpi-ctx">' + html + '</span>'; }
+  function badge(txt, color) { return '<span class="dms-badge" style="--dms-c:' + color + '">' + esc(txt) + '</span>'; }
+  function wait() { return '<span class="dms-sm">' + esc(tr('Calculating…', 'جارٍ الحساب…')) + '</span>'; }
+  function asOf() { return tagc(esc(tr('As of today', 'حتى اليوم'))); }
+  /* Value of a source-backed KPI: '…' while loading, '—' when the source failed (never a false zero). */
+  function kv(key, f) { return D[key + 'Err'] ? '—' : D[key] == null ? '…' : f(D[key]); }
+  function ks(key, f) { return D[key + 'Err'] ? esc(tr('Unavailable', 'غير متاح')) : D[key] == null ? wait() : f(D[key]); }
+  function spark(vs) {
+    var n = vs.length, real = vs.filter(function (v) { return v != null; }), pts = [];
+    if (n < 3 || real.length < 3 || !real.some(function (v) { return v > 0; })) { return ''; }
+    var max = Math.max.apply(null, real), min = Math.min(0, Math.min.apply(null, real)), rng = (max - min) || 1;
+    vs.forEach(function (v, i) { if (v != null) { pts.push([(i / (n - 1) * 100).toFixed(2), (26 - (v - min) / rng * 23).toFixed(2)]); } });
+    var line = pts.map(function (p) { return p.join(','); }).join(' L');
+    return '<svg class="dms-spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path class="dms-spark-a" d="M' + pts[0][0] + ',28 L' + line + ' L' + pts[pts.length - 1][0] + ',28 Z"/><path class="dms-spark-l" d="M' + line + '"/></svg>';
+  }
+  /* Change vs the comparison window. fmt formats values; small count bases show "was N" instead of a percentage. */
+  function deltaChip(cur, prev, R, fmt, isCount, lowerIsBetter) {
+    if (cur == null || prev == null || !R) { return ''; }
+    fmt = fmt || moneyS;
+    var tip = tr('This period', 'هذه الفترة') + ' (' + rangeLabel(R[0]) + '): ' + fmt(cur) + '\n' + tr('Previous', 'السابقة') + ' (' + rangeLabel(R[1]) + '): ' + fmt(prev);
+    var sr = '<span class="dms-sr"> ' + esc(tr('vs previous period', 'مقارنة بالفترة السابقة')) + '</span>';
+    if (prev === 0 || (isCount && prev < 5)) { return '<span class="dms-delta dms-flat" data-tip="' + esc(tip) + '">' + esc(tr('was', 'كان')) + ' <bdi>' + esc(fmt(prev)) + '</bdi>' + sr + '</span>'; }
+    var p = (cur - prev) / prev * 100, a = Math.abs(p), k = a < 0.05 ? 'flat' : p > 0 ? 'up' : 'down', tone = k === 'flat' ? 'flat' : ((k === 'up') !== !!lowerIsBetter ? 'up' : 'down');
+    var txt = a > 999 ? '10×+' : (a < 10 ? a.toFixed(1) : Math.round(a)) + '%';
+    return '<span class="dms-delta dms-' + tone + '" data-tip="' + esc(tip) + '">' + (k === 'flat' ? '' : ico(k === 'up' ? 'up' : 'dn')) + '<bdi>' + (k === 'down' ? '−' : '') + txt + '</bdi>' + sr + '</span>';
+  }
+  function panel(title, body, extra, meta) {
+    return '<section class="dms-panelbox ' + (extra || '') + '"><div class="dms-ph"><h3 class="dms-h3">' + esc(title) + '</h3>' + (meta ? '<span class="dms-ph-meta">' + meta + '</span>' : '') + '</div>' + body + '</section>';
+  }
+  function note(txt) { return '<p class="dms-note">' + txt + '</p>'; }
+  function alertBox(kind, html) { return '<div class="dms-alert dms-alert-' + kind + '" role="' + (kind === 'err' ? 'alert' : 'status') + '">' + html + '</div>'; }
+  function empty(txt) { return '<div class="dms-empty">' + esc(txt || tr('No data for the current filters.', 'لا توجد بيانات للمرشحات الحالية.')) + '</div>'; }
+  function srcErr(kind, what) { return alertBox('err', '<b>' + esc(tr('Source unavailable', 'المصدر غير متاح')) + ':</b> ' + esc(what) + ' — ' + esc(errText(kind))); }
+  function skel(n, cls) { return rep('<div class="dms-skel ' + (cls || '') + '"></div>', n); }
+  /* Body for a panel backed by source `key`: skeleton while loading, named error on failure, else f(data). */
+  function src(key, what, f) { return D[key + 'Err'] ? srcErr(D[key + 'Err'], what) : D[key] == null ? skel(1, 'dms-skel-panel') : f(D[key]); }
+
+  /* ---------- charts (HTML/CSS; hover details via the shared tooltip, data-tip) ---------- */
+  function niceMax(v) { if (!(v > 0)) { return 1; } var p = Math.pow(10, Math.floor(Math.log(v) / Math.LN10)), f = v / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
+  function axisFmt(v) { var a = Math.abs(v); return a >= 1e9 ? +(v / 1e9).toFixed(1) + 'B' : a >= 1e6 ? +(v / 1e6).toFixed(1) + 'M' : a >= 1e3 ? +(v / 1e3).toFixed(1) + 'K' : String(a < 10 ? +v.toFixed(2) : Math.round(v)); }
+  function bucketLabel(k, g, short) {
+    if (g === 'cat') { return String(k); }
+    if (g === 'week' && !short) { return tr('Week of ', 'أسبوع ') + fmtDate(k, true); }
+    if (g !== 'month') { return fmtDate(k, !short); }
+    try { return new Intl.DateTimeFormat(locale(), { month: 'short', year: '2-digit', timeZone: 'UTC' }).format(new Date(parseISO(k + '-01'))); } catch (e) { return k; }
+  }
+  /* Count charts get whole-number ticks (top is a multiple of 4), so small counts never show 0, 1, 1, 2, 2. */
+  function countTop(max, fmt) { var t = niceMax(max); return fmt === num ? Math.max(4, Math.ceil(t / 4) * 4) : t; }
+  function granName(g) { return g === 'day' ? tr('by day', 'يوميًا') : g === 'week' ? tr('by week', 'أسبوعيًا') : tr('by month', 'شهريًا'); }
+  /* Time buckets for a range: daily up to 45 days, weekly up to 120 days, monthly beyond; stops at today. */
+  function buckets(range) {
+    var from = range[0], to = clip(range)[1], span = diffDays(from, to) + 1, g = span <= 45 ? 'day' : span <= 120 ? 'week' : 'month', keys = [], cur, i;
+    function keyOf(iso) { iso = String(iso).slice(0, 10); return g === 'day' ? iso : g === 'week' ? weekStartOf(iso) : iso.slice(0, 7); }
+    if (to < from) { return { keys: [], gran: g, keyOf: keyOf }; }
+    if (g === 'month') { keys = monthList(from, to); } else { cur = keyOf(from); for (i = 0; i < 200 && cur <= to; i++) { keys.push(cur); cur = addDays(cur, g === 'day' ? 1 : 7); } }
+    return { keys: keys, gran: g, keyOf: keyOf };
+  }
+  /* Grouped rows (one per date) folded into buckets: rows[dateField], rows[valField]. */
+  function series(range, rows, dateF, valF) {
+    var B = buckets(range), d = {}; B.keys.forEach(function (k) { d[k] = { v: 0, n: 0 }; });
+    (rows || []).forEach(function (r) { var k = B.keyOf(r[dateF]); if (d[k]) { d[k].v += valF ? (+r[valF] || 0) : 1; d[k].n += +r.n || (valF ? 0 : 1); } });
+    B.d = d; return B;
+  }
+  function legend(series) { return '<div class="dms-legend">' + series.map(function (s) { return '<span><i style="--dms-c:' + s.color + '"></i>' + esc(s.label) + '</span>'; }).join('') + '</div>'; }
+  /* Column chart. ser = [{label, color, val: function (key) {}}]; fmt formats values (default money). */
+  function barChart(keys, gran, ser, fmt, extraTip, emptyTxt) {
+    if (!Array.isArray(ser)) { ser = [ser]; }
+    fmt = fmt || moneyFull; var max = 0;
+    keys.forEach(function (k) { ser.forEach(function (s) { max = Math.max(max, s.val(k) || 0); }); });
+    if (!keys.length || !max) { return empty(emptyTxt || tr('Nothing in this range.', 'لا شيء في هذا النطاق.')); }
+    var top = countTop(max, fmt), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, gran) + ser.map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k) || 0); }).join('') + (extraTip ? extraTip(k) : '');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '">' + ser.map(function (s) { var v = s.val(k) || 0; return '<i class="dms-bar' + (v ? '' : ' dms-bar-0') + '" style="height:' + (v / top * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i>'; }).join('') + '</div>';
+    }).join('');
+    var aria = ser.map(function (s) { return s.label + ': ' + keys.map(function (k) { return bucketLabel(k, gran, true) + ' ' + fmt(s.val(k) || 0); }).join(', '); }).join('; ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + (ser.length > 1 ? legend(ser) : '');
+  }
+  /* Line chart for balances (may go negative). ser = [{label, color, val(key), dash?}]; the first series is the main line. */
+  function lineChart(keys, gran, ser, fmt) {
+    fmt = fmt || moneyFull; var all = [];
+    keys.forEach(function (k) { ser.forEach(function (s) { var v = s.val(k); if (v != null) { all.push(v); } }); });
+    if (!keys.length || !all.length) { return empty(); }
+    var mx = Math.max.apply(null, all), mn = Math.min.apply(null, all), hi = mx > 0 ? niceMax(mx) : 0, lo = mn < 0 ? -niceMax(-mn) : 0;
+    if (hi === lo) { hi = lo + 1; }
+    var y = function (v) { return (100 - (v - lo) / (hi - lo) * 100).toFixed(2); }, x = function (i) { return (keys.length < 2 ? 50 : i / (keys.length - 1) * 100).toFixed(2); };
+    var ticks = [0, 0.25, 0.5, 0.75, 1].map(function (t) { return lo + (hi - lo) * t; });
+    var paths = ser.map(function (s) { var pts = keys.map(function (k, i) { var v = s.val(k); return v == null ? null : x(i) + ',' + y(v); }).filter(Boolean); return '<polyline class="dms-line' + (s.dash ? ' dms-line-ref' : '') + '" style="--dms-c:' + s.color + '" points="' + pts.join(' ') + '"/>'; }).join('');
+    var zero = lo < 0 ? '<i class="dms-gl dms-gl-0" style="bottom:' + ((0 - lo) / (hi - lo) * 100).toFixed(2) + '%"></i>' : '';
+    var hits = keys.map(function (k) { return '<div class="dms-col dms-col-hit" data-tip="' + esc(bucketLabel(k, gran) + ser.map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k)); }).join('')) + '"></div>'; }).join('');
+    var aria = ser[0].label + ': ' + keys.map(function (k) { return bucketLabel(k, gran, true) + ' ' + fmt(ser[0].val(k)); }).join(', ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (v, i) { return '<span style="bottom:' + i * 25 + '%">' + axisFmt(v) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + [0, 25, 50, 75, 100].map(function (b) { return '<i class="dms-gl" style="bottom:' + b + '%"></i>'; }).join('') + zero + '<svg class="dms-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">' + paths + '</svg><div class="dms-cols">' + hits + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + (ser.length > 1 ? legend(ser) : '');
+  }
+  /* Stacked columns (one bar per key, segments per series). */
+  function stackChart(keys, gran, ser, fmt) {
+    fmt = fmt || num; var tot = {}, max = 0;
+    keys.forEach(function (k) { tot[k] = sum(ser, function (s) { return s.val(k) || 0; }); max = Math.max(max, tot[k]); });
+    if (!keys.length || !max) { return empty(); }
+    var top = countTop(max, fmt), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, gran) + ser.filter(function (s) { return s.val(k); }).map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k)); }).join('');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '"><span class="dms-stackbar" style="height:' + (tot[k] / top * 100).toFixed(2) + '%">' + ser.map(function (s) { var v = s.val(k) || 0; return v ? '<i style="flex:' + v + ' 0 0;background:' + s.color + '"></i>' : ''; }).join('') + '</span></div>';
+    }).join('');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(ser.map(function (s) { return s.label; }).join(', ')) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + legend(ser);
+  }
+  function fitChartLabels() {
+    HOST.querySelectorAll('.dms-xaxis').forEach(function (axis) {
+      var labels = axis.querySelectorAll('span'), widest = 0;
+      labels.forEach(function (label) { var range = document.createRange(); range.selectNodeContents(label); widest = Math.max(widest, range.getBoundingClientRect().width); });
+      var slots = Math.max(1, Math.min(8, Math.floor(axis.clientWidth / (widest + 16)))), step = Math.max(1, Math.ceil(labels.length / slots));
+      labels.forEach(function (label, i) { label.style.visibility = i % step ? 'hidden' : 'visible'; });
+    });
+  }
+  /* Share rows: label · bar · value · %. items = [{label, value, color, act?, tip?}]; ordered=true keeps the given order. */
+  function shareList(items, head, fmt, ordered) {
+    fmt = fmt || num; var tot = sum(items, function (s) { return s.value; }), rows = items.filter(function (s) { return s.value; });
+    if (!ordered) { rows = rows.slice().sort(function (a, b) { return b.value - a.value; }); }
+    if (!tot) { return empty(); }
+    return (head ? '<div class="dms-share-t">' + head + '</div>' : '') + rows.map(function (s) {
+      var tip = s.tip || (s.label + ': ' + fmt(s.value) + ' (' + pct(s.value, tot) + ')');
+      var inner = '<span class="dms-share-l"><i class="dms-dot" style="--dms-c:' + s.color + '"></i>' + bdi(s.label) + '</span><span class="dms-share-b"><i style="width:' + (s.value / tot * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i></span>' +
+        '<span class="dms-num">' + esc(fmt(s.value)) + '</span><span class="dms-share-p dms-num">' + pct(s.value, tot, 0) + '</span>';
+      return s.act ? '<button type="button" class="dms-share dms-share-btn" data-act="kpi" data-v="' + esc(s.act) + '" data-tip="' + esc(tip) + '">' + inner + '</button>' : '<div class="dms-share" data-tip="' + esc(tip) + '">' + inner + '</div>';
+    }).join('');
+  }
+  /* Ranked horizontal bars: items = [{label, value, color?, act?}]. */
+  function hbars(items, fmt, color) {
+    if (!items.length) { return empty(); }
+    var max = Math.max.apply(null, items.map(function (i) { return Math.abs(i.value); }).concat([1])); fmt = fmt || num;
+    return items.map(function (i) {
+      var inner = '<span class="dms-split-l">' + bdi(i.label) + '</span><span class="dms-split"><i style="width:' + (Math.abs(i.value) / max * 100).toFixed(2) + '%;background:' + (i.color || color || 'var(--dms-royal)') + '"></i></span><span class="dms-num dms-split-v">' + esc(fmt(i.value)) + '</span>';
+      var tip = ' data-tip="' + esc(i.label + ': ' + fmt(i.value)) + '"';
+      return i.act ? '<button type="button" class="dms-stack-row dms-split-row" data-act="kpi" data-v="' + esc(i.act) + '"' + tip + '>' + inner + '</button>' : '<div class="dms-stack-row dms-split-row"' + tip + '>' + inner + '</div>';
+    }).join('');
+  }
+  /* Two-part bars ranked by total: items = [{label, total, part, act?}]; parts = [{label, color}] for part and remainder. */
+  function splitBars(items, parts, fmt) {
+    if (!items.length) { return empty(); }
+    fmt = fmt || money; var max = Math.max.apply(null, items.map(function (i) { return i.total; }).concat([1]));
+    return items.map(function (i) {
+      var tip = i.label + '\n' + parts[0].label + ': ' + fmt(i.part) + '\n' + parts[1].label + ': ' + fmt(i.total - i.part);
+      var bar = '<span class="dms-split"><i style="width:' + (i.part / max * 100).toFixed(2) + '%;background:' + parts[0].color + '"></i><i style="width:' + (Math.max(0, i.total - i.part) / max * 100).toFixed(2) + '%;background:' + parts[1].color + '"></i></span>';
+      var inner = '<span class="dms-split-l">' + bdi(i.label) + '</span>' + bar + '<span class="dms-num dms-split-v">' + esc(fmt(i.total)) + '</span>';
+      return i.act ? '<button type="button" class="dms-stack-row dms-split-row" data-act="kpi" data-v="' + esc(i.act) + '" data-tip="' + esc(tip) + '">' + inner + '</button>' : '<div class="dms-stack-row dms-split-row" data-tip="' + esc(tip) + '">' + inner + '</div>';
+    }).join('') + legend(parts);
+  }
+  function mixBar(segs) {
+    var tot = sum(segs, function (s) { return s.value; }); if (!tot) { return ''; }
+    return '<span class="dms-mix"><span class="dms-mix-b">' + segs.map(function (s) { return s.value ? '<i style="width:' + (s.value / tot * 100).toFixed(2) + '%;background:' + s.color + '" data-tip="' + esc(s.label + ': ' + (s.fmt || num)(s.value)) + '"></i>' : ''; }).join('') + '</span></span>';
+  }
+  var PAL = ['var(--dms-royal)', '#6b8be0', '#1f8a5b', '#d97a1e', '#8a97a8', '#a3b4ef', '#c2412d', '#d6a419', '#4b5a6e', '#b6bfca'];
+
+  /* ---------- tables: client-side (search / sort / pagination / CSV) and server-side (paginated, sortable, CSV) ---------- */
+  var TBL = {}, TS = {}, SS = {}, focusId = null;
+  function regTable(spec) { TBL[spec.id] = spec; return '<div class="dms-tbl" data-tbl="' + esc(spec.id) + '"></div>'; }
+  function fillTables(scope) { var els = (scope || HOST).querySelectorAll('[data-tbl]'); for (var i = 0; i < els.length; i++) { fillTable(els[i].getAttribute('data-tbl'), els[i]); } }
+  function clientRows(sp, st) {
+    var rows = sp.rows, q = st.q.trim().toLowerCase();
+    if (q) { rows = rows.filter(function (r) { return sp.text(r).toLowerCase().indexOf(q) >= 0; }); }
+    if (st.sk) { var col = sp.cols.filter(function (c) { return c.k === st.sk; })[0]; if (col && col.s) { rows = rows.slice().sort(function (a, b) { var x = col.s(a), y = col.s(b); return (x < y ? -1 : x > y ? 1 : 0) * st.dir; }); } }
+    return rows;
+  }
+  function thead(sp, sk, dir, act, id) {
+    return '<thead><tr>' + sp.cols.map(function (c) {
+      var key = act === 'ssort' ? c.sf : c.k, can = act === 'ssort' ? !!c.sf : !!c.s, on = can && sk === key;
+      return '<th class="' + (can ? 'dms-th-s' : '') + (c.num ? ' dms-th-n' : '') + '"' + (can ? ' data-act="' + act + '" data-id="' + esc(id) + '" data-v="' + esc(key) + '" tabindex="0" aria-sort="' + (on ? (dir > 0 ? 'ascending' : 'descending') : 'none') + '"' : '') + '>' + esc(c.h) + (on ? (dir > 0 ? ' ▲' : ' ▼') : '') + '</th>';
+    }).join('') + '</tr></thead>';
+  }
+  function tcells(sp, r) { return '<tr>' + sp.cols.map(function (c) { return '<td' + (c.num ? ' class="dms-td-n"' : '') + '>' + c.r(r) + '</td>'; }).join('') + '</tr>'; }
+  function fillTable(id, el) {
+    var sp = TBL[id]; el = el || HOST.querySelector('[data-tbl="' + id + '"]'); if (!sp || !el) { return; }
+    if (sp.server) { return fillServer(id, el); }
+    var st = TS[id] || (TS[id] = { q: '', page: 1, sk: sp.sk || '', dir: sp.dir || 1 }), rows = clientRows(sp, st);
+    var ps = sp.pageSize || CFG.pageSize, pages = Math.max(1, Math.ceil(rows.length / ps)); if (st.page > pages) { st.page = pages; }
+    var slice = rows.slice((st.page - 1) * ps, st.page * ps);
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(tr('Search this table…', 'ابحث في الجدول…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search this table', 'ابحث في الجدول')) + '"><span class="dms-tb-r"><span class="dms-sm">' + num(rows.length) + ' ' + esc(rows.length === 1 ? tr('row', 'سجل') : tr('rows', 'سجل')) + (st.q ? ' / ' + num(sp.rows.length) : '') + '</span>' +
+      (rows.length ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csv" data-id="' + esc(id) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    if (sp.notice) { h += sp.notice; }
+    if (!rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
+    h += '<div class="dms-tablewrap"><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'tsort', id) + '<tbody>' + slice.map(function (r) { return tcells(sp, r); }).join('') + '</tbody>' + (sp.foot ? '<tfoot>' + sp.foot(rows) + '</tfoot>' : '') + '</table></div>';
+    h += pager(id, 'tpage', st.page, pages, rows.length, ps);
+    el.innerHTML = h; restoreFocus(el, id);
+  }
+  function pager(id, act, pg, pages, total, ps) {
+    if (total <= ps) { return ''; }
+    return '<div class="dms-pager"><span>' + esc(tr('Showing', 'عرض')) + ' ' + num((pg - 1) * ps + 1) + '–' + num(Math.min(pg * ps, total)) + ' / ' + num(total) + '</span><span><button type="button" class="dms-btn" data-act="' + act + '" data-id="' + esc(id) + '" data-v="-1"' + (pg <= 1 ? ' disabled' : '') + '>‹ ' + esc(tr('Previous', 'السابق')) + '</button> ' +
+      esc(tr('Page', 'صفحة')) + ' ' + pg + ' ' + esc(tr('of', 'من')) + ' ' + pages + ' <button type="button" class="dms-btn" data-act="' + act + '" data-id="' + esc(id) + '" data-v="1"' + (pg >= pages ? ' disabled' : '') + '>' + esc(tr('Next', 'التالي')) + ' ›</button></span></div>';
+  }
+  function restoreFocus(el, id) { if (focusId === id) { var i = el.querySelector('[data-tq]'); if (i) { i.focus(); try { i.setSelectionRange(i.value.length, i.value.length); } catch (e) { /* ignore */ } } } }
+  function srvArgs(sp, st) {
+    var q = st.q.trim(), base = { doctype: sp.dt, filters: sp.filters };
+    if (sp.parent) { base.parent = sp.parent; }
+    if (q && sp.search) { base.or_filters = sp.search.map(function (f) { return [sp.dt, f, 'like', '%' + q + '%']; }); }
+    return base;
+  }
+  function srvOrder(sp, st) { return st.sk ? st.sk + (st.dir > 0 ? ' asc' : ' desc') : sp.order; }
+  function fillServer(id, el) {
+    var sp = TBL[id], st = SS[id] || (SS[id] = { q: '', page: 1, total: null, rows: null, loading: false, err: null, req: 0, sk: '', dir: 1 });
+    if (!st.dirty && st.rows && st.key === JSON.stringify(sp.filters)) { return paintServer(id, el); }
+    st.dirty = false; st.key = JSON.stringify(sp.filters);
+    var req = ++st.req; st.loading = true; st.err = null;
+    var ps = sp.pageSize || CFG.modalPage, base = srvArgs(sp, st);
+    paintServer(id, el);
+    var chk = function () { return !destroyed && SS[id] && SS[id].req === req; };
+    if (sp.loader) { sp.loader(st.page - 1, ps, st.q.trim(), srvOrder(sp, st)).then(function (res) { if (!chk()) { return; } st.total = res.total; st.rows = res.rows || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); }, function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } }); return; }
+    var cnt = getList(Object.assign({}, base, { fields: ['count(name) as n'], limit_page_length: 1 }), chk).then(function (r) { return r ? +one(r).n || 0 : null; });
+    var rows = getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: (st.page - 1) * ps, limit_page_length: ps }), chk);
+    Promise.all([cnt, rows]).then(function (res) {
+      if (!chk()) { return; } st.total = res[0]; st.rows = res[1] || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]'));
+    }).catch(function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } });
+  }
+  function paintServer(id, el) {
+    if (!el) { return; } var sp = TBL[id], st = SS[id], ps = sp.pageSize || CFG.modalPage;
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(sp.searchHint || tr('Search…', 'بحث…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search', 'بحث')) + '"><span class="dms-tb-r"><span class="dms-sm">' + (st.total == null ? '' : num(st.total) + ' ' + esc(st.total === 1 ? tr('record', 'سجل') : tr('records', 'سجل'))) + '</span>' +
+      (st.total ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csvall" data-id="' + esc(id) + '" title="' + esc(tr('Export up to 5,000 rows', 'تصدير حتى 5,000 سجل')) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    if (st.err) { el.innerHTML = h + alertBox('err', esc(st.err === 'perm' ? tr('Permission denied for your user.', 'لا تملك صلاحية القراءة.') : tr('Technical error while reading this list.', 'خطأ تقني أثناء قراءة القائمة.')) + ' <button type="button" class="dms-linkbtn" data-act="sretry" data-id="' + esc(id) + '">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>'); return restoreFocus(el, id); }
+    if (st.loading && !st.rows) { el.innerHTML = h + '<div class="dms-skel"></div>'; return restoreFocus(el, id); }
+    if (!st.rows || !st.rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
+    var pages = Math.max(1, Math.ceil((st.total || 0) / ps));
+    h += '<div class="dms-tablewrap" style="opacity:' + (st.loading ? .55 : 1) + '"' + (st.loading ? ' aria-busy="true"' : '') + '><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'ssort', id) + '<tbody>' + st.rows.map(function (r) { return tcells(sp, r); }).join('') + '</tbody></table></div>' + pager(id, 'spage', st.page, pages, st.total || 0, ps);
+    el.innerHTML = h; restoreFocus(el, id);
+  }
+  function csvCell(v) { v = v == null ? '' : String(v); if (/^[=+\-@\t\r]/.test(v) && !/^-?[\d.,]+$/.test(v)) { v = "'" + v; } return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  function download(name, sp, rows) {
+    var cols = sp.cols.filter(function (c) { return c.c; }), lines = [cols.map(function (c) { return csvCell(c.h); }).join(',')].concat(rows.map(function (r) { return cols.map(function (c) { return csvCell(c.c(r)); }).join(','); }));
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+    a.download = String(name).replace(/[^\w-]+/g, '_') + '_' + TODAY + '.csv'; HOST.appendChild(a); a.click(); later(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+  function exportServer(id) {
+    var sp = TBL[id], st = SS[id], out = [], step = 500, base = srvArgs(sp, st), g = GEN;
+    if (sp.loader) { toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…')); var acc = [], pg = function (p) { return sp.loader(p, 500, st.q.trim(), srvOrder(sp, st)).then(function (res) { acc = acc.concat(res.rows || []); return (res.rows || []).length === 500 && acc.length < 5000 ? pg(p + 1) : acc; }); }; pg(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); }); return; }
+    function next(s) {
+      return getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: s, limit_page_length: step }), function () { return g === GEN; }).then(function (r) {
+        out = out.concat(r || []); return (r && r.length === step && out.length < 5000) ? next(s + step) : out;
+      });
+    }
+    toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…'));
+    next(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); });
+  }
+  function toast(msg, bad) { var e = document.createElement('div'); e.className = 'dms-toast' + (bad ? ' dms-toast-err' : ''); e.setAttribute('role', 'status'); e.textContent = msg; HOST.appendChild(e); later(function () { e.remove(); }, 3500); }
+  /* common cells */
+  function dtc(v) { return v ? '<span class="dms-num">' + esc(String(v).slice(0, 10)) + '</span>' : '<span class="dms-sm">—</span>'; }
+  function who(v) { return v ? bdi(v) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>'; }
+  function txt(v) { return v ? bdi(v) : '<span class="dms-sm">—</span>'; }
+  function amc(v) { return v == null || v === '' ? '<span class="dms-sm">—</span>' : '<span class="dms-num">' + esc(amt(v)) + '</span>'; }
+  function overdueTag(due) { var d = diffDays(String(due || TODAY).slice(0, 10), TODAY); return d > 0 ? '<span class="dms-days ' + (d > 90 ? 'dms-days-bad' : 'dms-days-warn') + '">' + num(d) + '</span>' : '<span class="dms-sm">—</span>'; }
+  function col(h, f, o) { o = o || {}; return Object.assign({ h: h, sf: o.sort === false ? undefined : f, r: function (x) { return o.fmt ? o.fmt(x[f], x) : txt(x[f]); }, c: function (x) { return x[f]; } }, o); }
+  function linkCol(h, dt, f, labelF) { return { h: h, sf: f, r: function (x) { return docLink(typeof dt === 'function' ? dt(x) : dt, x[f], labelF ? x[labelF] || x[f] : x[f]); }, c: function (x) { return x[f]; } }; }
+
+  /* ---------- actions pending ---------- */
+  var PRIO = { high: ['High', 'عالية'], med: ['Medium', 'متوسطة'], low: ['Low', 'منخفضة'] };
+  function score(p, amount, age) { return { high: 300, med: 200, low: 100 }[p] + Math.min(40, Math.log(1 + Math.abs(amount || 0)) / Math.LN10 * 6) + Math.min(20, (age || 0) / 10); }
+  /* Server specs ({id, server:true, dt, filters, fields, order, it(row) → item}) load count + 6 most urgent rows each. */
+  function loadActions(specs, key) {
+    run(key || 'act', function (chk) {
+      return Promise.all(specs.filter(function (s) { return s.server; }).map(function (s) {
+        var c = getList({ doctype: s.dt, fields: ['count(name) as n'], filters: s.filters, limit_page_length: 1 }, chk).then(function (r) { return +one(r).n || 0; }, function (e) { return 'ERR:' + errKind(e); });
+        var l = (s.rank ? fetchAll({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order }, chk, 2000) : getList({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order, limit_page_length: 6 }, chk)).then(function (r) { return r || []; }, function (e) { return 'ERR:' + errKind(e); });
+        return Promise.all([c, l]).then(function (x) { return { id: s.id, count: typeof x[1] === 'string' ? x[1] : x[0], rows: Array.isArray(x[1]) ? x[1] : [] }; });
+      })).then(function (res) { var o = {}; res.forEach(function (x) { o[x.id] = x; }); return o; });
+    });
+  }
+  /* client: {id: {rows, item}} for client specs, null while their sources load, or 'ERR:kind'. */
+  function actModel(specs, key, client) {
+    var counts = {}, items = [], A = D[key || 'act'], AE = D[(key || 'act') + 'Err'];
+    specs.forEach(function (s) {
+      if (s.client) {
+        var c = client == null ? null : typeof client === 'string' ? client : client[s.id];
+        if (typeof c === 'string') { counts[s.id] = c; }
+        else if (c) { counts[s.id] = c.count != null ? c.count : c.rows.length; c.rows.slice(0, 6).forEach(function (r) { items.push(c.item(r)); }); }
+        return;
+      }
+      if (AE) { counts[s.id] = 'ERR:' + AE; return; }
+      var x = A && A[s.id]; if (!x) { return; }
+      counts[s.id] = x.count;
+      x.rows.forEach(function (r) { var it = s.it(r); it.dt = it.dt || s.dt; it.name = it.name || r.name; items.push(it); });
+    });
+    items.sort(function (a, b) { return b.score - a.score; });
+    var seen = {}; items = items.filter(function (it) { var k = it.dt + '|' + it.name; if (seen[k]) { return false; } seen[k] = 1; return true; });   /* one row per record, under its most urgent category */
+    return { specs: specs, counts: counts, items: items, ready: specs.every(function (s) { return counts[s.id] !== undefined; }) };
+  }
+  function pendingTotal(AM) {
+    if (!AM) { return null; }
+    var t = 0, any = false; Object.keys(AM.counts).forEach(function (k) { var c = AM.counts[k]; if (typeof c === 'number') { t += c; any = true; } });
+    return any ? t : null;
+  }
+  function dtLabel(dt) { var L = APP.dtLabels && APP.dtLabels[dt]; return L ? tr(L[0], L[1]) : dt; }
+  function arow(it) {
+    return '<a class="dms-arow" href="' + esc(it.href || docUrl(it.dt, it.name)) + '" target="_blank" rel="noopener noreferrer">' +
+      '<span class="dms-prio dms-prio-' + it.p + '">' + esc(tr(PRIO[it.p][0], PRIO[it.p][1])) + '</span>' +
+      '<span class="dms-arow-main"><span class="dms-arow-t"><bdi>' + esc(it.title || it.name) + '</bdi><span class="dms-arow-dt">' + esc(dtLabel(it.dt)) + '</span></span><span class="dms-arow-d">' + bdi(it.desc || '') + '</span></span>' +
+      '<span class="dms-arow-who">' + (it.who ? bdi(it.who) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>') + '</span>' +
+      '<span class="dms-arow-due dms-tone-' + (it.tone || 'n') + '">' + esc(it.due || '') + '</span><span class="dms-sr"> (' + esc(tr('opens in a new tab', 'يفتح في علامة تبويب جديدة')) + ')</span></a>';
+  }
+  function drillId(s) { return s.drill || ((s.client ? 'cli:' : 'srv:') + s.id); }
+  function catBtn(s, c) {
+    var err = typeof c === 'string', inner = '<span class="dms-acat-t">' + esc(s.short) + '</span><b class="dms-num">' + (err || c == null ? '—' : num(c)) + '</b>';
+    return (!err && c) ? '<button type="button" class="dms-acat" data-act="kpi" data-v="' + esc(drillId(s)) + '" title="' + esc(s.title + ' — ' + tr('view all', 'عرض الكل')) + '">' + inner + '</button>'
+      : '<div class="dms-acat dms-acat-off" title="' + esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.title) + '">' + inner + '</div>';
+  }
+  function actionsPanel(AM) {
+    var tot = pendingTotal(AM);
+    var h = '<section class="dms-panelbox dms-actpanel" id="dms-pending" tabindex="-1" aria-labelledby="dms-pending-h"><div class="dms-ph"><h3 class="dms-h3" id="dms-pending-h">' + esc(tr('Actions pending', 'الإجراءات المعلقة')) +
+      (tot != null ? ' <span class="dms-h3-n dms-num">' + num(tot) + '</span>' : '') + '</h3><span class="dms-ph-meta">' + esc(tr('As of today · most urgent first', 'حتى اليوم · الأكثر إلحاحًا أولًا')) + '</span>' +
+      (tab !== 'actions' && APP.tabs.some(function (x) { return x.id === 'actions'; }) ? '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="goto:actions">' + esc(tr('View all', 'عرض الكل')) + '</button>' : '') + '</div>';
+    if (!AM) { return h + '<div class="dms-arows" aria-busy="true">' + skel(6, 'dms-skel-row') + '</div></section>'; }
+    var known = AM.specs.filter(function (s) { return AM.counts[s.id] !== undefined; });
+    if (!known.length) { return h + '<div class="dms-arows" aria-busy="true">' + skel(6, 'dms-skel-row') + '</div></section>'; }
+    var errs = known.filter(function (s) { return typeof AM.counts[s.id] === 'string'; });
+    if (AM.ready && errs.length === AM.specs.length) { return h + alertBox('err', esc(tr('Pending actions could not be loaded.', 'تعذر تحميل الإجراءات المعلقة.')) + ' <button type="button" class="dms-linkbtn" data-act="refresh">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>') + '</section>'; }
+    var items = AM.items.slice(0, CFG.actRows || 7);
+    h += items.length ? '<div class="dms-arows">' + items.map(arow).join('') + '</div>' : (AM.ready ? '<div class="dms-empty dms-empty-sm">' + esc(tr('Nothing pending for this selection.', 'لا توجد إجراءات معلقة لهذا الاختيار.')) + '</div>' : '<div class="dms-arows" aria-busy="true">' + skel(4, 'dms-skel-row') + '</div>');
+    h += '<div class="dms-acats">' + AM.specs.map(function (s) { return catBtn(s, AM.counts[s.id]); }).join('') + '</div>';
+    if (errs.length) { h += note(esc(tr('Could not load: ', 'تعذر التحميل: ') + errs.map(function (s) { return s.short; }).join(', '))); }
+    return h + '</section>';
+  }
+  function actionsTab(AM, info) {
+    var h = alertBox('info', esc(info || tr('Action lists are as of today and not filtered by the period. They follow the filters where the source supports them.', 'قوائم الإجراءات حتى اليوم وغير مرتبطة بالفترة، وتتبع المرشحات حيثما يدعمها المصدر.')));
+    h += kpis((AM ? AM.specs : []).map(function (s) {
+      var c = AM.counts[s.id], err = typeof c === 'string';
+      return kpi({ label: s.title, val: c === undefined ? '…' : err ? '—' : num(c), sub: esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.why), act: (!err && c) ? drillId(s) : null });
+    }));
+    return h + actionsPanel(AM);
   }
 
-  function setPreset(p) { st.period = p; root.querySelectorAll('[data-id="period"] button').forEach(function (x) { x.classList.toggle('on', x.getAttribute('data-v') === p); }); }
-  root.querySelectorAll('[data-id="period"] button').forEach(function (b) {
-    b.onclick = function () {
-      var p = b.getAttribute('data-v');
-      if (p === 'Custom') { setPreset('Custom'); q('from').focus(); return; }
-      setPreset(p); loadPerf();
-    };
-  });
-  function onDate() {
-    var f = q('from').value, t = q('to').value;
-    setPreset('Custom');
-    if (!f || !t) return;
-    if (f > t) { q('perfmsg').className = 'mfd-msg err'; q('perfmsg').textContent = 'From Date must be on or before To Date.'; return; }
-    st.from = f; st.to = t; loadPerf();
+  /* ---------- drill-downs (overlay) ---------- */
+  var OVL = null;
+  function openDrill(id) {
+    if (id.indexOf('goto:') === 0) { goTab(id.slice(5)); return; }
+    var r = null;
+    if (id.indexOf('srv:') === 0 && APP.actSpecs) {
+      var s = APP.actSpecs().filter(function (x) { return x.id === id.slice(4); })[0];
+      if (s && s.table) { delete SS.drill; r = { title: s.title, sub: s.why, spec: Object.assign({ id: 'drill', server: true, dt: s.dt, filters: s.filters, order: s.order, file: s.id }, s.table()) }; }
+    }
+    if (!r && APP.drill) { r = APP.drill(id); }
+    if (!r || (!r.spec && r.body == null)) { return; }
+    if (r.spec) { r.spec.id = 'drill'; if (!r.spec.server && !r.spec.pageSize) { r.spec.pageSize = CFG.modalPage; } }
+    delete SS.drill; delete TS.drill;
+    var opener = OVL ? OVL.opener : activeEl();
+    OVL = Object.assign(r, { id: id, prev: OVL && r.stack !== false ? OVL : null, opener: opener, openerKey: OVL ? OVL.openerKey : opener && opener.getAttribute && opener.getAttribute('data-v') }); renderOverlay();
   }
-  q('from').onchange = onDate; q('to').onchange = onDate;
-  q('company').onchange = function () { st.company = q('company').value; st.factory = ''; setFactories([]); loadPerf(); loadPlan(); };
-  q('factory').onchange = function () { st.factory = q('factory').value; loadPerf(); loadPlan(); };
-  root.querySelectorAll('[data-id="pmode"] button').forEach(function (b) { b.onclick = function () { st.pmode = b.getAttribute('data-v'); root.querySelectorAll('[data-id="pmode"] button').forEach(function (x) { x.classList.toggle('on', x === b); }); var dd = st.pmode === 'today' ? riyadh(0) : riyadh(1); q('pstart').value = dd; q('pend').value = dd; st.pstart = dd; st.pend = dd; loadPlan(); }; });
-  function onPlanDate() { var a = q('pstart').value, b = q('pend').value; st.pmode = 'date'; root.querySelectorAll('[data-id="pmode"] button').forEach(function (x) { x.classList.remove('on'); }); if (!a || !b) return; if (a > b) { q('planmsg').className = 'mfd-msg err'; q('planmsg').textContent = 'Start Date must be on or before End Date.'; return; } var days = Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000); if (days > 366) { q('planmsg').className = 'mfd-msg err'; q('planmsg').textContent = 'Date range cannot exceed 367 days.'; return; } st.pstart = a; st.pend = b; loadPlan(); }
-  q('pstart').onchange = onPlanDate; q('pend').onchange = onPlanDate;
-  q('jstart').onchange=q('jend').onchange=function(){st.jfollow=false;loadJobs();};
-  q('jsync').onclick=function(){st.jfollow=true;loadJobs();};
-  q('main-tabs').querySelectorAll('button').forEach(function(b){b.onclick=function(){var v=b.getAttribute('data-view');q('main-tabs').querySelectorAll('button').forEach(function(x){x.classList.toggle('on',x===b);});root.querySelectorAll('[data-view-panel]').forEach(function(p){p.style.display=p.getAttribute('data-view-panel')===v?'':'none';});};});
-  q('refresh').onclick = function () { loadPerf(); loadPlan(); };
-  loadPerf().then(function () { loadPlan(); });
+  function overlayHTML() {
+    if (!OVL) { return ''; }
+    var link = OVL.link ? ' ' + docLink(OVL.link[0], OVL.link[1], OVL.link[2]) : '';
+    return '<div class="dms-overlay" data-act="ovbg"><div class="dms-modal" role="dialog" aria-modal="true" aria-labelledby="dms-dialog-title"><div class="dms-dhead"><div>' + (OVL.prev ? '<button type="button" class="dms-linkbtn" data-act="ovback">‹ ' + esc(tr('Back', 'رجوع')) + '</button>' : '') + '<h3 id="dms-dialog-title">' + esc(OVL.title) + '</h3>' + (OVL.sub || link ? '<p class="dms-sm">' + esc(OVL.sub || '') + link + '</p>' : '') + '</div><button type="button" class="dms-x" data-act="closeov" aria-label="' + esc(tr('Close', 'إغلاق')) + '">×</button></div>' + (OVL.body || '') + (OVL.spec ? regTable(OVL.spec) : '') + '</div></div>';
+  }
+  function renderOverlay() { var el = $('[data-ref="overlay"]'); if (!el) { return; } var app = $('.dms-app'); if (app) { app.inert = !!OVL; } if (!OVL) { Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { delete TBL[k]; } }); } else { delete TBL.drill; } el.innerHTML = overlayHTML(); fillTables(el); var x = el.querySelector('.dms-x'); if (x) { x.focus(); } }
+  function closeOverlay() {
+    var previous = OVL; OVL = null; renderOverlay(); delete SS.drill; delete TS.drill;
+    if (!previous) { return; }
+    var opener = previous.opener;
+    if (!opener || !opener.isConnected) { opener = Array.prototype.find.call(HOST.querySelectorAll('[data-act="kpi"]'), function (el) { return el.getAttribute('data-v') === previous.openerKey; }); }
+    if (opener) { opener.focus({ preventScroll: true }); }
+  }
+
+  /* ---------- filters, period, toolbar, tabs ---------- */
+  var F = { period: APP.period || 'month', from: '', to: '' }, PERIOD = [];
+  (APP.filters || []).forEach(function (f) { F[f.k] = ''; });
+  var tab = APP.tabs[0].id, POP = null, FD = null, FS = {}, CAL = null, ANIM = false, built = false, AMC = null;
+  var PERIODS = [['today', 'Today', 'اليوم'], ['yesterday', 'Yesterday', 'أمس'], ['week', 'This week', 'هذا الأسبوع'], ['lastWeek', 'Last week', 'الأسبوع الماضي'],
+    ['month', 'This month', 'هذا الشهر'], ['lastMonth', 'Last month', 'الشهر الماضي'], ['quarter', 'This quarter', 'هذا الربع'], ['ytd', 'Year to date', 'السنة حتى اليوم'],
+    ['year', 'This year', 'هذه السنة'], ['prevYear', 'Previous year', 'السنة الماضية'], ['custom', 'Custom range', 'نطاق مخصص']];
+  var PGROUPS = [['today', 'yesterday'], ['week', 'lastWeek'], ['month', 'lastMonth'], ['quarter', 'ytd', 'year', 'prevYear'], ['custom']];
+  function curPeriod() { return periodRange(F.period, F.from, F.to); }
+  function periodName(k) { var p = PERIODS.filter(function (x) { return x[0] === k; })[0]; return p ? tr(p[1], p[2]) : k; }
+  function filterCount() { return (APP.filters || []).filter(function (f) { return F[f.k]; }).length; }
+  function optList(f, draft) { var l = f.options ? f.options(draft || F) : []; return (l || []).map(function (x) { return typeof x === 'string' ? { v: x, l: x } : x; }); }
+  function optLabel(f, v) { var o = optList(f).filter(function (x) { return x.v === v; })[0]; return o ? o.l : (f.label ? f.label(v) : v); }
+  function pendingBtnHTML() {
+    var n = pendingTotal(AMC), lbl = n == null ? (AMC && AMC.ready ? '—' : '…') : num(n);
+    return '<button type="button" class="dms-pend' + (n ? ' dms-pend-on' : '') + '" data-act="pending" data-fk="pending" title="' + esc(tr('Pending actions as of today — show the list', 'الإجراءات المعلقة حتى اليوم — عرض القائمة')) + '">' +
+      '<i class="dms-pend-dot" aria-hidden="true"></i><b class="dms-num">' + lbl + '</b><span class="dms-pend-l">' + esc(tr('pending', 'معلّقة')) + '</span></button>';
+  }
+  function opt(v, label, cur) { return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(label) + '</option>'; }
+  function ffield(f) {
+    if (f.type === 'text' || f.type === 'date') { return '<div class="dms-ff"><label for="dms-fd-' + f.k + '">' + esc(tr(f.en, f.ar)) + '</label><input type="' + (f.type === 'date' ? 'date' : 'search') + '" id="dms-fd-' + f.k + '" class="dms-input" data-fd="' + f.k + '" data-fk="fd:' + f.k + '" value="' + esc(FD[f.k] || '') + '" placeholder="' + esc(f.ph ? tr(f.ph[0], f.ph[1]) : '') + '" autocomplete="off"></div>'; }
+    var list = optList(f, FD), label = tr(f.en, f.ar), k = f.k;
+    var q = clean(FS[k]).toLowerCase(), cur = FD[k], shown = list.filter(function (x) { return !q || String(x.l).toLowerCase().indexOf(q) >= 0 || String(x.v).toLowerCase().indexOf(q) >= 0; }), more = shown.length > 200;
+    shown = shown.slice(0, 200);
+    if (cur && !shown.some(function (x) { return x.v === cur; })) { shown.unshift({ v: cur, l: optLabel(f, cur) }); }
+    var h = '<div class="dms-ff"><label for="dms-fd-' + k + '">' + esc(label) + '</label>';
+    if (list.length > 8) { h += '<input type="search" class="dms-input" data-fs="' + k + '" data-fk="fs:' + k + '" value="' + esc(FS[k] || '') + '" placeholder="' + esc(tr('Search ' + num(list.length) + ' options', 'ابحث في ' + num(list.length) + ' خيار')) + '" aria-label="' + esc(tr('Search', 'بحث') + ' — ' + label) + '" autocomplete="off">'; }
+    h += '<select id="dms-fd-' + k + '" class="dms-input" data-fd="' + k + '" data-fk="fd:' + k + '">' + opt('', f.none ? tr(f.none[0], f.none[1]) : tr('All', 'الكل'), cur) + shown.map(function (x) { return opt(x.v, x.l, cur); }).join('') + '</select>';
+    if (q && !shown.length) { h += '<span class="dms-ff-hint">' + esc(tr('No matches', 'لا نتائج')) + '</span>'; }
+    else if (more) { h += '<span class="dms-ff-hint">' + esc(tr('First 200 matches — type to narrow', 'أول 200 نتيجة — اكتب للتضييق')) + '</span>'; }
+    return h + '</div>';
+  }
+  function filtersPopHTML() {
+    var n = APP.filterNote ? APP.filterNote() : '';
+    return '<div class="dms-pop dms-pop-filters" role="dialog" aria-label="' + esc(tr('Filters', 'المرشحات')) + '"><div class="dms-pop-b">' + APP.filters.map(ffield).join('') + '</div>' +
+      (n ? '<p class="dms-pop-note">' + esc(n) + '</p>' : '') +
+      '<div class="dms-pop-f"><button type="button" class="dms-btn" data-act="fclear" data-fk="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button><button type="button" class="dms-btn dms-btn-primary" data-act="fapply" data-fk="fapply">' + esc(tr('Apply', 'تطبيق')) + '</button></div></div>';
+  }
+  function calendarHTML() {
+    var v = CAL.view, first = weekStartOf(v), mon = v.slice(0, 7), fdy = CAL.focus && CAL.focus.slice(0, 7) === mon ? CAL.focus : (CAL.from && CAL.from.slice(0, 7) === mon ? CAL.from : v), wd = '', rows = '', r, c, d;
+    for (c = 0; c < 7; c++) { try { wd += '<span role="columnheader">' + esc(new Intl.DateTimeFormat(locale(), { weekday: 'narrow', timeZone: 'UTC' }).format(new Date(parseISO(addDays(first, c))))) + '</span>'; } catch (e) { wd += '<span></span>'; } }
+    for (r = 0; r < 6; r++) {
+      rows += '<div role="row" class="dms-cal-row">';
+      for (c = 0; c < 7; c++) {
+        d = addDays(first, r * 7 + c);
+        var end = d === CAL.from || d === CAL.to, inR = CAL.from && CAL.to && d > CAL.from && d < CAL.to;
+        rows += '<button type="button" role="gridcell" class="dms-day' + (d.slice(0, 7) !== mon ? ' dms-out' : '') + (d === TODAY ? ' dms-today' : '') + (inR ? ' dms-in' : '') + (end ? ' dms-end' : '') +
+          (CAL.from && CAL.to && d === CAL.from && d !== CAL.to ? ' dms-s' : '') + (CAL.from && CAL.to && d === CAL.to && d !== CAL.from ? ' dms-e' : '') + '" data-act="calday" data-v="' + d + '" data-fk="day:' + d + '" tabindex="' + (d === fdy ? 0 : -1) +
+          '" aria-pressed="' + end + '" aria-label="' + esc(fmtDate(d, true)) + '"><bdi>' + (+d.slice(8, 10)) + '</bdi></button>';
+      }
+      rows += '</div>';
+    }
+    var ok = CAL.from && CAL.to, msg = ok ? '<bdi>' + esc(rangeLabel([CAL.from, CAL.to])) + '</bdi> · ' + esc(daysTxt(diffDays(CAL.from, CAL.to) + 1)) : esc(CAL.from ? tr('Select an end date', 'اختر تاريخ النهاية') : tr('Select a start date', 'اختر تاريخ البداية'));
+    var title = v; try { title = new Intl.DateTimeFormat(locale(), { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(parseISO(v))); } catch (e) { /* ISO fallback */ }
+    return '<div class="dms-cal"><div class="dms-cal-h"><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="-1" data-fk="calprev" aria-label="' + esc(tr('Previous month', 'الشهر السابق')) + '">' + ico('prev', 'dms-flip') + '</button>' +
+      '<b aria-live="polite">' + esc(title) + '</b><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="1" data-fk="calnext" aria-label="' + esc(tr('Next month', 'الشهر التالي')) + '">' + ico('next', 'dms-flip') + '</button></div>' +
+      '<div class="dms-cal-g" role="grid" aria-label="' + esc(title) + '"><div class="dms-cal-wd" role="row">' + wd + '</div>' + rows + '</div>' +
+      '<div class="dms-cal-f"><span class="dms-cal-msg" aria-live="polite">' + msg + '</span><span class="dms-cal-btns"><button type="button" class="dms-btn" data-act="popclose" data-fk="calcancel">' + esc(tr('Cancel', 'إلغاء')) + '</button>' +
+      '<button type="button" class="dms-btn dms-btn-primary" data-act="calapply" data-fk="calapply"' + (ok ? '' : ' disabled') + '>' + esc(tr('Apply', 'تطبيق')) + '</button></span></div></div>';
+  }
+  function periodPopHTML() {
+    var n = APP.periodNote ? APP.periodNote() : '';
+    return '<div class="dms-pop dms-pop-period' + (CAL ? ' dms-has-cal' : '') + '" role="dialog" aria-label="' + esc(tr('Select period', 'اختر الفترة')) + '"><div class="dms-presets">' +
+      PGROUPS.map(function (g) {
+        return '<div class="dms-pgroup">' + g.map(function (k) {
+          var on = CAL ? k === 'custom' : F.period === k;
+          return '<button type="button" class="dms-preset' + (on ? ' dms-on' : '') + '" aria-pressed="' + on + '" data-act="preset" data-v="' + k + '" data-fk="preset:' + k + '"><span>' + esc(periodName(k)) + '</span>' +
+            (k !== 'custom' ? '<small><bdi>' + esc(rangeLabel(periodRange(k))) + '</bdi></small>' : '') + '</button>';
+        }).join('') + '</div>';
+      }).join('') + '</div>' + (CAL ? calendarHTML() : '') + (n ? '<p class="dms-pop-note dms-pop-note-p">' + esc(n) + '</p>' : '') + '</div>';
+  }
+  function toolbarHTML() {
+    var ac = filterCount(), R = PERIOD, hasF = APP.filters && APP.filters.length;
+    return '<div class="dms-topbar"><div class="dms-tb-title"><h2 class="dms-title">' + esc(APP.title()) + '</h2><p class="dms-sub" data-ref="stamp"></p></div>' +
+      '<div class="dms-tb-ctrls"><div class="dms-pendwrap" data-ref="pendwrap">' + pendingBtnHTML() + '</div>' +
+      (APP.period === false ? '' : '<div class="dms-anchor"><button type="button" class="dms-btn dms-period" data-act="pop" data-v="period" data-fk="pop:period" aria-haspopup="dialog" aria-expanded="' + (POP === 'period') + '" aria-label="' + esc(tr('Period', 'الفترة') + ': ' + periodName(F.period) + ' ' + rangeLabel(R)) + '">' + ico('cal') +
+        '<span class="dms-period-t"><b>' + esc(periodName(F.period)) + '</b><span class="dms-period-r"><bdi>' + esc(rangeLabel(R)) + '</bdi></span></span>' + ico('down', 'dms-chev') + '</button>' + (POP === 'period' ? periodPopHTML() : '') + '</div>') +
+      (hasF ? '<div class="dms-anchor"><button type="button" class="dms-btn' + (ac ? ' dms-btn-on' : '') + '" data-act="pop" data-v="filters" data-fk="pop:filters" aria-haspopup="dialog" aria-expanded="' + (POP === 'filters') + '">' + ico('filter') +
+        '<span class="dms-btn-t">' + esc(tr('Filters', 'المرشحات')) + '</span>' + (ac ? '<span class="dms-count" aria-label="' + esc(ac + ' ' + tr('active', 'نشط')) + '">' + ac + '</span>' : '') + '</button>' + (POP === 'filters' ? filtersPopHTML() : '') + '</div>' : '') +
+      '<button type="button" class="dms-btn dms-icobtn" data-act="refresh" data-ref="refresh" data-fk="refresh" aria-label="' + esc(tr('Refresh data', 'تحديث البيانات')) + '" title="' + esc(tr('Refresh data (keeps filters)', 'تحديث البيانات (مع الإبقاء على المرشحات)')) + '">' + ico('refresh') + '</button></div>' +
+      '<div class="dms-lang" role="group" aria-label="Language / اللغة"><button type="button" data-act="lang" data-v="en" data-fk="lang:en" lang="en" aria-pressed="' + (LANG === 'en') + '"' + (LANG === 'en' ? ' class="dms-on"' : '') + '>English</button>' +
+        '<button type="button" data-act="lang" data-v="ar" data-fk="lang:ar" lang="ar" aria-pressed="' + (LANG === 'ar') + '"' + (LANG === 'ar' ? ' class="dms-on"' : '') + '>العربية</button></div></div>';
+  }
+  function chipsHTML() {
+    var a = (APP.filters || []).filter(function (f) { return F[f.k]; }); if (!a.length) { return ''; }
+    return '<div class="dms-chips">' + a.map(function (f) {
+      var v = optLabel(f, F[f.k]), lab = tr(f.en, f.ar);
+      return '<span class="dms-chip"><span class="dms-chip-k">' + esc(lab) + '</span><bdi>' + esc(v) + '</bdi><button type="button" class="dms-chip-x" data-act="rmf" data-v="' + f.k + '" data-fk="rmf:' + f.k + '" aria-label="' + esc(tr('Remove filter', 'إزالة المرشح') + ' ' + lab + ': ' + v) + '">' + ico('x') + '</button></span>';
+    }).join('') + (a.length > 1 ? '<button type="button" class="dms-linkbtn" data-act="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button>' : '') + '</div>';
+  }
+  function tabsHTML() {
+    var pend = pendingTotal(AMC);
+    return '<div class="dms-tabs" role="tablist" aria-label="' + esc(tr('Sections', 'الأقسام')) + '">' + APP.tabs.map(function (x) {
+      var on = x.id === tab, lbl = tr(x.en, x.ar), b = x.id === 'actions' && pend ? '<span class="dms-tab-n dms-num" title="' + esc(tr('Pending actions as of today', 'الإجراءات المعلقة حتى اليوم')) + '">' + num(pend) + '</span>' : '';
+      return '<button class="dms-tab' + (on ? ' dms-on' : '') + '" role="tab" id="dms-tab-' + x.id + '" aria-selected="' + on + '" aria-controls="dms-panel" tabindex="' + (on ? 0 : -1) + '" data-act="tab" data-v="' + x.id + '" data-fk="tab:' + x.id + '" title="' + esc(lbl) + '" type="button"><span>' + esc(lbl) + '</span>' + b + '</button>';
+    }).join('') + '</div>';
+  }
+
+  /* ---------- rendering: a fixed skeleton whose regions repaint independently (focus kept via data-fk) ---------- */
+  function activeEl() { try { return ROOT.activeElement || null; } catch (e) { return null; } }
+  function paint(el, html) {
+    if (!el) { return; }
+    var a = activeEl(), fk = a && el.contains(a) && a.getAttribute ? a.getAttribute('data-fk') : null, ss = null;
+    if (fk && typeof a.selectionStart === 'number') { try { ss = [a.selectionStart, a.selectionEnd]; } catch (e) { /* not a text input */ } }
+    el.innerHTML = html;
+    if (fk) { focusFk(fk); if (ss) { var n = activeEl(); try { n.setSelectionRange(ss[0], ss[1]); } catch (e) { /* ignore */ } } }
+  }
+  function focusFk(k) { var n = HOST.querySelector('[data-fk="' + k + '"]'); if (n) { try { n.focus({ preventScroll: true }); } catch (e) { n.focus(); } } }
+  function skeleton() {
+    HOST.innerHTML = '<div class="dms-app"><div data-ref="tb"></div><div data-ref="chips"></div><div data-ref="tabs"></div><div class="dms-sheet" role="tabpanel" id="dms-panel" data-ref="sheet"><div data-ref="banner"></div><div class="dms-content" data-ref="content"></div></div>' +
+      '<div class="dms-tip" data-ref="tip" role="tooltip" hidden></div></div><div data-ref="overlay"></div>';
+    built = true;
+  }
+  function renderHeaderState() {
+    var b = $('[data-ref="refresh"]'), s = $('[data-ref="stamp"]'), bz = busy();
+    if (b) { b.classList.toggle('dms-busy', bz); b.setAttribute('aria-busy', String(bz)); }
+    if (s) { s.textContent = (APP.stamp ? APP.stamp() : tr('Read-only', 'للقراءة فقط')) + (LOADED ? ' · ' + tr('Updated ', 'آخر تحديث ') + LOADED : '') + (bz ? ' · ' + tr('loading…', 'جارٍ التحميل…') : ''); }
+    paint($('[data-ref="pendwrap"]'), pendingBtnHTML());
+    paint($('[data-ref="tabs"]'), tabsHTML());
+  }
+  function renderToolbar() { paint($('[data-ref="tb"]'), toolbarHTML()); paint($('[data-ref="chips"]'), chipsHTML()); renderHeaderState(); }
+  function contentHTML() {
+    if (!BOOTED) {
+      return '<div class="dms-grid dms-kpis dms-ov-kpis" aria-busy="true">' + skel(CFG.kpiCount || 6, 'dms-skel-kpi') + '</div><div class="dms-main2"><div class="dms-skel dms-skel-panel"></div><div class="dms-skel dms-skel-panel"></div></div>' +
+        note(esc(tr('Loading from ERPNext…', 'جارٍ التحميل من ERPNext…')));
+    }
+    if (APP.period !== false && (!PERIOD[0] || PERIOD[0] > PERIOD[1])) { return alertBox('err', esc(tr('Choose a valid date range.', 'اختر نطاق تاريخ صحيحًا.'))); }
+    return APP.content(tab, AMC);
+  }
+  function renderSoft() {
+    PERIOD = curPeriod(); AMC = APP.actions ? APP.actions() : null;
+    var keep = {}; Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { keep[k] = TBL[k]; } }); TBL = keep;
+    var b = $('[data-ref="banner"]'), c = $('[data-ref="content"]'), sh = $('[data-ref="sheet"]');
+    if (b) { b.innerHTML = BOOTED && APP.banner ? APP.banner() : ''; }
+    if (c) { paint(c, contentHTML()); c.classList.remove('dms-enter'); if (ANIM) { void c.offsetWidth; c.classList.add('dms-enter'); } ANIM = false; fillTables(c); fitChartLabels(); if (APP.afterRender) { APP.afterRender(c); } }
+    if (sh) { sh.setAttribute('aria-labelledby', 'dms-tab-' + tab); }
+    renderHeaderState();
+  }
+  function renderAll() {
+    HOST.setAttribute('dir', LANG === 'ar' ? 'rtl' : 'ltr'); HOST.setAttribute('lang', LANG);
+    if (!built) { skeleton(); }
+    PERIOD = curPeriod(); renderToolbar(); renderSoft();
+  }
+  /* Full reload (filters, refresh): new generation, empty store, tables back to page 1. */
+  function reload() {
+    setToday(); PERIOD = curPeriod(); GEN++; D = {}; LOADED = STAMP;
+    Object.keys(SS).forEach(function (k) { SS[k].dirty = true; SS[k].page = 1; }); Object.keys(TS).forEach(function (k) { TS[k].page = 1; });
+    APP.load(); ANIM = true; renderAll();
+  }
+
+  /* ---------- navigation and popovers ---------- */
+  function goTab(id, focusTab, force) {
+    if (tab !== id || force) { tab = id; ANIM = true; if (APP.onTab) { APP.onTab(id); } renderAll(); }
+    var t = $('#dms-tab-' + id); if (!t) { return; }
+    try { t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) { /* ignore */ }
+    if (focusTab) { t.focus(); }
+  }
+  function openPop(w) {
+    POP = w; CAL = null;
+    if (w === 'filters') { FD = {}; APP.filters.forEach(function (f) { FD[f.k] = F[f.k]; }); FS = {}; }
+    else if (F.period === 'custom' && F.from && F.to) { CAL = { from: F.from, to: F.to, view: monthStart(F.from), focus: F.from }; }
+    renderToolbar(); focusFk(w === 'filters' ? 'fd:' + APP.filters[0].k : CAL ? 'day:' + CAL.focus : 'preset:' + F.period);
+  }
+  function closePop(restore) { var w = POP; if (!w) { return; } POP = null; CAL = null; renderToolbar(); if (restore) { focusFk('pop:' + w); } }
+  function applyFilters(next) {
+    var prev = {}; APP.filters.forEach(function (f) { prev[f.k] = F[f.k]; F[f.k] = (next && next[f.k]) || ''; }); POP = null;
+    if (APP.onFilters) { APP.onFilters(prev); }
+    reload();
+  }
+  function applyPeriod(key, from, to) {
+    F.period = key; if (key === 'custom') { F.from = from; F.to = to; }
+    POP = null; CAL = null; setToday(); PERIOD = curPeriod();
+    Object.keys(SS).forEach(function (k) { if (TBL[k] && TBL[k].period) { SS[k].dirty = true; SS[k].page = 1; } });
+    if (APP.onPeriod) { APP.onPeriod(); } else { reload(); return; }
+    ANIM = true; renderAll(); focusFk('pop:period');
+  }
+  function calPick(d) {
+    if (!CAL.from || CAL.to) { CAL.from = d; CAL.to = null; } else if (d < CAL.from) { CAL.to = CAL.from; CAL.from = d; } else { CAL.to = d; }
+    CAL.focus = d;
+  }
+  function calMove(d) { CAL.focus = d; if (d.slice(0, 7) !== CAL.view.slice(0, 7)) { CAL.view = monthStart(d); } renderToolbar(); focusFk('day:' + d); }
+
+  /* ---------- tooltip (one shared element; positioned against the dashboard, clamped to its width) ---------- */
+  function showTip(n) {
+    var tip = $('[data-ref="tip"]'), app = $('.dms-app'); if (!tip || !app) { return; }
+    tip.textContent = n.getAttribute('data-tip'); tip.hidden = false;
+    var a = app.getBoundingClientRect(), r = n.getBoundingClientRect(), w = tip.offsetWidth, hgt = tip.offsetHeight;
+    var x = Math.max(4, Math.min(r.left - a.left + r.width / 2 - w / 2, a.width - w - 4)), y = r.top - a.top - hgt - 8;
+    if (y < 0) { y = r.bottom - a.top + 8; }
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  }
+  function hideTip() { var tip = $('[data-ref="tip"]'); if (tip) { tip.hidden = true; } }
+  function onOver(ev) { var n = ev.target.closest ? ev.target.closest('[data-tip]') : null; if (n && HOST.contains(n)) { showTip(n); } else { hideTip(); } }
+
+  /* ---------- events (single delegated set, removed on destroy) ---------- */
+  function onClick(ev) {
+    var n = ev.target.closest ? ev.target.closest('[data-act]') : null;
+    if (POP && !(ev.target.closest && ev.target.closest('.dms-anchor'))) { closePop(false); }
+    if (!n || !HOST.contains(n)) { return; }
+    var a = n.getAttribute('data-act'), v = n.getAttribute('data-v'), id = n.getAttribute('data-id');
+    if (APP.onAct && APP.onAct(a, v, n, id) === true) { return; }
+    if (a === 'ovbg') { if (ev.target === n) { closeOverlay(); } return; }
+    if (a === 'closeov') { closeOverlay(); return; }
+    if (a === 'ovback' && OVL && OVL.prev) { var pv = OVL.prev; delete SS.drill; delete TS.drill; OVL = pv; if (OVL.spec) { regTable(OVL.spec); } renderOverlay(); return; }
+    if (a === 'tab') { goTab(v); return; }
+    if (a === 'lang') { if (LANG !== v) { LANG = v; try { G.localStorage.setItem('dms_lang', LANG); } catch (e) { /* ignore */ } POP = null; CAL = null; renderAll(); if (OVL) { var o = OVL; OVL = null; renderOverlay(); openDrill(o.id); } focusFk('lang:' + v); } return; }
+    if (a === 'refresh') { if (APP.onRefresh) { APP.onRefresh(); } reload(); return; }
+    if (a === 'pop') { if (POP === v) { closePop(true); } else { openPop(v); } return; }
+    if (a === 'popclose') { closePop(true); return; }
+    if (a === 'preset') {
+      if (v !== 'custom') { applyPeriod(v); return; }
+      var r0 = PERIOD[0] || TODAY, r1 = PERIOD[1] || TODAY; CAL = { from: r0, to: r1, view: monthStart(r1 > TODAY ? TODAY : r1), focus: r1 > TODAY ? TODAY : r1 };
+      renderToolbar(); focusFk('day:' + CAL.focus); return;
+    }
+    if (a === 'calnav' && CAL) { CAL.view = addMonths(CAL.view, +v); CAL.focus = CAL.view; renderToolbar(); return; }
+    if (a === 'calday' && CAL) { calPick(v); renderToolbar(); focusFk('day:' + v); return; }
+    if (a === 'calapply' && CAL && CAL.from && CAL.to) { applyPeriod('custom', CAL.from, CAL.to); return; }
+    if (a === 'fapply') { applyFilters(FD); focusFk('pop:filters'); return; }
+    if (a === 'fclear') { applyFilters(null); focusFk('pop:filters'); return; }
+    if (a === 'rmf') { var nf = {}; APP.filters.forEach(function (f) { nf[f.k] = F[f.k]; }); nf[v] = ''; applyFilters(nf); focusFk('pop:filters'); return; }
+    if (a === 'pending') {
+      goTab(APP.tabs[0].id); var p = $('#dms-pending');
+      if (p) { var still = G.matchMedia && G.matchMedia('(prefers-reduced-motion: reduce)').matches; try { p.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' }); } catch (e) { p.scrollIntoView(); } p.focus({ preventScroll: true }); }
+      return;
+    }
+    if (a === 'kpi') { openDrill(v); return; }
+    if (a === 'tpage') { TS[id].page = Math.max(1, TS[id].page + (+v)); fillTable(id); return; }
+    if (a === 'tsort') { var st = TS[id]; if (st.sk === v) { st.dir = -st.dir; } else { st.sk = v; st.dir = 1; } st.page = 1; fillTable(id); focusHead(id, v); return; }
+    if (a === 'spage') { var ss = SS[id]; ss.page = Math.max(1, ss.page + (+v)); ss.dirty = true; fillTable(id); return; }
+    if (a === 'ssort') { var s2 = SS[id]; if (s2.sk === v) { s2.dir = -s2.dir; } else { s2.sk = v; s2.dir = 1; } s2.page = 1; s2.dirty = true; fillTable(id); focusHead(id, v); return; }
+    if (a === 'sretry') { SS[id].dirty = true; fillTable(id); return; }
+    if (a === 'csv') { var sp = TBL[id]; download(sp.file || id, sp, clientRows(sp, TS[id])); return; }
+    if (a === 'csvall') { exportServer(id); return; }
+  }
+  function focusHead(id, v) { var th = HOST.querySelector('[data-tbl="' + id + '"] th[data-v="' + v + '"]'); if (th) { th.focus(); } }
+  function onInput(ev) {
+    var n = ev.target; if (!n || !n.getAttribute || !HOST.contains(n)) { return; }
+    var fs = n.getAttribute('data-fs'), fd = n.getAttribute('data-fd'), tq = n.getAttribute('data-tq');
+    if (APP.onInput && APP.onInput(n, ev) === true) { return; }
+    if (fs) { if (FS[fs] === n.value) { return; } FS[fs] = n.value; renderToolbar(); return; }
+    if (fd) { if (!FD || FD[fd] === n.value) { return; } FD[fd] = n.value; if (n.type === 'search') { return; } if (APP.filters.some(function (f) { return f.dependsOn === fd; })) { APP.filters.forEach(function (f) { if (f.dependsOn === fd && FD[f.k] && !optList(f, FD).some(function (x) { return x.v === FD[f.k]; })) { FD[f.k] = ''; } }); renderToolbar(); } return; }
+    if (tq) {
+      focusId = tq; var spx = TBL[tq]; if (!spx) { return; }
+      if (spx.server) { var s2 = SS[tq]; if (s2.q === n.value) { return; } s2.q = n.value; s2.page = 1; clearTimeout(onInput.t); onInput.t = later(function () { s2.dirty = true; fillTable(tq); }, 350); }
+      else { var s1 = TS[tq] || (TS[tq] = { q: '', page: 1, sk: spx.sk || '', dir: spx.dir || 1 }); if (s1.q === n.value) { return; } s1.q = n.value; s1.page = 1; fillTable(tq); }
+    }
+  }
+  function onKey(ev) {
+    var t = ev.target, act = t && t.getAttribute ? t.getAttribute('data-act') : null, rtl = LANG === 'ar', k = ev.key;
+    if (k === 'Escape') {
+      if (POP) { ev.preventDefault(); closePop(true); return; }
+      if (OVL) { closeOverlay(); }
+      return;
+    }
+    if ((k === 'Enter' || k === ' ') && (act === 'tsort' || act === 'ssort')) { ev.preventDefault(); t.click(); return; }
+    if (k === 'Tab' && OVL) {
+      var modal = $('.dms-modal'), controls = Array.prototype.filter.call(modal.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), [tabindex="0"]'), function (el) { return el.getClientRects().length; });
+      var first = controls[0], last = controls[controls.length - 1];
+      if (ev.shiftKey && t === first) { ev.preventDefault(); last.focus(); }
+      else if (!ev.shiftKey && t === last) { ev.preventDefault(); first.focus(); }
+    }
+    if (act === 'tab' && /^(ArrowLeft|ArrowRight|Home|End)$/.test(k)) {
+      var ids = APP.tabs.map(function (x) { return x.id; }), i = ids.indexOf(t.getAttribute('data-v')), L = ids.length;
+      var d = k === 'Home' ? -i : k === 'End' ? L - 1 - i : ((k === 'ArrowRight') !== rtl ? 1 : -1);
+      ev.preventDefault(); goTab(ids[(i + d + L) % L], true); return;
+    }
+    if (act === 'calday' && CAL) {
+      var cur = t.getAttribute('data-v'), step = { ArrowRight: rtl ? -1 : 1, ArrowLeft: rtl ? 1 : -1, ArrowUp: -7, ArrowDown: 7 }[k];
+      if (step) { ev.preventDefault(); calMove(addDays(cur, step)); return; }
+      if (k === 'PageUp' || k === 'PageDown') { ev.preventDefault(); calMove(shiftMonths(cur, k === 'PageUp' ? -1 : 1)); return; }
+      if (k === 'Home' || k === 'End') { ev.preventDefault(); calMove(k === 'Home' ? weekStartOf(cur) : addDays(weekStartOf(cur), 6)); }
+    }
+  }
+  /* Start: wire events, render the skeleton, run APP.boot (reference lists), then the first load. */
+  function start() {
+    HOST.addEventListener('click', onClick, SIG);
+    HOST.addEventListener('input', onInput, SIG);
+    HOST.addEventListener('change', onInput, SIG);
+    HOST.addEventListener('keydown', onKey, SIG);
+    HOST.addEventListener('pointerover', onOver, SIG);
+    HOST.addEventListener('pointerleave', hideTip, SIG);
+    HOST.addEventListener('focusin', function (ev) { var n = ev.target.closest && ev.target.closest('[data-tip]'); if (n) { showTip(n); } }, SIG);
+    HOST.addEventListener('focusout', hideTip, SIG);
+    document.addEventListener('pointerdown', function (ev) {
+      if (!POP) { return; } var p = ev.composedPath ? ev.composedPath() : [];
+      for (var i = 0; i < p.length; i++) { if (p[i] === HOST) { return; } }
+      closePop(false);
+    }, SIG);
+    if (!G.frappe || !frappe.call) { HOST.innerHTML = '<div class="dms-empty">Frappe client API not available.</div>'; return; }
+    setToday(); PERIOD = curPeriod();
+    var chartResize = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fitChartLabels) : null;
+    if (chartResize) { chartResize.observe(HOST); if (abort) { abort.signal.addEventListener('abort', function () { chartResize.disconnect(); }); } }
+    if (document.fonts) { document.fonts.ready.then(function () { if (!destroyed) { fitChartLabels(); } }); }
+    renderAll();
+    var g = GEN, chk = function () { return g === GEN && !destroyed; };
+    Promise.resolve(APP.boot ? APP.boot(chk) : null).catch(function (e) { if (G.console) { console.error(APP.key, 'boot', e); } }).then(function () { if (destroyed) { return; } BOOTED = true; reload(); });
+  }
+  /* ==== end DMS kit ==== */
+
+  var COS = [], CO = [], FACS = [], PM = 'tomorrow', PT = 'scheduled', AGE = 'All', JT = 'active', UOM = null;
+  function n0(v) { return Number(v) || 0; }
+  function isN(v) { return typeof v === 'number' && isFinite(v); }
+  function two(a, b) { return '<div class="dms-cols-2 dms-grid">' + a + b + '</div>'; }
+  function ccy() { var co = (D.perf && D.perf.company) || F.company; return ((CO.filter(function (c) { return c.name === co; })[0] || {}).default_currency) || CUR; }
+  function m2(v) { return isN(v) ? amt(v) : '—'; }
+  function facts(rows) { return '<div class="dms-facts mf-facts">' + rows.map(function (r) { return '<div><span class="dms-sm">' + esc(r[0]) + '</span><b class="dms-num' + (r[2] ? ' dms-tone-' + r[2] : '') + '">' + r[1] + '</b>' + (r[3] ? '<span class="dms-sm">' + r[3] + '</span>' : '') + '</div>'; }).join('') + '</div>'; }
+  function okSec(s) { return s && s.access === 'ok'; }
+  function joLink(x) { return docLink('Factory Job Order', x); }
+  function seLink(x) { return docLink('Stock Entry', x); }
+  function planRange() { var t = TODAY, m = { today: [t, t], tomorrow: [addDays(t, 1), addDays(t, 1)], week: [addDays(t, 1), addDays(t, 7)], period: [PERIOD[0], PERIOD[1]] }; return m[PM] || m.tomorrow; }
+
+  /* ============================================================ loading */
+  function base() { var a = {}; if (F.company) { a.company = F.company; } if (F.factory) { a.factory = F.factory; } return a; }
+  function loadAll() {
+    run('perf', function () { return callP('mfg_dashboard_performance', Object.assign(base(), { period: 'Custom', from_date: PERIOD[0], to_date: PERIOD[1] })); });
+    run('jobs', function () { return callP('mfg_dashboard_jobs', Object.assign(base(), { from_date: PERIOD[0], to_date: PERIOD[1] })); });
+    loadPlan();
+  }
+  function loadPlan() { var r = planRange(); run('plan', function () { return callP('mfg_dashboard_plan', Object.assign(base(), { plan_start: r[0], plan_end: r[1] })); }); }
+
+  /* ============================================================ actions pending (from the API responses) */
+  function actSpecs() {
+    return [
+      { id: 'a_over', client: true, short: tr('Job orders past their end date', 'أوامر تجاوزت نهايتها'), title: tr('Submitted job orders past their end date and not completed', 'أوامر عمل معتمدة تجاوزت تاريخ نهايتها ولم تكتمل'), why: tr('Carryover in the jobs dates; overdue is measured against today. Records are never changed automatically.', 'المرحَّل ضمن تواريخ الأعمال؛ التأخير مقاس باليوم. لا تُعدَّل السجلات تلقائيًا.') },
+      { id: 'a_rev', client: true, short: tr('Schedules to review', 'جداول للمراجعة'), title: tr('Job orders whose schedule needs review', 'أوامر عمل تحتاج جدولتها مراجعة'), why: tr('Missing or inconsistent start and end dates.', 'تواريخ بدء أو نهاية مفقودة أو غير متسقة.') },
+      { id: 'a_neg', client: true, short: tr('Negative production cost', 'تكلفة إنتاج سالبة'), title: tr('Manufacture entries with a negative value difference', 'قيود تصنيع بفرق قيمة سالب'), why: tr('Kept as they are in the cost; review the valuation.', 'تبقى كما هي في التكلفة؛ راجع التقييم.') },
+      { id: 'a_cls', client: true, short: tr('Output to classify', 'إنتاج يحتاج تصنيفًا'), title: tr('Stock entries with mixed or missing finished-item groups', 'قيود بمجموعات أصناف نهائية مختلطة أو مفقودة'), why: tr('Shown as Multiple categories or Unclassified until the Item Group is set.', 'تظهر كفئات متعددة أو غير مصنفة حتى تُحدد مجموعة الصنف.') },
+      { id: 'a_ck', client: true, short: tr('Incomplete check-in days', 'أيام حضور ناقصة'), title: tr('Employees with incomplete check-in days', 'موظفون بأيام حضور ناقصة'), why: tr('A single punch or a span over 16 hours; those days are not counted in hours.', 'بصمة واحدة أو مدة أكثر من 16 ساعة؛ لا تُحتسب تلك الأيام.') }
+    ];
+  }
+  function actClient() {
+    var o = {}, J = D.jobs, P = D.perf;
+    var jo = function (p, tone, due) { return function (x) { return { p: p, score: score(p, 0, n0(x.days_overdue)), dt: 'Factory Job Order', name: x.jo, title: x.jo, desc: [x.factory, x.status, x.issue].filter(Boolean).join(' · '), who: null, due: due(x), tone: tone }; }; };
+    if (D.jobsErr) { o.a_over = o.a_rev = 'ERR:' + D.jobsErr; } else if (J) {
+      if (J.access) { o.a_over = o.a_rev = 'ERR:perm'; } else {
+        var ov = (J.carryover || []).filter(function (x) { return n0(x.days_overdue) > 0; }).sort(function (a, b) { return n0(b.days_overdue) - n0(a.days_overdue); });
+        o.a_over = { rows: ov, item: jo('high', 'bad', function (x) { return num(x.days_overdue) + tr(' days overdue', ' يوم تأخير'); }) };
+        o.a_rev = { rows: J.schedule_review || [], item: jo('med', 'warn', function (x) { return x.issue || tr('Review the schedule', 'راجع الجدولة'); }) };
+      }
+    }
+    if (D.perfErr) { o.a_neg = o.a_cls = o.a_ck = 'ERR:' + D.perfErr; } else if (P) {
+      var out = P.output || {}, lab = P.labour || {};
+      if (!okSec(out)) { o.a_neg = o.a_cls = 'ERR:perm'; } else {
+        o.a_neg = { rows: out.negative_value_difference_entries || [], item: function (x) { return { p: 'med', score: score('med', Math.abs(n0(x.value_difference)), ageOf(x.date)), dt: 'Stock Entry', name: x.se, title: x.se, desc: tr('Value difference ', 'فرق القيمة ') + m2(x.value_difference), who: null, due: x.date || '', tone: 'warn' }; } };
+        var cls = (out.output_review_entries || []).map(function (x) { return { se: x.se, why: tr('Different categories: ', 'فئات مختلفة: ') + (x.groups || []).join(', ') }; }).concat((out.output_unclassified_rows || []).map(function (x) { return { se: x.se, why: tr('No Item Group: ', 'بلا مجموعة صنف: ') + (x.item || '') }; }));
+        o.a_cls = { rows: cls, item: function (x) { return { p: 'low', score: score('low', 0, 0), dt: 'Stock Entry', name: x.se, title: x.se, desc: x.why, who: null, due: '', tone: 'n' }; } };
+      }
+      if (!okSec(lab) || lab.hours_access !== 'ok') { o.a_ck = 'ERR:perm'; } else { var ck = (lab.employees || []).filter(function (x) { return n0(x.ck_incomplete_days) > 0; }); o.a_ck = { rows: ck, item: function (x) { return { p: 'low', score: score('low', 0, n0(x.ck_incomplete_days)), dt: 'Employee', name: x.employee, title: x.employee, desc: num(x.ck_incomplete_days) + tr(' incomplete days', ' أيام ناقصة'), who: null, due: '', tone: 'n' }; } }; }
+    }
+    return Object.keys(o).length ? o : null;
+  }
+
+  /* ============================================================ shared */
+  function banner() {
+    var r = D.perf, h = ''; if (!r) { return h; }
+    var msgs = []; if (r.access) { msgs.push(r.access); } ['output', 'labour'].forEach(function (k) { if (r[k] && r[k].access && r[k].access !== 'ok') { msgs.push(r[k].access); } });
+    (r.notes || []).forEach(function (n) { msgs.push(n); }); if (r.output && r.output.truncated) { msgs.push(tr('Output list truncated at 5,000 rows — narrow the range.', 'قائمة الإنتاج مقتطعة عند 5,000 صف — ضيّق النطاق.')); }
+    if (msgs.length) { h += alertBox('warn', msgs.map(esc).join('<br>')); }
+    if (r.partial) { h += alertBox('info', esc(tr('The period is in progress: data runs to ', 'الفترة جارية: البيانات حتى ') + r.to_date_end + '.')); } else if (r.future) { h += alertBox('info', esc(tr('The period is in the future, so there is no production yet.', 'الفترة مستقبلية، فلا إنتاج بعد.'))); }
+    return h;
+  }
+  function need(key, label) { if (D[key + 'Err']) { return srcErr(D[key + 'Err'], label); } if (D[key] == null) { return skel(1, 'dms-skel-panel'); } return ''; }
+  function targetFacts(tg, o) {
+    var c = tg && tg.cost, cur = ccy();
+    if (!tg || tg.access !== 'ok' || !c) { return facts([[tr('Target cost', 'التكلفة المستهدفة'), esc(tr('Unavailable', 'غير متاح')), 'bad']]); }
+    if (!c.records) { return facts([[tr('Target cost', 'التكلفة المستهدفة'), esc(tr('Target not set', 'المستهدف غير محدد')), 'warn', '<a class="dms-link" href="/app/manufacturing-production-target/new" target="_blank" rel="noopener noreferrer">' + esc(tr('Set target', 'تحديد المستهدف')) + ' ↗</a>']]); }
+    var actual = okSec(o) ? n0(o.value_difference) : null, rows = [[tr('Target cost', 'التكلفة المستهدفة'), cur$(c.basis, cur), '', esc(c.basis_label || '')]];
+    if (c.produced_without_cost_target_count || c.records_without_cost) { rows.push([tr('Coverage', 'التغطية'), esc(tr('Partial', 'جزئية')), 'warn', esc(num(c.produced_without_cost_target_count) + tr(' produced items without a cost target', ' صنف منتج بلا مستهدف') + (c.records_without_cost ? '; ' + num(c.records_without_cost) + tr(' targets without Target Cost', ' مستهدف بلا تكلفة') : '') + tr('. Variance is not comparable.', '. الفرق غير قابل للمقارنة.'))]); }
+    else if (actual !== null && c.basis > 0) { var v = actual - c.basis; rows.push([v > 0 ? tr('Over target', 'أعلى من المستهدف') : tr('Under target', 'أقل من المستهدف'), cur$(Math.abs(v), cur), v > 0 ? 'bad' : 'ok', esc((Math.abs(v) / c.basis * 100).toFixed(1) + '%')]); }
+    return facts(rows);
+  }
+  function catBars(rows, fmt) { if (!rows.length) { return empty(tr('No entries for this range.', 'لا قيود لهذا النطاق.')); } return hbars(rows.map(function (x) { return { label: x.category, value: n0(x.value), color: n0(x.value) < 0 ? 'var(--dms-age3)' : null }; }).sort(function (a, b) { return b.value - a.value; }), fmt); }
+
+  /* ============================================================ overview */
+  function tabOverview(AM) {
+    if (D.perfErr) { return srcErr(D.perfErr, 'mfg_dashboard_performance') + actionsPanel(AM); }
+    var r = D.perf, J = D.jobs, cur = ccy();
+    if (!r) { return '<div class="dms-grid dms-kpis dms-ov-kpis" aria-busy="true">' + skel(6, 'dms-skel-kpi') + '</div><div class="dms-main2">' + actionsPanel(AM) + '<div class="dms-skel dms-skel-panel"></div></div>'; }
+    var o = r.output || {}, lab = r.labour || {}, tg = r.targets || {}, js = J && !J.access ? (J.summary || {}) : null;
+    var neg = (o.negative_value_difference_entries || []).length; var bu = (o.by_uom || []).slice().sort(function (x, y) { return n0(y.qty) - n0(x.qty); });
+    var h = kpis([
+      kpi({ label: tr('Production cost', 'تكلفة الإنتاج'), dot: 'var(--dms-royal)', val: !okSec(o) ? '—' : o.entries ? cur$(o.value_difference, cur) : '—', sub: esc(!okSec(o) ? tr('Access unavailable', 'الوصول غير متاح') : !o.entries ? tr('No entries', 'لا قيود') : num(o.entries) + tr(' entries', ' قيد') + (neg ? ' · ' + num(neg) + tr(' negative', ' سالب') : '')) }),
+      kpi({ label: tr('Production output', 'مخرجات الإنتاج'), dot: 'var(--dms-ok)', val: !okSec(o) ? '—' : bu.length ? '<bdi>' + esc(num(bu[0].qty)) + '<small>' + esc(bu[0].uom) + '</small></bdi>' : '0', sub: esc(bu.length > 1 ? tr('Also ', 'وأيضًا ') + bu.slice(1).map(function (u) { return num(u.qty) + ' ' + u.uom; }).join(' · ') + tr(' · never added across units', ' · لا تُجمع الوحدات') : tr('Per unit, never added across units', 'لكل وحدة، لا تُجمع الوحدات')) }),
+      kpi({ label: tr('Material cost', 'تكلفة المواد'), val: okSec(o) ? cur$(o.material_cost, cur) : '—', sub: esc(okSec(o) ? tr('Additional costs ', 'تكاليف إضافية ') + m2(o.additional_costs) : tr('Access unavailable', 'الوصول غير متاح')) }),
+      kpi({ label: tr('Labour / process cost', 'تكلفة العمالة / العمليات'), val: !okSec(lab) ? '—' : lab.records ? cur$(lab.approved, cur) : '—', sub: esc(!okSec(lab) ? tr('Access unavailable', 'الوصول غير متاح') : !lab.records ? (lab.combined_not_attributable ? tr('Combined 28/34 only — view all factories', 'المجمّع 28/34 فقط — اعرض كل المصانع') : tr('No records', 'لا سجلات')) : tr('Approved · unapproved ', 'معتمد · غير معتمد ') + m2(lab.unapproved)), act: 'goto:labour' }),
+      kpi({ label: tr('Active jobs', 'الأعمال النشطة'), dot: 'var(--dms-royal)', val: js ? num(js.active) : D.jobsErr || (J && J.access) ? '—' : '…', sub: esc(js ? num(js.pending) + tr(' pending', ' معلقة') : tr('Assigned or in progress', 'مسندة أو قيد التنفيذ')), act: 'goto:jobs' }),
+      kpi({ label: tr('Carryover jobs', 'الأعمال المرحّلة'), dot: 'var(--dms-age3)', val: J && !J.access ? num((J.carryover || []).length) : D.jobsErr || (J && J.access) ? '—' : '…', sub: esc(J && !J.access ? num((J.schedule_review || []).length) + tr(' schedules to review', ' جداول للمراجعة') : ''), act: 'goto:jobs' })
+    ], true);
+    h += '<div class="dms-main2">' + actionsPanel(AM) + '<div class="dms-stackcol">' + panel(tr('Cost against target', 'التكلفة مقابل المستهدف'), targetFacts(tg, o), '', esc(tr('Manufacturing Production Target', 'مستهدف الإنتاج الصناعي'))) +
+      panel(tr('Scope', 'النطاق'), facts([[tr('Range', 'النطاق'), esc(r.start + (r.start !== r.end ? ' → ' + r.end : '')), '', esc(num(diffDays(r.start, r.end) + 1) + (diffDays(r.start, r.end) ? tr(' days', ' يوم') : tr(' day', ' يوم')))], [tr('Factories', 'المصانع'), esc(r.scope_label || '—')], [tr('Company', 'الشركة'), esc(r.company || '—')]])) + '</div></div>';
+    var uoms = (o.by_uom || []).map(function (u) { return u.uom; }); if (!UOM || uoms.indexOf(UOM) < 0) { var best = (o.by_uom || []).slice().sort(function (a, b) { return b.qty - a.qty; })[0]; UOM = best ? best.uom : null; }
+    var chips = uoms.length > 1 ? '<div class="mf-qf" role="group">' + uoms.map(function (u) { return '<button type="button" class="dms-btn dms-btn-sm' + (u === UOM ? ' dms-btn-primary' : '') + '" data-act="uom" data-v="' + esc(u) + '" aria-pressed="' + (u === UOM) + '">' + esc(u) + '</button>'; }).join('') + '</div>' : '';
+    var oc = (o.output_categories || []).filter(function (x) { return x.uom === UOM; }).map(function (x) { return { category: x.category, value: x.qty }; });
+    var ct = (o.categories || []).map(function (x) { return { category: x.category, value: x.value_difference }; }), cs = ct.reduce(function (s, x) { return s + n0(x.value); }, 0);
+    h += two(panel(tr('Output by category', 'الإنتاج حسب الفئة'), okSec(o) ? chips + catBars(oc, num) : alertBox('warn', esc(tr('Access unavailable', 'الوصول غير متاح'))), '', esc(tr('Finished-item Item Group · ', 'مجموعة الصنف النهائي · ') + (UOM || ''))),
+      panel(tr('Production cost by category', 'تكلفة الإنتاج حسب الفئة'), okSec(o) ? catBars(ct, function (v) { return moneyS(v, cur); }) + (ct.length && Math.abs(cs - n0(o.value_difference)) > 0.005 ? alertBox('err', esc(tr('Category total does not match the card. Review source classification.', 'إجمالي الفئات لا يطابق البطاقة. راجع تصنيف المصدر.'))) : '') : alertBox('warn', esc(tr('Access unavailable', 'الوصول غير متاح'))), '', esc(cur)));
+    return h + panel(tr('Details and definitions', 'التفاصيل والتعريفات'), details(r), '', '');
+  }
+  function details(r) {
+    var o = r.output || {}, lab = r.labour || {}, cur = ccy(), li = [];
+    li.push(tr('<b>Output</b>: finished-goods quantity from submitted Manufacture stock entries, by posting date, confirmed factory warehouses only', '<b>الإنتاج</b>: كمية المنتج النهائي من قيود تصنيع معتمدة حسب تاريخ الترحيل، في مستودعات المصانع المؤكدة فقط') + (o.entries != null ? ' (' + num(o.entries) + ')' : '') + '.');
+    li.push(tr('<b>Production cost</b>: incoming minus outgoing inventory value (value_difference) on those entries: ', '<b>تكلفة الإنتاج</b>: قيمة المخزون الداخل ناقص الخارج على تلك القيود: ') + esc(m2(o.value_difference) + ' ' + cur) + ' (' + tr('incoming ', 'الداخل ') + esc(m2(o.fg_valuation)) + ' − ' + tr('outgoing ', 'الخارج ') + esc(m2(o.material_cost)) + '). ' + tr('Negative differences are kept as they are. Materials, additional costs and labour are not added to this figure.', 'الفروق السالبة تبقى كما هي. لا تُضاف المواد والتكاليف الإضافية والعمالة لهذا الرقم.'));
+    li.push(tr('<b>Categories</b>: finished-item Item Group on the stock entry row. Multiple-category entries: ', '<b>الفئات</b>: مجموعة الصنف النهائي في صف القيد. قيود متعددة الفئات: ') + num(o.multiple_category_count || 0) + tr('; unclassified: ', '؛ غير مصنفة: ') + num(o.unclassified_count || 0) + '.');
+    li.push(tr('<b>Additional costs</b> (operating cost per work order or BOM): ', '<b>التكاليف الإضافية</b> (تكلفة التشغيل لكل أمر عمل أو BOM): ') + ((o.additional_cost_entries || []).length ? o.additional_cost_entries.map(function (x) { return seLink(x.se) + ' ' + esc(m2(x.amount)); }).join('; ') : esc(tr('none in this range', 'لا شيء في هذا النطاق'))) + '.');
+    li.push(tr('<b>Labour / process cost</b>: Factory Daily Production "Total Achieved Amount" (actual qty × rate), each report once, by report date. Approved = submitted and Approved (', '<b>تكلفة العمالة / العمليات</b>: "إجمالي المبلغ المحقق" في الإنتاج اليومي للمصنع (الكمية × السعر)، كل تقرير مرة واحدة حسب تاريخه. المعتمد = مقدّم وبحالة معتمد (') + num(lab.approved_records || 0) + tr(' reports); unapproved = draft or pending review (', ' تقرير)؛ غير المعتمد = مسودة أو بانتظار المراجعة (') + num(lab.unapproved_records || 0) + tr('); cancelled, rejected and other states excluded', ')؛ الملغى والمرفوض وغيرها مستبعد') + (lab.excluded_records ? ' (' + num(lab.excluded_records) + ')' : '') + tr('. Not added to production cost.', '. لا تُضاف لتكلفة الإنتاج.'));
+    li.push(tr('<b>Factories</b>: ', '<b>المصانع</b>: ') + esc((r.mapping || []).map(function (m) { return m.factory + ' = ' + m.warehouse; }).join('; ') || '—') + tr('. Dates in Asia/Riyadh.', '. التواريخ بتوقيت الرياض.'));
+    if (r.is_admin && r.diagnostics) { var dg = r.diagnostics; li.push(tr('<b>Administrator diagnostics</b> (System Manager only; excluded from all figures): output — ', '<b>تشخيص المسؤول</b> (مدير النظام فقط؛ مستبعد من كل الأرقام): الإنتاج — ') + esc((dg.excluded_output || []).map(function (x) { return x.wh + ': ' + num(x.qty) + ' ' + x.uom + ' (' + num(x.n) + ')'; }).join('; ') || '—') + tr('; labour — ', '؛ العمالة — ') + esc((dg.excluded_labour || []).map(function (x) { return (x.branch || '(blank)') + ': ' + num(x.n) + ', ' + m2(x.amount); }).join('; ') || '—') + '.'); }
+    return '<details class="mf-details"><summary>' + esc(tr('Show how each figure is calculated', 'اعرض طريقة حساب كل رقم')) + '</summary><ul>' + li.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></details>';
+  }
+
+  /* ============================================================ labour */
+  function tabLabour() {
+    var b = need('perf', 'mfg_dashboard_performance'); if (b) { return b; }
+    var lab = D.perf.labour || {}, cur = ccy();
+    if (!okSec(lab)) { return alertBox('warn', esc(tr('Factory Daily Production is not accessible for your account.', 'الإنتاج اليومي للمصنع غير متاح لحسابك.'))); }
+    var list = lab.employees || []; if (!list.length) { return empty(tr('No Factory Daily Production rows for this period and factory.', 'لا صفوف إنتاج يومي لهذه الفترة والمصنع.')); }
+    var hoursOk = lab.hours_access === 'ok', t = { e: 0, ap: 0, un: 0, ac: 0, ot: 0, sh: 0, h: 0, oh: 0, inc: 0 };
+    list.forEach(function (x) { t.e += n0(x.earnings); t.ap += n0(x.earn_approved); t.un += n0(x.earn_unapproved); t.ac += n0(x.achieved); t.ot += n0(x.ot_amount); t.sh += n0(x.shortfall); t.h += n0(x.ck_hours); t.oh += n0(x.ck_ot_hours); t.inc += n0(x.ck_incomplete_days); });
+    var card = n0(lab.approved) + n0(lab.unapproved), rec = Math.abs(t.ac - card) < 0.01;
+    var h = kpis([kpi({ label: tr('Total earned', 'إجمالي المكتسب'), dot: 'var(--dms-royal)', val: cur$(t.e, cur), sub: esc(tr('Approved ', 'معتمد ') + m2(t.ap) + tr(' · unapproved ', ' · غير معتمد ') + m2(t.un)) }), kpi({ label: tr('Achieved amount', 'المبلغ المحقق'), val: cur$(t.ac, cur), sub: esc(rec ? tr('Reconciles with the labour card', 'يطابق بطاقة العمالة') : tr('Card shows ', 'البطاقة ') + m2(card)) }), kpi({ label: tr('OT / incentive', 'إضافي / حوافز'), val: cur$(t.ot, cur) }), kpi({ label: tr('Shortfall, not deducted', 'العجز، غير مخصوم'), dot: t.sh ? 'var(--dms-age3)' : null, val: cur$(t.sh, cur) }),
+      kpi({ label: tr('Hours worked', 'ساعات العمل'), val: hoursOk ? amt(t.h).replace(/\.00$/, '') + ' h' : '—', sub: esc(hoursOk ? tr('Overtime ', 'إضافي ') + amt(t.oh).replace(/\.00$/, '') + ' h' : tr('Check-in hours unavailable', 'ساعات البصمة غير متاحة')) }), kpi({ label: tr('Employees', 'الموظفون'), val: num(list.length), sub: esc(hoursOk && t.inc ? num(t.inc) + tr(' incomplete days', ' أيام ناقصة') : '') })]);
+    h += panel(tr('Earnings, hours and overtime per employee', 'الأجور والساعات والإضافي لكل موظف'), regTable({ id: 't_lab', rows: list, pageSize: 15, file: 'labour_earnings', sk: 'e', dir: -1, text: function (x) { return x.employee; }, cols: [
+      { k: 'emp', h: tr('Employee', 'الموظف'), s: function (x) { return x.employee; }, r: function (x) { return x.employee === '(No employee)' ? esc(tr('No employee', 'بلا موظف')) : docLink('Employee', x.employee); }, c: function (x) { return x.employee; } },
+      { k: 'e', h: tr('Total earned', 'إجمالي المكتسب'), num: 1, s: function (x) { return n0(x.earnings); }, r: function (x) { return '<b class="dms-num">' + esc(m2(x.earnings)) + '</b><span class="dms-sm mf-sub">' + esc(tr('Appr. ', 'معتمد ') + m2(x.earn_approved) + ' · ' + tr('unappr. ', 'غير معتمد ') + m2(x.earn_unapproved)) + '</span>'; }, c: function (x) { return x.earnings; } },
+      { k: 'h', h: tr('Hours', 'الساعات'), num: 1, s: function (x) { return n0(x.ck_hours); }, r: function (x) { return hoursOk ? '<span class="dms-num">' + esc(amt(x.ck_hours || 0)) + '</span><span class="dms-sm mf-sub">' + esc(tr('OT ', 'إضافي ') + amt(x.ck_ot_hours || 0) + ' · ' + num(x.ck_days || 0) + tr(' days', ' يوم')) + '</span>' : '—'; }, c: function (x) { return hoursOk ? x.ck_hours : ''; } },
+      { k: 'ac', h: tr('Achieved', 'المحقق'), num: 1, s: function (x) { return n0(x.achieved); }, r: function (x) { return '<span class="dms-num">' + esc(m2(x.achieved)) + '</span>'; }, c: function (x) { return x.achieved; } },
+      { k: 'ot', h: tr('OT / incentive', 'إضافي / حوافز'), num: 1, s: function (x) { return n0(x.ot_amount); }, r: function (x) { return '<span class="dms-num">' + esc(m2(x.ot_amount)) + '</span>'; }, c: function (x) { return x.ot_amount; } },
+      { k: 'sh', h: tr('Shortfall', 'العجز'), num: 1, s: function (x) { return n0(x.shortfall); }, r: function (x) { return x.shortfall ? '<span class="dms-num dms-tone-warn">' + esc(m2(x.shortfall)) + '</span>' : '—'; }, c: function (x) { return x.shortfall; } },
+      { k: 'f', h: tr('Check', 'تحقق'), r: function (x) { if (!hoursOk) { return ''; } var f = []; if (x.ck_incomplete_days) { f.push(stat('warn', num(x.ck_incomplete_days) + tr(' incomplete', ' ناقصة'))); } if (x.ck_long_days) { f.push(stat('warn', num(x.ck_long_days) + tr(' over 13 h', ' فوق 13 س'))); } if (x.ck_no_shift_days) { f.push(stat('warn', num(x.ck_no_shift_days) + tr(' without shift', ' بلا وردية'))); } return f.join(' '); }, c: function (x) { return [x.ck_incomplete_days, x.ck_long_days, x.ck_no_shift_days].join('/'); } }] }), '', esc(cur));
+    return h + note(esc(tr('Achieved amount = actual qty × rate per Factory Daily Production row. Total earned = achieved + positive OT / incentive; negative OT is a shortfall, shown apart and not deducted. ', 'المبلغ المحقق = الكمية × السعر لكل صف. إجمالي المكتسب = المحقق + الإضافي الموجب؛ الإضافي السالب عجز يظهر منفصلًا ولا يُخصم. ') + (hoursOk ? tr('Hours come from Employee Checkin: first to last punch each day; overtime = hours beyond the shift length. Days with one punch or a span over 16 h are incomplete and not counted; days over 13 h are flagged.', 'الساعات من بصمات الموظفين: من أول لآخر بصمة يوميًا؛ الإضافي = ما يتجاوز طول الوردية. الأيام ببصمة واحدة أو أكثر من 16 ساعة ناقصة ولا تُحتسب؛ الأيام فوق 13 ساعة تُعلَّم.') : tr('Hours are unavailable: ', 'الساعات غير متاحة: ') + (lab.hours_access || ''))));
+  }
+
+  /* ============================================================ jobs and plan */
+  function joCols(extra) { return [
+    { k: 'jo', h: tr('Factory job order', 'أمر عمل المصنع'), s: function (x) { return x.jo; }, r: function (x) { return joLink(x.jo) + '<span class="dms-sm mf-sub">' + bdi(x.factory || '') + '</span>'; }, c: function (x) { return x.jo; } },
+    { k: 'sd', h: tr('Start', 'البدء'), s: function (x) { return x.start_date || ''; }, r: function (x) { return dtc(x.start_date); }, c: function (x) { return x.start_date; } },
+    { k: 'ed', h: tr('End', 'النهاية'), s: function (x) { return x.end_date || ''; }, r: function (x) { return dtc(x.end_date); }, c: function (x) { return x.end_date; } }].concat(extra); }
+  function tabJobs() {
+    var b = need('jobs', 'mfg_dashboard_jobs'); if (b) { return b; }
+    var J = D.jobs; if (J.access) { return alertBox('warn', esc(J.access)); }
+    var T = [['active', tr('Active', 'نشطة')], ['pending', tr('Pending', 'معلقة')], ['carryover', tr('Carryover', 'مرحّلة')], ['schedule_review', tr('Schedule needs review', 'الجدولة تحتاج مراجعة')]];
+    var h = kpis(T.map(function (t, i) { return kpi({ label: t[1], dot: ['var(--dms-royal)', '#8a97a8', 'var(--dms-age3)', 'var(--dms-bad)'][i], val: num((J[t[0]] || []).length), act: 'jt:' + t[0] }); }));
+    h += note(esc(tr('Active = Assigned or In progress; pending = Open. Orders overlapping the period. Carryover uses the current status.', 'النشطة = مسندة أو قيد التنفيذ؛ المعلقة = مفتوحة. الأوامر المتداخلة مع الفترة. المرحّل يعتمد الحالة الحالية.') + (J.truncated ? tr(' Results truncated; narrow the scope.', ' النتائج مقتطعة؛ ضيّق النطاق.') : '')));
+    h += '<div class="mf-qf" role="group">' + T.map(function (t) { return '<button type="button" class="dms-btn dms-btn-sm' + (JT === t[0] ? ' dms-btn-primary' : '') + '" data-act="jt" data-v="' + t[0] + '" aria-pressed="' + (JT === t[0]) + '">' + esc(t[1]) + ' <b>' + num((J[t[0]] || []).length) + '</b></button>'; }).join('') + '</div>';
+    var list = J[JT] || [];
+    return h + panel((T.filter(function (t) { return t[0] === JT; })[0] || T[0])[1], regTable({ id: 't_jobs', rows: list, pageSize: 15, file: 'jobs_' + JT, text: function (x) { return [x.jo, x.factory, x.status].join(' '); }, empty: tr('No orders in this group.', 'لا أوامر في هذه المجموعة.'), cols: joCols([
+      { k: 'st', h: tr('Status', 'الحالة'), s: function (x) { return x.status || ''; }, r: function (x) { return bdi(x.status || '—'); }, c: function (x) { return x.status; } },
+      { k: 'rw', h: tr('Activity rows', 'صفوف النشاط'), num: 1, s: function (x) { return n0(x.rows); }, r: function (x) { return '<span class="dms-num">' + num(x.rows) + '</span>'; }, c: function (x) { return x.rows; } },
+      { k: 'em', h: tr('Employees', 'الموظفون'), num: 1, s: function (x) { return n0(x.employees); }, r: function (x) { return '<span class="dms-num">' + num(x.employees) + '</span>'; }, c: function (x) { return x.employees; } },
+      { k: 'nt', h: tr('Note', 'ملاحظة'), r: function (x) { var t = x.issue || (JT === 'carryover' ? (x.days_overdue ? num(x.days_overdue) + tr(' days overdue today', ' يوم تأخير اليوم') : tr('Potential carryover', 'ترحيل محتمل')) : ''); return t ? stat(x.days_overdue || x.issue ? 'warn' : 'n', t) : ''; }, c: function (x) { return x.issue || x.days_overdue || ''; } }]) }));
+  }
+  function tabPlan() {
+    var M = [['today', tr('Today', 'اليوم')], ['tomorrow', tr('Tomorrow', 'غدًا')], ['week', tr('Next 7 days', 'الأيام السبعة القادمة')], ['period', tr('Same as the period', 'مثل الفترة')]];
+    var h = '<div class="mf-qf" role="group" aria-label="' + esc(tr('Plan dates', 'تواريخ الخطة')) + '">' + M.map(function (m) { return '<button type="button" class="dms-btn dms-btn-sm' + (PM === m[0] ? ' dms-btn-primary' : '') + '" data-act="pm" data-v="' + m[0] + '" aria-pressed="' + (PM === m[0]) + '">' + esc(m[1]) + '</button>'; }).join('') + '<span class="dms-sm">' + esc(planRange().join(' → ')) + '</span></div>';
+    var b = need('plan', 'mfg_dashboard_plan'); if (b) { return h + b; }
+    var r = D.plan, msgs = []; if (r.access) { msgs.push(r.access); } (r.notes || []).forEach(function (n) { msgs.push(n); }); if (r.truncated) { msgs.push(tr('Plan list truncated — narrow the filter.', 'قائمة الخطة مقتطعة — ضيّق المرشح.')); }
+    if (msgs.length) { h += alertBox('warn', msgs.map(esc).join('<br>')); } if (r.access) { return h; }
+    var s = r.summary || {}, sched = r.scheduled || [], drafts = r.draft_rows || [], carry = r.carryover || [], rev = r.schedule_review || [], all = sched.concat(drafts), ft = all.filter(function (x) { return !x.item_code; }).length;
+    h += kpis([kpi({ label: tr('Factory job orders', 'أوامر عمل المصنع'), dot: 'var(--dms-royal)', val: num(s.job_orders), sub: esc(tr('Submitted, active, overlapping the plan dates', 'معتمدة ونشطة ومتداخلة مع الخطة')) }), kpi({ label: tr('Activity rows', 'صفوف النشاط'), val: num(s.activity_rows) }), kpi({ label: tr('Unique employees', 'موظفون فريدون'), val: num(s.unique_employees) }), kpi({ label: tr('Carryover', 'المرحّل'), dot: 'var(--dms-age3)', val: num(carry.length), sub: esc(r.plan_is_future ? tr('Including potential', 'مع المحتمل') : '') }), kpi({ label: tr('Draft plans', 'خطط مسودة'), val: num(s.draft_job_orders || 0), sub: esc(num(drafts.length) + tr(' rows', ' صف')) })]);
+    if ((s.activities || []).length) { h += panel(tr('Rows by activity', 'الصفوف حسب النشاط'), hbars(s.activities.map(function (a) { return { label: a.activity, value: n0(a.rows) }; }), num), '', esc(tr('Quantities have no UOM recorded, so they are never totalled across activities', 'لا وحدة للكميات، فلا تُجمع عبر الأنشطة') + (ft ? ' · ' + num(ft) + tr(' of ', ' من ') + num(all.length) + tr(' rows use free-text items', ' صف بأصناف نصية') : ''))); }
+    var T = [['scheduled', tr('Scheduled', 'المجدول'), sched.length], ['carry', tr('Carryover', 'المرحّل'), carry.length], ['review', tr('Schedule needs review', 'الجدولة تحتاج مراجعة'), rev.length], ['drafts', tr('Draft plans', 'خطط مسودة'), drafts.length]];
+    h += '<div class="mf-qf" role="group">' + T.map(function (t) { return '<button type="button" class="dms-btn dms-btn-sm' + (PT === t[0] ? ' dms-btn-primary' : '') + '" data-act="pt" data-v="' + t[0] + '" aria-pressed="' + (PT === t[0]) + '">' + esc(t[1]) + ' <b>' + num(t[2]) + '</b></button>'; }).join('') + '</div>';
+    var rowCols = [
+      { k: 'jo', h: tr('Factory job order', 'أمر عمل المصنع'), s: function (x) { return x.jo; }, r: function (x) { return joLink(x.jo) + (x.docstatus === 0 ? ' ' + stat('warn', tr('Draft', 'مسودة')) : '') + '<span class="dms-sm mf-sub">' + bdi(x.factory || '') + '</span>'; }, c: function (x) { return x.jo; } },
+      { k: 'em', h: tr('Employee', 'الموظف'), s: function (x) { return x.employee || ''; }, r: function (x) { return bdi(x.employee || '—') + '<span class="dms-sm mf-sub">' + bdi(x.designation || '') + '</span>'; }, c: function (x) { return x.employee; } },
+      { k: 'it', h: tr('Item and size', 'الصنف والحجم'), s: function (x) { return x.item || ''; }, r: function (x) { return (x.item_code ? docLink('Item', x.item_code, x.item) : bdi(x.item || '—')) + '<span class="dms-sm mf-sub">' + bdi(x.size || '') + '</span>'; }, c: function (x) { return (x.item || '') + ' ' + (x.size || ''); } },
+      { k: 'ac', h: tr('Activity', 'النشاط'), s: function (x) { return x.activity || ''; }, r: function (x) { return bdi(x.activity || '—'); }, c: function (x) { return x.activity; } },
+      { k: 'q', h: tr('Order-period quantity', 'كمية فترة الأمر'), num: 1, s: function (x) { return n0(x.qty_req); }, r: function (x) { return (x.qty_numeric ? '<span class="dms-num">' + esc(amt(x.qty_req)) + '</span>' : x.qty_req_text ? bdi(x.qty_req_text) + ' ' + stat('warn', tr('not numeric', 'غير رقمي')) : '—') + '<span class="dms-sm mf-sub">' + bdi(x.qty_basis || '') + '</span>'; }, c: function (x) { return x.qty_numeric ? x.qty_req : x.qty_req_text; } },
+      { k: 'dt', h: tr('Dates', 'التواريخ'), s: function (x) { return x.start_date || ''; }, r: function (x) { return dtc(x.start_date) + ' → ' + dtc(x.end_date); }, c: function (x) { return x.start_date + ' → ' + x.end_date; } },
+      { k: 'st', h: tr('Order status', 'حالة الأمر'), s: function (x) { return x.jo_status || ''; }, r: function (x) { return bdi(x.jo_status || '—'); }, c: function (x) { return x.jo_status; } }];
+    var joC = joCols([
+      { k: 'cl', h: tr('Classification', 'التصنيف'), s: function (x) { return n0(x.days_overdue); }, r: function (x) { return x.reason ? stat('warn', x.reason) : x.kind === 'Overdue' ? stat('bad', tr('Overdue', 'متأخر')) + ' <span class="dms-num">' + num(x.days_overdue) + '</span>' : stat('n', x.kind || ''); }, c: function (x) { return x.reason || x.kind; } },
+      { k: 'ag', h: tr('Ageing', 'العمر'), s: function (x) { return x.ageing || ''; }, r: function (x) { return bdi(x.ageing || '—'); }, c: function (x) { return x.ageing; } },
+      { k: 'st', h: tr('Order status', 'حالة الأمر'), s: function (x) { return x.jo_status || ''; }, r: function (x) { return bdi(x.jo_status || '—'); }, c: function (x) { return x.jo_status; } },
+      { k: 'rw', h: tr('Rows / employees', 'الصفوف / الموظفون'), num: 1, s: function (x) { return n0(x.activity_rows); }, r: function (x) { return '<span class="dms-num">' + num(x.activity_rows) + ' / ' + num(x.unique_employees) + '</span>'; }, c: function (x) { return x.activity_rows + '/' + x.unique_employees; } },
+      { k: 'av', h: tr('Activities', 'الأنشطة'), r: function (x) { return '<span class="dms-sm">' + bdi((x.activities || []).join(', ')) + '</span>'; }, c: function (x) { return (x.activities || []).join(', '); } }]);
+    if (PT === 'scheduled') { return h + panel(tr('Scheduled rows', 'الصفوف المجدولة'), regTable({ id: 't_sched', rows: sched, pageSize: 15, file: 'plan_scheduled', text: function (x) { return [x.jo, x.employee, x.item, x.activity].join(' '); }, empty: tr('No submitted, active factory job order overlaps these dates.', 'لا أمر عمل معتمد ونشط يتداخل مع هذه التواريخ.'), cols: rowCols })); }
+    if (PT === 'drafts') { return h + panel(tr('Draft plans', 'خطط مسودة'), regTable({ id: 't_drafts', rows: drafts, pageSize: 15, file: 'plan_drafts', text: function (x) { return [x.jo, x.employee, x.item, x.activity].join(' '); }, empty: tr('No draft job orders for these dates.', 'لا أوامر مسودة لهذه التواريخ.'), cols: rowCols }), '', esc(tr('Not submitted — excluded from Scheduled and Carryover', 'غير معتمدة — مستبعدة من المجدول والمرحّل'))); }
+    if (PT === 'review') { return h + panel(tr('Schedule needs review', 'الجدولة تحتاج مراجعة'), regTable({ id: 't_rev', rows: rev, pageSize: 15, file: 'plan_review', text: function (x) { return [x.jo, x.factory, x.reason].join(' '); }, empty: tr('Nothing needs schedule review.', 'لا شيء يحتاج مراجعة الجدولة.'), cols: joC })); }
+    var B = ['All', '1-7 days', '8-30 days', '31-90 days', 'Over 90 days', 'Not yet overdue'], cnt = {}; carry.forEach(function (c) { cnt[c.ageing] = (cnt[c.ageing] || 0) + 1; });
+    var fl = carry.filter(function (c) { return AGE === 'All' || c.ageing === AGE; });
+    return h + panel(tr('Carryover', 'المرحّل'), '<div class="mf-qf" role="group" aria-label="' + esc(tr('Ageing', 'العمر')) + '">' + B.map(function (b2) { var n = b2 === 'All' ? carry.length : (cnt[b2] || 0); return '<button type="button" class="dms-btn dms-btn-sm' + (AGE === b2 ? ' dms-btn-primary' : '') + '" data-act="age" data-v="' + esc(b2) + '" aria-pressed="' + (AGE === b2) + '">' + esc(b2 === 'All' ? tr('All', 'الكل') : b2) + ' <b>' + num(n) + '</b></button>'; }).join('') + '</div>' +
+      regTable({ id: 't_carry', rows: fl, pageSize: 15, file: 'plan_carryover', sk: 'cl', dir: -1, text: function (x) { return [x.jo, x.factory, x.ageing].join(' '); }, empty: tr('Nothing to review.', 'لا شيء للمراجعة.'), cols: joC }), '', esc(tr('Submitted, not completed, ending before ', 'معتمدة وغير مكتملة وتنتهي قبل ') + r.plan_start + tr('. Overdue is measured against today. Records are never changed automatically.', '. التأخير مقاس باليوم. لا تُعدَّل السجلات تلقائيًا.')));
+  }
+  function tabActions(AM) { return actionsTab(AM, tr('Job orders in the period, production entries and check-in data for the selected factories.', 'أوامر العمل في الفترة وقيود الإنتاج وبيانات البصمة للمصانع المحددة.')); }
+
+  /* ============================================================ drills and events */
+  function drill(id) {
+    if (id.indexOf('cli:') !== 0) { return null; }
+    var k = id.slice(4), cc = actClient(), x = cc && cc[k], s = actSpecs().filter(function (y) { return y.id === k; })[0];
+    if (!x || typeof x === 'string' || !s) { return null; }
+    return { title: s.title, sub: s.why, spec: { rows: x.rows.map(x.item), file: k, text: function (it) { return [it.title, it.desc].join(' '); }, cols: [
+      { h: tr('Record', 'السجل'), r: function (it) { return docLink(it.dt, it.name, it.title); }, c: function (it) { return it.name; } },
+      { h: tr('Details', 'التفاصيل'), r: function (it) { return '<span class="dms-sm">' + bdi(it.desc) + '</span>'; }, c: function (it) { return it.desc; } },
+      { h: tr('When', 'متى'), r: function (it) { return '<span class="dms-tone-' + it.tone + '">' + esc(it.due) + '</span>'; }, c: function (it) { return it.due; } }] } };
+  }
+  function onAct(a, v) {
+    if (a === 'kpi' && v.indexOf('goto:') === 0) { goTab(v.slice(5), false, true); return true; }
+    if (a === 'kpi' && v.indexOf('jt:') === 0) { JT = v.slice(3); renderSoft(); return true; }
+    if (a === 'jt') { JT = v; renderSoft(); return true; }
+    if (a === 'pt') { PT = v; renderSoft(); return true; }
+    if (a === 'age') { AGE = v; renderSoft(); return true; }
+    if (a === 'uom') { UOM = v; renderSoft(); return true; }
+    if (a === 'pm') { PM = v; loadPlan(); renderSoft(); return true; }
+    return false;
+  }
+
+  start();
 })();
 
-/* ==== DM theme sync v1 · generated by tools/erp/shell/dark_theme.py ==== */
+/* ==== DM theme sync (same as tools/erp/shell/dark_theme.py output; maintained here since this block is built on the standard) ==== */
 ;(function () {
   var r = typeof root_element !== 'undefined' ? root_element : null, h = r && r.host;
   if (!h || h.__dmsTheme) return; h.__dmsTheme = 1;
   var s = function () { h.setAttribute('data-dms-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'); };
   s(); new MutationObserver(s).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 })();
-/* ==== end DM theme sync v1 ==== */
-
-/* ==== DM language v1 · generated by tools/erp/shell/i18n.py ==== */
-;(function () {
-  var root = typeof root_element !== 'undefined' ? root_element : document;
-  var AR = {"Access unavailable": "الوصول غير متاح", "Achieved": "المحقق", "Achieved amount (SAR)": "المبلغ المحقق (ريال)", "Active": "نشط", "Active Jobs": "الأعمال النشطة", "Active: Assigned / Inprogress. Pending: Open. Counts are orders overlapping the jobs dates. Carryover uses current status.": "نشط: مُسند / قيد التنفيذ. معلق: مفتوح. الأعداد هي الأوامر المتداخلة مع تواريخ الأعمال. المرحَّل يعتمد على الحالة الحالية.", "Activities": "الأنشطة", "Activity": "النشاط", "Activity rows": "صفوف النشاط", "Actual": "الفعلي", "Additional costs": "تكاليف إضافية", "Administrator diagnostics": "تشخيص المسؤول", "Ageing": "أعمار الذمم", "All": "الكل", "All Factories": "كل المصانع", "Amount": "المبلغ", "Appr.": "معتمد", "Approved": "معتمد", "Asia/Riyadh": "توقيت الرياض", "Carryover": "المرحَّل", "Carryover (incl. potential)": "المرحَّل (مع المحتمل)", "Categories": "الفئات", "Category": "الفئة", "Category total does not match the card. Review source classification.": "إجمالي الفئات لا يطابق البطاقة. راجع تصنيف المصدر.", "Category: finished-item Item Group ·": "الفئة: مجموعة صنف المنتج النهائي ·", "Classification": "التصنيف", "Combined 28/34 only — view All Factories": "مجمّع 28/34 فقط — اعرض كل المصانع", "Company": "الشركة", "Completed": "مكتمل", "Could not load data.": "تعذر تحميل البيانات.", "Could not load data. Check your access or try Refresh.": "تعذر تحميل البيانات. تحقق من صلاحياتك أو اضغط تحديث.", "Count": "العدد", "Custom": "مخصص", "Daily": "يومي", "Daily Production Plan": "خطة الإنتاج اليومية", "Data quality:": "جودة البيانات:", "Date": "التاريخ", "Date range cannot exceed 367 days.": "لا يمكن أن يتجاوز نطاق التاريخ 367 يومًا.", "Days": "الأيام", "Days counted": "الأيام المحتسبة", "Days overdue": "أيام التأخير", "Details": "التفاصيل", "Details & definitions": "التفاصيل والتعريفات", "Draft": "مسودة", "Draft Plans": "خطط مسودة", "Employee": "الموظف", "Employee Checkin not accessible": "سجلات حضور الموظفين غير متاحة", "Employees": "الموظفون", "End Date": "تاريخ النهاية", "Entry": "القيد", "Factories": "المصانع", "Factory": "المصنع", "Factory Daily Production has no Duty Hours or OT hours recorded for this period.": "لا توجد ساعات عمل أو ساعات إضافية مسجلة في الإنتاج اليومي للمصنع لهذه الفترة.", "Factory Daily Production is not accessible for your account.": "الإنتاج اليومي للمصنع غير متاح لحسابك.", "Factory Job Order": "أمر عمل المصنع", "Factory Job Orders": "أوامر عمل المصنع", "Factory Job Orders · separate from finished output": "أوامر عمل المصنع · منفصلة عن الإنتاج النهائي", "For a future range, carryover is based on each order’s current status and may change before then.": "للنطاقات المستقبلية، يعتمد المرحَّل على الحالة الحالية لكل أمر وقد يتغير قبل ذلك.", "From": "من", "From Date": "من تاريخ", "From Date must be on or before To Date.": "يجب أن يكون تاريخ البداية قبل تاريخ النهاية أو مساويًا له.", "Future range": "نطاق مستقبلي", "Hours": "الساعات", "Hours and overtime are unavailable:": "الساعات والعمل الإضافي غير متاحة:", "Hours worked": "ساعات العمل", "In progress — data to": "قيد التنفيذ — البيانات حتى", "Issue": "مشكلة", "Item": "الصنف", "JO Status": "حالة أمر العمل", "Jobs": "الأعمال", "Jobs End Date": "تاريخ نهاية الأعمال", "Jobs Start Date": "تاريخ بداية الأعمال", "Jobs date range": "نطاق تاريخ الأعمال", "Labour / Process Cost": "تكلفة العمالة / العمليات", "Labour Earnings & Hours": "أجور وساعات العمالة", "Loading": "تحميل", "Loading…": "جارٍ التحميل…", "Manufacturing Dashboard": "لوحة التصنيع", "Manufacturing Production Target": "مستهدف الإنتاج الصناعي", "Material Cost": "تكلفة المواد", "Monthly": "شهري", "Name": "الاسم", "No": "لا", "No Factory Daily Production rows for this period and factory.": "لا توجد صفوف إنتاج يومي للمصنع لهذه الفترة والمصنع.", "No data": "لا توجد بيانات", "No data for this range": "لا توجد بيانات لهذا النطاق", "No draft job orders for this date.": "لا توجد أوامر عمل مسودة لهذا التاريخ.", "No entries": "لا توجد إدخالات", "No entries for this range": "لا توجد إدخالات لهذا النطاق", "No orders in this group.": "لا توجد أوامر في هذه المجموعة.", "No records": "لا توجد سجلات", "No submitted, active Factory Job Order overlaps": "لا يوجد أمر عمل مصنع معتمد ونشط يتداخل مع", "Not submitted — excluded from Scheduled and Carryover.": "غير معتمد — مستبعد من المجدول والمرحَّل.", "Not yet overdue": "لم يتأخر بعد", "Note": "ملاحظة", "Nothing needs schedule review.": "لا يوجد ما يحتاج مراجعة الجدولة.", "Nothing to review.": "لا يوجد ما يُراجع.", "OT / incentive (SAR)": "إضافي / حوافز (ريال)", "Order-period quantity": "كمية فترة الأمر", "Out": "خارج", "Output": "الإنتاج", "Output list truncated at 5,000 rows — narrow the range.": "تم اقتطاع قائمة الإنتاج عند 5,000 صف — ضيّق النطاق.", "Over 90 days": "أكثر من 90 يومًا", "Over target by": "أعلى من المستهدف بـ", "Overdue": "متأخر", "Overtime hours": "ساعات العمل الإضافي", "Overview": "نظرة عامة", "Partial target coverage": "تغطية جزئية للمستهدف", "Pending": "معلق", "Pending Jobs": "الأعمال المعلقة", "Per employee · selected period, company and factory": "لكل موظف · الفترة والشركة والمصنع المحددة", "Plan list truncated — narrow the filter.": "تم اقتطاع قائمة الخطط — ضيّق التصفية.", "Plan range:": "نطاق الخطة:", "Potential carryover": "المرحَّل المحتمل", "Produced Quantity": "الكمية المنتجة", "Product": "المنتج", "Production Cost": "تكلفة الإنتاج", "Production Cost (SAR)": "تكلفة الإنتاج (ريال)", "Production Cost by Category (SAR)": "تكلفة الإنتاج حسب الفئة (ريال)", "Production Output": "مخرجات الإنتاج", "Production Output by Category": "مخرجات الإنتاج حسب الفئة", "Production Overview": "نظرة عامة على الإنتاج", "Production cost by category": "تكلفة الإنتاج حسب الفئة", "Qty": "الكمية", "Quantities are not totalled across activities. Submitted job orders only.": "لا تُجمع الكميات عبر الأنشطة. أوامر العمل المعتمدة فقط.", "Record": "السجل", "Records": "السجلات", "Records are never changed automatically.": "لا تُعدَّل السجلات تلقائيًا أبدًا.", "Refresh": "تحديث", "Reject": "رفض", "Rejected": "مرفوض", "Rev": "مراجعة", "Review needed": "تحتاج مراجعة", "Riyadh": "الرياض", "Same records, factories and approval states as the Labour / Process Cost card": "نفس السجلات والمصانع وحالات الاعتماد في بطاقة تكلفة العمالة / العمليات", "Schedule Needs Review": "الجدولة تحتاج مراجعة", "Schedule needs review": "الجدولة تحتاج مراجعة", "Scheduled": "مجدول", "Set target": "تحديد المستهدف", "Shortfall (SAR, not deducted)": "العجز (ريال، غير مخصوم)", "Size": "الحجم", "Start Date": "تاريخ البداية", "Start Date must be on or before End Date.": "يجب أن يكون تاريخ البداية قبل تاريخ النهاية أو مساويًا له.", "Status": "الحالة", "Stock": "المخزون", "Submitted": "معتمد", "Submitted Factory Job Orders": "أوامر عمل المصنع المعتمدة", "Submitted, not Completed, ending before": "معتمد وغير مكتمل وينتهي قبل", "Target": "المستهدف", "Target cost:": "التكلفة المستهدفة:", "Target not set": "المستهدف غير محدد", "To": "إلى", "To Date": "إلى تاريخ", "Today": "اليوم", "Tomorrow": "غدًا", "Total": "الإجمالي", "Total (": "الإجمالي (", "Total earned (SAR)": "إجمالي المكتسب (ريال)", "UOM": "الوحدة", "Unapproved": "غير معتمد", "Unavailable": "غير متاح", "Unclassified": "غير مصنف", "Under target by": "أقل من المستهدف بـ", "Unique employees": "موظفون فريدون", "Updated": "تم التحديث", "Use main dates": "استخدم التواريخ الرئيسية", "Variance": "الفرق", "Weekly": "أسبوعي", "to": "إلى"}, SEL = ".mfd", SLOT = ".mfd-actions", KEY = 'dms-lang', ATTRS = ['placeholder', 'title', 'aria-label'];
-  var lang = 'en'; try { lang = localStorage.getItem(KEY) === 'ar' ? 'ar' : 'en'; } catch (e) { /* storage blocked */ }
-  var orig = new WeakMap(), busy = false, timer = 0;
-  function host() { return root.querySelector(SEL); }
-  function has(k) { return !!k && Object.prototype.hasOwnProperty.call(AR, k); }
-  function text(h) {
-    var w = document.createTreeWalker(h, NodeFilter.SHOW_TEXT), n;
-    while ((n = w.nextNode())) {
-      var p = n.parentElement; if (!p || /^(SCRIPT|STYLE|TEXTAREA|CODE|PRE)$/.test(p.tagName) || p.closest('.dms-lang-btn')) continue;
-      if (lang === 'ar') { var t = n.nodeValue.trim(), m = t.match(/^([^A-Za-z0-9(]*)(.*?)([\s:.…·-]*)$/), k = has(t) ? t : (m && has(m[2]) ? m[2] : '');
-        if (k) { if (!orig.has(n)) orig.set(n, n.nodeValue); n.nodeValue = n.nodeValue.replace(k, AR[k]); } }
-      else if (orig.has(n)) { n.nodeValue = orig.get(n); orig.delete(n); }
-    }
-    h.querySelectorAll('[placeholder],[title],[aria-label]').forEach(function (e) {
-      ATTRS.forEach(function (a) {
-        var v = e.getAttribute(a), k = 'data-dms-' + a; if (v == null) return;
-        if (lang === 'ar') { var t = v.trim(); if (Object.prototype.hasOwnProperty.call(AR, t)) { if (!e.hasAttribute(k)) e.setAttribute(k, v); e.setAttribute(a, AR[t]); } }
-        else if (e.hasAttribute(k)) { e.setAttribute(a, e.getAttribute(k)); e.removeAttribute(k); }
-      });
-    });
-  }
-  function button(h) {
-    var slot = SLOT === '&' ? h : h.querySelector(SLOT); if (!slot) return;
-    var b = slot.querySelector('.dms-lang-btn');
-    if (!b) {
-      b = document.createElement('button'); b.type = 'button'; b.className = 'dms-lang-btn';
-      b.addEventListener('click', function () { lang = lang === 'ar' ? 'en' : 'ar'; try { localStorage.setItem(KEY, lang); } catch (e) { /* optional */ } apply(); });
-      var first = slot.querySelector(':scope > button, :scope > a, :scope > div > button'); first ? first.parentNode.insertBefore(b, first) : slot.appendChild(b);
-    }
-    b.textContent = lang === 'ar' ? 'English' : 'العربية'; b.setAttribute('aria-label', lang === 'ar' ? 'Switch to English' : 'التبديل إلى العربية'); b.lang = lang === 'ar' ? 'en' : 'ar';
-  }
-  function apply() {
-    var h = host(); if (!h) return;
-    busy = true;
-    try { button(h); text(h); h.setAttribute('dir', lang === 'ar' ? 'rtl' : 'ltr'); h.setAttribute('lang', lang); } finally { mo.takeRecords(); busy = false; }
-  }
-  var mo = new MutationObserver(function () { if (busy) return; clearTimeout(timer); timer = setTimeout(apply, 25); });
-  mo.observe(root === document ? (document.body || document.documentElement) : root, { childList: true, subtree: true, characterData: false });
-  apply();
-})();
-/* ==== end DM language v1 ==== */

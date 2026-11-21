@@ -1,395 +1,1387 @@
-/* DM Credit Controller Dashboard - read-only, client-side only. Uses existing Frappe APIs; permissions are enforced by the server. */
+/* ===== DM Group KSA — Credit Controller Dashboard — SCRIPT field · v2 =====
+   Client-side only and READ-ONLY. Native frappe.client.get_list and frappe.desk.query_report.run under the logged-in
+   user's permissions (User Permissions and Permission Query scripts apply). No writes, no external services.
+   Built on the DM dashboard standard; the shared runtime between the "DMS kit" markers is generated from
+   tools/erp/kit/dms-kit.js (edit the kit and run tools/erp/kit/build_kit.py, not the copy).
+   Receivables are current balances (as of today) in the system currency: Sales Invoices with a party account in that
+   currency, in companies whose default currency is that currency. Receipts use company-currency amounts. */
 (function () {
-'use strict';
-var ROOT = (typeof root_element !== 'undefined' && root_element) ? root_element : document;
-var host = ROOT.querySelector('#dmcc') || document.querySelector('#dmcc');
-if (!host) { return; }
-if (host.getAttribute('data-ready') === '1') { return; }
-host.setAttribute('data-ready', '1');
+  'use strict';
+  var APP = {
+    key: '__dmsCreditController',
+    cfg: { cap: 5000, nearPct: 80, dueSoon: 7, facilityWarn: 30, dsoDays: 90 },
+    period: 'month',
+    tabs: [
+      { id: 'overview', en: 'Overview', ar: 'نظرة عامة' }, { id: 'aging', en: 'Customer aging', ar: 'أعمار ديون العملاء' },
+      { id: 'invoices', en: 'Open invoices', ar: 'الفواتير المفتوحة' }, { id: 'limits', en: 'Credit limits', ar: 'حدود الائتمان' },
+      { id: 'coll', en: 'Collections', ar: 'التحصيلات' }, { id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }
+    ],
+    filters: [
+      { k: 'company', en: 'Company', ar: 'الشركة', options: function () { return REF.companies; } },
+      { k: 'division', en: 'Division', ar: 'القسم', options: function () { return REF.divisions; } },
+      { k: 'location', en: 'Location', ar: 'الموقع', options: function () { return REF.locations; } },
+      { k: 'customer', en: 'Customer (with an open balance)', ar: 'العميل (برصيد مفتوح)', options: function () { return custOptions(); }, label: function (v) { return custName(v); } }
+    ],
+    sources: ['ag', 'div', 'ms', 'co', 'lm', 'act'],
+    dtLabels: { 'Sales Invoice': ['Invoice', 'فاتورة'], 'Payment Entry': ['Receipt', 'سند قبض'], 'Customer': ['Customer', 'عميل'] },
+    title: function () { return tr('Credit controller', 'مراقب الائتمان'); },
+    stamp: function () { return tr('Read-only · ' + CUR, 'للقراءة فقط · ' + CUR); },
+    filterNote: function () { return tr('Only ' + CUR + ' companies are listed. Division does not apply to receipts; company does not apply to customer collection flags.', 'تظهر شركات ' + CUR + ' فقط. القسم لا ينطبق على المقبوضات؛ والشركة لا تنطبق على علامات تحصيل العملاء.'); },
+    periodNote: function () { return tr('The period applies to collections. Balances, aging and actions are always as of today.', 'تنطبق الفترة على التحصيلات. الأرصدة والأعمار والإجراءات دائمًا حتى اليوم.'); },
+    boot: function (chk) { return loadRef(chk); },
+    load: function () { loadAll(); },
+    onPeriod: function () { loadColl(); },
+    onTab: function (id) { if (id === 'coll') { loadYear(); } },
+    onFilters: function (prev) { if (F.company !== prev.company && !F.customer) { REF.customers = null; } },
+    onRefresh: function () { if (!F.customer) { REF.customers = null; } },
+    afterLoad: function () { loadWho(); },
+    actSpecs: function () { return actSpecs(); },
+    actions: function () { return actModel(actSpecs(), 'act', actClientState()); },
+    banner: function () { return srcAlerts(); },
+    content: function (t, AM) { return { overview: tabOverview, aging: tabAging, invoices: tabInvoices, limits: tabLimits, coll: tabColl, actions: tabActions }[t](AM); },
+    drill: function (id) { return drill(id); },
+    onAct: function (a, v) {
+      if (a === 'recon') { RECON_OPEN = !RECON_OPEN; if (RECON_OPEN) { loadRefReports(); } renderSoft(); return true; }
+      if (a === 'bucket') { BUCKET = v; delete SS.t_inv; renderSoft(); var bb = HOST.querySelector('[data-act="bucket"][data-v="' + v + '"]'); if (bb) { bb.focus(); } return true; }
+      if (a === 'kpi' && v.indexOf('bk:') === 0) { BUCKET = v.slice(3); delete SS.t_inv; goTab('invoices', false, true); return true; }
+      return false;
+    }
+  };
 
-/* ---------- utils ---------- */
-function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-function fmt(n) { return (n == null || isNaN(n)) ? '–' : Number(n).toLocaleString('en-US', { maximumFractionDigits: 0 }); }
-function p2(n) { return (n < 10 ? '0' : '') + n; }
-function todayStr() { try { return frappe.datetime.get_today(); } catch (e) { var d = new Date(); return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()); } }
-function addDays(s, n) { var d = new Date(s + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.getUTCFullYear() + '-' + p2(d.getUTCMonth() + 1) + '-' + p2(d.getUTCDate()); }
-function dayDiff(a, b) { return Math.round((Date.parse(b.slice(0, 10) + 'T00:00:00Z') - Date.parse(a.slice(0, 10) + 'T00:00:00Z')) / 86400000); }
-function monthStart(s, back) { var y = +s.slice(0, 4), m = +s.slice(5, 7) - 1 - (back || 0); var d = new Date(Date.UTC(y, m, 1)); return d.getUTCFullYear() + '-' + p2(d.getUTCMonth() + 1) + '-01'; }
-function monthEnd(s, back) { return addDays(monthStart(s, (back || 0) - 1), -1); }
-function slug(dt) { try { return frappe.router.slug(dt); } catch (e) { return String(dt).toLowerCase().replace(/ /g, '-'); } }
-function docUrl(dt, n) { return '/app/' + slug(dt) + '/' + encodeURIComponent(n); }
-function $(sel, el) { return (el || host).querySelector(sel); }
-function $$(sel, el) { return Array.prototype.slice.call((el || host).querySelectorAll(sel)); }
-function sum(a, f) { var s = 0; a.forEach(function (x) { s += f(x) || 0; }); return s; }
-var PAL = ['#1d4ed8', '#3b82f6', '#0ea5e9', '#64748b', '#93c5fd', '#0b2a5b', '#94a3b8', '#38bdf8'];
+  /* ==== DMS kit v1 · generated from tools/erp/kit/dms-kit.js by build_kit.py — edit the kit, not this copy ==== */
+  /* Shared runtime for DM dashboards on the standard (toolbar, period, filters, tabs, tables, drill-downs, charts,
+     actions pending). Copied into each dashboard.js by tools/erp/kit/build_kit.py; the dashboard defines `APP` before
+     this block. Read-only helpers: frappe.client.get_list / frappe.desk.query_report.run under the viewer's permissions. */
+  var G = window;
+  var ROOT = (typeof root_element !== 'undefined' && root_element) ? root_element : document;
+  var HOST = ROOT.querySelector('[data-dms-root]');
+  if (!HOST) { return; }
+  if (G[APP.key] && typeof G[APP.key].destroy === 'function') { try { G[APP.key].destroy(); } catch (e) { /* ignore */ } }
+  var abort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  var SIG = abort ? { signal: abort.signal } : false;
+  var timers = [], destroyed = false, GEN = 0, BOOTED = false, LOADED = '';
+  G[APP.key] = { destroy: function () { destroyed = true; GEN++; if (abort) { abort.abort(); } timers.forEach(clearTimeout); timers = []; } };
+  var CFG = Object.assign({ conc: 6, pageSize: 25, modalPage: 15, weekStart: 0 }, APP.cfg || {});
+  var CUR = 'SAR';
+  try { CUR = (frappe.boot.sysdefaults && frappe.boot.sysdefaults.currency) || 'SAR'; } catch (e) { /* default */ }
+  var LANG = 'en';
+  try { var sv = G.localStorage.getItem('dms_lang'); if (sv === 'ar' || sv === 'en') { LANG = sv; } } catch (e) { /* storage unavailable */ }
+  function tr(en, ar) { return LANG === 'ar' ? ar : en; }
 
-/* ---------- i18n ---------- */
-var L = {
- title: ['CREDIT CONTROLLER DASHBOARD', 'لوحة مراقب الائتمان'], sub: ['Receivables, Overdue Aging, Credit Limits & Collections', 'الذمم المدينة وأعمار الديون وحدود الائتمان والتحصيلات'],
- refresh: ['Refresh', 'تحديث'], updated: ['Last updated', 'آخر تحديث'], reset: ['Reset Filters', 'إعادة ضبط الفلاتر'],
- company: ['Company', 'الشركة'], division: ['Division', 'القسم / الشعبة'], location: ['Location', 'الموقع'], customer: ['Customer', 'العميل'], asof: ['Current balance date', 'تاريخ الرصيد الحالي'], all: ['All', 'الكل'],
- t_overview: ['Overview', 'نظرة عامة'], t_aging: ['Customer Aging', 'أعمار ديون العملاء'], t_invoices: ['Open Invoices', 'الفواتير المفتوحة'], t_limits: ['Credit Limits', 'حدود الائتمان'], t_coll: ['Collections', 'التحصيلات'],
- k_out: ['Total Outstanding', 'إجمالي المستحق'], k_nd: ['Not Yet Due', 'غير مستحق بعد'], k_od: ['Overdue', 'متأخر'], k_odp: ['Overdue %', 'نسبة المتأخر'], k_90: ['Overdue > 90 days', 'متأخر أكثر من 90 يومًا'],
- k_inv: ['Open Invoices', 'فواتير مفتوحة'], k_cust: ['Customers with Balance', 'عملاء لديهم رصيد'], k_cr: ['Unapplied Credit Notes', 'إشعارات دائنة غير مطبقة'], k_mtd: ['Customer receipts this month — gross', 'متحصلات العملاء هذا الشهر — إجمالي'], k_30: ['Collected Last 30 Days', 'المحصّل آخر 30 يومًا'],
- k_lm: ['Collected Last Month', 'المحصّل الشهر الماضي'], k_rc: ['Receipts This Month', 'عدد السندات هذا الشهر'],
- c_age: ['Aging of Receivables', 'أعمار الذمم المدينة'], c_top: ['Top 10 Customers by Outstanding', 'أعلى 10 عملاء حسب المستحق'], c_comp: ['Outstanding by Company', 'المستحق حسب الشركة'], c_coll: ['Collections – last 6 months', 'التحصيلات – آخر 6 أشهر'],
- b_nd: ['Not yet due', 'غير مستحق'], b_1: ['1–30 days', '1–30 يومًا'], b_2: ['31–60 days', '31–60 يومًا'], b_3: ['61–90 days', '61–90 يومًا'], b_4: ['91–180 days', '91–180 يومًا'], b_5: ['Over 180 days', 'أكثر من 180 يومًا'],
- overdue_all: ['All overdue', 'كل المتأخر'], total: ['Total', 'الإجمالي'], search: ['Search…', 'بحث…'], csv: ['Export CSV', 'تصدير CSV'], exportall: ['Export all (max 5,000)', 'تصدير الكل (حتى 5,000)'], open: ['Open', 'فتح'], close: ['Close', 'إغلاق'],
- page: ['Page', 'صفحة'], of: ['of', 'من'], prev: ['Prev', 'السابق'], next: ['Next', 'التالي'], showing: ['Showing', 'عرض'], loading: ['Loading…', 'جارٍ التحميل…'], empty: ['No records found for the selected filters.', 'لا توجد سجلات للفلاتر المحددة.'],
- err: ['Could not load some data', 'تعذر تحميل بعض البيانات'], inv: ['Invoice', 'الفاتورة'], posting: ['Posting Date', 'تاريخ الفاتورة'], due: ['Due Date', 'تاريخ الاستحقاق'], dover: ['Days Overdue', 'أيام التأخير'], outst: ['Outstanding', 'المستحق'], gt: ['Invoice Total', 'إجمالي الفاتورة'],
- invs: ['Invoices', 'الفواتير'], limit: ['Credit Limit', 'حد الائتمان'], util: ['Utilization', 'نسبة الاستخدام'], status: ['Status', 'الحالة'], overdue: ['Overdue', 'المتأخر'], over: ['Above positive limit — selected company', 'تجاوز حد موجب — الشركة المحددة'], near: ['Near limit (≥80%)', 'قريب من الحد (≥80%)'], okk: ['Within limit', 'ضمن الحد'], nolimit: ['No limit set', 'لا يوجد حد'],
- receipt: ['Receipt', 'السند'], date: ['Date', 'التاريخ'], amount: ['Amount', 'المبلغ'], mode: ['Mode of Payment', 'طريقة الدفع'], ref: ['Reference', 'المرجع'], party: ['Customer', 'العميل'],
- note_l: ['Outstanding = submitted Sales Invoices with a positive outstanding amount. Overdue is measured from the Due Date against the As-of date. Credit limits come from the Customer Credit Limit table. Current balances only; party accounts are restricted to the displayed currency. Collections use company-base receipts. Historical and foreign-currency ageing: native Accounts Receivable report.', 'المستحق = فواتير مبيعات معتمدة برصيد موجب. التأخير يُحسب من تاريخ الاستحقاق مقابل تاريخ "كما في". حدود الائتمان من جدول حد ائتمان العميل. المبالغ كما هي مخزنة (بعملة الشركة).'],
- note_c: ['Collections use submitted Payment Entries of type Receive (Division filter does not apply to them).', 'التحصيلات من سندات الدفع المعتمدة من نوع Receive (فلتر القسم لا ينطبق عليها).'],
- nolimits: ['No credit limits are defined (or not visible to your user).', 'لا توجد حدود ائتمان معرّفة (أو غير مرئية لمستخدمك).'], openc: ['Open customer', 'فتح العميل'], partial: ['Showing the first rows only – narrow the filters for the full list.', 'عرض الصفوف الأولى فقط – ضيّق الفلاتر لعرض القائمة كاملة.']
-};
-function t(k) { var v = L[k]; return v ? v[S.lang === 'ar' ? 1 : 0] : k; }
-var DISPLAY_CURRENCY=(frappe.boot.sysdefaults||{}).currency||'SAR';
-var S = { lang: window.__dmccLang || 'en', tab: 'overview', ts: null, ready: false, epoch: 0, bucket: 'od', f: { company: '', division: '', location: '', customer: '', asof: todayStr() } };
-var D = {}, OPT = { company: [], division: [], location: [] }, HAS = {};
-
-/* ---------- API layer (queue + cache) ---------- */
-var Q = { run: 0, q: [], max: 4 }, CACHE = {};
-function pump() { while (Q.run < Q.max && Q.q.length) { (function (j) { Q.run++; j.fn().then(j.ok, j.no).then(function () { Q.run--; pump(); }); })(Q.q.shift()); } }
-function api(method, args) {
-  var key = method + '|' + JSON.stringify(args);
-  if (CACHE[key]) { return CACHE[key]; }
-  var p = new Promise(function (ok, no) { Q.q.push({ fn: function () { return new Promise(function (res, rej) { frappe.call({ method: method, args: JSON.parse(JSON.stringify(args)), silent: true, callback: function (r) { res(r ? r.message : null); }, error: function (e) { rej(e || new Error('api')); } }); }); }, ok: ok, no: no }); pump(); });
-  CACHE[key] = p; p.catch(function () { if (CACHE[key] === p) { delete CACHE[key]; } }); return p;
-}
-function gcount(dt, f) { if(dt==='Sales Invoice')f=(f||[]).concat([['party_account_currency','=',DISPLAY_CURRENCY]]);return api('frappe.client.get_count', { doctype: dt, filters: f || [] }); }
-function glist(dt, o) {
- if(dt==='Sales Invoice')o=Object.assign({},o,{filters:(o.filters||[]).concat([['party_account_currency','=',DISPLAY_CURRENCY]])});
- var a = { doctype: dt, fields: o.fields, filters: o.filters || [], limit_start: o.start || 0, limit_page_length: o.limit || 20 }; ['order_by', 'group_by', 'or_filters', 'parent'].forEach(function (k) { if (o[k]) { a[k] = o[k]; } }); return api('frappe.client.get_list', a); }
-function loadMeta(dt) { return new Promise(function (res) { var to = setTimeout(res, 15000); try { frappe.model.with_doctype(dt, function () { try { var f = {}; frappe.get_meta(dt).fields.forEach(function (x) { f[x.fieldname] = 1; }); HAS[dt] = f; } catch (e) { } clearTimeout(to); res(); }); } catch (e) { clearTimeout(to); res(); } }); }
-function has(dt, f) { return !!(HAS[dt] && HAS[dt][f]); }
-
-/* ---------- filters & aging buckets ---------- */
-var SI = 'Sales Invoice', PE = 'Payment Entry';
-var BK = [{ id: 'nd', k: 'b_nd', c: '#16a34a' }, { id: 'b1', k: 'b_1', lo: 1, hi: 30, c: '#3b82f6' }, { id: 'b2', k: 'b_2', lo: 31, hi: 60, c: '#0ea5e9' }, { id: 'b3', k: 'b_3', lo: 61, hi: 90, c: '#d97706' }, { id: 'b4', k: 'b_4', lo: 91, hi: 180, c: '#ea580c' }, { id: 'b5', k: 'b_5', lo: 181, c: '#dc2626' }];
-function bFilter(b) {
-  var a = todayStr();
-  if (b.id === 'nd') { return [[SI, 'due_date', '>=', a]]; }
-  if (b.id === 'od') { return [[SI, 'due_date', '<', a]]; }
-  if (!b.hi) { return [[SI, 'due_date', '<', addDays(a, -(b.lo - 1))]]; }
-  return [[SI, 'due_date', 'between', [addDays(a, -b.hi), addDays(a, -b.lo)]]];
-}
-function siBase() {
-  var q = S.f, f = [[SI, 'docstatus', '=', 1], [SI, 'outstanding_amount', '>', 0], [SI, 'posting_date', '<=', todayStr()]];
-  if (q.company) { f.push([SI, 'company', '=', q.company]); }
-  if (q.division && has(SI, 'custom_division')) { f.push([SI, 'custom_division', '=', q.division]); }
-  if (q.location && has(SI, 'location')) { f.push([SI, 'location', '=', q.location]); }
-  if (q.customer) { f.push([SI, 'customer_name', 'like', '%' + q.customer + '%']); }
-  return f;
-}
-function peBase() {
-  var q = S.f, f = [[PE, 'docstatus', '=', 1], [PE, 'payment_type', '=', 'Receive'], [PE,'party_type','=','Customer']];
-  if (q.company) { f.push([PE, 'company', '=', q.company]); }
-  if (q.location && has(PE, 'location')) { f.push([PE, 'location', '=', q.location]); }
-  if (q.customer) { f.push([PE, 'party_name', 'like', '%' + q.customer + '%']); }
-  return f;
-}
-
-/* ---------- data loaders ---------- */
-function sumOf(r) { return r && r[0] ? (r[0].amt || 0) : 0; }
-function sched() { clearTimeout(sched.t); sched.t = setTimeout(renderBody, 150); }
-function loadAging() {
-  if (D.agP) { return D.agP; }
-  D.agP = Promise.all(BK.map(function (b) {
-    return glist(SI, { fields: ['customer', 'customer_name', 'sum(outstanding_amount) as amt', 'count(name) as n'], filters: siBase().concat(bFilter(b)), group_by: 'customer, customer_name', limit: 5000 }).then(function (r) { return r || []; });
-  })).then(function (res) {
-    var m = {}, tot = {}, cnt = 0;
-    res.forEach(function (rows, i) { var b = BK[i]; tot[b.id] = 0; rows.forEach(function (x) { var c = m[x.customer] || (m[x.customer] = { customer: x.customer, name: x.customer_name || x.customer, b: {}, total: 0, n: 0 }); c.b[b.id] = (c.b[b.id] || 0) + x.amt; c.total += x.amt; c.n += x.n; tot[b.id] += x.amt; cnt += x.n; }); });
-    D.ag = { cust: Object.keys(m).map(function (k) { return m[k]; }), tot: tot, count: cnt, truncated: res.some(function (r) { return r.length >= 5000; }) };
-    sched();
-  }).catch(function () { D.ag = { err: 1, cust: [], tot: {}, count: 0 }; sched(); });
-  return D.agP;
-}
-function loadMisc() {
-  if (D.miscP) { return D.miscP; }
-  var a = S.f.asof, td = todayStr(), ms = monthStart(td, 0);
-  var sumPE = function (from, to) { return glist(PE, { fields: ['sum(base_received_amount) as amt', 'count(name) as n'], filters: peBase().concat([[PE, 'posting_date', 'between', [from, to]]]), limit: 1 }).then(function (r) { return { amt: r && r[0] ? r[0].amt || 0 : 0, n: r && r[0] ? r[0].n || 0 : 0 }; }).catch(function () { return null; }); };
-  var months = []; for (var i = 5; i >= 0; i--) { months.push({ from: monthStart(td, i), to: i === 0 ? td : monthEnd(td, i), lab: monthStart(td, i).slice(0, 7) }); }
-  D.miscP = Promise.all([
-    glist(SI, { fields: ['sum(outstanding_amount) as amt', 'count(name) as n'], filters: [[SI, 'docstatus', '=', 1], [SI, 'outstanding_amount', '<', 0]].concat(siBase().slice(2)), limit: 1 }).catch(function () { return null; }),
-    glist(SI, { fields: ['company', 'sum(outstanding_amount) as amt'], filters: siBase(), group_by: 'company', limit: 50 }).catch(function () { return null; }),
-    sumPE(ms, td), sumPE(addDays(td, -29), td), sumPE(monthStart(td, 1), monthEnd(td, 1))
-  ].concat(months.map(function (m) { return sumPE(m.from, m.to); }))).then(function (r) {
-    D.misc = { credits: r[0] ? Math.abs(sumOf(r[0])) : null, byCompany: r[1] || [], mtd: r[2], d30: r[3], lm: r[4], months: months.map(function (m, i) { return { lab: m.lab, v: r[5 + i] ? r[5 + i].amt : 0 }; }) };
-    sched();
-  }).catch(function () { D.misc = { err: 1, byCompany: [], months: [] }; sched(); });
-  return D.miscP;
-}
-function loadLimits() {
-  if (D.limP) { return D.limP; }
-  D.limP = glist('Customer Credit Limit', { parent: 'Customer', fields: ['parent', 'company', 'credit_limit'], filters: S.f.company ? [['Customer Credit Limit', 'company', '=', S.f.company]] : [], limit: 5000 }).then(function (r) { D.lim = { rows: r || [] }; sched(); })
-    .catch(function () { D.lim = { rows: [], err: 1 }; sched(); });
-  return D.limP;
-}
-
-/* ---------- charts ---------- */
-function donut(items, total) {
-  var R = 60, C = 2 * Math.PI * R, cum = 0, s = '<svg viewBox="0 0 170 170" role="img"><g transform="rotate(-90 85 85)">';
-  items.forEach(function (i) { var dash = total ? C * i.v / total : 0; s += '<circle cx="85" cy="85" r="' + R + '" fill="none" stroke="' + i.c + '" stroke-width="26" stroke-dasharray="' + dash.toFixed(2) + ' ' + (C - dash).toFixed(2) + '" stroke-dashoffset="' + (-cum).toFixed(2) + '" style="cursor:pointer"' + (i.a ? ' data-act="' + i.a + '" data-v="' + esc(i.v2 || '') + '"' : '') + '><title>' + esc(i.l) + ': ' + fmt(i.v) + '</title></circle>'; cum += dash; });
-  s += '</g><text x="85" y="82" text-anchor="middle" font-size="15" font-weight="800" fill="#12408c">' + fmt(total) + '</text><text x="85" y="100" text-anchor="middle" font-size="10" fill="#64748b">' + esc(t('total')) + '</text></svg>';
-  return '<div class="cc-donut">' + s + '<div class="cc-lg">' + items.map(function (i) { return '<div' + (i.a ? ' data-act="' + i.a + '" data-v="' + esc(i.v2 || '') + '"' : '') + '><i style="background:' + i.c + '"></i>' + esc(i.l) + '<b>' + fmt(i.v) + '</b></div>'; }).join('') + '</div></div>';
-}
-function bars(items) {
-  var mx = 0; items.forEach(function (i) { mx = Math.max(mx, i.v); }); if (!items.length || !mx) { return '<div class="cc-empty">' + t('empty') + '</div>'; }
-  return '<div class="cc-bars">' + items.map(function (i) { return '<div class="cc-br"' + (i.a ? ' data-act="' + i.a + '" data-v="' + esc(i.v2 || '') + '"' : '') + ' title="' + esc(i.l) + '"><span class="n">' + esc(i.l) + '</span><span class="t"><i style="width:' + (i.v / mx * 100).toFixed(2) + '%;background:' + (i.c || '#1d4ed8') + '"></i></span><span class="c">' + fmt(i.v) + '</span></div>'; }).join('') + '</div>';
-}
-function kpi(label, val, cls, act, v2, sub) { return '<button class="cc-kpi ' + (cls || '') + (act ? '' : ' dis') + '"' + (act ? ' data-act="' + act + '" data-v="' + esc(v2 || '') + '"' : '') + '><div class="l">' + esc(label) + '</div><div class="v">' + (val == null ? '<span class="cc-sp"></span>' : (typeof val === 'string' ? val : fmt(val))) + '</div>' + (sub ? '<div class="s">' + sub + '</div>' : '') + '</button>'; }
-function loadingBlock() { return '<div class="cc-ld"><div class="cc-sp"></div>' + t('loading') + '</div>'; }
-
-/* ---------- table component (client rows or server paging) ---------- */
-var TB = {};
-function mk(id, cfg) { TB[id] = Object.assign({ id: id, page: 1, size: 20, q: '', rows: [], all: [], total: 0, sort: { k: '', d: 'desc' }, dirty: true, tok: 0 }, cfg); return TB[id]; }
-function tshell(id) { var tb = TB[id]; return '<div class="cc-tb"><input class="cc-in" style="max-width:260px" data-tq="' + id + '" placeholder="' + esc(t('search')) + '" value="' + esc(tb.q) + '"><div><button class="cc-btn" data-act="csv" data-v="' + id + '">' + t('csv') + '</button> ' + (tb.exportAll ? '<button class="cc-btn" data-act="csvall" data-v="' + id + '">' + t('exportall') + '</button>' : '') + '</div></div><div data-tbb="' + id + '"></div>'; }
-function view(tb) {
-  if (tb.mode === 'server') { return tb.rows; }
-  var rows = tb.all.slice(), q = (tb.q || '').toLowerCase();
-  if (q) { rows = rows.filter(function (r) { return tb.cols.some(function (c) { return c.c && String(c.c(r) == null ? '' : c.c(r)).toLowerCase().indexOf(q) >= 0; }); }); }
-  var sc = tb.cols.filter(function (c) { return c.k === tb.sort.k; })[0];
-  if (sc && sc.sk) { var d = tb.sort.d === 'asc' ? 1 : -1; rows.sort(function (a, b) { var x = sc.sk(a), y = sc.sk(b); return (x > y ? 1 : x < y ? -1 : 0) * d; }); }
-  tb.vt = rows.length; return rows;
-}
-function draw(id) {
-  var tb = TB[id], el = $('[data-tbb="' + id + '"]'); if (!tb || !el) { return; }
-  if (tb.mode === 'server' && tb.dirty) {
-    tb.dirty = false; tb.loading = true; var tok = ++tb.tok; paint(tb, el);
-    tb.loader(tb).then(function (r) { if (tok !== tb.tok) { return; } tb.rows = r.rows; tb.total = r.total; tb.loading = false; tb.err = 0; paint(tb, $('[data-tbb="' + id + '"]')); })
-      .catch(function () { if (tok !== tb.tok) { return; } tb.loading = false; tb.err = 1; paint(tb, $('[data-tbb="' + id + '"]')); });
-    return;
+  /* ---------- helpers ---------- */
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function clean(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+  function plain(s, n) { return clean(String(s || '').replace(/<[^>]*>/g, ' ')).slice(0, n || 90); }
+  function $(sel) { return HOST.querySelector(sel); }
+  function later(fn, ms) { var id = setTimeout(function () { if (!destroyed) { fn(); } }, ms); timers.push(id); return id; }
+  function bdi(s) { return '<bdi>' + esc(s) + '</bdi>'; }
+  function num(n) { return (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString('en-US'); }
+  function money(v) {
+    if (v == null || isNaN(v)) { return '—'; }
+    var a = Math.abs(v), s = v < 0 ? '-' : '';
+    if (a >= 1e9) { return s + (a / 1e9).toFixed(2) + 'B'; }
+    if (a >= 1e6) { return s + (a / 1e6).toFixed(2) + 'M'; }
+    if (a >= 1e4) { return s + (a / 1e3).toFixed(1) + 'K'; }
+    return s + Math.round(a).toLocaleString('en-US');
   }
-  paint(tb, el);
-}
-function paint(tb, el) {
-  if (!el) { return; }
-  if (tb.loading) { el.innerHTML = loadingBlock(); return; }
-  if (tb.err) { el.innerHTML = '<div class="cc-note err">' + t('err') + '</div>'; return; }
-  var rows = view(tb), total = tb.mode === 'server' ? tb.total : tb.vt, page = tb.mode === 'server' ? rows : rows.slice((tb.page - 1) * tb.size, tb.page * tb.size);
-  var pages = Math.max(1, Math.ceil(total / tb.size)); if (tb.page > pages) { tb.page = pages; }
-  if (!page.length) { el.innerHTML = '<div class="cc-empty">' + t('empty') + '</div>'; return; }
-  var h = '<div class="cc-tw"><table class="cc-t"><thead><tr>' + tb.cols.map(function (c) {
-    var can = tb.mode === 'server' ? !!c.sf : !!c.sk; return '<th class="' + (can ? 's' : '') + (c.num ? ' num' : '') + '"' + (can ? ' data-act="sort" data-v="' + tb.id + '|' + c.k + '"' : '') + '>' + esc(t(c.h)) + (tb.sort.k === c.k ? (tb.sort.d === 'asc' ? ' ▲' : ' ▼') : '') + '</th>'; }).join('') + '</tr></thead><tbody>';
-  page.forEach(function (r) { h += '<tr>' + tb.cols.map(function (c) { return '<td' + (c.num ? ' class="num"' : '') + '>' + c.r(r) + '</td>'; }).join('') + '</tr>'; });
-  h += '</tbody>' + (tb.foot ? '<tfoot>' + tb.foot(rows) + '</tfoot>' : '') + '</table></div><div class="cc-pg"><span>' + t('showing') + ' ' + fmt((tb.page - 1) * tb.size + 1) + '–' + fmt(Math.min(total, tb.page * tb.size)) + ' ' + t('of') + ' ' + fmt(total) + '</span><span><button class="cc-btn" data-act="pg" data-v="' + tb.id + '|-1"' + (tb.page <= 1 ? ' disabled' : '') + '>' + t('prev') + '</button> ' + t('page') + ' ' + tb.page + ' ' + t('of') + ' ' + pages + ' <button class="cc-btn" data-act="pg" data-v="' + tb.id + '|1"' + (tb.page >= pages ? ' disabled' : '') + '>' + t('next') + '</button></span></div>';
-  el.innerHTML = h;
-}
-function csvCell(v) { v = v == null ? '' : String(v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
-function dl(name, tb, rows) {
-  var cols = tb.cols.filter(function (c) { return c.c; }), lines = [cols.map(function (c) { return csvCell(t(c.h)); }).join(',')].concat(rows.map(function (r) { return cols.map(function (c) { return csvCell(c.c(r)); }).join(','); }));
-  var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' })); a.download = name + '_' + todayStr() + '.csv'; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
-}
-function toast(m, bad) { var e = document.createElement('div'); e.className = 'cc-toast' + (bad ? ' err' : ''); e.textContent = m; host.appendChild(e); setTimeout(function () { e.remove(); }, 4000); }
-function openForm(dt, n) { try { closeModal(); frappe.set_route('Form', dt, n); } catch (e) { window.open(docUrl(dt, n), '_blank'); } }
-function lnk(dt, n) { return '<a href="' + docUrl(dt, n) + '" data-act="open" data-v="' + esc(dt) + '|' + esc(n) + '">' + esc(n) + '</a>'; }
-function tag(cls, txt) { return '<span class="cc-tag ' + cls + '">' + esc(txt) + '</span>'; }
+  function amt(v) { return (v == null || isNaN(v)) ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function moneyS(v, cur) { return (cur || CUR) + ' ' + money(v); }
+  function moneyB(v, cur) { return '<bdi>' + esc(moneyS(v, cur)) + '</bdi>'; }
+  function moneyFull(v, cur) { return (v == null || isNaN(v)) ? '' : (cur || CUR) + ' ' + amt(v); }
+  function cur$(v, cur) { return '<bdi>' + esc(money(v)) + '<small>' + esc(cur || CUR) + '</small></bdi>'; }
+  function pct(n, d, dp) { return (d > 0 && n != null) ? (n / d * 100).toFixed(dp == null ? 1 : dp) + '%' : tr('N/A', 'غير متاح'); }
+  function sum(arr, f) { var t = 0; for (var i = 0; i < arr.length; i++) { t += (f ? f(arr[i]) : arr[i]) || 0; } return t; }
+  function vals(o) { return Object.keys(o).map(function (k) { return o[k]; }); }
+  function uniq(a) { var m = {}; a.forEach(function (x) { if (x) { m[x] = 1; } }); return Object.keys(m).sort(function (x, y) { return x.localeCompare(y); }); }
+  function rep(s, n) { var o = ''; for (var i = 0; i < n; i++) { o += s; } return o; }
+  function one(r) { return (r && r[0]) || {}; }
+  function groupBy(rows, f) { var m = {}; rows.forEach(function (r) { var k = f(r); (m[k] || (m[k] = [])).push(r); }); return m; }
+  var NAtxt = function () { return tr('Not assigned', 'غير مُعيَّن'); };
 
-/* ---------- customer drill-down modal ---------- */
-var MD = null;
-function closeModal() { MD = null; var m = $('#cc-modal'); if (m) { m.innerHTML = ''; } }
-function openCustomer(cust, name) {
-  var m = $('#cc-modal'); m.innerHTML = '<div class="cc-ov" data-act="mbg"><div class="cc-md"><div class="cc-mh"><h2>' + esc(name || cust) + '</h2><button class="cc-btn" data-act="mclose">' + t('close') + '</button></div>' + loadingBlock() + '</div></div>'; MD = 1;
-  glist(SI, { fields: ['name', 'posting_date', 'due_date', 'outstanding_amount', 'grand_total'], filters: siBase().filter(function (x) { return x[1] !== 'customer_name'; }).concat([[SI, 'customer', '=', cust]]), order_by: 'due_date asc', limit: 300 }).then(function (rows) {
-    if (!MD) { return; } rows = rows || []; var a = S.f.asof, tot = sum(rows, function (r) { return r.outstanding_amount; });
-    var h = '<div class="cc-mh"><h2>' + esc(name || cust) + ' – ' + fmt(tot) + '</h2><span><button class="cc-btn" data-act="open" data-v="Customer|' + esc(cust) + '">' + t('openc') + '</button> <button class="cc-btn" data-act="mclose">' + t('close') + '</button></span></div>';
-    h += rows.length ? '<div class="cc-tw"><table class="cc-t"><thead><tr><th>' + t('inv') + '</th><th>' + t('posting') + '</th><th>' + t('due') + '</th><th class="num">' + t('dover') + '</th><th class="num">' + t('outst') + '</th></tr></thead><tbody>' + rows.map(function (r) { var d = dayDiff(r.due_date, a); return '<tr><td>' + lnk(SI, r.name) + '</td><td>' + esc(r.posting_date) + '</td><td>' + esc(r.due_date) + '</td><td class="num">' + (d > 0 ? tag(d > 90 ? 'bad' : 'warn', d) : '–') + '</td><td class="num">' + fmt(r.outstanding_amount) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<div class="cc-empty">' + t('empty') + '</div>';
-    m.innerHTML = '<div class="cc-ov" data-act="mbg"><div class="cc-md">' + h + '</div></div>';
-  }).catch(function () { if (MD) { m.innerHTML = '<div class="cc-ov" data-act="mbg"><div class="cc-md"><div class="cc-note err">' + t('err') + '</div></div></div>'; } });
-}
-
-/* ---------- tabs ---------- */
-function note(txt) { return '<div class="cc-note info">' + txt + '</div>'; }
-function tabOverview() {
-  loadAging(); loadMisc(); var A = D.ag, M = D.misc, h = note(t('note_l'));
-  if (A && A.err) { h += '<div class="cc-note err">' + t('err') + '</div>'; }
-  var tot = A ? sum(BK, function (b) { return A.tot[b.id]; }) : null, nd = A ? A.tot.nd : null, od = A ? tot - nd : null, o90 = A ? A.tot.b4 + A.tot.b5 + A.tot.b3 * 0 : null;
-  if (A) { o90 = A.tot.b4 + A.tot.b5; var b90 = A.tot.b3; }
-  h += '<div class="cc-kpis">' + kpi(t('k_out'), tot, '', 'tab', 'aging') + kpi(t('k_nd'), nd, 'ok', 'bk', 'nd') + kpi(t('k_od'), od, 'bad', 'bk', 'od') + kpi(t('k_odp'), A ? (tot ? (od / tot * 100).toFixed(1) + '%' : '0%') : null, od / (tot || 1) > 0.5 ? 'bad' : 'warn') +
-    kpi(t('k_90'), o90, 'bad', 'bk', 'b4') + kpi(t('k_inv'), A ? A.count : null, '', 'tab', 'invoices') + kpi(t('k_cust'), A ? A.cust.length : null, '', 'tab', 'aging') + kpi(t('k_cr'), M ? M.credits : null, 'warn') +
-    kpi(t('k_mtd'), M && M.mtd ? M.mtd.amt : (M ? 0 : null), 'ok', 'tab', 'coll') + kpi(t('k_30'), M && M.d30 ? M.d30.amt : (M ? 0 : null), 'ok', 'tab', 'coll') + '</div>';
-  var age = A ? donut(BK.map(function (b) { return { l: t(b.k), v: A.tot[b.id], c: b.c, a: 'bk', v2: b.id }; }), tot) : loadingBlock();
-  var top = A ? bars(A.cust.slice().sort(function (a, b) { return b.total - a.total; }).slice(0, 10).map(function (c) { return { l: c.name, v: c.total, c: PAL[0], a: 'cust', v2: c.customer + '|' + c.name }; })) : loadingBlock();
-  var comp = M ? bars(M.byCompany.map(function (r) { return { l: r.company, v: r.amt, c: PAL[1] }; }).sort(function (a, b) { return b.v - a.v; })) : loadingBlock();
-  var col = M ? bars(M.months.map(function (m) { return { l: m.lab, v: m.v, c: '#16a34a' }; })) : loadingBlock();
-  return h + '<div class="cc-grid"><div class="cc-card"><h3>' + t('c_age') + '</h3>' + age + '</div><div class="cc-card"><h3>' + t('c_top') + '</h3>' + top + '</div><div class="cc-card"><h3>' + t('c_comp') + '</h3>' + comp + '</div><div class="cc-card"><h3>' + t('c_coll') + '</h3>' + col + '</div></div>';
-}
-function custCols() {
-  var cols = [{ k: 'name', h: 'party', r: function (x) { return '<a data-act="cust" data-v="' + esc(x.customer + '|' + x.name) + '">' + esc(x.name) + '</a>'; }, c: function (x) { return x.name; }, sk: function (x) { return x.name; } }];
-  BK.forEach(function (b) { cols.push({ k: b.id, h: b.k, num: 1, r: function (x) { return x.b[b.id] ? fmt(x.b[b.id]) : '<span style="color:#cbd5e1">–</span>'; }, c: function (x) { return Math.round(x.b[b.id] || 0); }, sk: function (x) { return x.b[b.id] || 0; } }); });
-  cols.push({ k: 'total', h: 'total', num: 1, r: function (x) { return '<b>' + fmt(x.total) + '</b>'; }, c: function (x) { return Math.round(x.total); }, sk: function (x) { return x.total; } });
-  cols.push({ k: 'n', h: 'invs', num: 1, r: function (x) { return fmt(x.n); }, c: function (x) { return x.n; }, sk: function (x) { return x.n; } });
-  return cols;
-}
-function tabAging() {
-  loadAging(); var A = D.ag; if (!A) { return note(t('note_l')) + loadingBlock(); }
-  var h = note(t('note_l')) + (A.truncated ? '<div class="cc-note">' + t('partial') + '</div>' : '');
-  h += '<div class="cc-card"><div data-tbx="t_aging"></div></div>';
-  var sg = JSON.stringify(S.f) + S.lang;
-  if (!TB.t_aging || TB.t_aging.sig !== sg) { mk('t_aging', { mode: 'client', cols: custCols(), sort: { k: 'total', d: 'desc' }, size: 25, sig: sg, dirty: false, foot: function () { return '<tr><td>' + t('total') + '</td>' + BK.map(function (b) { return '<td class="num">' + fmt(A.tot[b.id]) + '</td>'; }).join('') + '<td class="num">' + fmt(sum(BK, function (b) { return A.tot[b.id]; })) + '</td><td class="num">' + fmt(A.count) + '</td></tr>'; } }); }
-  TB.t_aging.all = A.cust; return h;
-}
-function tabInvoices() {
-  loadAging(); var A = D.ag, h = note(t('note_l')), chips = [{ id: 'od', k: 'overdue_all' }].concat(BK);
-  h += '<div class="cc-chips">' + chips.map(function (b) { var n = A ? (b.id === 'od' ? sum(BK.slice(1), function (x) { return A.tot[x.id]; }) : A.tot[b.id]) : null; return '<button class="cc-chip' + (S.bucket === b.id ? ' on' : '') + '" data-act="bk" data-v="' + b.id + '">' + t(b.k) + '<b>' + (n == null ? '…' : fmt(n)) + '</b></button>'; }).join('') + '</div>';
-  h += '<div class="cc-card"><div data-tbx="t_inv"></div></div>';
-  var sg = S.bucket + JSON.stringify(S.f) + S.lang;
-  if (!TB.t_inv || TB.t_inv.sig !== sg) {
-    var b = chips.filter(function (x) { return x.id === S.bucket; })[0] || chips[0], fl = function () { return siBase().concat(bFilter(b)); };
-    var fields = ['name', 'customer', 'customer_name', 'company', 'posting_date', 'due_date', 'outstanding_amount', 'grand_total'];
-    var cols = [{ k: 'name', h: 'inv', sf: 'name', r: function (x) { return lnk(SI, x.name); }, c: function (x) { return x.name; } },
-      { k: 'customer_name', h: 'party', sf: 'customer_name', r: function (x) { return '<a data-act="cust" data-v="' + esc(x.customer + '|' + (x.customer_name || x.customer)) + '">' + esc(x.customer_name || x.customer) + '</a>'; }, c: function (x) { return x.customer_name; } },
-      { k: 'company', h: 'company', sf: 'company', r: function (x) { return esc(x.company); }, c: function (x) { return x.company; } },
-      { k: 'posting_date', h: 'posting', sf: 'posting_date', r: function (x) { return esc(x.posting_date); }, c: function (x) { return x.posting_date; } },
-      { k: 'due_date', h: 'due', sf: 'due_date', r: function (x) { return esc(x.due_date); }, c: function (x) { return x.due_date; } },
-      { k: 'dover', h: 'dover', num: 1, r: function (x) { var d = dayDiff(x.due_date, S.f.asof); return d > 0 ? tag(d > 90 ? 'bad' : 'warn', d) : tag('ok', '0'); }, c: function (x) { return Math.max(0, dayDiff(x.due_date, S.f.asof)); } },
-      { k: 'outstanding_amount', h: 'outst', num: 1, sf: 'outstanding_amount', r: function (x) { return '<b>' + fmt(x.outstanding_amount) + '</b>'; }, c: function (x) { return x.outstanding_amount; } },
-      { k: 'grand_total', h: 'gt', num: 1, sf: 'grand_total', r: function (x) { return fmt(x.grand_total); }, c: function (x) { return x.grand_total; } }];
-    var load = function (o) { var q = {}; if (o.q) { q.or_filters = [[SI, 'name', 'like', '%' + o.q + '%'], [SI, 'customer_name', 'like', '%' + o.q + '%']]; } return Promise.all([glist(SI, Object.assign({ fields: fields, filters: fl(), order_by: o.order, start: o.start, limit: o.limit }, q)), gcount(SI, fl())]).then(function (x) { return { rows: x[0] || [], total: x[1] || 0 }; }); };
-    mk('t_inv', { mode: 'server', cols: cols, sig: sg, sort: { k: 'due_date', d: 'asc', sf: 'due_date' },
-      loader: function (tb) { return load({ q: tb.q, order: (tb.sort.sf || 'due_date') + ' ' + tb.sort.d, start: (tb.page - 1) * tb.size, limit: tb.size }); },
-      exportAll: function () { var out = [], step = 500; function nx(s) { return load({ order: 'due_date asc', start: s, limit: step }).then(function (r) { out = out.concat(r.rows); return out.length < r.total && out.length < 5000 ? nx(s + step) : out; }); } return nx(0); } });
+  /* ---------- dates (ERP site time zone, calendar arithmetic) ---------- */
+  function siteTz() {
+    try {
+      if (G.frappe && frappe.boot) {
+        if (frappe.boot.time_zone && frappe.boot.time_zone.system) { return frappe.boot.time_zone.system; }
+        if (frappe.boot.sysdefaults && frappe.boot.sysdefaults.time_zone) { return frappe.boot.sysdefaults.time_zone; }
+      }
+    } catch (e) { /* ignore */ }
+    return null;
   }
-  return h;
-}
-function reportReferenceTotal(response,field){
-  if(!response||!Array.isArray(response.result))throw new Error('Reference report unavailable');
-  var first=response.columns&&response.columns[0];first=first&&first.fieldname;
-  return response.result.reduce(function(sum,row){
-    if(!row||Array.isArray(row))throw new Error('Unsupported reference report response');
-    if(row.is_total_row||row._is_total_row||(first&&String(row[first]||'').trim().toLowerCase()==='total'))return sum;
-    if(row[field]===undefined)throw new Error('Reference report field unavailable');
-    var value=Number(row[field]);if(!isFinite(value))throw new Error('Invalid reference report value');
-    return sum+value;
-  },0);
-}
-function loadSharedReference(){
-  if(D.sharedReferenceP)return D.sharedReferenceP;
-  D.sharedReferenceP=Promise.all(['Over Credit Limit Customer','Collection Analysis Report'].map(function(name){return api('frappe.desk.query_report.run',{report_name:name,filters:{},ignore_prepared_report:true});})).then(function(r){
-    D.sharedReference={over:reportReferenceTotal(r[0],'over_credit_limit_customer_count'),collections:reportReferenceTotal(r[1],'total_collection')};sched();
-  }).catch(function(){D.sharedReference={unavailable:true};sched();});
-  return D.sharedReferenceP;
-}
-function sharedReferencePanel(){
-  loadSharedReference();var ref=D.sharedReference;
-  var heading=S.lang==='ar'?'مرجع الصفحات الأخرى — جميع الشركات':'Cross-page reference — all companies';
-  var overLabel=S.lang==='ar'?'تجاوز الحد، بما فيه الحد الصفري':'Over credit limit, including zero limits';
-  var collectionLabel=S.lang==='ar'?'تحصيل مندوبي المبيعات — التقرير القديم':'Salesperson collections — legacy adjusted report';
-  var basis=S.lang==='ar'?'هذه مراجع عامة ولا تتأثر بمرشحات هذه الصفحة. تقرير التحصيل يستبعد مندوبي مبيعات محددين ويقسم المقبوضات على 1.15؛ لا يمثل إجمالي المقبوضات.':'These are the same report definitions used by the native pages, across all companies. They do not follow this page’s company/division/location filters. The collection report excludes selected salespeople and divides receipts by 1.15; it is not gross customer receipts.';
-  if(ref&&ref.unavailable)return note(heading+': '+(S.lang==='ar'?'غير متاح لصلاحيات المستخدم':'unavailable for this user'));
-  return '<section class="cc-card"><h3>'+heading+'</h3>'+note(basis)+'<div class="cc-kpis">'+kpi(overLabel,ref?ref.over:null,'bad')+kpi(collectionLabel,ref?ref.collections:null,'')+'</div></section>';
-}
-function tabLimits() {
-  loadAging(); loadLimits(); var A = D.ag, LM = D.lim, h = sharedReferencePanel()+note(t('note_l'));
-  if (!A || !LM) { return h + loadingBlock(); }
-  if (!LM.rows.length) { return h + '<div class="cc-empty">' + t('nolimits') + '</div>'; }
-  var lim = {}; LM.rows.forEach(function (r) { lim[r.parent] = (lim[r.parent] || 0) + (r.credit_limit || 0); });
-  var rows = A.cust.map(function (c) { var l = lim[c.customer] || 0, od = c.total - (c.b.nd || 0), u = l ? c.total / l * 100 : null; return { customer: c.customer, name: c.name, limit: l, total: c.total, od: od, util: u, st: !l ? 'nolimit' : u > 100 ? 'over' : u >= 80 ? 'near' : 'okk' }; });
-  var cnt = function (s) { return rows.filter(function (r) { return r.st === s; }).length; };
-  h += '<div class="cc-kpis">' + kpi(t('over'), cnt('over'), 'bad') + kpi(t('near'), cnt('near'), 'warn') + kpi(t('okk'), cnt('okk'), 'ok') + kpi(t('nolimit'), cnt('nolimit'), '') + '</div><div class="cc-card"><div data-tbx="t_lim"></div></div>';
-  var sg = JSON.stringify(S.f) + S.lang;
-  if (!TB.t_lim || TB.t_lim.sig !== sg) {
-    mk('t_lim', { mode: 'client', sig: sg, dirty: false, size: 25, sort: { k: 'util', d: 'desc' }, cols: [
-      { k: 'name', h: 'party', r: function (x) { return '<a data-act="cust" data-v="' + esc(x.customer + '|' + x.name) + '">' + esc(x.name) + '</a>'; }, c: function (x) { return x.name; }, sk: function (x) { return x.name; } },
-      { k: 'limit', h: 'limit', num: 1, r: function (x) { return x.limit ? fmt(x.limit) : '–'; }, c: function (x) { return x.limit; }, sk: function (x) { return x.limit; } },
-      { k: 'total', h: 'outst', num: 1, r: function (x) { return '<b>' + fmt(x.total) + '</b>'; }, c: function (x) { return Math.round(x.total); }, sk: function (x) { return x.total; } },
-      { k: 'od', h: 'overdue', num: 1, r: function (x) { return fmt(x.od); }, c: function (x) { return Math.round(x.od); }, sk: function (x) { return x.od; } },
-      { k: 'util', h: 'util', num: 1, r: function (x) { return x.util == null ? '–' : x.util.toFixed(0) + '%'; }, c: function (x) { return x.util == null ? '' : x.util.toFixed(1); }, sk: function (x) { return x.util == null ? -1 : x.util; } },
-      { k: 'st', h: 'status', r: function (x) { return tag(x.st === 'over' ? 'bad' : x.st === 'near' ? 'warn' : x.st === 'okk' ? 'ok' : 'na', t(x.st)); }, c: function (x) { return t(x.st); }, sk: function (x) { return x.st; } }] });
+  function siteParts() {
+    var tz = siteTz(), o = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }, p;
+    if (tz) { o.timeZone = tz; }
+    try { p = new Intl.DateTimeFormat('en-CA', o).formatToParts(new Date()); } catch (e) { delete o.timeZone; p = new Intl.DateTimeFormat('en-CA', o).formatToParts(new Date()); }
+    var m = {}; p.forEach(function (x) { m[x.type] = x.value; }); if (m.hour === '24') { m.hour = '00'; } return m;
   }
-  TB.t_lim.all = rows; return h;
-}
-function tabColl() {
-  loadMisc(); var M = D.misc, h = sharedReferencePanel()+note(t('note_c'));
-  h += '<div class="cc-kpis">' + kpi(t('k_mtd'), M && M.mtd ? M.mtd.amt : (M ? 0 : null), 'ok') + kpi(t('k_rc'), M && M.mtd ? M.mtd.n : (M ? 0 : null), '') + kpi(t('k_lm'), M && M.lm ? M.lm.amt : (M ? 0 : null), '') + kpi(t('k_30'), M && M.d30 ? M.d30.amt : (M ? 0 : null), 'ok') + '</div><div class="cc-card"><div data-tbx="t_pe"></div></div>';
-  var sg = JSON.stringify(S.f) + S.lang;
-  if (!TB.t_pe || TB.t_pe.sig !== sg) {
-    var fields = ['name', 'party', 'party_name', 'posting_date', 'base_received_amount', 'mode_of_payment', 'reference_no', 'company'].filter(function (f) { return f === 'name' || has(PE, f); });
-    var load = function (o) { var q = {}; if (o.q) { q.or_filters = [[PE, 'name', 'like', '%' + o.q + '%'], [PE, 'party_name', 'like', '%' + o.q + '%']]; } return Promise.all([glist(PE, Object.assign({ fields: fields, filters: peBase(), order_by: o.order, start: o.start, limit: o.limit }, q)), gcount(PE, peBase())]).then(function (x) { return { rows: x[0] || [], total: x[1] || 0 }; }); };
-    mk('t_pe', { mode: 'server', sig: sg, sort: { k: 'posting_date', d: 'desc', sf: 'posting_date' }, cols: [
-      { k: 'name', h: 'receipt', sf: 'name', r: function (x) { return '<a href="' + docUrl(PE, x.name) + '" data-act="open" data-v="Payment Entry|' + esc(x.name) + '">' + esc(x.name) + '</a>'; }, c: function (x) { return x.name; } },
-      { k: 'party_name', h: 'party', sf: 'party_name', r: function (x) { return esc(x.party_name || x.party); }, c: function (x) { return x.party_name; } },
-      { k: 'posting_date', h: 'date', sf: 'posting_date', r: function (x) { return esc(x.posting_date); }, c: function (x) { return x.posting_date; } },
-      { k: 'base_received_amount', h: 'amount', num: 1, sf: 'base_received_amount', r: function (x) { return '<b>' + fmt(x.base_received_amount) + '</b>'; }, c: function (x) { return x.base_received_amount; } },
-      { k: 'mode_of_payment', h: 'mode', sf: 'mode_of_payment', r: function (x) { return esc(x.mode_of_payment || ''); }, c: function (x) { return x.mode_of_payment; } },
-      { k: 'reference_no', h: 'ref', r: function (x) { return esc(x.reference_no || ''); }, c: function (x) { return x.reference_no; } },
-      { k: 'company', h: 'company', sf: 'company', r: function (x) { return esc(x.company || ''); }, c: function (x) { return x.company; } }],
-      loader: function (tb) { return load({ q: tb.q, order: (tb.sort.sf || 'posting_date') + ' ' + tb.sort.d, start: (tb.page - 1) * tb.size, limit: tb.size }); },
-      exportAll: function () { var out = []; function nx(s) { return load({ order: 'posting_date desc', start: s, limit: 500 }).then(function (r) { out = out.concat(r.rows); return out.length < r.total && out.length < 5000 ? nx(s + 500) : out; }); } return nx(0); } });
+  function parseISO(s) {
+    if (!s || typeof s !== 'string') { return null; }
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s); if (!m) { return null; }
+    var y = +m[1], mo = +m[2], d = +m[3], ms = Date.UTC(y, mo - 1, d), dt = new Date(ms);
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) { return null; }
+    return ms;
   }
-  return h;
-}
-L.company = L.company; L.invs = L.invs; L.company = ['Company', 'الشركة'];
+  function isoOf(ms) { var d = new Date(ms); return d.getUTCFullYear() + '-' + ('0' + (d.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + d.getUTCDate()).slice(-2); }
+  function addDays(iso, n) { return isoOf(parseISO(iso) + n * 86400000); }
+  function diffDays(a, b) { return Math.round((parseISO(b) - parseISO(a)) / 86400000); }
+  var TODAY = '', STAMP = '';
+  function setToday() { var p = siteParts(); TODAY = p.year + '-' + p.month + '-' + p.day; STAMP = p.hour + ':' + p.minute; }
+  function monthStart(iso) { return iso.slice(0, 8) + '01'; }
+  function monthEnd(iso) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7); return isoOf(Date.UTC(y, m, 0)); }
+  function addMonths(iso, n) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n; return isoOf(Date.UTC(y, m, 1)); }
+  function weekStartOf(iso) { var dow = new Date(parseISO(iso)).getUTCDay(); return addDays(iso, -((dow - CFG.weekStart + 7) % 7)); }
+  function quarterStart(iso) { var m = +iso.slice(5, 7); return iso.slice(0, 5) + ('0' + (Math.floor((m - 1) / 3) * 3 + 1)).slice(-2) + '-01'; }
+  function shiftMonths(iso, n) {
+    var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n, d = +iso.slice(8, 10), last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    return isoOf(Date.UTC(y, m, Math.min(d, last)));
+  }
+  function periodRange(key, cf, ct) {
+    var t = TODAY, y = t.slice(0, 4), ws = weekStartOf(t), qs = quarterStart(t), lm = addMonths(monthStart(t), -1);
+    switch (key) {
+      case 'today': return [t, t];
+      case 'yesterday': return [addDays(t, -1), addDays(t, -1)];
+      case 'week': return [ws, addDays(ws, 6)];
+      case 'lastWeek': return [addDays(ws, -7), addDays(ws, -1)];
+      case 'month': return [monthStart(t), monthEnd(t)];
+      case 'lastMonth': return [lm, monthEnd(lm)];
+      case 'quarter': return [qs, monthEnd(addMonths(qs, 2))];
+      case 'year': return [y + '-01-01', y + '-12-31'];
+      case 'prevYear': return [(y - 1) + '-01-01', (y - 1) + '-12-31'];
+      case 'custom': return [cf, ct];
+      default: return [y + '-01-01', t];   // ytd
+    }
+  }
+  /* Comparison window: the same span one preset unit earlier; custom ranges compare with the equally long range before. */
+  function prevRange(key, from, to) {
+    switch (key) {
+      case 'today': case 'yesterday': return [addDays(from, -1), addDays(to, -1)];
+      case 'week': case 'lastWeek': return [addDays(from, -7), addDays(to, -7)];
+      case 'month': case 'lastMonth': return [shiftMonths(from, -1), shiftMonths(to, -1)];
+      case 'quarter': return [shiftMonths(from, -3), shiftMonths(to, -3)];
+      case 'ytd': case 'year': case 'prevYear': return [shiftMonths(from, -12), shiftMonths(to, -12)];
+      default: var n = diffDays(from, to) + 1; return [addDays(from, -n), addDays(from, -1)];
+    }
+  }
+  /* In-progress periods stop at today, so this month to date compares with the same days of last month. */
+  function clip(r) { return [r[0], r[1] > TODAY && r[0] <= TODAY ? TODAY : r[1]]; }
+  function cmpRanges() { var c = clip(PERIOD); return { cur: c, prev: prevRange(F.period, c[0], c[1]) }; }
+  function monthList(from, to) { var out = [], cur = monthStart(from); for (var i = 0; i < 72 && cur <= to; i++) { out.push(cur.slice(0, 7)); cur = addMonths(cur, 1); } return out; }
+  function locale() { return LANG === 'ar' ? 'ar-SA-u-nu-latn-ca-gregory' : 'en-GB'; }
+  function fmtDate(iso, yr) {
+    try { var o = { day: 'numeric', month: 'short', timeZone: 'UTC' }; if (yr) { o.year = 'numeric'; } return new Intl.DateTimeFormat(locale(), o).format(new Date(parseISO(String(iso).slice(0, 10)))); } catch (e) { return iso; }
+  }
+  function rangeLabel(r) {
+    if (!r || !r[0] || !r[1]) { return ''; }
+    return r[0] === r[1] ? fmtDate(r[0], true) : fmtDate(r[0], r[0].slice(0, 4) !== r[1].slice(0, 4)) + ' – ' + fmtDate(r[1], true);
+  }
+  var PLR = null;
+  function daysTxt(n) {
+    if (LANG !== 'ar') { return num(n) + (n === 1 ? ' day' : ' days'); }
+    var c = 'other'; try { c = (PLR || (PLR = new Intl.PluralRules('ar'))).select(n); } catch (e) { /* generic form */ }
+    return c === 'one' ? 'يوم واحد' : c === 'two' ? 'يومان' : c === 'few' ? n + ' أيام' : c === 'many' ? n + ' يومًا' : n + ' يوم';
+  }
+  function ageOf(iso) { var d = iso ? diffDays(String(iso).slice(0, 10), TODAY) : 0; return isNaN(d) ? 0 : Math.max(0, d); }
+  function lateTxt(iso) {
+    var d = diffDays(String(iso).slice(0, 10), TODAY); if (isNaN(d)) { return ''; }
+    return d > 0 ? tr(daysTxt(d) + ' overdue', 'متأخر ' + daysTxt(d)) : d === 0 ? tr('Due today', 'مستحق اليوم') : tr('Due in ' + daysTxt(-d), 'مستحق خلال ' + daysTxt(-d));
+  }
+  function agoTxt(iso, en, ar) { var a = ageOf(iso); return a ? tr((en || 'Waiting') + ' ' + daysTxt(a), (ar || 'منذ') + ' ' + daysTxt(a)) : tr('Today', 'اليوم'); }
 
-/* ---------- shell, filters, events ---------- */
-var TABS = [['overview', 't_overview', tabOverview], ['aging', 't_aging', tabAging], ['invoices', 't_invoices', tabInvoices], ['limits', 't_limits', tabLimits], ['coll', 't_coll', tabColl]];
-function opt(v, l, s) { return '<option value="' + esc(v) + '"' + (s ? ' selected' : '') + '>' + esc(l) + '</option>'; }
-function drawFilters() {
-  var f = S.f, el = $('#cc-fl'); if (!el) { return; }
-  function sel(k, lab, list) { return '<div><label>' + t(lab) + '</label><select data-f="' + k + '">' + opt('', t('all'), !f[k]) + list.map(function (x) { return opt(x, x, f[k] === x); }).join('') + '</select></div>'; }
-  el.innerHTML = sel('company', 'company', OPT.company) + sel('division', 'division', OPT.division) + sel('location', 'location', OPT.location) +
-    '<div><label>' + t('customer') + '</label><input type="search" data-f="customer" value="' + esc(f.customer) + '" placeholder="' + esc(t('search')) + '"></div><div><label>' + t('asof') + '</label><input type="date" data-f="asof" disabled value="' + esc(todayStr()) + '"></div><div><button class="cc-btn" data-act="reset" style="width:100%">' + t('reset') + '</button></div>';
-}
-function drawTabs() { $('#cc-tabs').innerHTML = TABS.map(function (x) { return '<button class="cc-tab' + (S.tab === x[0] ? ' on' : '') + '" data-act="tab" data-v="' + x[0] + '">' + t(x[1]) + '</button>'; }).join(''); }
-function shellHtml() {
-  host.setAttribute('dir', S.lang === 'ar' ? 'rtl' : 'ltr');
-  host.innerHTML = '<div class="cc-hd"><div class="cc-brand"><div class="cc-logo">DM GROUP</div><div><h1>' + esc(t('title')) + '</h1><p>' + esc(t('sub')) + '</p></div></div><div class="cc-hr"><span class="cc-ts" id="cc-ts"></span><button class="cc-btn" data-act="refresh">⟳ ' + t('refresh') + '</button><button class="cc-btn" data-act="lang">' + (S.lang === 'ar' ? 'English' : 'العربية') + '</button></div></div><div class="cc-fl" id="cc-fl"></div><div class="cc-tabs" id="cc-tabs"></div><div class="cc-body" id="cc-body"></div><div id="cc-modal"></div>';
-  drawFilters(); drawTabs(); ts();
-}
-function ts() { var e = $('#cc-ts'); if (e && S.ts) { e.textContent = t('updated') + ': ' + S.ts.toLocaleString('en-GB'); } }
-function renderBody() { if(!S.f.company){$('#cc-body').innerHTML='<div class="cc-note">Select one company. Current receivables are limited to '+esc(DISPLAY_CURRENCY)+' party accounts; use the <a href="/app/query-report/Accounts%20Receivable">native Accounts Receivable report</a> for historical or foreign-currency balances.</div>';return;}
-  var b = $('#cc-body'); if (!b) { return; } if (!S.ready) { b.innerHTML = loadingBlock(); return; }
-  var h; try { h = TABS.filter(function (x) { return x[0] === S.tab; })[0][2](); } catch (e) { h = '<div class="cc-note err">' + esc(t('err')) + ': ' + esc(e && e.message) + '</div>'; if (window.console) { console.error('Credit Controller', e); } }
-  b.innerHTML = h; $$('[data-tbx]', b).forEach(function (box) { var id = box.getAttribute('data-tbx'); if (TB[id]) { box.innerHTML = tshell(id); draw(id); } });
-}
-function resetData() { S.epoch++; CACHE = {}; D = {}; TB = {}; closeModal(); }
-function onFilters() { S.f.asof=todayStr(); resetData(); renderBody(); }
-host.addEventListener('click', function (ev) {
-  var el = ev.target.closest ? ev.target.closest('[data-act]') : null; if (!el || !host.contains(el)) { return; }
-  var act = el.getAttribute('data-act'), v = el.getAttribute('data-v') || '';
-  if (act === 'mbg' && ev.target !== el) { return; }
-  if (act === 'open') { ev.preventDefault(); var p = v.split('|'); if (!p[1] && el.getAttribute('data-name')) { p = [el.getAttribute('data-dt'), el.getAttribute('data-name')]; } openForm(p[0], p.slice(1).join('|')); return; }
-  ev.preventDefault();
-  if (act === 'tab') { S.tab = v; drawTabs(); renderBody(); }
-  else if (act === 'bk') { S.bucket = v; S.tab = 'invoices'; delete TB.t_inv; drawTabs(); renderBody(); }
-  else if (act === 'cust') { var c = v.split('|'); openCustomer(c[0], c.slice(1).join('|')); }
-  else if (act === 'lang') { S.lang = S.lang === 'ar' ? 'en' : 'ar'; window.__dmccLang = S.lang; TB = {}; shellHtml(); renderBody(); }
-  else if (act === 'refresh') { S.ts = new Date(); resetData(); ts(); renderBody(); }
-  else if (act === 'reset') { S.f = { company: '', division: '', location: '', customer: '', asof: todayStr() }; drawFilters(); onFilters(); }
-  else if (act === 'mclose' || act === 'mbg') { closeModal(); }
-  else if (act === 'sort') { var s = v.split('|'), tb = TB[s[0]], col = tb.cols.filter(function (x) { return x.k === s[1]; })[0]; tb.sort = { k: s[1], d: (tb.sort.k === s[1] && tb.sort.d === 'asc') ? 'desc' : 'asc', sf: col.sf }; tb.page = 1; if (tb.mode === 'server') { tb.dirty = true; } draw(tb.id); }
-  else if (act === 'pg') { var g = v.split('|'), tb2 = TB[g[0]]; tb2.page += +g[1]; if (tb2.mode === 'server') { tb2.dirty = true; } draw(tb2.id); }
-  else if (act === 'csv') { var tb3 = TB[v]; dl(v, tb3, tb3.mode === 'server' ? tb3.rows : view(tb3)); }
-  else if (act === 'csvall') { var tb4 = TB[v]; toast(t('loading')); tb4.exportAll().then(function (rows) { dl(v, tb4, rows); }).catch(function () { toast(t('err'), 1); }); }
-});
-host.addEventListener('change', function (ev) { var k = ev.target.getAttribute && ev.target.getAttribute('data-f'); if (!k) { return; } S.f[k] = ev.target.value; if (k !== 'customer') { onFilters(); } });
-var qt = null;
-host.addEventListener('input', function (ev) {
-  var el = ev.target, k = el.getAttribute && el.getAttribute('data-f'), id = el.getAttribute && el.getAttribute('data-tq');
-  if (k === 'customer') { clearTimeout(qt); qt = setTimeout(function () { S.f.customer = el.value; onFilters(); }, 600); return; }
-  if (!id || !TB[id]) { return; } clearTimeout(qt); qt = setTimeout(function () { var tb = TB[id]; if (!tb) { return; } tb.q = el.value; tb.page = 1; if (tb.mode === 'server') { tb.dirty = true; } draw(id); }, 350);
-});
-host.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && MD) { closeModal(); } });
+  /* ---------- ERP read-only API layer (bounded concurrency, one retry, cancellation) ---------- */
+  var REQ_TIMEOUT = 90000;
+  function callP(method, args) {
+    return new Promise(function (resolve, reject) {
+      var done = false, ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var timer = setTimeout(function () { if (done) { return; } done = true; if (ctl) { try { ctl.abort(); } catch (x) { /* ignore */ } } var te = new Error('Request timed out'); te.timeout = true; reject(te); }, REQ_TIMEOUT);
+      var body = new URLSearchParams();
+      Object.keys(args || {}).forEach(function (k) { var v = args[k]; if (v === undefined || v === null) { return; } body.append(k, (typeof v === 'object') ? JSON.stringify(v) : String(v)); });
+      fetch('/api/method/' + method, { method: 'POST', credentials: 'same-origin', signal: ctl ? ctl.signal : undefined,
+        headers: { 'X-Frappe-CSRF-Token': (G.frappe && frappe.csrf_token) || '', 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' }, body: body.toString() })
+        .then(function (r) { return r.text().then(function (txt) { return { r: r, txt: txt }; }); })
+        .then(function (o) {
+          if (done) { return; } done = true; clearTimeout(timer);
+          var j = null; try { j = JSON.parse(o.txt); } catch (x) { /* ignore */ }
+          if (o.r.ok && j && !j.exc) { resolve(j.message === undefined ? null : j.message); return; }
+          var ex = String((j && (j.exception || j.exc_type)) || '');
+          var perm = o.r.status === 401 || o.r.status === 403 || /permission/i.test(ex);
+          var e = new Error((perm ? 'No access to ' + ((args && (args.doctype || args.report_name)) || method) : (ex.split(':').slice(-1)[0].trim() || ('HTTP ' + o.r.status))));
+          e.status = perm ? 403 : o.r.status; reject(e);
+        })
+        .catch(function (err) { if (done) { return; } done = true; clearTimeout(timer); reject(err || new Error('request failed')); });
+    });
+  }
+  var active = 0, queue = [];
+  function pump() {
+    while (active < CFG.conc && queue.length) {
+      var j = queue.shift(); active++;
+      j.fn().then(j.res, j.rej).then(function () { active--; pump(); });
+    }
+  }
+  function limited(fn) { return new Promise(function (res, rej) { queue.push({ fn: fn, res: res, rej: rej }); pump(); }); }
+  function guarded(chk, method, args) {
+    return limited(function () {
+      if (destroyed || (chk && !chk())) { return Promise.resolve(null); }
+      return callP(method, args).catch(function (e) { if (e && (e.status === 403 || e.timeout || e.status === 417)) { throw e; } return new Promise(function (r) { setTimeout(r, 400); }).then(function () { return callP(method, args); }); });
+    });
+  }
+  function errKind(e) {
+    var txt = ''; try { txt = (e && (e.responseText || e.statusText || e.message)) || ''; } catch (x) { /* ignore */ }
+    return (/PermissionError|not permitted|No access|403/i.test(String(txt)) || (e && e.status === 403)) ? 'perm' : 'tech';
+  }
+  function getList(args, chk) { return guarded(chk, 'frappe.client.get_list', args); }
+  function getCount(dt, filters, chk) { return getList({ doctype: dt, fields: ['count(name) as n'], filters: filters || [], limit_page_length: 1 }, chk).then(function (r) { return +one(r).n || 0; }); }
+  /* All rows of a bounded list (paged); rejects with e.tooLarge when the source exceeds `cap`. */
+  function fetchAll(args, chk, cap) {
+    cap = cap || 20000;
+    return getCount(args.doctype, args.filters, chk).then(function (n) {
+      if (n > cap) { var e = new Error('too large'); e.tooLarge = n; throw e; }
+      var jobs = []; for (var i = 0; i < Math.ceil(n / 500); i++) { jobs.push(getList(Object.assign({}, args, { order_by: args.order_by || 'name asc', limit_start: i * 500, limit_page_length: 500 }), chk)); }
+      return Promise.all(jobs).then(function (res) { var out = []; res.forEach(function (r) { if (r) { out = out.concat(r); } }); return out; });
+    });
+  }
+  function docUrl(dt, name) {
+    try { if (G.frappe && frappe.utils && frappe.utils.get_form_link) { return frappe.utils.get_form_link(dt, name); } } catch (e) { /* fall through */ }
+    return '/app/' + dt.toLowerCase().replace(/ /g, '-') + '/' + encodeURIComponent(name);
+  }
+  function docLink(dt, name, label) { return '<a class="dms-link" href="' + esc(docUrl(dt, name)) + '" target="_blank" rel="noopener noreferrer"><bdi>' + esc(label || name) + '</bdi> ↗</a>'; }
 
-function names(dt) { return glist(dt, { fields: dt==='Company'?['name','default_currency']:['name'], limit: 500, order_by: 'name asc' }).then(function (r) { return (r || []).filter(function(x){return dt!=='Company'||x.default_currency===DISPLAY_CURRENCY;}).map(function (x) { return x.name; }); }).catch(function () { return []; }); }
-function init() {
-  if (typeof frappe === 'undefined' || !frappe.call) { host.innerHTML = '<div class="cc-note err">Frappe client not available.</div>'; return; }
-  shellHtml(); renderBody();
-  Promise.all([loadMeta(SI), loadMeta(PE), names('Company'), names('Division'),
-    glist(SI, { fields: ['location', 'count(name) as c'], group_by: 'location', filters: [[SI, 'docstatus', '=', 1], [SI, 'outstanding_amount', '>', 0]], limit: 100 }).catch(function () { return []; })]).then(function (r) {
-    OPT.company = r[2]; OPT.division = has(SI, 'custom_division') ? r[3] : []; OPT.location = has(SI, 'location') ? (r[4] || []).map(function (x) { return x.location; }).filter(Boolean).sort() : [];
-    S.ready = true; S.ts = new Date(); drawFilters(); ts(); renderBody();
-  }).catch(function (e) { $('#cc-body').innerHTML = '<div class="cc-note err">' + esc(t('err')) + ': ' + esc(e && (e.message || e)) + '</div>'; });
-}
-init();
+  /* ---------- data store: each source loads and renders independently; stale generations are dropped ---------- */
+  var D = {};
+  var softT = null;
+  function soon() { if (softT) { return; } softT = later(function () { softT = null; renderSoft(); }, 40); }
+  function run(key, fn) {
+    var g = GEN, chk = function () { return g === GEN && !destroyed; }, tok = {};
+    D[key] = null; D[key + 'Err'] = null; D[key + 'Tok'] = tok;
+    var mine = function () { return chk() && D[key + 'Tok'] === tok; };
+    fn(mine).then(function (v) { if (!mine()) { return; } D[key] = v; if (APP.afterLoad) { APP.afterLoad(key); } soon(); },
+      function (e) { if (!mine()) { return; } D[key + 'Err'] = e && e.tooLarge ? 'large:' + e.tooLarge : errKind(e); if (G.console && e && !e.status && !e.tooLarge) { console.error(APP.key, key, e); } soon(); });
+  }
+  function busy() { return !BOOTED || (APP.sources || []).some(function (k) { return D[k] == null && D[k + 'Err'] == null; }); }
+  function errText(kind) { return /^large:/.test(String(kind)) ? tr('too many records (' + num(+String(kind).slice(6)) + ') — narrow the filters or period', 'عدد كبير من السجلات (' + num(+String(kind).slice(6)) + ') — ضيّق المرشحات أو الفترة') : kind === 'perm' ? tr('permission denied for your user', 'لا تملك صلاحية القراءة') : tr('technical error while reading', 'خطأ تقني أثناء القراءة'); }
+
+  /* ---------- UI primitives ---------- */
+  var ICO = {
+    refresh: '<path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/>', filter: '<path d="M4 5h16l-6.2 7.6V19l-3.6 1.6v-8z"/>',
+    cal: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/>', down: '<path d="m6 9 6 6 6-6"/>',
+    prev: '<path d="m15 6-6 6 6 6"/>', next: '<path d="m9 6 6 6-6 6"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
+    up: '<path d="M12 19V6M6.5 11.5 12 6l5.5 5.5"/>', dn: '<path d="M12 5v13M6.5 12.5 12 18l5.5-5.5"/>', dl: '<path d="M12 4v11M7 10.5 12 15.5l5-5M5 20h14"/>'
+  };
+  function ico(n, cls) { return '<svg class="dms-ico' + (cls ? ' ' + cls : '') + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + ICO[n] + '</svg>'; }
+  function kpi(o) {
+    var inner = '<span class="dms-kpi-h"><span class="dms-kpi-l">' + (o.dot ? '<i class="dms-dot" style="--dms-c:' + o.dot + '"></i>' : '') + esc(o.label) + '</span>' + (o.top || '') + '</span>' +
+      '<span class="dms-kpi-n">' + o.val + '</span>' + (o.sub ? '<span class="dms-kpi-s">' + o.sub + '</span>' : '') + (o.foot != null ? '<span class="dms-kpi-f">' + o.foot + '</span>' : '');
+    var t = o.tip ? ' title="' + esc(o.tip) + '"' : '';
+    return o.act ? '<button type="button" class="dms-kpi" data-act="kpi" data-v="' + esc(o.act) + '"' + t + '>' + inner + '</button>' : '<div class="dms-kpi"' + t + '>' + inner + '</div>';
+  }
+  function kpis(list, ov) { return '<div class="dms-grid dms-kpis' + (ov ? ' dms-ov-kpis' : '') + '">' + list.join('') + '</div>'; }
+  function tagc(txt) { return '<span class="dms-tag">' + txt + '</span>'; }
+  function stat(k, txt) { return '<span class="dms-stat dms-stat-' + k + '">' + esc(txt) + '</span>'; }
+  function ctx(html) { return '<span class="dms-kpi-ctx">' + html + '</span>'; }
+  function badge(txt, color) { return '<span class="dms-badge" style="--dms-c:' + color + '">' + esc(txt) + '</span>'; }
+  function wait() { return '<span class="dms-sm">' + esc(tr('Calculating…', 'جارٍ الحساب…')) + '</span>'; }
+  function asOf() { return tagc(esc(tr('As of today', 'حتى اليوم'))); }
+  /* Value of a source-backed KPI: '…' while loading, '—' when the source failed (never a false zero). */
+  function kv(key, f) { return D[key + 'Err'] ? '—' : D[key] == null ? '…' : f(D[key]); }
+  function ks(key, f) { return D[key + 'Err'] ? esc(tr('Unavailable', 'غير متاح')) : D[key] == null ? wait() : f(D[key]); }
+  function spark(vs) {
+    var n = vs.length, real = vs.filter(function (v) { return v != null; }), pts = [];
+    if (n < 3 || real.length < 3 || !real.some(function (v) { return v > 0; })) { return ''; }
+    var max = Math.max.apply(null, real), min = Math.min(0, Math.min.apply(null, real)), rng = (max - min) || 1;
+    vs.forEach(function (v, i) { if (v != null) { pts.push([(i / (n - 1) * 100).toFixed(2), (26 - (v - min) / rng * 23).toFixed(2)]); } });
+    var line = pts.map(function (p) { return p.join(','); }).join(' L');
+    return '<svg class="dms-spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path class="dms-spark-a" d="M' + pts[0][0] + ',28 L' + line + ' L' + pts[pts.length - 1][0] + ',28 Z"/><path class="dms-spark-l" d="M' + line + '"/></svg>';
+  }
+  /* Change vs the comparison window. fmt formats values; small count bases show "was N" instead of a percentage. */
+  function deltaChip(cur, prev, R, fmt, isCount, lowerIsBetter) {
+    if (cur == null || prev == null || !R) { return ''; }
+    fmt = fmt || moneyS;
+    var tip = tr('This period', 'هذه الفترة') + ' (' + rangeLabel(R[0]) + '): ' + fmt(cur) + '\n' + tr('Previous', 'السابقة') + ' (' + rangeLabel(R[1]) + '): ' + fmt(prev);
+    var sr = '<span class="dms-sr"> ' + esc(tr('vs previous period', 'مقارنة بالفترة السابقة')) + '</span>';
+    if (prev === 0 || (isCount && prev < 5)) { return '<span class="dms-delta dms-flat" data-tip="' + esc(tip) + '">' + esc(tr('was', 'كان')) + ' <bdi>' + esc(fmt(prev)) + '</bdi>' + sr + '</span>'; }
+    var p = (cur - prev) / prev * 100, a = Math.abs(p), k = a < 0.05 ? 'flat' : p > 0 ? 'up' : 'down', tone = k === 'flat' ? 'flat' : ((k === 'up') !== !!lowerIsBetter ? 'up' : 'down');
+    var txt = a > 999 ? '10×+' : (a < 10 ? a.toFixed(1) : Math.round(a)) + '%';
+    return '<span class="dms-delta dms-' + tone + '" data-tip="' + esc(tip) + '">' + (k === 'flat' ? '' : ico(k === 'up' ? 'up' : 'dn')) + '<bdi>' + (k === 'down' ? '−' : '') + txt + '</bdi>' + sr + '</span>';
+  }
+  function panel(title, body, extra, meta) {
+    return '<section class="dms-panelbox ' + (extra || '') + '"><div class="dms-ph"><h3 class="dms-h3">' + esc(title) + '</h3>' + (meta ? '<span class="dms-ph-meta">' + meta + '</span>' : '') + '</div>' + body + '</section>';
+  }
+  function note(txt) { return '<p class="dms-note">' + txt + '</p>'; }
+  function alertBox(kind, html) { return '<div class="dms-alert dms-alert-' + kind + '" role="' + (kind === 'err' ? 'alert' : 'status') + '">' + html + '</div>'; }
+  function empty(txt) { return '<div class="dms-empty">' + esc(txt || tr('No data for the current filters.', 'لا توجد بيانات للمرشحات الحالية.')) + '</div>'; }
+  function srcErr(kind, what) { return alertBox('err', '<b>' + esc(tr('Source unavailable', 'المصدر غير متاح')) + ':</b> ' + esc(what) + ' — ' + esc(errText(kind))); }
+  function skel(n, cls) { return rep('<div class="dms-skel ' + (cls || '') + '"></div>', n); }
+  /* Body for a panel backed by source `key`: skeleton while loading, named error on failure, else f(data). */
+  function src(key, what, f) { return D[key + 'Err'] ? srcErr(D[key + 'Err'], what) : D[key] == null ? skel(1, 'dms-skel-panel') : f(D[key]); }
+
+  /* ---------- charts (HTML/CSS; hover details via the shared tooltip, data-tip) ---------- */
+  function niceMax(v) { if (!(v > 0)) { return 1; } var p = Math.pow(10, Math.floor(Math.log(v) / Math.LN10)), f = v / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
+  function axisFmt(v) { var a = Math.abs(v); return a >= 1e9 ? +(v / 1e9).toFixed(1) + 'B' : a >= 1e6 ? +(v / 1e6).toFixed(1) + 'M' : a >= 1e3 ? +(v / 1e3).toFixed(1) + 'K' : String(a < 10 ? +v.toFixed(2) : Math.round(v)); }
+  function bucketLabel(k, g, short) {
+    if (g === 'cat') { return String(k); }
+    if (g === 'week' && !short) { return tr('Week of ', 'أسبوع ') + fmtDate(k, true); }
+    if (g !== 'month') { return fmtDate(k, !short); }
+    try { return new Intl.DateTimeFormat(locale(), { month: 'short', year: '2-digit', timeZone: 'UTC' }).format(new Date(parseISO(k + '-01'))); } catch (e) { return k; }
+  }
+  /* Count charts get whole-number ticks (top is a multiple of 4), so small counts never show 0, 1, 1, 2, 2. */
+  function countTop(max, fmt) { var t = niceMax(max); return fmt === num ? Math.max(4, Math.ceil(t / 4) * 4) : t; }
+  function granName(g) { return g === 'day' ? tr('by day', 'يوميًا') : g === 'week' ? tr('by week', 'أسبوعيًا') : tr('by month', 'شهريًا'); }
+  /* Time buckets for a range: daily up to 45 days, weekly up to 120 days, monthly beyond; stops at today. */
+  function buckets(range) {
+    var from = range[0], to = clip(range)[1], span = diffDays(from, to) + 1, g = span <= 45 ? 'day' : span <= 120 ? 'week' : 'month', keys = [], cur, i;
+    function keyOf(iso) { iso = String(iso).slice(0, 10); return g === 'day' ? iso : g === 'week' ? weekStartOf(iso) : iso.slice(0, 7); }
+    if (to < from) { return { keys: [], gran: g, keyOf: keyOf }; }
+    if (g === 'month') { keys = monthList(from, to); } else { cur = keyOf(from); for (i = 0; i < 200 && cur <= to; i++) { keys.push(cur); cur = addDays(cur, g === 'day' ? 1 : 7); } }
+    return { keys: keys, gran: g, keyOf: keyOf };
+  }
+  /* Grouped rows (one per date) folded into buckets: rows[dateField], rows[valField]. */
+  function series(range, rows, dateF, valF) {
+    var B = buckets(range), d = {}; B.keys.forEach(function (k) { d[k] = { v: 0, n: 0 }; });
+    (rows || []).forEach(function (r) { var k = B.keyOf(r[dateF]); if (d[k]) { d[k].v += valF ? (+r[valF] || 0) : 1; d[k].n += +r.n || (valF ? 0 : 1); } });
+    B.d = d; return B;
+  }
+  function legend(series) { return '<div class="dms-legend">' + series.map(function (s) { return '<span><i style="--dms-c:' + s.color + '"></i>' + esc(s.label) + '</span>'; }).join('') + '</div>'; }
+  /* Column chart. ser = [{label, color, val: function (key) {}}]; fmt formats values (default money). */
+  function barChart(keys, gran, ser, fmt, extraTip, emptyTxt) {
+    if (!Array.isArray(ser)) { ser = [ser]; }
+    fmt = fmt || moneyFull; var max = 0;
+    keys.forEach(function (k) { ser.forEach(function (s) { max = Math.max(max, s.val(k) || 0); }); });
+    if (!keys.length || !max) { return empty(emptyTxt || tr('Nothing in this range.', 'لا شيء في هذا النطاق.')); }
+    var top = countTop(max, fmt), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, gran) + ser.map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k) || 0); }).join('') + (extraTip ? extraTip(k) : '');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '">' + ser.map(function (s) { var v = s.val(k) || 0; return '<i class="dms-bar' + (v ? '' : ' dms-bar-0') + '" style="height:' + (v / top * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i>'; }).join('') + '</div>';
+    }).join('');
+    var aria = ser.map(function (s) { return s.label + ': ' + keys.map(function (k) { return bucketLabel(k, gran, true) + ' ' + fmt(s.val(k) || 0); }).join(', '); }).join('; ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + (ser.length > 1 ? legend(ser) : '');
+  }
+  /* Line chart for balances (may go negative). ser = [{label, color, val(key), dash?}]; the first series is the main line. */
+  function lineChart(keys, gran, ser, fmt) {
+    fmt = fmt || moneyFull; var all = [];
+    keys.forEach(function (k) { ser.forEach(function (s) { var v = s.val(k); if (v != null) { all.push(v); } }); });
+    if (!keys.length || !all.length) { return empty(); }
+    var mx = Math.max.apply(null, all), mn = Math.min.apply(null, all), hi = mx > 0 ? niceMax(mx) : 0, lo = mn < 0 ? -niceMax(-mn) : 0;
+    if (hi === lo) { hi = lo + 1; }
+    var y = function (v) { return (100 - (v - lo) / (hi - lo) * 100).toFixed(2); }, x = function (i) { return (keys.length < 2 ? 50 : i / (keys.length - 1) * 100).toFixed(2); };
+    var ticks = [0, 0.25, 0.5, 0.75, 1].map(function (t) { return lo + (hi - lo) * t; });
+    var paths = ser.map(function (s) { var pts = keys.map(function (k, i) { var v = s.val(k); return v == null ? null : x(i) + ',' + y(v); }).filter(Boolean); return '<polyline class="dms-line' + (s.dash ? ' dms-line-ref' : '') + '" style="--dms-c:' + s.color + '" points="' + pts.join(' ') + '"/>'; }).join('');
+    var zero = lo < 0 ? '<i class="dms-gl dms-gl-0" style="bottom:' + ((0 - lo) / (hi - lo) * 100).toFixed(2) + '%"></i>' : '';
+    var hits = keys.map(function (k) { return '<div class="dms-col dms-col-hit" data-tip="' + esc(bucketLabel(k, gran) + ser.map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k)); }).join('')) + '"></div>'; }).join('');
+    var aria = ser[0].label + ': ' + keys.map(function (k) { return bucketLabel(k, gran, true) + ' ' + fmt(ser[0].val(k)); }).join(', ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (v, i) { return '<span style="bottom:' + i * 25 + '%">' + axisFmt(v) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + [0, 25, 50, 75, 100].map(function (b) { return '<i class="dms-gl" style="bottom:' + b + '%"></i>'; }).join('') + zero + '<svg class="dms-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">' + paths + '</svg><div class="dms-cols">' + hits + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + (ser.length > 1 ? legend(ser) : '');
+  }
+  /* Stacked columns (one bar per key, segments per series). */
+  function stackChart(keys, gran, ser, fmt) {
+    fmt = fmt || num; var tot = {}, max = 0;
+    keys.forEach(function (k) { tot[k] = sum(ser, function (s) { return s.val(k) || 0; }); max = Math.max(max, tot[k]); });
+    if (!keys.length || !max) { return empty(); }
+    var top = countTop(max, fmt), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, gran) + ser.filter(function (s) { return s.val(k); }).map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k)); }).join('');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '"><span class="dms-stackbar" style="height:' + (tot[k] / top * 100).toFixed(2) + '%">' + ser.map(function (s) { var v = s.val(k) || 0; return v ? '<i style="flex:' + v + ' 0 0;background:' + s.color + '"></i>' : ''; }).join('') + '</span></div>';
+    }).join('');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(ser.map(function (s) { return s.label; }).join(', ')) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + legend(ser);
+  }
+  function fitChartLabels() {
+    HOST.querySelectorAll('.dms-xaxis').forEach(function (axis) {
+      var labels = axis.querySelectorAll('span'), widest = 0;
+      labels.forEach(function (label) { var range = document.createRange(); range.selectNodeContents(label); widest = Math.max(widest, range.getBoundingClientRect().width); });
+      var slots = Math.max(1, Math.min(8, Math.floor(axis.clientWidth / (widest + 16)))), step = Math.max(1, Math.ceil(labels.length / slots));
+      labels.forEach(function (label, i) { label.style.visibility = i % step ? 'hidden' : 'visible'; });
+    });
+  }
+  /* Share rows: label · bar · value · %. items = [{label, value, color, act?, tip?}]; ordered=true keeps the given order. */
+  function shareList(items, head, fmt, ordered) {
+    fmt = fmt || num; var tot = sum(items, function (s) { return s.value; }), rows = items.filter(function (s) { return s.value; });
+    if (!ordered) { rows = rows.slice().sort(function (a, b) { return b.value - a.value; }); }
+    if (!tot) { return empty(); }
+    return (head ? '<div class="dms-share-t">' + head + '</div>' : '') + rows.map(function (s) {
+      var tip = s.tip || (s.label + ': ' + fmt(s.value) + ' (' + pct(s.value, tot) + ')');
+      var inner = '<span class="dms-share-l"><i class="dms-dot" style="--dms-c:' + s.color + '"></i>' + bdi(s.label) + '</span><span class="dms-share-b"><i style="width:' + (s.value / tot * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i></span>' +
+        '<span class="dms-num">' + esc(fmt(s.value)) + '</span><span class="dms-share-p dms-num">' + pct(s.value, tot, 0) + '</span>';
+      return s.act ? '<button type="button" class="dms-share dms-share-btn" data-act="kpi" data-v="' + esc(s.act) + '" data-tip="' + esc(tip) + '">' + inner + '</button>' : '<div class="dms-share" data-tip="' + esc(tip) + '">' + inner + '</div>';
+    }).join('');
+  }
+  /* Ranked horizontal bars: items = [{label, value, color?, act?}]. */
+  function hbars(items, fmt, color) {
+    if (!items.length) { return empty(); }
+    var max = Math.max.apply(null, items.map(function (i) { return Math.abs(i.value); }).concat([1])); fmt = fmt || num;
+    return items.map(function (i) {
+      var inner = '<span class="dms-split-l">' + bdi(i.label) + '</span><span class="dms-split"><i style="width:' + (Math.abs(i.value) / max * 100).toFixed(2) + '%;background:' + (i.color || color || 'var(--dms-royal)') + '"></i></span><span class="dms-num dms-split-v">' + esc(fmt(i.value)) + '</span>';
+      var tip = ' data-tip="' + esc(i.label + ': ' + fmt(i.value)) + '"';
+      return i.act ? '<button type="button" class="dms-stack-row dms-split-row" data-act="kpi" data-v="' + esc(i.act) + '"' + tip + '>' + inner + '</button>' : '<div class="dms-stack-row dms-split-row"' + tip + '>' + inner + '</div>';
+    }).join('');
+  }
+  /* Two-part bars ranked by total: items = [{label, total, part, act?}]; parts = [{label, color}] for part and remainder. */
+  function splitBars(items, parts, fmt) {
+    if (!items.length) { return empty(); }
+    fmt = fmt || money; var max = Math.max.apply(null, items.map(function (i) { return i.total; }).concat([1]));
+    return items.map(function (i) {
+      var tip = i.label + '\n' + parts[0].label + ': ' + fmt(i.part) + '\n' + parts[1].label + ': ' + fmt(i.total - i.part);
+      var bar = '<span class="dms-split"><i style="width:' + (i.part / max * 100).toFixed(2) + '%;background:' + parts[0].color + '"></i><i style="width:' + (Math.max(0, i.total - i.part) / max * 100).toFixed(2) + '%;background:' + parts[1].color + '"></i></span>';
+      var inner = '<span class="dms-split-l">' + bdi(i.label) + '</span>' + bar + '<span class="dms-num dms-split-v">' + esc(fmt(i.total)) + '</span>';
+      return i.act ? '<button type="button" class="dms-stack-row dms-split-row" data-act="kpi" data-v="' + esc(i.act) + '" data-tip="' + esc(tip) + '">' + inner + '</button>' : '<div class="dms-stack-row dms-split-row" data-tip="' + esc(tip) + '">' + inner + '</div>';
+    }).join('') + legend(parts);
+  }
+  function mixBar(segs) {
+    var tot = sum(segs, function (s) { return s.value; }); if (!tot) { return ''; }
+    return '<span class="dms-mix"><span class="dms-mix-b">' + segs.map(function (s) { return s.value ? '<i style="width:' + (s.value / tot * 100).toFixed(2) + '%;background:' + s.color + '" data-tip="' + esc(s.label + ': ' + (s.fmt || num)(s.value)) + '"></i>' : ''; }).join('') + '</span></span>';
+  }
+  var PAL = ['var(--dms-royal)', '#6b8be0', '#1f8a5b', '#d97a1e', '#8a97a8', '#a3b4ef', '#c2412d', '#d6a419', '#4b5a6e', '#b6bfca'];
+
+  /* ---------- tables: client-side (search / sort / pagination / CSV) and server-side (paginated, sortable, CSV) ---------- */
+  var TBL = {}, TS = {}, SS = {}, focusId = null;
+  function regTable(spec) { TBL[spec.id] = spec; return '<div class="dms-tbl" data-tbl="' + esc(spec.id) + '"></div>'; }
+  function fillTables(scope) { var els = (scope || HOST).querySelectorAll('[data-tbl]'); for (var i = 0; i < els.length; i++) { fillTable(els[i].getAttribute('data-tbl'), els[i]); } }
+  function clientRows(sp, st) {
+    var rows = sp.rows, q = st.q.trim().toLowerCase();
+    if (q) { rows = rows.filter(function (r) { return sp.text(r).toLowerCase().indexOf(q) >= 0; }); }
+    if (st.sk) { var col = sp.cols.filter(function (c) { return c.k === st.sk; })[0]; if (col && col.s) { rows = rows.slice().sort(function (a, b) { var x = col.s(a), y = col.s(b); return (x < y ? -1 : x > y ? 1 : 0) * st.dir; }); } }
+    return rows;
+  }
+  function thead(sp, sk, dir, act, id) {
+    return '<thead><tr>' + sp.cols.map(function (c) {
+      var key = act === 'ssort' ? c.sf : c.k, can = act === 'ssort' ? !!c.sf : !!c.s, on = can && sk === key;
+      return '<th class="' + (can ? 'dms-th-s' : '') + (c.num ? ' dms-th-n' : '') + '"' + (can ? ' data-act="' + act + '" data-id="' + esc(id) + '" data-v="' + esc(key) + '" tabindex="0" aria-sort="' + (on ? (dir > 0 ? 'ascending' : 'descending') : 'none') + '"' : '') + '>' + esc(c.h) + (on ? (dir > 0 ? ' ▲' : ' ▼') : '') + '</th>';
+    }).join('') + '</tr></thead>';
+  }
+  function tcells(sp, r) { return '<tr>' + sp.cols.map(function (c) { return '<td' + (c.num ? ' class="dms-td-n"' : '') + '>' + c.r(r) + '</td>'; }).join('') + '</tr>'; }
+  function fillTable(id, el) {
+    var sp = TBL[id]; el = el || HOST.querySelector('[data-tbl="' + id + '"]'); if (!sp || !el) { return; }
+    if (sp.server) { return fillServer(id, el); }
+    var st = TS[id] || (TS[id] = { q: '', page: 1, sk: sp.sk || '', dir: sp.dir || 1 }), rows = clientRows(sp, st);
+    var ps = sp.pageSize || CFG.pageSize, pages = Math.max(1, Math.ceil(rows.length / ps)); if (st.page > pages) { st.page = pages; }
+    var slice = rows.slice((st.page - 1) * ps, st.page * ps);
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(tr('Search this table…', 'ابحث في الجدول…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search this table', 'ابحث في الجدول')) + '"><span class="dms-tb-r"><span class="dms-sm">' + num(rows.length) + ' ' + esc(rows.length === 1 ? tr('row', 'سجل') : tr('rows', 'سجل')) + (st.q ? ' / ' + num(sp.rows.length) : '') + '</span>' +
+      (rows.length ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csv" data-id="' + esc(id) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    if (sp.notice) { h += sp.notice; }
+    if (!rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
+    h += '<div class="dms-tablewrap"><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'tsort', id) + '<tbody>' + slice.map(function (r) { return tcells(sp, r); }).join('') + '</tbody>' + (sp.foot ? '<tfoot>' + sp.foot(rows) + '</tfoot>' : '') + '</table></div>';
+    h += pager(id, 'tpage', st.page, pages, rows.length, ps);
+    el.innerHTML = h; restoreFocus(el, id);
+  }
+  function pager(id, act, pg, pages, total, ps) {
+    if (total <= ps) { return ''; }
+    return '<div class="dms-pager"><span>' + esc(tr('Showing', 'عرض')) + ' ' + num((pg - 1) * ps + 1) + '–' + num(Math.min(pg * ps, total)) + ' / ' + num(total) + '</span><span><button type="button" class="dms-btn" data-act="' + act + '" data-id="' + esc(id) + '" data-v="-1"' + (pg <= 1 ? ' disabled' : '') + '>‹ ' + esc(tr('Previous', 'السابق')) + '</button> ' +
+      esc(tr('Page', 'صفحة')) + ' ' + pg + ' ' + esc(tr('of', 'من')) + ' ' + pages + ' <button type="button" class="dms-btn" data-act="' + act + '" data-id="' + esc(id) + '" data-v="1"' + (pg >= pages ? ' disabled' : '') + '>' + esc(tr('Next', 'التالي')) + ' ›</button></span></div>';
+  }
+  function restoreFocus(el, id) { if (focusId === id) { var i = el.querySelector('[data-tq]'); if (i) { i.focus(); try { i.setSelectionRange(i.value.length, i.value.length); } catch (e) { /* ignore */ } } } }
+  function srvArgs(sp, st) {
+    var q = st.q.trim(), base = { doctype: sp.dt, filters: sp.filters };
+    if (sp.parent) { base.parent = sp.parent; }
+    if (q && sp.search) { base.or_filters = sp.search.map(function (f) { return [sp.dt, f, 'like', '%' + q + '%']; }); }
+    return base;
+  }
+  function srvOrder(sp, st) { return st.sk ? st.sk + (st.dir > 0 ? ' asc' : ' desc') : sp.order; }
+  function fillServer(id, el) {
+    var sp = TBL[id], st = SS[id] || (SS[id] = { q: '', page: 1, total: null, rows: null, loading: false, err: null, req: 0, sk: '', dir: 1 });
+    if (!st.dirty && st.rows && st.key === JSON.stringify(sp.filters)) { return paintServer(id, el); }
+    st.dirty = false; st.key = JSON.stringify(sp.filters);
+    var req = ++st.req; st.loading = true; st.err = null;
+    var ps = sp.pageSize || CFG.modalPage, base = srvArgs(sp, st);
+    paintServer(id, el);
+    var chk = function () { return !destroyed && SS[id] && SS[id].req === req; };
+    if (sp.loader) { sp.loader(st.page - 1, ps, st.q.trim(), srvOrder(sp, st)).then(function (res) { if (!chk()) { return; } st.total = res.total; st.rows = res.rows || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); }, function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } }); return; }
+    var cnt = getList(Object.assign({}, base, { fields: ['count(name) as n'], limit_page_length: 1 }), chk).then(function (r) { return r ? +one(r).n || 0 : null; });
+    var rows = getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: (st.page - 1) * ps, limit_page_length: ps }), chk);
+    Promise.all([cnt, rows]).then(function (res) {
+      if (!chk()) { return; } st.total = res[0]; st.rows = res[1] || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]'));
+    }).catch(function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } });
+  }
+  function paintServer(id, el) {
+    if (!el) { return; } var sp = TBL[id], st = SS[id], ps = sp.pageSize || CFG.modalPage;
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(sp.searchHint || tr('Search…', 'بحث…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search', 'بحث')) + '"><span class="dms-tb-r"><span class="dms-sm">' + (st.total == null ? '' : num(st.total) + ' ' + esc(st.total === 1 ? tr('record', 'سجل') : tr('records', 'سجل'))) + '</span>' +
+      (st.total ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csvall" data-id="' + esc(id) + '" title="' + esc(tr('Export up to 5,000 rows', 'تصدير حتى 5,000 سجل')) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    if (st.err) { el.innerHTML = h + alertBox('err', esc(st.err === 'perm' ? tr('Permission denied for your user.', 'لا تملك صلاحية القراءة.') : tr('Technical error while reading this list.', 'خطأ تقني أثناء قراءة القائمة.')) + ' <button type="button" class="dms-linkbtn" data-act="sretry" data-id="' + esc(id) + '">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>'); return restoreFocus(el, id); }
+    if (st.loading && !st.rows) { el.innerHTML = h + '<div class="dms-skel"></div>'; return restoreFocus(el, id); }
+    if (!st.rows || !st.rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
+    var pages = Math.max(1, Math.ceil((st.total || 0) / ps));
+    h += '<div class="dms-tablewrap" style="opacity:' + (st.loading ? .55 : 1) + '"' + (st.loading ? ' aria-busy="true"' : '') + '><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'ssort', id) + '<tbody>' + st.rows.map(function (r) { return tcells(sp, r); }).join('') + '</tbody></table></div>' + pager(id, 'spage', st.page, pages, st.total || 0, ps);
+    el.innerHTML = h; restoreFocus(el, id);
+  }
+  function csvCell(v) { v = v == null ? '' : String(v); if (/^[=+\-@\t\r]/.test(v) && !/^-?[\d.,]+$/.test(v)) { v = "'" + v; } return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  function download(name, sp, rows) {
+    var cols = sp.cols.filter(function (c) { return c.c; }), lines = [cols.map(function (c) { return csvCell(c.h); }).join(',')].concat(rows.map(function (r) { return cols.map(function (c) { return csvCell(c.c(r)); }).join(','); }));
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+    a.download = String(name).replace(/[^\w-]+/g, '_') + '_' + TODAY + '.csv'; HOST.appendChild(a); a.click(); later(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+  function exportServer(id) {
+    var sp = TBL[id], st = SS[id], out = [], step = 500, base = srvArgs(sp, st), g = GEN;
+    if (sp.loader) { toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…')); var acc = [], pg = function (p) { return sp.loader(p, 500, st.q.trim(), srvOrder(sp, st)).then(function (res) { acc = acc.concat(res.rows || []); return (res.rows || []).length === 500 && acc.length < 5000 ? pg(p + 1) : acc; }); }; pg(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); }); return; }
+    function next(s) {
+      return getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: s, limit_page_length: step }), function () { return g === GEN; }).then(function (r) {
+        out = out.concat(r || []); return (r && r.length === step && out.length < 5000) ? next(s + step) : out;
+      });
+    }
+    toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…'));
+    next(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); });
+  }
+  function toast(msg, bad) { var e = document.createElement('div'); e.className = 'dms-toast' + (bad ? ' dms-toast-err' : ''); e.setAttribute('role', 'status'); e.textContent = msg; HOST.appendChild(e); later(function () { e.remove(); }, 3500); }
+  /* common cells */
+  function dtc(v) { return v ? '<span class="dms-num">' + esc(String(v).slice(0, 10)) + '</span>' : '<span class="dms-sm">—</span>'; }
+  function who(v) { return v ? bdi(v) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>'; }
+  function txt(v) { return v ? bdi(v) : '<span class="dms-sm">—</span>'; }
+  function amc(v) { return v == null || v === '' ? '<span class="dms-sm">—</span>' : '<span class="dms-num">' + esc(amt(v)) + '</span>'; }
+  function overdueTag(due) { var d = diffDays(String(due || TODAY).slice(0, 10), TODAY); return d > 0 ? '<span class="dms-days ' + (d > 90 ? 'dms-days-bad' : 'dms-days-warn') + '">' + num(d) + '</span>' : '<span class="dms-sm">—</span>'; }
+  function col(h, f, o) { o = o || {}; return Object.assign({ h: h, sf: o.sort === false ? undefined : f, r: function (x) { return o.fmt ? o.fmt(x[f], x) : txt(x[f]); }, c: function (x) { return x[f]; } }, o); }
+  function linkCol(h, dt, f, labelF) { return { h: h, sf: f, r: function (x) { return docLink(typeof dt === 'function' ? dt(x) : dt, x[f], labelF ? x[labelF] || x[f] : x[f]); }, c: function (x) { return x[f]; } }; }
+
+  /* ---------- actions pending ---------- */
+  var PRIO = { high: ['High', 'عالية'], med: ['Medium', 'متوسطة'], low: ['Low', 'منخفضة'] };
+  function score(p, amount, age) { return { high: 300, med: 200, low: 100 }[p] + Math.min(40, Math.log(1 + Math.abs(amount || 0)) / Math.LN10 * 6) + Math.min(20, (age || 0) / 10); }
+  /* Server specs ({id, server:true, dt, filters, fields, order, it(row) → item}) load count + 6 most urgent rows each. */
+  function loadActions(specs, key) {
+    run(key || 'act', function (chk) {
+      return Promise.all(specs.filter(function (s) { return s.server; }).map(function (s) {
+        var c = getList({ doctype: s.dt, fields: ['count(name) as n'], filters: s.filters, limit_page_length: 1 }, chk).then(function (r) { return +one(r).n || 0; }, function (e) { return 'ERR:' + errKind(e); });
+        var l = (s.rank ? fetchAll({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order }, chk, 2000) : getList({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order, limit_page_length: 6 }, chk)).then(function (r) { return r || []; }, function (e) { return 'ERR:' + errKind(e); });
+        return Promise.all([c, l]).then(function (x) { return { id: s.id, count: typeof x[1] === 'string' ? x[1] : x[0], rows: Array.isArray(x[1]) ? x[1] : [] }; });
+      })).then(function (res) { var o = {}; res.forEach(function (x) { o[x.id] = x; }); return o; });
+    });
+  }
+  /* client: {id: {rows, item}} for client specs, null while their sources load, or 'ERR:kind'. */
+  function actModel(specs, key, client) {
+    var counts = {}, items = [], A = D[key || 'act'], AE = D[(key || 'act') + 'Err'];
+    specs.forEach(function (s) {
+      if (s.client) {
+        var c = client == null ? null : typeof client === 'string' ? client : client[s.id];
+        if (typeof c === 'string') { counts[s.id] = c; }
+        else if (c) { counts[s.id] = c.count != null ? c.count : c.rows.length; c.rows.slice(0, 6).forEach(function (r) { items.push(c.item(r)); }); }
+        return;
+      }
+      if (AE) { counts[s.id] = 'ERR:' + AE; return; }
+      var x = A && A[s.id]; if (!x) { return; }
+      counts[s.id] = x.count;
+      x.rows.forEach(function (r) { var it = s.it(r); it.dt = it.dt || s.dt; it.name = it.name || r.name; items.push(it); });
+    });
+    items.sort(function (a, b) { return b.score - a.score; });
+    var seen = {}; items = items.filter(function (it) { var k = it.dt + '|' + it.name; if (seen[k]) { return false; } seen[k] = 1; return true; });   /* one row per record, under its most urgent category */
+    return { specs: specs, counts: counts, items: items, ready: specs.every(function (s) { return counts[s.id] !== undefined; }) };
+  }
+  function pendingTotal(AM) {
+    if (!AM) { return null; }
+    var t = 0, any = false; Object.keys(AM.counts).forEach(function (k) { var c = AM.counts[k]; if (typeof c === 'number') { t += c; any = true; } });
+    return any ? t : null;
+  }
+  function dtLabel(dt) { var L = APP.dtLabels && APP.dtLabels[dt]; return L ? tr(L[0], L[1]) : dt; }
+  function arow(it) {
+    return '<a class="dms-arow" href="' + esc(it.href || docUrl(it.dt, it.name)) + '" target="_blank" rel="noopener noreferrer">' +
+      '<span class="dms-prio dms-prio-' + it.p + '">' + esc(tr(PRIO[it.p][0], PRIO[it.p][1])) + '</span>' +
+      '<span class="dms-arow-main"><span class="dms-arow-t"><bdi>' + esc(it.title || it.name) + '</bdi><span class="dms-arow-dt">' + esc(dtLabel(it.dt)) + '</span></span><span class="dms-arow-d">' + bdi(it.desc || '') + '</span></span>' +
+      '<span class="dms-arow-who">' + (it.who ? bdi(it.who) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>') + '</span>' +
+      '<span class="dms-arow-due dms-tone-' + (it.tone || 'n') + '">' + esc(it.due || '') + '</span><span class="dms-sr"> (' + esc(tr('opens in a new tab', 'يفتح في علامة تبويب جديدة')) + ')</span></a>';
+  }
+  function drillId(s) { return s.drill || ((s.client ? 'cli:' : 'srv:') + s.id); }
+  function catBtn(s, c) {
+    var err = typeof c === 'string', inner = '<span class="dms-acat-t">' + esc(s.short) + '</span><b class="dms-num">' + (err || c == null ? '—' : num(c)) + '</b>';
+    return (!err && c) ? '<button type="button" class="dms-acat" data-act="kpi" data-v="' + esc(drillId(s)) + '" title="' + esc(s.title + ' — ' + tr('view all', 'عرض الكل')) + '">' + inner + '</button>'
+      : '<div class="dms-acat dms-acat-off" title="' + esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.title) + '">' + inner + '</div>';
+  }
+  function actionsPanel(AM) {
+    var tot = pendingTotal(AM);
+    var h = '<section class="dms-panelbox dms-actpanel" id="dms-pending" tabindex="-1" aria-labelledby="dms-pending-h"><div class="dms-ph"><h3 class="dms-h3" id="dms-pending-h">' + esc(tr('Actions pending', 'الإجراءات المعلقة')) +
+      (tot != null ? ' <span class="dms-h3-n dms-num">' + num(tot) + '</span>' : '') + '</h3><span class="dms-ph-meta">' + esc(tr('As of today · most urgent first', 'حتى اليوم · الأكثر إلحاحًا أولًا')) + '</span>' +
+      (tab !== 'actions' && APP.tabs.some(function (x) { return x.id === 'actions'; }) ? '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="goto:actions">' + esc(tr('View all', 'عرض الكل')) + '</button>' : '') + '</div>';
+    if (!AM) { return h + '<div class="dms-arows" aria-busy="true">' + skel(6, 'dms-skel-row') + '</div></section>'; }
+    var known = AM.specs.filter(function (s) { return AM.counts[s.id] !== undefined; });
+    if (!known.length) { return h + '<div class="dms-arows" aria-busy="true">' + skel(6, 'dms-skel-row') + '</div></section>'; }
+    var errs = known.filter(function (s) { return typeof AM.counts[s.id] === 'string'; });
+    if (AM.ready && errs.length === AM.specs.length) { return h + alertBox('err', esc(tr('Pending actions could not be loaded.', 'تعذر تحميل الإجراءات المعلقة.')) + ' <button type="button" class="dms-linkbtn" data-act="refresh">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>') + '</section>'; }
+    var items = AM.items.slice(0, CFG.actRows || 7);
+    h += items.length ? '<div class="dms-arows">' + items.map(arow).join('') + '</div>' : (AM.ready ? '<div class="dms-empty dms-empty-sm">' + esc(tr('Nothing pending for this selection.', 'لا توجد إجراءات معلقة لهذا الاختيار.')) + '</div>' : '<div class="dms-arows" aria-busy="true">' + skel(4, 'dms-skel-row') + '</div>');
+    h += '<div class="dms-acats">' + AM.specs.map(function (s) { return catBtn(s, AM.counts[s.id]); }).join('') + '</div>';
+    if (errs.length) { h += note(esc(tr('Could not load: ', 'تعذر التحميل: ') + errs.map(function (s) { return s.short; }).join(', '))); }
+    return h + '</section>';
+  }
+  function actionsTab(AM, info) {
+    var h = alertBox('info', esc(info || tr('Action lists are as of today and not filtered by the period. They follow the filters where the source supports them.', 'قوائم الإجراءات حتى اليوم وغير مرتبطة بالفترة، وتتبع المرشحات حيثما يدعمها المصدر.')));
+    h += kpis((AM ? AM.specs : []).map(function (s) {
+      var c = AM.counts[s.id], err = typeof c === 'string';
+      return kpi({ label: s.title, val: c === undefined ? '…' : err ? '—' : num(c), sub: esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.why), act: (!err && c) ? drillId(s) : null });
+    }));
+    return h + actionsPanel(AM);
+  }
+
+  /* ---------- drill-downs (overlay) ---------- */
+  var OVL = null;
+  function openDrill(id) {
+    if (id.indexOf('goto:') === 0) { goTab(id.slice(5)); return; }
+    var r = null;
+    if (id.indexOf('srv:') === 0 && APP.actSpecs) {
+      var s = APP.actSpecs().filter(function (x) { return x.id === id.slice(4); })[0];
+      if (s && s.table) { delete SS.drill; r = { title: s.title, sub: s.why, spec: Object.assign({ id: 'drill', server: true, dt: s.dt, filters: s.filters, order: s.order, file: s.id }, s.table()) }; }
+    }
+    if (!r && APP.drill) { r = APP.drill(id); }
+    if (!r || (!r.spec && r.body == null)) { return; }
+    if (r.spec) { r.spec.id = 'drill'; if (!r.spec.server && !r.spec.pageSize) { r.spec.pageSize = CFG.modalPage; } }
+    delete SS.drill; delete TS.drill;
+    var opener = OVL ? OVL.opener : activeEl();
+    OVL = Object.assign(r, { id: id, prev: OVL && r.stack !== false ? OVL : null, opener: opener, openerKey: OVL ? OVL.openerKey : opener && opener.getAttribute && opener.getAttribute('data-v') }); renderOverlay();
+  }
+  function overlayHTML() {
+    if (!OVL) { return ''; }
+    var link = OVL.link ? ' ' + docLink(OVL.link[0], OVL.link[1], OVL.link[2]) : '';
+    return '<div class="dms-overlay" data-act="ovbg"><div class="dms-modal" role="dialog" aria-modal="true" aria-labelledby="dms-dialog-title"><div class="dms-dhead"><div>' + (OVL.prev ? '<button type="button" class="dms-linkbtn" data-act="ovback">‹ ' + esc(tr('Back', 'رجوع')) + '</button>' : '') + '<h3 id="dms-dialog-title">' + esc(OVL.title) + '</h3>' + (OVL.sub || link ? '<p class="dms-sm">' + esc(OVL.sub || '') + link + '</p>' : '') + '</div><button type="button" class="dms-x" data-act="closeov" aria-label="' + esc(tr('Close', 'إغلاق')) + '">×</button></div>' + (OVL.body || '') + (OVL.spec ? regTable(OVL.spec) : '') + '</div></div>';
+  }
+  function renderOverlay() { var el = $('[data-ref="overlay"]'); if (!el) { return; } var app = $('.dms-app'); if (app) { app.inert = !!OVL; } if (!OVL) { Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { delete TBL[k]; } }); } else { delete TBL.drill; } el.innerHTML = overlayHTML(); fillTables(el); var x = el.querySelector('.dms-x'); if (x) { x.focus(); } }
+  function closeOverlay() {
+    var previous = OVL; OVL = null; renderOverlay(); delete SS.drill; delete TS.drill;
+    if (!previous) { return; }
+    var opener = previous.opener;
+    if (!opener || !opener.isConnected) { opener = Array.prototype.find.call(HOST.querySelectorAll('[data-act="kpi"]'), function (el) { return el.getAttribute('data-v') === previous.openerKey; }); }
+    if (opener) { opener.focus({ preventScroll: true }); }
+  }
+
+  /* ---------- filters, period, toolbar, tabs ---------- */
+  var F = { period: APP.period || 'month', from: '', to: '' }, PERIOD = [];
+  (APP.filters || []).forEach(function (f) { F[f.k] = ''; });
+  var tab = APP.tabs[0].id, POP = null, FD = null, FS = {}, CAL = null, ANIM = false, built = false, AMC = null;
+  var PERIODS = [['today', 'Today', 'اليوم'], ['yesterday', 'Yesterday', 'أمس'], ['week', 'This week', 'هذا الأسبوع'], ['lastWeek', 'Last week', 'الأسبوع الماضي'],
+    ['month', 'This month', 'هذا الشهر'], ['lastMonth', 'Last month', 'الشهر الماضي'], ['quarter', 'This quarter', 'هذا الربع'], ['ytd', 'Year to date', 'السنة حتى اليوم'],
+    ['year', 'This year', 'هذه السنة'], ['prevYear', 'Previous year', 'السنة الماضية'], ['custom', 'Custom range', 'نطاق مخصص']];
+  var PGROUPS = [['today', 'yesterday'], ['week', 'lastWeek'], ['month', 'lastMonth'], ['quarter', 'ytd', 'year', 'prevYear'], ['custom']];
+  function curPeriod() { return periodRange(F.period, F.from, F.to); }
+  function periodName(k) { var p = PERIODS.filter(function (x) { return x[0] === k; })[0]; return p ? tr(p[1], p[2]) : k; }
+  function filterCount() { return (APP.filters || []).filter(function (f) { return F[f.k]; }).length; }
+  function optList(f, draft) { var l = f.options ? f.options(draft || F) : []; return (l || []).map(function (x) { return typeof x === 'string' ? { v: x, l: x } : x; }); }
+  function optLabel(f, v) { var o = optList(f).filter(function (x) { return x.v === v; })[0]; return o ? o.l : (f.label ? f.label(v) : v); }
+  function pendingBtnHTML() {
+    var n = pendingTotal(AMC), lbl = n == null ? (AMC && AMC.ready ? '—' : '…') : num(n);
+    return '<button type="button" class="dms-pend' + (n ? ' dms-pend-on' : '') + '" data-act="pending" data-fk="pending" title="' + esc(tr('Pending actions as of today — show the list', 'الإجراءات المعلقة حتى اليوم — عرض القائمة')) + '">' +
+      '<i class="dms-pend-dot" aria-hidden="true"></i><b class="dms-num">' + lbl + '</b><span class="dms-pend-l">' + esc(tr('pending', 'معلّقة')) + '</span></button>';
+  }
+  function opt(v, label, cur) { return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(label) + '</option>'; }
+  function ffield(f) {
+    if (f.type === 'text' || f.type === 'date') { return '<div class="dms-ff"><label for="dms-fd-' + f.k + '">' + esc(tr(f.en, f.ar)) + '</label><input type="' + (f.type === 'date' ? 'date' : 'search') + '" id="dms-fd-' + f.k + '" class="dms-input" data-fd="' + f.k + '" data-fk="fd:' + f.k + '" value="' + esc(FD[f.k] || '') + '" placeholder="' + esc(f.ph ? tr(f.ph[0], f.ph[1]) : '') + '" autocomplete="off"></div>'; }
+    var list = optList(f, FD), label = tr(f.en, f.ar), k = f.k;
+    var q = clean(FS[k]).toLowerCase(), cur = FD[k], shown = list.filter(function (x) { return !q || String(x.l).toLowerCase().indexOf(q) >= 0 || String(x.v).toLowerCase().indexOf(q) >= 0; }), more = shown.length > 200;
+    shown = shown.slice(0, 200);
+    if (cur && !shown.some(function (x) { return x.v === cur; })) { shown.unshift({ v: cur, l: optLabel(f, cur) }); }
+    var h = '<div class="dms-ff"><label for="dms-fd-' + k + '">' + esc(label) + '</label>';
+    if (list.length > 8) { h += '<input type="search" class="dms-input" data-fs="' + k + '" data-fk="fs:' + k + '" value="' + esc(FS[k] || '') + '" placeholder="' + esc(tr('Search ' + num(list.length) + ' options', 'ابحث في ' + num(list.length) + ' خيار')) + '" aria-label="' + esc(tr('Search', 'بحث') + ' — ' + label) + '" autocomplete="off">'; }
+    h += '<select id="dms-fd-' + k + '" class="dms-input" data-fd="' + k + '" data-fk="fd:' + k + '">' + opt('', f.none ? tr(f.none[0], f.none[1]) : tr('All', 'الكل'), cur) + shown.map(function (x) { return opt(x.v, x.l, cur); }).join('') + '</select>';
+    if (q && !shown.length) { h += '<span class="dms-ff-hint">' + esc(tr('No matches', 'لا نتائج')) + '</span>'; }
+    else if (more) { h += '<span class="dms-ff-hint">' + esc(tr('First 200 matches — type to narrow', 'أول 200 نتيجة — اكتب للتضييق')) + '</span>'; }
+    return h + '</div>';
+  }
+  function filtersPopHTML() {
+    var n = APP.filterNote ? APP.filterNote() : '';
+    return '<div class="dms-pop dms-pop-filters" role="dialog" aria-label="' + esc(tr('Filters', 'المرشحات')) + '"><div class="dms-pop-b">' + APP.filters.map(ffield).join('') + '</div>' +
+      (n ? '<p class="dms-pop-note">' + esc(n) + '</p>' : '') +
+      '<div class="dms-pop-f"><button type="button" class="dms-btn" data-act="fclear" data-fk="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button><button type="button" class="dms-btn dms-btn-primary" data-act="fapply" data-fk="fapply">' + esc(tr('Apply', 'تطبيق')) + '</button></div></div>';
+  }
+  function calendarHTML() {
+    var v = CAL.view, first = weekStartOf(v), mon = v.slice(0, 7), fdy = CAL.focus && CAL.focus.slice(0, 7) === mon ? CAL.focus : (CAL.from && CAL.from.slice(0, 7) === mon ? CAL.from : v), wd = '', rows = '', r, c, d;
+    for (c = 0; c < 7; c++) { try { wd += '<span role="columnheader">' + esc(new Intl.DateTimeFormat(locale(), { weekday: 'narrow', timeZone: 'UTC' }).format(new Date(parseISO(addDays(first, c))))) + '</span>'; } catch (e) { wd += '<span></span>'; } }
+    for (r = 0; r < 6; r++) {
+      rows += '<div role="row" class="dms-cal-row">';
+      for (c = 0; c < 7; c++) {
+        d = addDays(first, r * 7 + c);
+        var end = d === CAL.from || d === CAL.to, inR = CAL.from && CAL.to && d > CAL.from && d < CAL.to;
+        rows += '<button type="button" role="gridcell" class="dms-day' + (d.slice(0, 7) !== mon ? ' dms-out' : '') + (d === TODAY ? ' dms-today' : '') + (inR ? ' dms-in' : '') + (end ? ' dms-end' : '') +
+          (CAL.from && CAL.to && d === CAL.from && d !== CAL.to ? ' dms-s' : '') + (CAL.from && CAL.to && d === CAL.to && d !== CAL.from ? ' dms-e' : '') + '" data-act="calday" data-v="' + d + '" data-fk="day:' + d + '" tabindex="' + (d === fdy ? 0 : -1) +
+          '" aria-pressed="' + end + '" aria-label="' + esc(fmtDate(d, true)) + '"><bdi>' + (+d.slice(8, 10)) + '</bdi></button>';
+      }
+      rows += '</div>';
+    }
+    var ok = CAL.from && CAL.to, msg = ok ? '<bdi>' + esc(rangeLabel([CAL.from, CAL.to])) + '</bdi> · ' + esc(daysTxt(diffDays(CAL.from, CAL.to) + 1)) : esc(CAL.from ? tr('Select an end date', 'اختر تاريخ النهاية') : tr('Select a start date', 'اختر تاريخ البداية'));
+    var title = v; try { title = new Intl.DateTimeFormat(locale(), { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(parseISO(v))); } catch (e) { /* ISO fallback */ }
+    return '<div class="dms-cal"><div class="dms-cal-h"><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="-1" data-fk="calprev" aria-label="' + esc(tr('Previous month', 'الشهر السابق')) + '">' + ico('prev', 'dms-flip') + '</button>' +
+      '<b aria-live="polite">' + esc(title) + '</b><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="1" data-fk="calnext" aria-label="' + esc(tr('Next month', 'الشهر التالي')) + '">' + ico('next', 'dms-flip') + '</button></div>' +
+      '<div class="dms-cal-g" role="grid" aria-label="' + esc(title) + '"><div class="dms-cal-wd" role="row">' + wd + '</div>' + rows + '</div>' +
+      '<div class="dms-cal-f"><span class="dms-cal-msg" aria-live="polite">' + msg + '</span><span class="dms-cal-btns"><button type="button" class="dms-btn" data-act="popclose" data-fk="calcancel">' + esc(tr('Cancel', 'إلغاء')) + '</button>' +
+      '<button type="button" class="dms-btn dms-btn-primary" data-act="calapply" data-fk="calapply"' + (ok ? '' : ' disabled') + '>' + esc(tr('Apply', 'تطبيق')) + '</button></span></div></div>';
+  }
+  function periodPopHTML() {
+    var n = APP.periodNote ? APP.periodNote() : '';
+    return '<div class="dms-pop dms-pop-period' + (CAL ? ' dms-has-cal' : '') + '" role="dialog" aria-label="' + esc(tr('Select period', 'اختر الفترة')) + '"><div class="dms-presets">' +
+      PGROUPS.map(function (g) {
+        return '<div class="dms-pgroup">' + g.map(function (k) {
+          var on = CAL ? k === 'custom' : F.period === k;
+          return '<button type="button" class="dms-preset' + (on ? ' dms-on' : '') + '" aria-pressed="' + on + '" data-act="preset" data-v="' + k + '" data-fk="preset:' + k + '"><span>' + esc(periodName(k)) + '</span>' +
+            (k !== 'custom' ? '<small><bdi>' + esc(rangeLabel(periodRange(k))) + '</bdi></small>' : '') + '</button>';
+        }).join('') + '</div>';
+      }).join('') + '</div>' + (CAL ? calendarHTML() : '') + (n ? '<p class="dms-pop-note dms-pop-note-p">' + esc(n) + '</p>' : '') + '</div>';
+  }
+  function toolbarHTML() {
+    var ac = filterCount(), R = PERIOD, hasF = APP.filters && APP.filters.length;
+    return '<div class="dms-topbar"><div class="dms-tb-title"><h2 class="dms-title">' + esc(APP.title()) + '</h2><p class="dms-sub" data-ref="stamp"></p></div>' +
+      '<div class="dms-tb-ctrls"><div class="dms-pendwrap" data-ref="pendwrap">' + pendingBtnHTML() + '</div>' +
+      (APP.period === false ? '' : '<div class="dms-anchor"><button type="button" class="dms-btn dms-period" data-act="pop" data-v="period" data-fk="pop:period" aria-haspopup="dialog" aria-expanded="' + (POP === 'period') + '" aria-label="' + esc(tr('Period', 'الفترة') + ': ' + periodName(F.period) + ' ' + rangeLabel(R)) + '">' + ico('cal') +
+        '<span class="dms-period-t"><b>' + esc(periodName(F.period)) + '</b><span class="dms-period-r"><bdi>' + esc(rangeLabel(R)) + '</bdi></span></span>' + ico('down', 'dms-chev') + '</button>' + (POP === 'period' ? periodPopHTML() : '') + '</div>') +
+      (hasF ? '<div class="dms-anchor"><button type="button" class="dms-btn' + (ac ? ' dms-btn-on' : '') + '" data-act="pop" data-v="filters" data-fk="pop:filters" aria-haspopup="dialog" aria-expanded="' + (POP === 'filters') + '">' + ico('filter') +
+        '<span class="dms-btn-t">' + esc(tr('Filters', 'المرشحات')) + '</span>' + (ac ? '<span class="dms-count" aria-label="' + esc(ac + ' ' + tr('active', 'نشط')) + '">' + ac + '</span>' : '') + '</button>' + (POP === 'filters' ? filtersPopHTML() : '') + '</div>' : '') +
+      '<button type="button" class="dms-btn dms-icobtn" data-act="refresh" data-ref="refresh" data-fk="refresh" aria-label="' + esc(tr('Refresh data', 'تحديث البيانات')) + '" title="' + esc(tr('Refresh data (keeps filters)', 'تحديث البيانات (مع الإبقاء على المرشحات)')) + '">' + ico('refresh') + '</button></div>' +
+      '<div class="dms-lang" role="group" aria-label="Language / اللغة"><button type="button" data-act="lang" data-v="en" data-fk="lang:en" lang="en" aria-pressed="' + (LANG === 'en') + '"' + (LANG === 'en' ? ' class="dms-on"' : '') + '>English</button>' +
+        '<button type="button" data-act="lang" data-v="ar" data-fk="lang:ar" lang="ar" aria-pressed="' + (LANG === 'ar') + '"' + (LANG === 'ar' ? ' class="dms-on"' : '') + '>العربية</button></div></div>';
+  }
+  function chipsHTML() {
+    var a = (APP.filters || []).filter(function (f) { return F[f.k]; }); if (!a.length) { return ''; }
+    return '<div class="dms-chips">' + a.map(function (f) {
+      var v = optLabel(f, F[f.k]), lab = tr(f.en, f.ar);
+      return '<span class="dms-chip"><span class="dms-chip-k">' + esc(lab) + '</span><bdi>' + esc(v) + '</bdi><button type="button" class="dms-chip-x" data-act="rmf" data-v="' + f.k + '" data-fk="rmf:' + f.k + '" aria-label="' + esc(tr('Remove filter', 'إزالة المرشح') + ' ' + lab + ': ' + v) + '">' + ico('x') + '</button></span>';
+    }).join('') + (a.length > 1 ? '<button type="button" class="dms-linkbtn" data-act="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button>' : '') + '</div>';
+  }
+  function tabsHTML() {
+    var pend = pendingTotal(AMC);
+    return '<div class="dms-tabs" role="tablist" aria-label="' + esc(tr('Sections', 'الأقسام')) + '">' + APP.tabs.map(function (x) {
+      var on = x.id === tab, lbl = tr(x.en, x.ar), b = x.id === 'actions' && pend ? '<span class="dms-tab-n dms-num" title="' + esc(tr('Pending actions as of today', 'الإجراءات المعلقة حتى اليوم')) + '">' + num(pend) + '</span>' : '';
+      return '<button class="dms-tab' + (on ? ' dms-on' : '') + '" role="tab" id="dms-tab-' + x.id + '" aria-selected="' + on + '" aria-controls="dms-panel" tabindex="' + (on ? 0 : -1) + '" data-act="tab" data-v="' + x.id + '" data-fk="tab:' + x.id + '" title="' + esc(lbl) + '" type="button"><span>' + esc(lbl) + '</span>' + b + '</button>';
+    }).join('') + '</div>';
+  }
+
+  /* ---------- rendering: a fixed skeleton whose regions repaint independently (focus kept via data-fk) ---------- */
+  function activeEl() { try { return ROOT.activeElement || null; } catch (e) { return null; } }
+  function paint(el, html) {
+    if (!el) { return; }
+    var a = activeEl(), fk = a && el.contains(a) && a.getAttribute ? a.getAttribute('data-fk') : null, ss = null;
+    if (fk && typeof a.selectionStart === 'number') { try { ss = [a.selectionStart, a.selectionEnd]; } catch (e) { /* not a text input */ } }
+    el.innerHTML = html;
+    if (fk) { focusFk(fk); if (ss) { var n = activeEl(); try { n.setSelectionRange(ss[0], ss[1]); } catch (e) { /* ignore */ } } }
+  }
+  function focusFk(k) { var n = HOST.querySelector('[data-fk="' + k + '"]'); if (n) { try { n.focus({ preventScroll: true }); } catch (e) { n.focus(); } } }
+  function skeleton() {
+    HOST.innerHTML = '<div class="dms-app"><div data-ref="tb"></div><div data-ref="chips"></div><div data-ref="tabs"></div><div class="dms-sheet" role="tabpanel" id="dms-panel" data-ref="sheet"><div data-ref="banner"></div><div class="dms-content" data-ref="content"></div></div>' +
+      '<div class="dms-tip" data-ref="tip" role="tooltip" hidden></div></div><div data-ref="overlay"></div>';
+    built = true;
+  }
+  function renderHeaderState() {
+    var b = $('[data-ref="refresh"]'), s = $('[data-ref="stamp"]'), bz = busy();
+    if (b) { b.classList.toggle('dms-busy', bz); b.setAttribute('aria-busy', String(bz)); }
+    if (s) { s.textContent = (APP.stamp ? APP.stamp() : tr('Read-only', 'للقراءة فقط')) + (LOADED ? ' · ' + tr('Updated ', 'آخر تحديث ') + LOADED : '') + (bz ? ' · ' + tr('loading…', 'جارٍ التحميل…') : ''); }
+    paint($('[data-ref="pendwrap"]'), pendingBtnHTML());
+    paint($('[data-ref="tabs"]'), tabsHTML());
+  }
+  function renderToolbar() { paint($('[data-ref="tb"]'), toolbarHTML()); paint($('[data-ref="chips"]'), chipsHTML()); renderHeaderState(); }
+  function contentHTML() {
+    if (!BOOTED) {
+      return '<div class="dms-grid dms-kpis dms-ov-kpis" aria-busy="true">' + skel(CFG.kpiCount || 6, 'dms-skel-kpi') + '</div><div class="dms-main2"><div class="dms-skel dms-skel-panel"></div><div class="dms-skel dms-skel-panel"></div></div>' +
+        note(esc(tr('Loading from ERPNext…', 'جارٍ التحميل من ERPNext…')));
+    }
+    if (APP.period !== false && (!PERIOD[0] || PERIOD[0] > PERIOD[1])) { return alertBox('err', esc(tr('Choose a valid date range.', 'اختر نطاق تاريخ صحيحًا.'))); }
+    return APP.content(tab, AMC);
+  }
+  function renderSoft() {
+    PERIOD = curPeriod(); AMC = APP.actions ? APP.actions() : null;
+    var keep = {}; Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { keep[k] = TBL[k]; } }); TBL = keep;
+    var b = $('[data-ref="banner"]'), c = $('[data-ref="content"]'), sh = $('[data-ref="sheet"]');
+    if (b) { b.innerHTML = BOOTED && APP.banner ? APP.banner() : ''; }
+    if (c) { paint(c, contentHTML()); c.classList.remove('dms-enter'); if (ANIM) { void c.offsetWidth; c.classList.add('dms-enter'); } ANIM = false; fillTables(c); fitChartLabels(); if (APP.afterRender) { APP.afterRender(c); } }
+    if (sh) { sh.setAttribute('aria-labelledby', 'dms-tab-' + tab); }
+    renderHeaderState();
+  }
+  function renderAll() {
+    HOST.setAttribute('dir', LANG === 'ar' ? 'rtl' : 'ltr'); HOST.setAttribute('lang', LANG);
+    if (!built) { skeleton(); }
+    PERIOD = curPeriod(); renderToolbar(); renderSoft();
+  }
+  /* Full reload (filters, refresh): new generation, empty store, tables back to page 1. */
+  function reload() {
+    setToday(); PERIOD = curPeriod(); GEN++; D = {}; LOADED = STAMP;
+    Object.keys(SS).forEach(function (k) { SS[k].dirty = true; SS[k].page = 1; }); Object.keys(TS).forEach(function (k) { TS[k].page = 1; });
+    APP.load(); ANIM = true; renderAll();
+  }
+
+  /* ---------- navigation and popovers ---------- */
+  function goTab(id, focusTab, force) {
+    if (tab !== id || force) { tab = id; ANIM = true; if (APP.onTab) { APP.onTab(id); } renderAll(); }
+    var t = $('#dms-tab-' + id); if (!t) { return; }
+    try { t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) { /* ignore */ }
+    if (focusTab) { t.focus(); }
+  }
+  function openPop(w) {
+    POP = w; CAL = null;
+    if (w === 'filters') { FD = {}; APP.filters.forEach(function (f) { FD[f.k] = F[f.k]; }); FS = {}; }
+    else if (F.period === 'custom' && F.from && F.to) { CAL = { from: F.from, to: F.to, view: monthStart(F.from), focus: F.from }; }
+    renderToolbar(); focusFk(w === 'filters' ? 'fd:' + APP.filters[0].k : CAL ? 'day:' + CAL.focus : 'preset:' + F.period);
+  }
+  function closePop(restore) { var w = POP; if (!w) { return; } POP = null; CAL = null; renderToolbar(); if (restore) { focusFk('pop:' + w); } }
+  function applyFilters(next) {
+    var prev = {}; APP.filters.forEach(function (f) { prev[f.k] = F[f.k]; F[f.k] = (next && next[f.k]) || ''; }); POP = null;
+    if (APP.onFilters) { APP.onFilters(prev); }
+    reload();
+  }
+  function applyPeriod(key, from, to) {
+    F.period = key; if (key === 'custom') { F.from = from; F.to = to; }
+    POP = null; CAL = null; setToday(); PERIOD = curPeriod();
+    Object.keys(SS).forEach(function (k) { if (TBL[k] && TBL[k].period) { SS[k].dirty = true; SS[k].page = 1; } });
+    if (APP.onPeriod) { APP.onPeriod(); } else { reload(); return; }
+    ANIM = true; renderAll(); focusFk('pop:period');
+  }
+  function calPick(d) {
+    if (!CAL.from || CAL.to) { CAL.from = d; CAL.to = null; } else if (d < CAL.from) { CAL.to = CAL.from; CAL.from = d; } else { CAL.to = d; }
+    CAL.focus = d;
+  }
+  function calMove(d) { CAL.focus = d; if (d.slice(0, 7) !== CAL.view.slice(0, 7)) { CAL.view = monthStart(d); } renderToolbar(); focusFk('day:' + d); }
+
+  /* ---------- tooltip (one shared element; positioned against the dashboard, clamped to its width) ---------- */
+  function showTip(n) {
+    var tip = $('[data-ref="tip"]'), app = $('.dms-app'); if (!tip || !app) { return; }
+    tip.textContent = n.getAttribute('data-tip'); tip.hidden = false;
+    var a = app.getBoundingClientRect(), r = n.getBoundingClientRect(), w = tip.offsetWidth, hgt = tip.offsetHeight;
+    var x = Math.max(4, Math.min(r.left - a.left + r.width / 2 - w / 2, a.width - w - 4)), y = r.top - a.top - hgt - 8;
+    if (y < 0) { y = r.bottom - a.top + 8; }
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  }
+  function hideTip() { var tip = $('[data-ref="tip"]'); if (tip) { tip.hidden = true; } }
+  function onOver(ev) { var n = ev.target.closest ? ev.target.closest('[data-tip]') : null; if (n && HOST.contains(n)) { showTip(n); } else { hideTip(); } }
+
+  /* ---------- events (single delegated set, removed on destroy) ---------- */
+  function onClick(ev) {
+    var n = ev.target.closest ? ev.target.closest('[data-act]') : null;
+    if (POP && !(ev.target.closest && ev.target.closest('.dms-anchor'))) { closePop(false); }
+    if (!n || !HOST.contains(n)) { return; }
+    var a = n.getAttribute('data-act'), v = n.getAttribute('data-v'), id = n.getAttribute('data-id');
+    if (APP.onAct && APP.onAct(a, v, n, id) === true) { return; }
+    if (a === 'ovbg') { if (ev.target === n) { closeOverlay(); } return; }
+    if (a === 'closeov') { closeOverlay(); return; }
+    if (a === 'ovback' && OVL && OVL.prev) { var pv = OVL.prev; delete SS.drill; delete TS.drill; OVL = pv; if (OVL.spec) { regTable(OVL.spec); } renderOverlay(); return; }
+    if (a === 'tab') { goTab(v); return; }
+    if (a === 'lang') { if (LANG !== v) { LANG = v; try { G.localStorage.setItem('dms_lang', LANG); } catch (e) { /* ignore */ } POP = null; CAL = null; renderAll(); if (OVL) { var o = OVL; OVL = null; renderOverlay(); openDrill(o.id); } focusFk('lang:' + v); } return; }
+    if (a === 'refresh') { if (APP.onRefresh) { APP.onRefresh(); } reload(); return; }
+    if (a === 'pop') { if (POP === v) { closePop(true); } else { openPop(v); } return; }
+    if (a === 'popclose') { closePop(true); return; }
+    if (a === 'preset') {
+      if (v !== 'custom') { applyPeriod(v); return; }
+      var r0 = PERIOD[0] || TODAY, r1 = PERIOD[1] || TODAY; CAL = { from: r0, to: r1, view: monthStart(r1 > TODAY ? TODAY : r1), focus: r1 > TODAY ? TODAY : r1 };
+      renderToolbar(); focusFk('day:' + CAL.focus); return;
+    }
+    if (a === 'calnav' && CAL) { CAL.view = addMonths(CAL.view, +v); CAL.focus = CAL.view; renderToolbar(); return; }
+    if (a === 'calday' && CAL) { calPick(v); renderToolbar(); focusFk('day:' + v); return; }
+    if (a === 'calapply' && CAL && CAL.from && CAL.to) { applyPeriod('custom', CAL.from, CAL.to); return; }
+    if (a === 'fapply') { applyFilters(FD); focusFk('pop:filters'); return; }
+    if (a === 'fclear') { applyFilters(null); focusFk('pop:filters'); return; }
+    if (a === 'rmf') { var nf = {}; APP.filters.forEach(function (f) { nf[f.k] = F[f.k]; }); nf[v] = ''; applyFilters(nf); focusFk('pop:filters'); return; }
+    if (a === 'pending') {
+      goTab(APP.tabs[0].id); var p = $('#dms-pending');
+      if (p) { var still = G.matchMedia && G.matchMedia('(prefers-reduced-motion: reduce)').matches; try { p.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' }); } catch (e) { p.scrollIntoView(); } p.focus({ preventScroll: true }); }
+      return;
+    }
+    if (a === 'kpi') { openDrill(v); return; }
+    if (a === 'tpage') { TS[id].page = Math.max(1, TS[id].page + (+v)); fillTable(id); return; }
+    if (a === 'tsort') { var st = TS[id]; if (st.sk === v) { st.dir = -st.dir; } else { st.sk = v; st.dir = 1; } st.page = 1; fillTable(id); focusHead(id, v); return; }
+    if (a === 'spage') { var ss = SS[id]; ss.page = Math.max(1, ss.page + (+v)); ss.dirty = true; fillTable(id); return; }
+    if (a === 'ssort') { var s2 = SS[id]; if (s2.sk === v) { s2.dir = -s2.dir; } else { s2.sk = v; s2.dir = 1; } s2.page = 1; s2.dirty = true; fillTable(id); focusHead(id, v); return; }
+    if (a === 'sretry') { SS[id].dirty = true; fillTable(id); return; }
+    if (a === 'csv') { var sp = TBL[id]; download(sp.file || id, sp, clientRows(sp, TS[id])); return; }
+    if (a === 'csvall') { exportServer(id); return; }
+  }
+  function focusHead(id, v) { var th = HOST.querySelector('[data-tbl="' + id + '"] th[data-v="' + v + '"]'); if (th) { th.focus(); } }
+  function onInput(ev) {
+    var n = ev.target; if (!n || !n.getAttribute || !HOST.contains(n)) { return; }
+    var fs = n.getAttribute('data-fs'), fd = n.getAttribute('data-fd'), tq = n.getAttribute('data-tq');
+    if (APP.onInput && APP.onInput(n, ev) === true) { return; }
+    if (fs) { if (FS[fs] === n.value) { return; } FS[fs] = n.value; renderToolbar(); return; }
+    if (fd) { if (!FD || FD[fd] === n.value) { return; } FD[fd] = n.value; if (n.type === 'search') { return; } if (APP.filters.some(function (f) { return f.dependsOn === fd; })) { APP.filters.forEach(function (f) { if (f.dependsOn === fd && FD[f.k] && !optList(f, FD).some(function (x) { return x.v === FD[f.k]; })) { FD[f.k] = ''; } }); renderToolbar(); } return; }
+    if (tq) {
+      focusId = tq; var spx = TBL[tq]; if (!spx) { return; }
+      if (spx.server) { var s2 = SS[tq]; if (s2.q === n.value) { return; } s2.q = n.value; s2.page = 1; clearTimeout(onInput.t); onInput.t = later(function () { s2.dirty = true; fillTable(tq); }, 350); }
+      else { var s1 = TS[tq] || (TS[tq] = { q: '', page: 1, sk: spx.sk || '', dir: spx.dir || 1 }); if (s1.q === n.value) { return; } s1.q = n.value; s1.page = 1; fillTable(tq); }
+    }
+  }
+  function onKey(ev) {
+    var t = ev.target, act = t && t.getAttribute ? t.getAttribute('data-act') : null, rtl = LANG === 'ar', k = ev.key;
+    if (k === 'Escape') {
+      if (POP) { ev.preventDefault(); closePop(true); return; }
+      if (OVL) { closeOverlay(); }
+      return;
+    }
+    if ((k === 'Enter' || k === ' ') && (act === 'tsort' || act === 'ssort')) { ev.preventDefault(); t.click(); return; }
+    if (k === 'Tab' && OVL) {
+      var modal = $('.dms-modal'), controls = Array.prototype.filter.call(modal.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), [tabindex="0"]'), function (el) { return el.getClientRects().length; });
+      var first = controls[0], last = controls[controls.length - 1];
+      if (ev.shiftKey && t === first) { ev.preventDefault(); last.focus(); }
+      else if (!ev.shiftKey && t === last) { ev.preventDefault(); first.focus(); }
+    }
+    if (act === 'tab' && /^(ArrowLeft|ArrowRight|Home|End)$/.test(k)) {
+      var ids = APP.tabs.map(function (x) { return x.id; }), i = ids.indexOf(t.getAttribute('data-v')), L = ids.length;
+      var d = k === 'Home' ? -i : k === 'End' ? L - 1 - i : ((k === 'ArrowRight') !== rtl ? 1 : -1);
+      ev.preventDefault(); goTab(ids[(i + d + L) % L], true); return;
+    }
+    if (act === 'calday' && CAL) {
+      var cur = t.getAttribute('data-v'), step = { ArrowRight: rtl ? -1 : 1, ArrowLeft: rtl ? 1 : -1, ArrowUp: -7, ArrowDown: 7 }[k];
+      if (step) { ev.preventDefault(); calMove(addDays(cur, step)); return; }
+      if (k === 'PageUp' || k === 'PageDown') { ev.preventDefault(); calMove(shiftMonths(cur, k === 'PageUp' ? -1 : 1)); return; }
+      if (k === 'Home' || k === 'End') { ev.preventDefault(); calMove(k === 'Home' ? weekStartOf(cur) : addDays(weekStartOf(cur), 6)); }
+    }
+  }
+  /* Start: wire events, render the skeleton, run APP.boot (reference lists), then the first load. */
+  function start() {
+    HOST.addEventListener('click', onClick, SIG);
+    HOST.addEventListener('input', onInput, SIG);
+    HOST.addEventListener('change', onInput, SIG);
+    HOST.addEventListener('keydown', onKey, SIG);
+    HOST.addEventListener('pointerover', onOver, SIG);
+    HOST.addEventListener('pointerleave', hideTip, SIG);
+    HOST.addEventListener('focusin', function (ev) { var n = ev.target.closest && ev.target.closest('[data-tip]'); if (n) { showTip(n); } }, SIG);
+    HOST.addEventListener('focusout', hideTip, SIG);
+    document.addEventListener('pointerdown', function (ev) {
+      if (!POP) { return; } var p = ev.composedPath ? ev.composedPath() : [];
+      for (var i = 0; i < p.length; i++) { if (p[i] === HOST) { return; } }
+      closePop(false);
+    }, SIG);
+    if (!G.frappe || !frappe.call) { HOST.innerHTML = '<div class="dms-empty">Frappe client API not available.</div>'; return; }
+    setToday(); PERIOD = curPeriod();
+    var chartResize = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fitChartLabels) : null;
+    if (chartResize) { chartResize.observe(HOST); if (abort) { abort.signal.addEventListener('abort', function () { chartResize.disconnect(); }); } }
+    if (document.fonts) { document.fonts.ready.then(function () { if (!destroyed) { fitChartLabels(); } }); }
+    renderAll();
+    var g = GEN, chk = function () { return g === GEN && !destroyed; };
+    Promise.resolve(APP.boot ? APP.boot(chk) : null).catch(function (e) { if (G.console) { console.error(APP.key, 'boot', e); } }).then(function () { if (destroyed) { return; } BOOTED = true; reload(); });
+  }
+  /* ==== end DMS kit ==== */
+
+  var SI = 'Sales Invoice', PE = 'Payment Entry', CU = 'Customer', CL = 'Customer Credit Limit';
+  var REF = { companies: [], coErr: null, divisions: [], locations: [], customers: null };
+  var WHO = {}, BUCKET = 'od', RECON_OPEN = false;
+
+  /* ---------- native report reference (kept for reconciliation with the native pages) ---------- */
+  function reportReferenceTotal(response,field){
+    if(!response||!Array.isArray(response.result))throw new Error('Reference report unavailable');
+    var first=response.columns&&response.columns[0];first=first&&first.fieldname;
+    return response.result.reduce(function(sum,row){
+      if(!row||Array.isArray(row))throw new Error('Unsupported reference report response');
+      if(row.is_total_row||row._is_total_row||(first&&String(row[first]||'').trim().toLowerCase()==='total'))return sum;
+      if(row[field]===undefined)throw new Error('Reference report field unavailable');
+      var value=Number(row[field]);if(!isFinite(value))throw new Error('Invalid reference report value');
+      return sum+value;
+    },0);
+  }
+
+  /* ---------- filters (verified against the ERP map: Sales Invoice custom_division Link, location Select; Payment Entry location Select) ---------- */
+  function coScope(dt) {
+    if (F.company) { return [[dt, 'company', '=', F.company]]; }
+    return REF.companies.length ? [[dt, 'company', 'in', REF.companies]] : [];
+  }
+  function siF(extra) {
+    var f = [[SI, 'docstatus', '=', 1], [SI, 'party_account_currency', '=', CUR]].concat(coScope(SI));
+    if (F.division) { f.push([SI, 'custom_division', '=', F.division]); }
+    if (F.location) { f.push([SI, 'location', '=', F.location]); }
+    if (F.customer) { f.push([SI, 'customer', '=', F.customer]); }
+    return f.concat(extra || []);
+  }
+  function siOpen(extra) { return siF([[SI, 'outstanding_amount', '>', 0], [SI, 'posting_date', '<=', TODAY]]).concat(extra || []); }
+  function peF(extra) {
+    var f = [[PE, 'docstatus', '=', 1], [PE, 'payment_type', '=', 'Receive'], [PE, 'party_type', '=', 'Customer']].concat(coScope(PE));
+    if (F.location) { f.push([PE, 'location', '=', F.location]); }
+    if (F.customer) { f.push([PE, 'party', '=', F.customer]); }
+    return f.concat(extra || []);
+  }
+  function custOptions() {
+    if (!REF.customers && D.ag && !F.customer) { REF.customers = D.ag.cust.map(function (c) { return { v: c.customer, l: c.name }; }).sort(function (a, b) { return a.l.localeCompare(b.l); }); }
+    return REF.customers || [];
+  }
+  function custName(id) { var c = (REF.customers || []).filter(function (x) { return x.v === id; })[0]; return c ? c.l : id; }
+
+  /* Aging buckets by days past the due date (as of today). */
+  var BK = [
+    { id: 'nd', en: 'Not yet due', ar: 'غير مستحق بعد', c: 'var(--dms-age0)' },
+    { id: 'b1', lo: 1, hi: 30, en: '1–30 days', ar: '1–30 يومًا', c: 'var(--dms-age1)' },
+    { id: 'b2', lo: 31, hi: 60, en: '31–60 days', ar: '31–60 يومًا', c: 'var(--dms-age2)' },
+    { id: 'b3', lo: 61, hi: 90, en: '61–90 days', ar: '61–90 يومًا', c: 'var(--dms-age3)' },
+    { id: 'b4', lo: 91, hi: 180, en: '91–180 days', ar: '91–180 يومًا', c: 'var(--dms-age4)' },
+    { id: 'b5', lo: 181, en: 'Over 180 days', ar: 'أكثر من 180 يومًا', c: 'var(--dms-age5)' }
+  ];
+  var CHIPS = [{ id: 'all', en: 'All open', ar: 'كل المفتوح' }, { id: 'od', en: 'All overdue', ar: 'كل المتأخر' }, { id: 'o90', en: 'Overdue > 90 days', ar: 'متأخر > 90 يومًا' }].concat(BK);
+  function bk(id) { return CHIPS.filter(function (b) { return b.id === id; })[0] || CHIPS[0]; }
+  function bFilter(id) {
+    var a = TODAY, b = bk(id);
+    if (id === 'all') { return []; }
+    if (id === 'nd') { return [[SI, 'due_date', '>=', a]]; }
+    if (id === 'od') { return [[SI, 'due_date', '<', a]]; }
+    if (id === 'o90') { return [[SI, 'due_date', '<', addDays(a, -90)]]; }
+    if (!b.hi) { return [[SI, 'due_date', '<', addDays(a, -(b.lo - 1))]]; }
+    return [[SI, 'due_date', 'between', [addDays(a, -b.hi), addDays(a, -b.lo)]]];
+  }
+  function bucketAmount(id) {
+    var A = D.ag; if (!A) { return null; }
+    if (id === 'all') { return sum(BK, function (b) { return A.tot[b.id]; }); }
+    if (id === 'od') { return sum(BK.slice(1), function (b) { return A.tot[b.id]; }); }
+    if (id === 'o90') { return A.tot.b4 + A.tot.b5; }
+    return A.tot[id];
+  }
+
+  /* ---------- loaders ---------- */
+  function loadRef(chk) {
+    return Promise.all([
+      getList({ doctype: 'Company', fields: ['name', 'default_currency'], order_by: 'name asc', limit_page_length: 500 }, chk).then(function (r) { return { ok: (r || []).filter(function (x) { return x.default_currency === CUR; }).map(function (x) { return x.name; }) }; }, function (e) { return { err: errKind(e) }; }),
+      getList({ doctype: 'Division', fields: ['name'], order_by: 'name asc', limit_page_length: 500 }, chk).then(function (r) { return (r || []).map(function (x) { return x.name; }); }, function () { return []; }),
+      getList({ doctype: SI, fields: ['location', 'count(name) as n'], filters: [[SI, 'docstatus', '=', 1], [SI, 'outstanding_amount', '>', 0]], group_by: 'location', limit_page_length: 100 }, chk).then(function (r) { return (r || []).map(function (x) { return x.location; }).filter(Boolean).sort(); }, function () { return []; })
+    ]).then(function (r) {
+      REF.companies = r[0].ok || []; REF.coErr = r[0].err || (r[0].ok && !r[0].ok.length ? 'none' : null); REF.divisions = r[1]; REF.locations = r[2];
+    });
+  }
+  function loadAll() {
+    run('ag', function (chk) {
+      return Promise.all(BK.map(function (b) {
+        return getList({ doctype: SI, fields: ['customer', 'customer_name', 'company', 'sum(outstanding_amount) as amt', 'count(name) as n'], filters: siOpen(bFilter(b.id)), group_by: 'customer, customer_name, company', limit_page_length: CFG.cap }, chk);
+      })).then(function (res) {
+        var cust = {}, pairs = {}, tot = {}, cnt = {}, n = 0;
+        res.forEach(function (rows, i) {
+          var b = BK[i]; tot[b.id] = 0; cnt[b.id] = 0;
+          (rows || []).forEach(function (x) {
+            var a = +x.amt || 0, k = x.customer, c = cust[k] || (cust[k] = { customer: k, name: clean(x.customer_name) || k, b: {}, total: 0, od: 0, n: 0 }), pk = k + '\u0001' + x.company;
+            var p = pairs[pk] || (pairs[pk] = { customer: k, name: c.name, company: x.company, total: 0, od: 0 });
+            c.b[b.id] = (c.b[b.id] || 0) + a; c.total += a; c.n += +x.n || 0; p.total += a;
+            if (b.id !== 'nd') { c.od += a; p.od += a; }
+            tot[b.id] += a; cnt[b.id] += +x.n || 0; n += +x.n || 0;
+          });
+        });
+        return { cust: vals(cust), byId: cust, pairs: vals(pairs), tot: tot, cnt: cnt, n: n, truncated: res.some(function (r) { return r && r.length >= CFG.cap; }) };
+      });
+    });
+    run('div', function (chk) {
+      var q = function (extra) { return getList({ doctype: SI, fields: ['custom_division', 'sum(outstanding_amount) as amt'], filters: siOpen(extra), group_by: 'custom_division', limit_page_length: 200 }, chk); };
+      return Promise.all([q([]), q(bFilter('od'))]).then(function (r) {
+        var m = {}; (r[0] || []).forEach(function (x) { m[x.custom_division || ''] = { div: x.custom_division || '', amt: +x.amt || 0, od: 0 }; });
+        (r[1] || []).forEach(function (x) { var k = x.custom_division || ''; (m[k] || (m[k] = { div: k, amt: 0, od: 0 })).od = +x.amt || 0; });
+        return vals(m);
+      });
+    });
+    run('ms', function (chk) {
+      return Promise.all([
+        getList({ doctype: SI, fields: ['sum(outstanding_amount) as amt', 'count(name) as n'], filters: siF([[SI, 'outstanding_amount', '<', 0]]), limit_page_length: 1 }, chk),
+        getList({ doctype: SI, fields: ['sum(base_grand_total) as amt', 'count(name) as n'], filters: siF([[SI, 'posting_date', 'between', [addDays(TODAY, -(CFG.dsoDays - 1)), TODAY]]]), limit_page_length: 1 }, chk)
+      ]).then(function (r) { return { credits: Math.abs(+one(r[0]).amt || 0), creditsN: +one(r[0]).n || 0, billed: +one(r[1]).amt || 0, billedN: +one(r[1]).n || 0 }; });
+    });
+    loadColl();
+    run('lm', function (chk) {
+      var f = []; if (F.company) { f.push([CL, 'company', '=', F.company]); } if (F.customer) { f.push([CL, 'parent', '=', F.customer]); }
+      return getList({ doctype: CL, parent: CU, fields: ['parent', 'company', 'credit_limit', 'custom_credit_status', 'custom_credit_expiry_date', 'custom_credit_type'], filters: f, limit_page_length: CFG.cap }, chk)
+        .then(function (r) { return { rows: r || [], truncated: (r || []).length >= CFG.cap }; });
+    });
+    loadActions(actSpecs());
+    if (tab === 'coll') { loadYear(); }
+  }
+  /* Receipts for the period (one daily-grouped query) and the comparison window. Re-run alone when only the period changes. */
+  function loadColl() {
+    run('co', function (chk) {
+      var R = cmpRanges(), cur = R.cur, prev = R.prev;
+      if (PERIOD[0] > TODAY) { return Promise.resolve({ rows: [], prev: { amt: 0, n: 0 }, range: cur, prevRange: prev, future: true }); }
+      return Promise.all([
+        getList({ doctype: PE, fields: ['posting_date', 'sum(base_received_amount) as amt', 'count(name) as n'], filters: peF([[PE, 'posting_date', 'between', cur]]), group_by: 'posting_date', order_by: 'posting_date asc', limit_page_length: 2000 }, chk),
+        getList({ doctype: PE, fields: ['sum(base_received_amount) as amt', 'count(name) as n'], filters: peF([[PE, 'posting_date', 'between', prev]]), limit_page_length: 1 }, chk)
+      ]).then(function (r) { return { rows: r[0] || [], prev: { amt: +one(r[1]).amt || 0, n: +one(r[1]).n || 0 }, range: cur, prevRange: prev }; });
+    });
+  }
+  function loadYear() {
+    if (D.yr || D.yrTok) { return; }
+    run('yr', function (chk) {
+      var from = addMonths(monthStart(TODAY), -11);
+      return getList({ doctype: PE, fields: ['posting_date', 'sum(base_received_amount) as amt', 'count(name) as n'], filters: peF([[PE, 'posting_date', 'between', [from, TODAY]]]), group_by: 'posting_date', order_by: 'posting_date asc', limit_page_length: 1000 }, chk)
+        .then(function (r) { var m = {}; (r || []).forEach(function (x) { var k = String(x.posting_date).slice(0, 7); m[k] = (m[k] || 0) + (+x.amt || 0); }); return { keys: monthList(from, TODAY), d: m }; });
+    });
+  }
+  function loadRefReports() {
+    if (D.ref || D.refTok) { return; }
+    run('ref', function (chk) {
+      return Promise.all(['Over Credit Limit Customer', 'Collection Analysis Report'].map(function (name) { return guarded(chk, 'frappe.desk.query_report.run', { report_name: name, filters: {}, ignore_prepared_report: true }); }))
+        .then(function (r) { return { over: reportReferenceTotal(r[0], 'over_credit_limit_customer_count'), collections: reportReferenceTotal(r[1], 'total_collection') }; });
+    });
+  }
+  /* Responsible salesperson for customer-level actions (over limit, facility renewal): one small query for the shown rows. */
+  function loadWho() {
+    if (D.whoAsked || !D.ag || !D.lm) { return; }
+    D.whoAsked = true;
+    var ids = {}; actClient().forEach(function (s) { s.rows.slice(0, 8).forEach(function (r) { if (WHO[r.customer] === undefined) { ids[r.customer] = 1; } }); });
+    var list = Object.keys(ids); if (!list.length) { return; }
+    var g = GEN;
+    getList({ doctype: CU, fields: ['name', 'custom_sales_person'], filters: [[CU, 'name', 'in', list]], limit_page_length: list.length }, function () { return g === GEN; })
+      .then(function (r) { (r || []).forEach(function (x) { WHO[x.name] = x.custom_sales_person || ''; }); soon(); }, function () { /* names stay "not assigned" */ });
+  }
+
+  /* ---------- models ---------- */
+  function custOf(id) { return D.ag ? D.ag.byId[id] || null : null; }
+  function agTotal() { return D.ag ? sum(BK, function (b) { return D.ag.tot[b.id]; }) : null; }
+  function creditRows() {
+    if (!D.ag || !D.lm) { return null; }
+    var lim = {};
+    D.lm.rows.forEach(function (r) {
+      var k = r.parent + '\u0001' + r.company, o = lim[k] || (lim[k] = { limit: 0, st: '', exp: '', type: '' });
+      o.limit += +r.credit_limit || 0; o.st = r.custom_credit_status || o.st; o.exp = r.custom_credit_expiry_date || o.exp; o.type = r.custom_credit_type || o.type;
+    });
+    return D.ag.pairs.map(function (p) {
+      var l = lim[p.customer + '\u0001' + p.company], L = l ? l.limit : 0, u = L > 0 ? p.total / L * 100 : null;
+      return { customer: p.customer, name: p.name, company: p.company, limit: L, total: p.total, od: p.od, util: u, avail: L > 0 ? L - p.total : null,
+        st: !(L > 0) ? 'none' : u > 100 ? 'over' : u >= CFG.nearPct ? 'near' : 'ok', fst: l ? l.st : '', exp: l ? String(l.exp || '').slice(0, 10) : '', type: l ? l.type : '' };
+    });
+  }
+  var CST = { over: ['Over limit', 'تجاوز الحد', 'bad'], near: ['Near limit', 'قريب من الحد', 'warn'], ok: ['Within limit', 'ضمن الحد', 'ok'], none: ['No limit set', 'لا يوجد حد', 'n'] };
+  var FST = { Active: 'نشط', Expired: 'منتهي', Missing: 'مفقود', 'Under Review': 'قيد المراجعة' };
+  function facilityIssue(r) {
+    if (!r.fst && !r.exp) { return null; }
+    if (r.fst === 'Expired' || (r.exp && r.exp < TODAY)) { return { p: 'high', k: 'expired', txt: r.exp ? tr('Facility expired ' + fmtDate(r.exp, true), 'انتهى التسهيل ' + fmtDate(r.exp, true)) : tr('Facility status Expired', 'حالة التسهيل منتهية') }; }
+    if (r.fst === 'Missing') { return { p: 'high', k: 'missing', txt: tr('Facility documents missing', 'مستندات التسهيل مفقودة') }; }
+    if (r.exp && r.exp <= addDays(TODAY, CFG.facilityWarn)) { return { p: 'med', k: 'soon', txt: tr('Facility expires ' + fmtDate(r.exp, true), 'ينتهي التسهيل ' + fmtDate(r.exp, true)) }; }
+    if (r.fst === 'Under Review') { return { p: 'med', k: 'review', txt: tr('Facility under review', 'التسهيل قيد المراجعة') }; }
+    return null;
+  }
+  function collSeries() {
+    var C = D.co; if (!C || C.future) { return null; }
+    var S = series(C.range, C.rows, 'posting_date', 'amt');
+    S.total = sum(C.rows, function (r) { return +r.amt || 0; }); S.n = sum(C.rows, function (r) { return +r.n || 0; }); S.partial = C.rows.length >= 2000;
+    return S;
+  }
+
+  /* ---------- actions pending (verified sources; each item links to its ERP record) ---------- */
+  var INV_F = ['name', 'customer', 'customer_name', 'company', 'posting_date', 'due_date', 'outstanding_amount', 'grand_total', 'currency', 'sales_person'];
+  var PE_F = ['name', 'party', 'party_name', 'posting_date', 'base_received_amount', 'unallocated_amount', 'mode_of_payment', 'reference_no', 'company', 'sales_person'];
+  function invTable() { return { fields: INV_F, cols: invCols(), search: ['name', 'customer_name'], searchHint: tr('Search invoice or customer…', 'ابحث برقم الفاتورة أو العميل…') }; }
+  function actSpecs() {
+    var t = TODAY;
+    function inv(r, p, due, tone) { return { p: p, score: score(p, r.outstanding_amount, ageOf(r.due_date)), dt: SI, name: r.name, who: r.sales_person, title: clean(r.customer_name) || r.customer, desc: r.name + ' · ' + moneyFull(r.outstanding_amount), due: due, tone: tone }; }
+    var cf = [[CU, 'custom_collection_status', 'in', ['Follow up', 'Escalated', 'Critical']], [CU, 'disabled', '=', 0]];
+    if (F.division) { cf.push([CU, 'custom_division', '=', F.division]); }
+    if (F.customer) { cf.push([CU, 'name', '=', F.customer]); }
+    return [
+      { id: 'a_over', client: true, short: tr('Over credit limit', 'تجاوز حد الائتمان'), title: tr('Customers above their credit limit', 'عملاء تجاوزوا حد الائتمان'), why: tr('Open balance above a positive credit limit for that company. Hold new credit or collect.', 'رصيد مفتوح يتجاوز حدًا ائتمانيًا موجبًا لتلك الشركة. أوقف الائتمان الجديد أو حصّل.') },
+      { id: 'a_90', server: true, dt: SI, short: tr('Overdue > 90 days', 'متأخر > 90 يومًا'), title: tr('Invoices overdue more than 90 days', 'فواتير متأخرة أكثر من 90 يومًا'), why: tr('Open balance with a due date more than 90 days ago. Largest first.', 'رصيد مفتوح وتاريخ الاستحقاق قبل أكثر من 90 يومًا. الأكبر أولًا.'),
+        filters: siOpen(bFilter('o90')), order: 'outstanding_amount desc', fields: INV_F, table: invTable, it: function (r) { return inv(r, 'high', lateTxt(r.due_date), 'bad'); } },
+      { id: 'a_coll', server: true, dt: CU, short: tr('Flagged customers', 'عملاء مُعلَّمون'), title: tr('Customers flagged for collection follow-up', 'عملاء بحاجة لمتابعة التحصيل'), why: tr('Customer collection status Follow up, Escalated or Critical (not company-specific).', 'حالة التحصيل للعميل: متابعة أو مُصعَّد أو حرج (غير مرتبطة بشركة).'),
+        filters: cf, order: 'modified desc', fields: ['name', 'customer_name', 'custom_collection_status', 'custom_sales_person', 'custom_division'],
+        table: function () { return { fields: ['name', 'customer_name', 'custom_collection_status', 'custom_sales_person', 'custom_division'], cols: custCols(), search: ['name', 'customer_name'] }; },
+        it: function (r) {
+          var hi = r.custom_collection_status !== 'Follow up', c = custOf(r.name);
+          return { p: hi ? 'high' : 'med', score: score(hi ? 'high' : 'med', c ? c.od : 0, 0) - 5, dt: CU, name: r.name, who: r.custom_sales_person, title: clean(r.customer_name) || r.name,
+            desc: collStatus(r.custom_collection_status) + (c ? ' · ' + moneyS(c.od) + ' ' + tr('overdue', 'متأخر') : ''), due: collStatus(r.custom_collection_status), tone: hi ? 'bad' : 'warn' };
+        } },
+      { id: 'a_fac', client: true, short: tr('Facility renewal', 'تجديد التسهيل'), title: tr('Credit facilities expired, missing or expiring', 'تسهيلات ائتمانية منتهية أو مفقودة أو قاربت الانتهاء'), why: tr('Customers with an open balance whose credit facility is expired, missing, under review or expires within ' + CFG.facilityWarn + ' days.', 'عملاء لديهم رصيد مفتوح وتسهيلهم منتهٍ أو مفقود أو قيد المراجعة أو ينتهي خلال ' + CFG.facilityWarn + ' يومًا.') },
+      { id: 'a_new', server: true, dt: SI, short: tr('Newly overdue', 'متأخر حديثًا'), title: tr('Invoices overdue 1–30 days', 'فواتير متأخرة 1–30 يومًا'), why: tr('Chase early: due date passed in the last 30 days.', 'المتابعة المبكرة: تجاوز تاريخ الاستحقاق خلال آخر 30 يومًا.'),
+        filters: siOpen(bFilter('b1')), order: 'outstanding_amount desc', fields: INV_F, table: invTable, it: function (r) { return inv(r, 'med', lateTxt(r.due_date), 'warn'); } },
+      { id: 'a_unalloc', server: true, dt: PE, short: tr('Unallocated receipts', 'مقبوضات غير مخصصة'), title: tr('Customer receipts not allocated to invoices', 'مقبوضات عملاء غير مخصصة للفواتير'), why: tr('Submitted receipts with an unallocated amount (' + CUR + ' accounts). Allocate them so balances are correct.', 'مقبوضات معتمدة بمبلغ غير مخصص (حسابات ' + CUR + '). خصصها لتصحيح الأرصدة.'),
+        filters: peF([[PE, 'unallocated_amount', '>', 0], [PE, 'paid_from_account_currency', '=', CUR]]), order: 'unallocated_amount desc', fields: ['name', 'party', 'party_name', 'posting_date', 'unallocated_amount', 'base_received_amount', 'mode_of_payment', 'sales_person', 'owner'],
+        table: function () { return { fields: PE_F.concat(['owner']), cols: peCols(), search: ['name', 'party_name'] }; },
+        it: function (r) { return { p: 'med', score: score('med', r.unallocated_amount, ageOf(r.posting_date)) - 10, dt: PE, name: r.name, who: r.sales_person || r.owner, title: clean(r.party_name) || r.party, desc: r.name + ' · ' + moneyFull(r.unallocated_amount) + ' ' + tr('unallocated', 'غير مخصص'), due: tr('Received ' + fmtDate(r.posting_date, true), 'استُلم ' + fmtDate(r.posting_date, true)), tone: 'warn' }; } },
+      { id: 'a_due', server: true, dt: SI, short: tr('Due in ' + CFG.dueSoon + ' days', 'مستحق خلال ' + CFG.dueSoon + ' أيام'), title: tr('Invoices falling due in the next ' + CFG.dueSoon + ' days', 'فواتير تستحق خلال ' + CFG.dueSoon + ' أيام'), why: tr('Remind the customer before the due date. Largest first.', 'ذكّر العميل قبل تاريخ الاستحقاق. الأكبر أولًا.'),
+        filters: siOpen([[SI, 'due_date', 'between', [t, addDays(t, CFG.dueSoon)]]]), order: 'outstanding_amount desc', fields: INV_F, table: invTable, it: function (r) { return inv(r, 'low', lateTxt(r.due_date), 'n'); } },
+      { id: 'a_cn', server: true, dt: SI, short: tr('Unapplied credit notes', 'إشعارات دائنة غير مطبقة'), title: tr('Credit balances not applied to invoices', 'أرصدة دائنة غير مطبقة على الفواتير'), why: tr('Submitted invoices or credit notes with a negative outstanding amount.', 'فواتير أو إشعارات دائنة معتمدة برصيد مستحق سالب.'),
+        filters: siF([[SI, 'outstanding_amount', '<', 0]]), order: 'outstanding_amount asc', fields: INV_F, table: invTable,
+        it: function (r) { return { p: 'low', score: score('low', r.outstanding_amount, 0) - 5, dt: SI, name: r.name, who: r.sales_person, title: clean(r.customer_name) || r.customer, desc: r.name + ' · ' + moneyFull(Math.abs(r.outstanding_amount)) + ' ' + tr('credit', 'دائن'), due: tr('Posted ' + fmtDate(r.posting_date, true), 'بتاريخ ' + fmtDate(r.posting_date, true)), tone: 'n' }; } }
+    ];
+  }
+  function collStatus(s) { return LANG === 'ar' ? ({ 'Follow up': 'متابعة', Escalated: 'مُصعَّد', Critical: 'حرج', Normal: 'طبيعي' }[s] || s || '') : (s || ''); }
+  /* Customer-level actions computed from the aging and credit-limit sources. */
+  function actClient() {
+    var rows = creditRows(); if (!rows) { return []; }
+    var over = rows.filter(function (r) { return r.st === 'over'; }).sort(function (a, b) { return (a.avail || 0) - (b.avail || 0); });
+    var fac = rows.map(function (r) { var i = facilityIssue(r); return i ? Object.assign({ issue: i }, r) : null; }).filter(Boolean).sort(function (a, b) { return (a.issue.p === b.issue.p ? 0 : a.issue.p === 'high' ? -1 : 1) || b.total - a.total; });
+    return [
+      { id: 'a_over', rows: over, item: function (r) { return { p: 'high', score: score('high', -r.avail, 0) + 5, dt: CU, name: r.customer, who: WHO[r.customer], title: r.name, desc: tr('Above limit by ', 'تجاوز الحد بمبلغ ') + moneyS(-r.avail) + ' · ' + r.company, due: pct(r.util, 100, 0) + ' ' + tr('used', 'مستخدم'), tone: 'bad' }; } },
+      { id: 'a_fac', rows: fac, item: function (r) { return { p: r.issue.p, score: score(r.issue.p, r.total, 0) - 2, dt: CU, name: r.customer, who: WHO[r.customer], title: r.name, desc: r.issue.txt + ' · ' + moneyS(r.total) + ' ' + tr('open', 'مفتوح'), due: r.company, tone: r.issue.p === 'high' ? 'bad' : 'warn' }; } }
+    ];
+  }
+  function actClientState() {
+    if (D.agErr || D.lmErr) { return 'ERR:' + (D.agErr === 'perm' || D.lmErr === 'perm' ? 'perm' : 'tech'); }
+    if (!D.ag || !D.lm) { return null; }
+    var o = {}; actClient().forEach(function (c) { o[c.id] = c; }); return o;
+  }
+
+  /* ---------- column sets ---------- */
+  function custBtn(id, name) { return '<button type="button" class="dms-linkbtn dms-cell-btn" data-act="kpi" data-v="cust:' + esc(id) + '"><bdi>' + esc(name || id) + '</bdi></button>'; }
+  function invCols(noCust) {
+    var c = [
+      { h: tr('Invoice', 'الفاتورة'), sf: 'name', r: function (x) { return docLink(SI, x.name); }, c: function (x) { return x.name; } },
+      { h: tr('Customer', 'العميل'), sf: 'customer_name', r: function (x) { return custBtn(x.customer, clean(x.customer_name)); }, c: function (x) { return clean(x.customer_name); } },
+      { h: tr('Company', 'الشركة'), sf: 'company', r: function (x) { return bdi(x.company); }, c: function (x) { return x.company; } },
+      { h: tr('Posting date', 'تاريخ الفاتورة'), sf: 'posting_date', r: function (x) { return dtc(x.posting_date); }, c: function (x) { return x.posting_date; } },
+      { h: tr('Due date', 'تاريخ الاستحقاق'), sf: 'due_date', r: function (x) { return dtc(x.due_date); }, c: function (x) { return x.due_date; } },
+      { h: tr('Days overdue', 'أيام التأخير'), num: 1, r: function (x) { return overdueTag(x.due_date); }, c: function (x) { return Math.max(0, diffDays(String(x.due_date || TODAY).slice(0, 10), TODAY)); } },
+      { h: tr('Outstanding', 'المستحق') + ' (' + CUR + ')', num: 1, sf: 'outstanding_amount', r: function (x) { return '<b class="dms-num">' + esc(amt(x.outstanding_amount)) + '</b>'; }, c: function (x) { return x.outstanding_amount; } },
+      { h: tr('Invoice total', 'إجمالي الفاتورة'), num: 1, sf: 'grand_total', r: function (x) { return '<span class="dms-num">' + esc(amt(x.grand_total)) + (x.currency && x.currency !== CUR ? ' <small>' + esc(x.currency) + '</small>' : '') + '</span>'; }, c: function (x) { return x.grand_total; } },
+      { h: tr('Salesperson', 'المندوب'), sf: 'sales_person', r: function (x) { return who(x.sales_person); }, c: function (x) { return x.sales_person; } }
+    ];
+    return noCust ? c.filter(function (x) { return x.sf !== 'customer_name'; }) : c;
+  }
+  function invSpec(id, filters, order, extra) { return Object.assign({ id: id, server: true, dt: SI, filters: filters, order: order || 'due_date asc', file: 'open_invoices' }, invTable(), extra || {}); }
+  function peCols() {
+    return [
+      { h: tr('Receipt', 'السند'), sf: 'name', r: function (x) { return docLink(PE, x.name); }, c: function (x) { return x.name; } },
+      { h: tr('Customer', 'العميل'), sf: 'party_name', r: function (x) { return custBtn(x.party, clean(x.party_name) || x.party); }, c: function (x) { return clean(x.party_name) || x.party; } },
+      { h: tr('Date', 'التاريخ'), sf: 'posting_date', r: function (x) { return dtc(x.posting_date); }, c: function (x) { return x.posting_date; } },
+      { h: tr('Amount', 'المبلغ') + ' (' + CUR + ')', num: 1, sf: 'base_received_amount', r: function (x) { return '<b class="dms-num">' + esc(amt(x.base_received_amount)) + '</b>'; }, c: function (x) { return x.base_received_amount; } },
+      { h: tr('Unallocated', 'غير مخصص'), num: 1, sf: 'unallocated_amount', r: function (x) { return +x.unallocated_amount ? '<span class="dms-num dms-tone-warn">' + esc(amt(x.unallocated_amount)) + '</span>' : '<span class="dms-sm">—</span>'; }, c: function (x) { return x.unallocated_amount; } },
+      { h: tr('Mode of payment', 'طريقة الدفع'), sf: 'mode_of_payment', r: function (x) { return txt(x.mode_of_payment); }, c: function (x) { return x.mode_of_payment; } },
+      { h: tr('Reference', 'المرجع'), r: function (x) { return txt(x.reference_no); }, c: function (x) { return x.reference_no; } },
+      { h: tr('Company', 'الشركة'), sf: 'company', r: function (x) { return txt(x.company); }, c: function (x) { return x.company; } },
+      { h: tr('Salesperson', 'المندوب'), sf: 'sales_person', r: function (x) { return who(x.sales_person); }, c: function (x) { return x.sales_person; } }
+    ];
+  }
+  function custCols() {
+    return [
+      { h: tr('Customer', 'العميل'), sf: 'customer_name', r: function (x) { return docLink(CU, x.name, clean(x.customer_name) || x.name); }, c: function (x) { return clean(x.customer_name) || x.name; } },
+      { h: tr('Collection status', 'حالة التحصيل'), sf: 'custom_collection_status', r: function (x) { var hi = x.custom_collection_status !== 'Follow up'; return '<span class="dms-prio dms-prio-' + (hi ? 'high' : 'med') + '">' + esc(collStatus(x.custom_collection_status)) + '</span>'; }, c: function (x) { return x.custom_collection_status; } },
+      { h: tr('Overdue', 'متأخر') + ' (' + CUR + ')', num: 1, r: function (x) { var c = custOf(x.name); return c ? '<span class="dms-num">' + esc(amt(c.od)) + '</span>' : '<span class="dms-sm">—</span>'; }, c: function (x) { var c = custOf(x.name); return c ? c.od : ''; } },
+      { h: tr('Division', 'القسم'), sf: 'custom_division', r: function (x) { return txt(x.custom_division); }, c: function (x) { return x.custom_division; } },
+      { h: tr('Salesperson', 'المندوب'), sf: 'custom_sales_person', r: function (x) { return who(x.custom_sales_person); }, c: function (x) { return x.custom_sales_person; } }
+    ];
+  }
+  function creditCols() {
+    return [
+      { k: 'name', h: tr('Customer', 'العميل'), s: function (x) { return x.name.toLowerCase(); }, r: function (x) { return custBtn(x.customer, x.name); }, c: function (x) { return x.name; } },
+      { k: 'company', h: tr('Company', 'الشركة'), s: function (x) { return x.company; }, r: function (x) { return bdi(x.company); }, c: function (x) { return x.company; } },
+      { k: 'limit', h: tr('Credit limit', 'حد الائتمان'), num: 1, s: function (x) { return x.limit; }, r: function (x) { return x.limit > 0 ? '<span class="dms-num">' + esc(amt(x.limit)) + '</span>' : '<span class="dms-sm">—</span>'; }, c: function (x) { return x.limit || ''; } },
+      { k: 'total', h: tr('Outstanding', 'المستحق'), num: 1, s: function (x) { return x.total; }, r: function (x) { return '<b class="dms-num">' + esc(amt(x.total)) + '</b>'; }, c: function (x) { return x.total.toFixed(2); } },
+      { k: 'od', h: tr('Overdue', 'متأخر'), num: 1, s: function (x) { return x.od; }, r: function (x) { return x.od ? '<span class="dms-num dms-tone-bad">' + esc(amt(x.od)) + '</span>' : '<span class="dms-sm">—</span>'; }, c: function (x) { return x.od.toFixed(2); } },
+      { k: 'avail', h: tr('Available credit', 'الائتمان المتاح'), num: 1, s: function (x) { return x.avail == null ? Infinity : x.avail; }, r: function (x) { return x.avail == null ? '<span class="dms-sm">—</span>' : '<span class="dms-num' + (x.avail < 0 ? ' dms-tone-bad' : '') + '">' + esc(amt(x.avail)) + '</span>'; }, c: function (x) { return x.avail == null ? '' : x.avail.toFixed(2); } },
+      { k: 'util', h: tr('Utilisation', 'نسبة الاستخدام'), s: function (x) { return x.util == null ? -1 : x.util; }, r: function (x) { return x.util == null ? '<span class="dms-sm">—</span>' : '<span class="dms-util"><span class="dms-util-b"><i class="dms-util-' + x.st + '" style="width:' + Math.min(100, x.util).toFixed(1) + '%"></i></span><span class="dms-num">' + x.util.toFixed(0) + '%</span></span>'; }, c: function (x) { return x.util == null ? '' : x.util.toFixed(1); } },
+      { k: 'st', h: tr('Status', 'الحالة'), s: function (x) { return ['over', 'near', 'ok', 'none'].indexOf(x.st); }, r: function (x) { return '<span class="dms-stat dms-stat-' + CST[x.st][2] + '">' + esc(tr(CST[x.st][0], CST[x.st][1])) + '</span>'; }, c: function (x) { return CST[x.st][0]; } },
+      { k: 'fst', h: tr('Facility', 'التسهيل'), s: function (x) { return x.fst + x.exp; }, r: function (x) { var i = facilityIssue(x); return (x.fst ? bdi(LANG === 'ar' ? (FST[x.fst] || x.fst) : x.fst) : '<span class="dms-sm">—</span>') + (x.exp ? '<span class="dms-sm' + (i ? ' dms-tone-' + (i.p === 'high' ? 'bad' : 'warn') : '') + '">' + esc(tr('Expires ', 'ينتهي ') + fmtDate(x.exp, true)) + '</span>' : ''); }, c: function (x) { return [x.fst, x.exp].filter(Boolean).join(' '); } }
+    ];
+  }
+  function creditSpec(id, rows, extra) { return Object.assign({ id: id, rows: rows, cols: creditCols(), text: function (x) { return [x.name, x.customer, x.company, x.fst].join(' '); }, sk: 'util', dir: -1, file: 'credit_limits' }, extra || {}); }
+
+  /* ---------- drill-downs ---------- */
+  function drill(id) {
+    if (id.indexOf('cust:') === 0) {
+      var cid = id.slice(5), c = custOf(cid);
+      return { title: c ? c.name : cid, sub: c ? moneyS(c.total) + ' ' + tr('open', 'مفتوح') + ' · ' + moneyS(c.od) + ' ' + tr('overdue', 'متأخر') : '', link: [CU, cid, tr('Open customer', 'فتح العميل')],
+        spec: invSpec('drill', siOpen([[SI, 'customer', '=', cid]]), 'due_date asc', { cols: invCols(true), file: 'customer_invoices' }) };
+    }
+    if (id.indexOf('cli:') === 0) {
+      var cs = actSpecs().filter(function (x) { return x.id === id.slice(4); })[0], cc = actClient().filter(function (x) { return x.id === id.slice(4); })[0]; if (!cs || !cc) { return null; }
+      return { title: cs.title, sub: cs.why, spec: creditSpec('drill', cc.rows, { sk: cs.id === 'a_over' ? 'avail' : 'fst', dir: 1, file: cs.id }) };
+    }
+    if (id.indexOf('lim:') === 0) {
+      var k = id.slice(4); return { title: tr(CST[k][0], CST[k][1]), spec: creditSpec('drill', (creditRows() || []).filter(function (r) { return r.st === k; })) };
+    }
+    return null;
+  }
+
+  /* ---------- tabs ---------- */
+  function srcAlerts() {
+    var h = '';
+    if (REF.coErr === 'none') { h += alertBox('err', esc(tr('No company with default currency ' + CUR + ' is visible to your user, so receivables cannot be shown.', 'لا توجد شركة بعملة افتراضية ' + CUR + ' ظاهرة لمستخدمك، لذا لا يمكن عرض الذمم.'))); }
+    else if (REF.coErr) { h += alertBox('warn', esc(tr('The company list could not be read; totals are limited to ' + CUR + ' party accounts only and receipts may include other company currencies.', 'تعذرت قراءة قائمة الشركات؛ الإجماليات مقصورة على حسابات العملاء بعملة ' + CUR + ' وقد تشمل المقبوضات عملات شركات أخرى.'))); }
+    if (D.ag && D.ag.truncated) { h += alertBox('warn', esc(tr('Some aging groups reached the ' + num(CFG.cap) + '-row limit, so customer lists may be incomplete. Narrow the filters.', 'بلغت بعض مجموعات الأعمار حد ' + num(CFG.cap) + ' سجل، لذا قد تكون القوائم ناقصة. ضيّق المرشحات.'))); }
+    return h;
+  }
+  function scopeNote() {
+    return note(esc(tr('Balances as of today: submitted Sales Invoices with a positive outstanding amount, ' + CUR + ' party accounts, ' + (F.company ? F.company : 'all ' + CUR + ' companies') + '. Aging counts days past the due date. Historical or foreign-currency aging: ', 'الأرصدة حتى اليوم: فواتير مبيعات معتمدة برصيد مستحق موجب، حسابات عملاء بعملة ' + CUR + '، ' + (F.company ? F.company : 'كل شركات ' + CUR) + '. الأعمار بعدد الأيام بعد تاريخ الاستحقاق. للأعمار التاريخية أو بعملات أخرى: ')) +
+      '<a class="dms-link" href="/app/query-report/Accounts%20Receivable" target="_blank" rel="noopener noreferrer">' + esc(tr('Accounts Receivable report', 'تقرير الذمم المدينة')) + ' ↗</a>');
+  }
+  function agingList() {
+    var A = D.ag, tot = agTotal(); if (!tot) { return empty(tr('No open receivables for the current filters.', 'لا توجد ذمم مفتوحة للمرشحات الحالية.')); }
+    return shareList(BK.map(function (b) { return { label: tr(b.en, b.ar), value: A.tot[b.id], color: b.c, act: 'bk:' + b.id, tip: tr(b.en, b.ar) + ': ' + moneyFull(A.tot[b.id]) + ' · ' + num(A.cnt[b.id]) + ' ' + tr('invoices', 'فاتورة') + ' (' + pct(A.tot[b.id], tot) + ')' }; }),
+      '<b class="dms-num">' + moneyB(tot) + '</b> ' + esc(tr('open', 'مفتوحة')) + ' · ' + num(A.n) + ' ' + esc(tr('invoices', 'فاتورة')), money, true);
+  }
+  var ODP = function () { return [{ label: tr('Overdue', 'متأخر'), color: 'var(--dms-bad)' }, { label: tr('Not yet due', 'غير مستحق بعد'), color: 'var(--dms-royal)' }]; };
+  function tabOverview(AM) {
+    var A = D.ag, M = D.ms, S = collSeries(), C = D.co, tot = agTotal(), od = A ? tot - A.tot.nd : null, o90 = A ? A.tot.b4 + A.tot.b5 : null, cr = creditRows(), h = '';
+    var over = cr ? cr.filter(function (r) { return r.st === 'over'; }) : null, near = cr ? cr.filter(function (r) { return r.st === 'near'; }).length : null;
+    var dso = A && M && M.billed > 0 ? tot / M.billed * CFG.dsoDays : null, w = wait();
+    var errAg = D.agErr ? '—' : null;
+    h += kpis([
+      kpi({ label: tr('Total outstanding', 'إجمالي المستحق'), val: errAg || (A ? cur$(tot) : '…'), act: A ? 'goto:aging' : null,
+        sub: A ? num(A.n) + ' ' + esc(tr('invoices', 'فاتورة')) + ' · ' + num(A.cust.length) + ' ' + esc(tr('customers', 'عميل')) : (D.agErr ? esc(tr('Unavailable', 'غير متاح')) : w), foot: A ? mixBar(BK.map(function (b) { return { label: tr(b.en, b.ar), value: A.tot[b.id], color: b.c, fmt: moneyS }; })) : '',
+        tip: tr('Submitted Sales Invoices with a positive outstanding amount, as of today. No history is stored, so no trend is shown.', 'فواتير مبيعات معتمدة برصيد مستحق موجب حتى اليوم. لا يوجد سجل تاريخي، لذا لا يظهر اتجاه.') }),
+      kpi({ label: tr('Overdue', 'متأخر'), dot: 'var(--dms-bad)', val: errAg || (A ? cur$(od) : '…'), act: A ? 'bk:od' : null, top: A ? (od > 0 ? stat('warn', pct(od, tot, 0)) : stat('ok', tr('None', 'لا يوجد'))) : '',
+        sub: A ? num(A.n - A.cnt.nd) + ' ' + esc(tr('overdue invoices', 'فاتورة متأخرة')) : w, foot: A ? ctx(esc(tr('Not yet due', 'غير مستحق بعد')) + ' ' + moneyB(A.tot.nd)) : '',
+        tip: tr('Outstanding amount on invoices whose due date is before today.', 'المبلغ المستحق على فواتير تاريخ استحقاقها قبل اليوم.') }),
+      kpi({ label: tr('Overdue > 90 days', 'متأخر أكثر من 90 يومًا'), dot: 'var(--dms-age5)', val: errAg || (A ? cur$(o90) : '…'), act: A ? 'bk:o90' : null, top: A && o90 > 0 ? stat('warn', pct(o90, tot, 0)) : '',
+        sub: A ? num(A.cnt.b4 + A.cnt.b5) + ' ' + esc(tr('invoices', 'فاتورة')) : w, foot: A ? ctx(esc(tr('Over 180 days', 'أكثر من 180 يومًا')) + ' ' + moneyB(A.tot.b5)) : '',
+        tip: tr('Highest collection risk: due date more than 90 days ago.', 'أعلى مخاطر التحصيل: تاريخ الاستحقاق قبل أكثر من 90 يومًا.') }),
+      kpi({ label: tr('Collected', 'المحصّل'), dot: 'var(--dms-ok)', val: D.coErr ? '—' : (S ? cur$(S.total) : C && C.future ? '—' : '…'), act: S ? 'goto:coll' : null,
+        top: S && C ? deltaChip(S.total, C.prev.amt, [C.range, C.prevRange]) : '',
+        sub: D.coErr ? esc(tr('Unavailable', 'غير متاح')) : S ? num(S.n) + ' ' + esc(tr('receipts', 'سند')) : (C && C.future ? esc(tr('Period has not started', 'الفترة لم تبدأ')) : w),
+        foot: S ? (spark(S.keys.map(function (k) { return S.d[k].v; })) || ctx(esc(tr('Average receipt', 'متوسط السند')) + ' ' + (S.n ? moneyB(S.total / S.n) : '—'))) : '',
+        tip: tr('Submitted customer receipts (Payment Entry, type Receive) dated in the period, company-currency amount. Compared with the same span of the previous period.', 'مقبوضات العملاء المعتمدة (سند دفع من نوع استلام) بتاريخ ضمن الفترة، بعملة الشركة. مقارنة بنفس المدة من الفترة السابقة.') }),
+      kpi({ label: tr('Over credit limit', 'تجاوز حد الائتمان'), val: D.lmErr || D.agErr ? '—' : (over ? num(over.length) : '…'), act: over && over.length ? 'cli:a_over' : (over ? 'goto:limits' : null), top: over ? (over.length ? stat('warn', tr('Hold credit', 'أوقف الائتمان')) : stat('ok', tr('None', 'لا يوجد'))) : '',
+        sub: over ? moneyB(sum(over, function (r) { return -r.avail; })) + ' ' + esc(tr('above limits', 'فوق الحدود')) : (D.lmErr ? esc(tr('Unavailable', 'غير متاح')) : w), foot: over ? ctx(esc(tr('Near limit (≥' + CFG.nearPct + '%)', 'قريب من الحد (≥' + CFG.nearPct + '%)')) + ' ' + num(near)) : '',
+        tip: tr('Customer–company pairs whose open balance exceeds a positive credit limit set for that company. Customers without a limit are not counted.', 'أزواج عميل–شركة يتجاوز رصيدها المفتوح حدًا ائتمانيًا موجبًا لتلك الشركة. لا يُحتسب العملاء بلا حد.') }),
+      kpi({ label: tr('DSO (' + CFG.dsoDays + '-day)', 'أيام التحصيل (' + CFG.dsoDays + ' يومًا)'), val: D.msErr || D.agErr ? '—' : (A && M ? (dso == null ? tr('N/A', 'غير متاح') : '<bdi>' + num(dso) + '<small>' + esc(tr('days', 'يوم')) + '</small></bdi>') : '…'), top: asOf(),
+        sub: M ? esc(tr('Billed last ' + CFG.dsoDays + ' days', 'المفوتر آخر ' + CFG.dsoDays + ' يومًا')) + ' ' + moneyB(M.billed) : (D.msErr ? esc(tr('Unavailable', 'غير متاح')) : w), foot: M ? ctx(esc(tr('Unapplied credits', 'أرصدة دائنة غير مطبقة')) + ' ' + moneyB(M.credits)) : '',
+        tip: tr('Days sales outstanding = total outstanding ÷ net billing (submitted invoices less returns) of the last ' + CFG.dsoDays + ' days × ' + CFG.dsoDays + '.', 'أيام التحصيل = إجمالي المستحق ÷ صافي الفوترة (الفواتير المعتمدة ناقص المرتجعات) لآخر ' + CFG.dsoDays + ' يومًا × ' + CFG.dsoDays + '.') })
+    ], true);
+    var ageP = src('ag', tr('Sales Invoices', 'فواتير المبيعات'), agingList);
+    var collP = D.coErr ? srcErr(D.coErr, tr('Payment Entries', 'سندات الدفع')) : S ? collChart(S) + (S.partial ? note(esc(tr('Showing the first 2,000 days with receipts.', 'عرض أول 2,000 يوم بها مقبوضات.'))) : '') : (C && C.future ? empty(tr('The selected period has not started yet.', 'الفترة المحددة لم تبدأ بعد.')) : skel(1, 'dms-skel-panel'));
+    h += '<div class="dms-main2">' + actionsPanel(AM) + '<div class="dms-stackcol">' +
+      panel(tr('Aging of receivables', 'أعمار الذمم المدينة'), ageP, '', esc(tr('As of today · days past due', 'حتى اليوم · أيام بعد الاستحقاق'))) +
+      panel(tr('Collections', 'التحصيلات'), collP, '', esc(CUR) + (S ? ' · ' + esc(granName(S.gran)) : '')) + '</div></div>';
+    var top = A ? A.cust.slice().sort(function (a, b) { return b.total - a.total; }).slice(0, 10).map(function (c) { return { label: c.name, total: c.total, part: c.od, act: 'cust:' + c.customer }; }) : null;
+    var byCo = {}; if (A) { A.pairs.forEach(function (p) { byCo[p.company] = (byCo[p.company] || 0) + p.total; }); }
+    var coSegs = Object.keys(byCo).sort(function (a, b) { return byCo[b] - byCo[a]; }).map(function (k, i) { return { label: k, value: byCo[k], color: PAL[i % PAL.length] }; });
+    var divs = D.div ? D.div.filter(function (x) { return x.amt > 0; }).sort(function (a, b) { return b.amt - a.amt; }).slice(0, 8).map(function (x) { return { label: x.div || tr('No division', 'بدون قسم'), total: x.amt, part: x.od }; }) : null;
+    h += '<div class="dms-breakdowns">' +
+      panel(tr('Top customers by outstanding', 'أعلى العملاء حسب المستحق'), D.agErr ? empty(tr('Unavailable', 'غير متاح')) : top ? splitBars(top, ODP()) : skel(1, 'dms-skel-panel'), '', esc(CUR) + ' · ' + esc(tr('select a customer for invoices', 'اختر عميلًا لعرض الفواتير'))) +
+      panel(tr('Outstanding by company', 'المستحق حسب الشركة'), D.agErr ? empty(tr('Unavailable', 'غير متاح')) : A ? shareList(coSegs, '<b class="dms-num">' + moneyB(tot) + '</b> ' + esc(tr('open', 'مفتوح')), money) : skel(1, 'dms-skel-panel')) +
+      panel(tr('Outstanding by division', 'المستحق حسب القسم'), D.divErr ? srcErr(D.divErr, tr('Sales Invoices by division', 'الفواتير حسب القسم')) : divs ? splitBars(divs, ODP()) : skel(1, 'dms-skel-panel'), '', esc(CUR)) + '</div>';
+    return scopeNote() + h + reconHTML();
+  }
+  function collChart(S) { return barChart(S.keys, S.gran, { label: tr('Collected', 'المحصّل'), color: 'var(--dms-ok)', val: function (k) { return S.d[k].v; } }, moneyFull, function (k) { return '\n' + tr('Receipts', 'السندات') + ': ' + num(S.d[k].n); }, tr('No receipts in this range.', 'لا توجد مقبوضات في هذا النطاق.')); }
+  /* Native report references: loaded only when opened (two full report runs). Different definitions, shown for reconciliation. */
+  function reconHTML() {
+    var h = '<section class="dms-panelbox dms-recon"><button type="button" class="dms-disclose" data-act="recon" aria-expanded="' + RECON_OPEN + '">' + ico('down', 'dms-chev') + '<span class="dms-h3">' + esc(tr('Native report references', 'مراجع التقارير الأصلية')) + '</span><span class="dms-ph-meta">' + esc(tr('All companies · different definitions', 'كل الشركات · تعريفات مختلفة')) + '</span></button>';
+    if (!RECON_OPEN) { return h + '</section>'; }
+    var R = D.ref, body = note(esc(tr('These come from the native report definitions across all companies and do not follow this page’s filters. "Over Credit Limit Customer" also counts customers with a zero limit. "Collection Analysis Report" excludes selected salespeople and divides receipts by 1.15, so it is not gross customer receipts.', 'هذه من تعريفات التقارير الأصلية لكل الشركات ولا تتبع مرشحات هذه الصفحة. تقرير "تجاوز حد الائتمان" يحتسب أيضًا العملاء بحد صفري. تقرير "تحليل التحصيل" يستبعد مندوبين محددين ويقسم المقبوضات على 1.15، فلا يمثل إجمالي المقبوضات.')));
+    if (D.refErr) { body += alertBox('warn', esc(tr('The native reports are unavailable for your user.', 'التقارير الأصلية غير متاحة لمستخدمك.'))); }
+    else { body += kpis([kpi({ label: tr('Over credit limit, incl. zero limits', 'تجاوز الحد، بما فيه الحد الصفري'), val: R ? num(R.over) : '…', sub: esc(tr('Over Credit Limit Customer report', 'تقرير تجاوز حد الائتمان')) }), kpi({ label: tr('Salesperson collections — legacy adjusted', 'تحصيل المندوبين — معدّل قديم'), val: R ? cur$(R.collections) : '…', sub: esc(tr('Collection Analysis Report · this month', 'تقرير تحليل التحصيل · هذا الشهر')) })]); }
+    return h + '<div class="dms-recon-b">' + body + '</div></section>';
+  }
+  function tabAging() {
+    var A = D.ag; if (D.agErr) { return srcErr(D.agErr, tr('Sales Invoices', 'فواتير المبيعات')); }
+    if (!A) { return scopeNote() + skel(1, 'dms-skel-panel'); }
+    var cols = [{ k: 'name', h: tr('Customer', 'العميل'), s: function (x) { return x.name.toLowerCase(); }, r: function (x) { return custBtn(x.customer, x.name); }, c: function (x) { return x.name; } }];
+    BK.forEach(function (b) { cols.push({ k: b.id, h: tr(b.en, b.ar), num: 1, s: function (x) { return x.b[b.id] || 0; }, r: function (x) { return x.b[b.id] ? '<span class="dms-num">' + esc(amt(x.b[b.id])) + '</span>' : '<span class="dms-sm">—</span>'; }, c: function (x) { return (x.b[b.id] || 0).toFixed(2); } }); });
+    cols.push({ k: 'total', h: tr('Total', 'الإجمالي'), num: 1, s: function (x) { return x.total; }, r: function (x) { return '<b class="dms-num">' + esc(amt(x.total)) + '</b>'; }, c: function (x) { return x.total.toFixed(2); } });
+    cols.push({ k: 'n', h: tr('Invoices', 'الفواتير'), num: 1, s: function (x) { return x.n; }, r: function (x) { return '<span class="dms-num">' + num(x.n) + '</span>'; }, c: function (x) { return x.n; } });
+    var spec = { id: 't_aging', rows: A.cust, cols: cols, sk: 'total', dir: -1, file: 'customer_aging', text: function (x) { return x.name + ' ' + x.customer; },
+      foot: function (rows) { return '<tr><td>' + esc(tr('Total', 'الإجمالي')) + (rows.length !== A.cust.length ? ' (' + num(rows.length) + ')' : '') + '</td>' + BK.map(function (b) { return '<td class="dms-td-n"><b class="dms-num">' + esc(amt(sum(rows, function (r) { return r.b[b.id]; }))) + '</b></td>'; }).join('') + '<td class="dms-td-n"><b class="dms-num">' + esc(amt(sum(rows, function (r) { return r.total; }))) + '</b></td><td class="dms-td-n"><b class="dms-num">' + num(sum(rows, function (r) { return r.n; })) + '</b></td></tr>'; } };
+    return scopeNote() + kpis(BK.map(function (b) { return kpi({ label: tr(b.en, b.ar), dot: b.c, val: cur$(A.tot[b.id]), sub: num(A.cnt[b.id]) + ' ' + esc(tr('invoices', 'فاتورة')) + ' · ' + esc(pct(A.tot[b.id], agTotal(), 0)), act: 'bk:' + b.id }); })) +
+      panel(tr('Customer aging', 'أعمار ديون العملاء'), regTable(spec), '', esc(CUR) + ' · ' + esc(tr('select a customer for invoices', 'اختر عميلًا لعرض الفواتير')));
+  }
+  function tabInvoices() {
+    var h = scopeNote() + '<div class="dms-chips dms-bchips" role="group" aria-label="' + esc(tr('Aging bucket', 'فئة العمر')) + '">' + CHIPS.map(function (b) {
+      var v = bucketAmount(b.id), on = BUCKET === b.id;
+      return '<button type="button" class="dms-bchip' + (on ? ' dms-on' : '') + '" aria-pressed="' + on + '" data-act="bucket" data-v="' + b.id + '">' + (b.c ? '<i class="dms-dot" style="--dms-c:' + b.c + '"></i>' : '') + '<span>' + esc(tr(b.en, b.ar)) + '</span><b class="dms-num">' + (v == null ? '…' : esc(money(v))) + '</b></button>';
+    }).join('') + '</div>';
+    var b = bk(BUCKET);
+    return h + panel(tr('Open invoices', 'الفواتير المفتوحة') + ' — ' + tr(b.en, b.ar), regTable(invSpec('t_inv', siOpen(bFilter(BUCKET)), BUCKET === 'nd' ? 'due_date asc' : 'outstanding_amount desc', { pageSize: CFG.pageSize })), '', esc(tr('Oldest or largest first · sortable', 'الأقدم أو الأكبر أولًا · قابلة للفرز')));
+  }
+  function tabLimits() {
+    if (D.lmErr) { return srcErr(D.lmErr, tr('Customer credit limits', 'حدود ائتمان العملاء')); }
+    if (D.agErr) { return srcErr(D.agErr, tr('Sales Invoices', 'فواتير المبيعات')); }
+    var rows = creditRows(); if (!rows) { return skel(1, 'dms-skel-panel'); }
+    var c = function (k) { return rows.filter(function (r) { return r.st === k; }); }, fac = actClient().filter(function (x) { return x.id === 'a_fac'; })[0].rows;
+    var h = note(esc(tr('Customers with an open balance, per company (ERPNext limits are set per company). Utilisation = outstanding ÷ credit limit. A zero or missing limit counts as "No limit set".', 'العملاء الذين لديهم رصيد مفتوح، لكل شركة (حدود ERPNext لكل شركة). نسبة الاستخدام = المستحق ÷ حد الائتمان. الحد الصفري أو المفقود يُعد "لا يوجد حد".')));
+    if (D.lm.truncated) { h += alertBox('warn', esc(tr('Credit-limit rows reached the ' + num(CFG.cap) + ' limit; choose a company.', 'بلغت صفوف الحدود ' + num(CFG.cap) + '؛ اختر شركة.'))); }
+    h += kpis(['over', 'near', 'ok', 'none'].map(function (k) {
+      var list = c(k); return kpi({ label: tr(CST[k][0], CST[k][1]), val: num(list.length), sub: moneyB(sum(list, function (r) { return r.total; })) + ' ' + esc(tr('outstanding', 'مستحق')), act: list.length ? 'lim:' + k : null, top: k === 'over' && list.length ? stat('warn', tr('Hold credit', 'أوقف الائتمان')) : '' });
+    }).concat([kpi({ label: tr('Facility renewal', 'تجديد التسهيل'), val: num(fac.length), sub: esc(tr('Expired, missing or expiring in ' + CFG.facilityWarn + ' days', 'منتهية أو مفقودة أو تنتهي خلال ' + CFG.facilityWarn + ' يومًا')), act: fac.length ? 'cli:a_fac' : null })]));
+    return h + panel(tr('Credit limits and utilisation', 'حدود الائتمان ونسبة الاستخدام'), regTable(creditSpec('t_lim', rows)), '', esc(CUR) + ' · ' + esc(tr('highest utilisation first', 'الأعلى استخدامًا أولًا')));
+  }
+  function tabColl(AM) {
+    loadYear();
+    var S = collSeries(), C = D.co, Y = D.yr, h = note(esc(tr('Submitted customer receipts (Payment Entry, type Receive), company-currency amounts. The division filter does not apply to receipts.', 'مقبوضات العملاء المعتمدة (سند دفع من نوع استلام) بعملة الشركة. مرشح القسم لا ينطبق على المقبوضات.')));
+    if (D.coErr) { return h + srcErr(D.coErr, tr('Payment Entries', 'سندات الدفع')); }
+    var un = AM && AM.counts.a_unalloc;
+    h += kpis([
+      kpi({ label: tr('Collected in period', 'المحصّل في الفترة'), dot: 'var(--dms-ok)', val: S ? cur$(S.total) : '…', top: S ? deltaChip(S.total, C.prev.amt, [C.range, C.prevRange]) : '', sub: S ? esc(rangeLabel(C.range)) : '' }),
+      kpi({ label: tr('Receipts', 'عدد السندات'), val: S ? num(S.n) : '…', sub: S ? esc(tr('Previous period', 'الفترة السابقة')) + ' ' + num(C.prev.n) : '' }),
+      kpi({ label: tr('Average receipt', 'متوسط السند'), val: S ? (S.n ? cur$(S.total / S.n) : '—') : '…', sub: esc(tr('Collected ÷ receipts', 'المحصّل ÷ عدد السندات')) }),
+      kpi({ label: tr('Previous period', 'الفترة السابقة'), val: C ? cur$(C.prev.amt) : '…', sub: C ? esc(rangeLabel(C.prevRange)) : '' }),
+      kpi({ label: tr('Unallocated receipts', 'مقبوضات غير مخصصة'), val: typeof un === 'number' ? num(un) : un ? '—' : '…', act: typeof un === 'number' && un ? 'srv:a_unalloc' : null, sub: esc(tr('As of today · allocate to invoices', 'حتى اليوم · خصصها للفواتير')), top: typeof un === 'number' && un ? stat('warn', tr('Action', 'إجراء')) : '' })
+    ]);
+    var yr = D.yrErr ? srcErr(D.yrErr, tr('Payment Entries', 'سندات الدفع')) : Y ? barChart(Y.keys, 'month', { label: tr('Collected', 'المحصّل'), color: 'var(--dms-ok)', val: function (k) { return Y.d[k] || 0; } }) : skel(1, 'dms-skel-panel');
+    h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Collections in period', 'التحصيلات في الفترة'), S ? collChart(S) : C && C.future ? empty(tr('The selected period has not started yet.', 'الفترة المحددة لم تبدأ بعد.')) : skel(1, 'dms-skel-panel'), '', esc(CUR) + (S ? ' · ' + esc(granName(S.gran)) : '')) +
+      panel(tr('Last 12 months', 'آخر 12 شهرًا'), yr, '', esc(CUR) + ' · ' + esc(tr('independent of the period', 'مستقل عن الفترة'))) + '</div>';
+    var range = C ? C.range : clip(PERIOD);
+    return h + panel(tr('Receipts in period', 'المقبوضات في الفترة'), regTable({ id: 't_pe', server: true, period: true, dt: PE, fields: PE_F, filters: peF([[PE, 'posting_date', 'between', range]]), order: 'posting_date desc', cols: peCols(), search: ['name', 'party_name', 'reference_no'], searchHint: tr('Search receipt, customer or reference…', 'ابحث بالسند أو العميل أو المرجع…'), file: 'receipts', pageSize: CFG.pageSize }), '', esc(rangeLabel(range)));
+  }
+  function tabActions(AM) { return actionsTab(AM, tr('Action lists are as of today and not filtered by the period. They follow the company, division, location and customer filters where the source supports them (customer flags have no company).', 'قوائم الإجراءات حتى اليوم وغير مرتبطة بالفترة، وتتبع مرشحات الشركة والقسم والموقع والعميل حيثما يدعمها المصدر (علامات العملاء بلا شركة).')); }
+
+  start();
 })();
 
-/* ==== DM theme sync v1 · generated by tools/erp/shell/dark_theme.py ==== */
+/* ==== DM theme sync (same as tools/erp/shell/dark_theme.py output; maintained here since this block left the generated shell) ==== */
 ;(function () {
   var r = typeof root_element !== 'undefined' ? root_element : null, h = r && r.host;
   if (!h || h.__dmsTheme) return; h.__dmsTheme = 1;
   var s = function () { h.setAttribute('data-dms-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'); };
   s(); new MutationObserver(s).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 })();
-/* ==== end DM theme sync v1 ==== */
+/* ==== end DM theme sync ==== */
