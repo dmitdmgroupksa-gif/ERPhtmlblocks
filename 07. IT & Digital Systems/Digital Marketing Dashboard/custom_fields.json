@@ -1,0 +1,72 @@
+[
+  {
+    "doctype": "Custom Field",
+    "dt": "Leads Generation List",
+    "fieldname": "marketing_channel",
+    "label": "Marketing Channel",
+    "fieldtype": "Link",
+    "insert_after": "source",
+    "options": "Marketing Channel"
+  },
+  {
+    "doctype": "Custom Field",
+    "dt": "Leads Generation List",
+    "fieldname": "campaign",
+    "label": "Campaign",
+    "fieldtype": "Link",
+    "insert_after": "marketing_channel",
+    "options": "Campaign"
+  },
+  {
+    "doctype": "Custom Field",
+    "dt": "Lead Allocation",
+    "fieldname": "marketing_channel",
+    "label": "Marketing Channel",
+    "fieldtype": "Link",
+    "insert_after": "source",
+    "options": "Marketing Channel"
+  },
+  {
+    "doctype": "Custom Field",
+    "dt": "Lead Allocation",
+    "fieldname": "campaign",
+    "label": "Campaign",
+    "fieldtype": "Link",
+    "insert_after": "marketing_channel",
+    "options": "Campaign"
+  },
+  {
+    "doctype": "Custom Field",
+    "dt": "Lead Allocation",
+    "fieldname": "deal_value",
+    "label": "Recorded conversion value (company currency)",
+    "fieldtype": "Currency",
+    "insert_after": "campaign"
+  },
+  {
+    "doctype": "Custom Field",
+    "dt": "Lead Allocation",
+    "fieldname": "converted_customer",
+    "label": "Converted Customer",
+    "fieldtype": "Link",
+    "insert_after": "deal_value",
+    "options": "Customer"
+  },
+  {
+    "doctype": "Custom Field",
+    "dt": "Lead Allocation",
+    "fieldname": "lost_reason",
+    "label": "Lost Reason",
+    "fieldtype": "Small Text",
+    "insert_after": "converted_customer"
+  },
+  {
+    "doctype": "Custom Field",
+    "dt": "Lead",
+    "fieldname": "marketing_channel",
+    "label": "Marketing Channel",
+    "fieldtype": "Link",
+    "insert_after": "source",
+    "options": "Marketing Channel"
+  }
+]

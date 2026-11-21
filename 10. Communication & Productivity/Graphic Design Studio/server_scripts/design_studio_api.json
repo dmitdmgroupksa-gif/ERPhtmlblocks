@@ -1,0 +1,8 @@
+{
+ "name": "Design Studio API",
+ "script_type": "API",
+ "api_method": "design_studio_api",
+ "allow_guest": 0,
+ "disabled": 0,
+ "source": "design_studio_api.py"
+}

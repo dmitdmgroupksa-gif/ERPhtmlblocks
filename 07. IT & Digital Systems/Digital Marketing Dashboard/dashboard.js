@@ -463,7 +463,7 @@
 		{ dt: 'Marketing Daily Metrics', kind: 'new', why: 'Spend, impressions, clicks, reach and messaging numbers per channel per day', fields: ['date', 'channel', 'campaign', 'spend', 'impressions', 'reach', 'clicks', 'engagements', 'video_views', 'platform_leads', 'messages_sent', 'messages_delivered', 'replies'] },
 		{ dt: 'Marketing Budget', kind: 'new', why: 'Budget and targets per channel / campaign / period', fields: ['from_date', 'to_date', 'channel', 'campaign', 'budget_amount', 'leads_target', 'conversions_target', 'revenue_target'] },
 		{ dt: 'Marketing Content', kind: 'new', why: 'Content calendar + post performance (posts, reels, emails, blogs)', fields: ['title', 'channel', 'campaign', 'content_type', 'status', 'publish_date', 'content_owner', 'post_link', 'impressions', 'reach', 'likes', 'comments', 'shares', 'saves', 'clicks', 'video_views'] },
-		{ dt: 'Web Analytics Daily', kind: 'new', why: 'Website sessions, engagement, conversions and search performance per day and source', fields: ['date', 'channel_group', 'sessions', 'users', 'new_users', 'engaged_sessions', 'bounce_rate', 'avg_session_duration', 'conversions', 'search_impressions', 'search_clicks', 'avg_position'] },
+		{ dt: 'Web Analytics Daily', kind: 'new', why: 'Website sessions, engagement, conversions and search performance per day and source', fields: ['date', 'channel_group', 'sessions', 'users', 'new_users', 'engaged_sessions', 'bounce_rate', 'average_session_duration', 'conversions', 'search_impressions', 'search_clicks', 'average_position'] },
 		{ dt: 'Leads Generation List', kind: 'fields', why: 'Attribute every lead to a channel and campaign', fields: ['marketing_channel', 'campaign'] },
 		{ dt: 'Lead Allocation', kind: 'fields', why: 'Carry attribution through to the win and record revenue', fields: ['marketing_channel', 'campaign', 'deal_value', 'converted_customer', 'lost_reason'] },
 		{ dt: 'Lead', kind: 'fields', why: 'Optional: channel on standard CRM leads', fields: ['marketing_channel'] },
@@ -933,9 +933,12 @@
 					if (!sc.has(o.date)) throw this.missing(dt + '.' + o.date);
 					fl.push([o.date, '>=', f.from + (o.datetime ? ' 00:00:00' : '')], [o.date, '<=', f.to + (o.datetime ? ' 23:59:59' : '')]);
 				}
-				if (f.campaign && o.campaign && sc.has(o.campaign)) fl.push([o.campaign, '=', f.campaign]);
+				if(f.campaign && o.campaign && !sc.has(o.campaign))throw this.missing(dt+'.'+o.campaign);
+				if (f.campaign && o.campaign) fl.push([o.campaign, '=', f.campaign]);
 				(o.extra || []).forEach((x) => { if (sc.has(x[0])) fl.push(x); });
-				return this.gl(dt, fields, fl, { order_by: o.order, limit: o.limit || 10000 });
+				const rows=await this.gl(dt, fields, fl, { order_by: o.order, limit: o.limit || 10000 });
+				if(['Marketing Channel','Marketing Daily Metrics','Marketing Budget','Marketing Content','Web Analytics Daily'].includes(dt)&&!rows.length)throw this.missing(dt+' has no source records in this scope');
+				return rows;
 			});
 		}
 		lgl(f) {
@@ -990,7 +993,8 @@
 				const sc = await this.schema('Marketing Budget');
 				if (!sc) throw this.missing('Marketing Budget');
 				const fl = [['from_date', '<=', f.to], ['to_date', '>=', f.from]];
-				if (f.campaign && sc.has('campaign')) fl.push(['campaign', '=', f.campaign]);
+				if(f.campaign&&!sc.has('campaign'))throw this.missing('Marketing Budget.campaign');
+				if (f.campaign) fl.push(['campaign', '=', f.campaign]);
 				const fields = ['name', 'from_date', 'to_date', 'channel', 'campaign', 'budget_amount', 'leads_target', 'conversions_target', 'revenue_target'].filter((x) => sc.has(x));
 				return this.gl('Marketing Budget', fields, fl, { limit: 2000 });
 			});
@@ -1000,7 +1004,7 @@
 				{ date: 'publish_date', campaign: 'campaign', order: 'publish_date desc', limit: 5000 });
 		}
 		web(f) {
-			return this.dsq('web', 'Web Analytics Daily', ['date', 'channel_group', 'sessions', 'users', 'new_users', 'engaged_sessions', 'bounce_rate', 'avg_session_duration', 'conversions', 'search_impressions', 'search_clicks', 'avg_position'],
+			return this.dsq('web', 'Web Analytics Daily', ['date', 'channel_group', 'sessions', 'users', 'new_users', 'engaged_sessions', 'bounce_rate', 'average_session_duration', 'conversions', 'search_impressions', 'search_clicks', 'average_position'],
 				{ date: 'date', order: 'date asc', limit: 20000 });
 		}
 		async empNames(ids) {
@@ -1788,12 +1792,12 @@
 			});
 			this.ts($g, __('Avg session duration (s)'), 6, f, 'line', async (ds) => {
 				const w = await this.web(f);
-				return [{ name: __('Seconds'), values: ds.map((d) => { const r = w.filter((x) => String(x.date).slice(0, 10) === d && flt(x.sessions) > 0); const s = r.reduce((a, x) => a + flt(x.sessions), 0); return s ? Math.round(r.reduce((a, x) => a + flt(x.avg_session_duration) * flt(x.sessions), 0) / s) : 0; }) }];
+				return [{ name: __('Seconds'), values: ds.map((d) => { const r = w.filter((x) => String(x.date).slice(0, 10) === d && flt(x.sessions) > 0); const s = r.reduce((a, x) => a + flt(x.sessions), 0); return s ? Math.round(r.reduce((a, x) => a + flt(x.average_session_duration) * flt(x.sessions), 0) / s) : 0; }) }];
 			});
 			this.ts($g, __('Search clicks per day'), 6, f, 'line', async (ds) => [{ name: __('Clicks'), values: this.perDay(await this.web(f), 'date', (r) => flt(r.search_clicks))(ds) }]);
 			this.ts($g, __('Avg search position'), 6, f, 'line', async (ds) => {
 				const w = await this.web(f);
-				return [{ name: __('Position'), values: ds.map((d) => { const r = w.filter((x) => String(x.date).slice(0, 10) === d && flt(x.avg_position) > 0); return r.length ? Math.round((r.reduce((a, x) => a + flt(x.avg_position), 0) / r.length) * 10) / 10 : 0; }) }];
+				return [{ name: __('Position'), values: ds.map((d) => { const r = w.filter((x) => String(x.date).slice(0, 10) === d && flt(x.average_position) > 0); return r.length ? Math.round((r.reduce((a, x) => a + flt(x.average_position), 0) / r.length) * 10) / 10 : 0; }) }];
 			}, { sub: __('lower is better') });
 			await Promise.all(jobs);
 		}

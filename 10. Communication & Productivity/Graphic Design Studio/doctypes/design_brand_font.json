@@ -1,0 +1,48 @@
+{
+ "doctype": "DocType",
+ "name": "Design Brand Font",
+ "module": "Custom",
+ "custom": 1,
+ "istable": 1,
+ "issingle": 0,
+ "track_changes": 0,
+ "fields": [
+  {
+   "fieldname": "family",
+   "fieldtype": "Data",
+   "label": "Family",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "weight",
+   "fieldtype": "Data",
+   "label": "Weight",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "script",
+   "fieldtype": "Select",
+   "label": "Script",
+   "options": "Latin\nArabic",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "font_file",
+   "fieldtype": "Link",
+   "label": "Font file",
+   "options": "Design Asset",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "licence",
+   "fieldtype": "Data",
+   "label": "Licence"
+  },
+  {
+   "fieldname": "licence_expiry",
+   "fieldtype": "Date",
+   "label": "Licence expiry"
+  }
+ ],
+ "permissions": []
+}

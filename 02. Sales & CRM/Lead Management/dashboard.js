@@ -1,1219 +1,1435 @@
+/* ===== DM Group KSA — Lead Management — SCRIPT field · v2 =====
+   Leads Generation List (frappe.client.get_list, the user's permissions) and Server Script "bulk_allocate_leads"
+   (unchanged; actions report_lead_ids, report_allocations, search_salespersons, unassign_allocations, fu_monitor,
+   fu_history, and the plain call that allocates). Writes are only the two v1 coordinator actions: allocate selected leads
+   and unassign allocations with a reason. Built on the DM dashboard standard; the shared runtime between the
+   "DMS kit" markers is generated from tools/erp/kit/dms-kit.js (edit the kit and run build_kit.py, not the copy). */
 (function () {
-var R = root_element;
-var DT = 'Leads Generation List';
-var LS_KEY = 'lm_dash_lang';
-var ICON = {
-  users: '<svg class="lm-ico" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
-  check: '<svg class="lm-ico" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>',
-  clock: '<svg class="lm-ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>',
-  book: '<svg class="lm-ico" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15z"/></svg>',
-  alert: '<svg class="lm-ico" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>',
-  refresh: '<svg class="lm-ico" viewBox="0 0 24 24"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15"/></svg>',
-  plus: '<svg class="lm-ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
-  send: '<svg class="lm-ico" viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>',
-  ext: '<svg class="lm-ico" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3"/></svg>'
-};
-var T = {
-  en: {title:'Lead Management',sub:'Lead generation, allocation and sales coordination',refreshed:'Last refreshed',refresh:'Refresh',addLead:'Add Lead',allocate:'Allocate Leads',
-    from:'Lead Date From',to:'Lead Date To',city:'City',source:'Source',sp:'Assigned Salesperson',alloc:'Allocation Status',all:'All',assigned:'Assigned',unassigned:'Unassigned',
-    search:'Search',searchPh:'Lead ID, company, contact, email or phone',apply:'Apply',reset:'Reset',
-    dateNote:'Period filters use the lead record field “Date”. Assigned = lead has at least one current allocation (status not Closed/Converted). Unassigned = never allocated; leads with only Closed/Converted allocations are counted separately (same definitions as the Detailed Report).',
-    total:'Total Leads',assignedL:'Assigned Leads',unassignedL:'Unassigned Leads',catalogue:'Catalogue Sent',missing:'Missing Contact Details',
-    ofTotal:'of total',noEmailPhone:'No usable email or phone',clickView:'Click to view',
-    bySource:'Leads by Source',byCity:'Leads by City',top10:'Top 10 + Other',allocBreak:'Allocation Breakdown',overTime:'Leads Generated Over Time',byDay:'by day',byMonth:'by month',other:'Other',notSet:'(Not set)',
-    leads:'Leads',selected:'selected',clearSel:'Clear selection',results:'results',
-    cId:'Lead ID',cCompany:'Company / Customer',cDate:'Lead Date',cCity:'City',cSource:'Source',cContact:'Contact Person',cPhone:'Primary Phone',cEmail:'Email',cSp:'Assigned Salesperson',cCat:'Catalogue Sent',cOpen:'Open',
-    yes:'Sent',no:'Not sent',open:'Open',more:'more',prev:'Previous',next:'Next',page:'Page',perPage:'per page',noRows:'No leads match the current filters.',
-    loading:'Loading…',error:'Could not load data',allocUnavailable:'Allocation data unavailable',allocUnavailableLong:'Allocation counts cannot be shown: active allocations are only readable through the allocation API, which is not available for this session.',
-    dq:'Data Quality',dqMissingCE:'Missing phone and email',dqCity:'Missing city',dqContact:'Missing contact person',dqDup:'Potential duplicates',dqDupNote:'Potential duplicates by identical email or phone (review only; nothing is merged or deleted).',groups:'groups',records:'records',
-    activeFilter:'Table filter',noSelection:'Select at least one lead in the table first.',reviewTitle:'Review allocation',selLeads:'Selected leads',salesperson:'Salesperson',
-    willSkip:'already have an active allocation and will be skipped (existing rule: no automatic reassignment).',confirm:'Confirm allocation',back:'Back',continue:'Continue',
-    done:'Allocation completed',created:'Created',skipped:'Skipped',notAuth:'You are not authorized to allocate leads.',
-    asgnDate:'Assignment Date',priority:'Priority',followUp:'Next Follow Up',restricted:'Restricted'},
-  ar: {title:'إدارة العملاء المحتملين',sub:'توليد العملاء المحتملين وتوزيعهم وتنسيق المبيعات',refreshed:'آخر تحديث',refresh:'تحديث',addLead:'إضافة عميل محتمل',allocate:'توزيع العملاء',
-    from:'تاريخ العميل من',to:'تاريخ العميل إلى',city:'المدينة',source:'المصدر',sp:'مندوب المبيعات المسند',alloc:'حالة التوزيع',all:'الكل',assigned:'موزع',unassigned:'غير موزع',
-    search:'بحث',searchPh:'رقم العميل، الشركة، جهة الاتصال، البريد أو الهاتف',apply:'تطبيق',reset:'إعادة ضبط',
-    dateNote:'تعتمد فلاتر الفترة على حقل «التاريخ» في سجل العميل. موزع = للعميل توزيع حالي واحد على الأقل. غير موزع = لم يوزع مطلقاً؛ العملاء الذين لديهم توزيعات مغلقة/محولة فقط يُحسبون منفصلين (نفس تعريفات التقرير التفصيلي).',
-    total:'إجمالي العملاء',assignedL:'العملاء الموزعون',unassignedL:'العملاء غير الموزعين',catalogue:'تم إرسال الكتالوج',missing:'بيانات اتصال ناقصة',
-    ofTotal:'من الإجمالي',noEmailPhone:'لا يوجد بريد أو هاتف صالح',clickView:'اضغط للعرض',
-    bySource:'العملاء حسب المصدر',byCity:'العملاء حسب المدينة',top10:'أعلى 10 + أخرى',allocBreak:'توزيع الإسناد',overTime:'العملاء عبر الزمن',byDay:'يومياً',byMonth:'شهرياً',other:'أخرى',notSet:'(غير محدد)',
-    leads:'العملاء المحتملون',selected:'محدد',clearSel:'إلغاء التحديد',results:'نتيجة',
-    cId:'رقم العميل',cCompany:'الشركة / العميل',cDate:'تاريخ العميل',cCity:'المدينة',cSource:'المصدر',cContact:'جهة الاتصال',cPhone:'الهاتف الأساسي',cEmail:'البريد الإلكتروني',cSp:'مندوب المبيعات',cCat:'الكتالوج',cOpen:'فتح',
-    yes:'مرسل',no:'غير مرسل',open:'فتح',more:'أخرى',prev:'السابق',next:'التالي',page:'صفحة',perPage:'لكل صفحة',noRows:'لا يوجد عملاء مطابقون للفلاتر الحالية.',
-    loading:'جارٍ التحميل…',error:'تعذر تحميل البيانات',allocUnavailable:'بيانات التوزيع غير متاحة',allocUnavailableLong:'لا يمكن عرض أعداد التوزيع: التوزيعات النشطة متاحة فقط عبر واجهة التوزيع، وهي غير متاحة لهذه الجلسة.',
-    dq:'جودة البيانات',dqMissingCE:'بدون هاتف وبريد',dqCity:'بدون مدينة',dqContact:'بدون جهة اتصال',dqDup:'تكرارات محتملة',dqDupNote:'تكرارات محتملة حسب تطابق البريد أو الهاتف (للمراجعة فقط؛ لا يتم الدمج أو الحذف).',groups:'مجموعات',records:'سجلات',
-    activeFilter:'فلتر الجدول',noSelection:'حدد عميلاً واحداً على الأقل من الجدول أولاً.',reviewTitle:'مراجعة التوزيع',selLeads:'العملاء المحددون',salesperson:'مندوب المبيعات',
-    willSkip:'لديهم توزيع نشط وسيتم تخطيهم (القاعدة الحالية: لا إعادة إسناد تلقائية).',confirm:'تأكيد التوزيع',back:'رجوع',continue:'متابعة',
-    done:'تم التوزيع',created:'تم الإنشاء',skipped:'تم التخطي',notAuth:'غير مصرح لك بتوزيع العملاء.',
-    asgnDate:'تاريخ الإسناد',priority:'الأولوية',followUp:'المتابعة القادمة',restricted:'مقيد'}
-};
-var lang = 'en';
-try { lang = localStorage.getItem(LS_KEY) || 'en'; } catch (e) {}
-function t(k) { return (T[lang] && T[lang][k]) || T.en[k] || k; }
-function esc(s) { return frappe.utils.escape_html(s == null ? '' : String(s)); }
-function fmtN(n) { return (n == null ? '–' : Number(n).toLocaleString('en-US')); }
-
-var CAN_ALLOC = frappe.user.has_role('Lead Allocation Coordinator') || frappe.user.has_role('System Manager');
-var CAN_ADD = frappe.model.can_create ? frappe.model.can_create(DT) : true;
-
-// ---------- verified "missing" definitions ----------
-var DIG = '0123456789٠١٢٣٤٥٦٧٨٩'.split('');
-var LET = 'abcdefghijklmnopqrstuvwxyzابتثجحخدذرزسشصضطظعغفقكلمنهويةىءأإآؤئ'.split('');
-function noDigits(f) { return DIG.map(function (d) { return [DT, f, 'not like', '%' + d + '%']; }); }
-function noLetters(f) { return LET.map(function (d) { return [DT, f, 'not like', '%' + d + '%']; }); }
-var MISSING_CONTACT = [[DT, 'customer_email', 'not like', '%@%'], [DT, 'customer_email_2', 'not like', '%@%']].concat(noDigits('phone'), noDigits('telephone'));
-var MISSING_CITY = noLetters('city');
-var MISSING_PERSON = noLetters('contact_person');
-
-var S = {
-  f: { from: '', to: '', city: '', source: '', sp: '', alloc: '', q: '' },
-  extra: null, // {key,label,filters}
-  page: 0, size: 20, sort: 'date', dir: 'desc',
-  sel: {}, alloc: null, allocErr: null, sps: [], req: 0, lastRefresh: null, cities: [], sources: []
-};
-
-function q(sel) { return R.querySelector(sel); }
-function qa(sel) { return Array.prototype.slice.call(R.querySelectorAll(sel)); }
-
-// ---------- data access (permission-aware: frappe.client.get_list) ----------
-function getList(args) {
-  return frappe.xcall('frappe.client.get_list', Object.assign({ doctype: DT, limit_page_length: 0 }, args));
-}
-function allocLeads() { return S.alloc ? Object.keys(S.alloc) : []; }
-function spLeads(sp) { var o = []; if (!S.alloc) return o; Object.keys(S.alloc).forEach(function (k) { if (S.alloc[k].some(function (a) { return a.sales_person === sp; })) o.push(k); }); return o; }
-
-function baseFilters(opts) {
-  opts = opts || {};
-  var f = [[DT, 'docstatus', '!=', 2]];
-  var F = S.f;
-  if (F.from) f.push([DT, 'date', '>=', F.from]);
-  if (F.to) f.push([DT, 'date', '<=', F.to]);
-  if (F.city) { if (F.city === '__none__') f = f.concat(MISSING_CITY); else f.push([DT, 'city', '=', F.city]); }
-  if (F.source) f.push(F.source === '__none__' ? [DT, 'source', 'is', 'not set'] : [DT, 'source', '=', F.source]);
-  if (F.sp) { var l = spLeads(F.sp); f.push([DT, 'name', 'in', l.length ? l : ['__none__']]); }
-  var al = opts.alloc !== undefined ? opts.alloc : F.alloc;
-  if (al) {
-    if (!S.alloc) throw new Error('alloc');
-    var a = allocLeads();
-    if (al === 'assigned') f.push([DT, 'name', 'in', a.length ? a : ['__none__']]);
-    else { var un = a.concat(S.histIds || []); if (un.length) f.push([DT, 'name', 'not in', un]); }
-  }
-  if (opts.withExtra !== false && S.extra) f = f.concat(S.extra.filters);
-  return f;
-}
-function orFilters() {
-  var s = (S.f.q || '').trim();
-  if (!s) return null;
-  var like = '%' + s + '%';
-  return ['name', 'customer_name', 'contact_person', 'customer_email', 'customer_email_2', 'phone', 'telephone'].map(function (x) { return [DT, x, 'like', like]; });
-}
-function countWith(extra, opts) {
-  var f;
-  try { f = baseFilters(opts).concat(extra || []); } catch (e) { return Promise.reject(e); }
-  var a = { fields: ['count(name) as c'], filters: f };
-  var o = orFilters(); if (o) a.or_filters = o;
-  return getList(a).then(function (r) { return (r && r[0] && r[0].c) || 0; });
-}
-function groupBy(field, extraOpts) {
-  var a = { fields: [field + ' as k', 'count(name) as c'], filters: baseFilters(extraOpts), group_by: field, order_by: 'c desc' };
-  var o = orFilters(); if (o) a.or_filters = o;
-  return getList(a);
-}
-function loadAlloc() {
-  // 2026-11-04: uses the same authorized reporting backend as the Detailed Report
-  // (bulk_allocate_leads: report_lead_ids + report_allocations). The old 'active_allocations' action never existed.
-  function post(args) {
-    return fetch('/api/method/bulk_allocate_leads', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Frappe-CSRF-Token': frappe.csrf_token }, body: JSON.stringify(args) })
-      .then(function (r) { return r.json().then(function (j) { if (!r.ok) { var er = new Error('http'); er.status = r.status; throw er; } return j.message; }); });
-  }
-  return post({ action: 'report_lead_ids' }).then(function (ids) {
-    var cur = ids.current || [];
-    S.histIds = ids.history_only || [];
-    var chunks = []; for (var i = 0; i < cur.length; i += 500) chunks.push(cur.slice(i, i + 500));
-    return Promise.all(chunks.map(function (c) { return post({ action: 'report_allocations', leads: JSON.stringify(c) }); })).then(function (parts) {
-      var m = {}, sps = {};
-      cur.forEach(function (l) { m[l] = []; });
-      parts.forEach(function (p) { Object.keys(p || {}).forEach(function (l) { (p[l] || []).forEach(function (al) { if (!al.current) return; (m[l] = m[l] || []).push(al); sps[al.sales_person] = al.sales_person_name || al.sales_person; }); }); });
-      S.alloc = m; S.allocErr = ids.truncated ? t('allocUnavailableLong') : null;
-      S.sps = Object.keys(sps).map(function (k) { return { v: k, l: sps[k] }; }).sort(function (a, b) { return a.l.localeCompare(b.l); });
-    });
-  }).catch(function (er) { S.alloc = null; S.histIds = []; S.sps = []; S.allocErr = (er && (er.status === 403 || er.status === 417)) ? (lang === 'ar' ? 'بيانات التوزيع متاحة لمنسقي التوزيع ومديري النظام فقط.' : 'Allocation counts are available to Lead Allocation Coordinators and System Managers only.') : t('allocUnavailableLong'); });
-}
-
-// ---------- render skeleton ----------
-function shell() {
-  var el = q('.lm');
-  el.setAttribute('dir', lang === 'ar' ? 'rtl' : 'ltr');
-  el.setAttribute('lang', lang);
-  el.innerHTML =
-    '<div class="lm-hd"><div><h2>' + t('title') + '</h2><div class="lm-sub">' + t('sub') + '</div><div class="lm-ts" data-ts></div></div>' +
-    '<div class="lm-act"><div class="lm-lang"><button data-lang="en" class="' + (lang === 'en' ? 'on' : '') + '">English</button><button data-lang="ar" class="' + (lang === 'ar' ? 'on' : '') + '">العربية</button></div>' +
-    '<button class="lm-btn" data-act="refresh">' + ICON.refresh + t('refresh') + '</button>' +
-    (CAN_ADD ? '<button class="lm-btn" data-act="add">' + ICON.plus + t('addLead') + '</button>' : '') +
-    (CAN_ALLOC ? '<button class="lm-btn" data-act="unassignsel">' + ut('btnSel') + '</button>' : '') +
-    (CAN_ALLOC ? '<button class="lm-btn pri" data-act="allocate">' + ICON.send + t('allocate') + ' <span data-selc></span></button>' : '') +
-    '</div></div>' +
-    '<div class="lm-tabs"></div><div data-pane="overview">' +
-    '<div class="lm-card lm-filters">' +
-      fi('from', '<input type="date" data-f="from">') + fi('to', '<input type="date" data-f="to">') +
-      fi('city', '<select data-f="city"></select>') + fi('source', '<select data-f="source"></select>') +
-      fi('sp', '<select data-f="sp"></select>') +
-      fi('alloc', '<select data-f="alloc"><option value="">' + t('all') + '</option><option value="assigned">' + t('assigned') + '</option><option value="unassigned">' + t('unassigned') + '</option></select>') +
-      '<div class="lm-f wide"><label>' + t('search') + '</label><input type="search" data-f="q" placeholder="' + t('searchPh') + '"></div>' +
-      '<div class="lm-fbtn"><button class="lm-btn pri" data-act="apply">' + t('apply') + '</button><button class="lm-btn" data-act="reset">' + t('reset') + '</button></div>' +
-      '<div class="lm-note">' + t('dateNote') + '</div>' +
-    '</div>' +
-    '<div class="lm-kpis">' +
-      kpi('total', ICON.users) + kpi('assigned', ICON.check, 'ok') + kpi('unassigned', ICON.clock, 'warn') + kpi('catalogue', ICON.book) + kpi('missing', ICON.alert, 'bad') +
-    '</div>' +
-    '<div class="lm-grid2">' +
-      '<div class="lm-card lm-panel"><h4>' + t('bySource') + '</h4><div data-ch="source"></div></div>' +
-      '<div class="lm-card lm-panel"><h4>' + t('byCity') + ' <small>' + t('top10') + '</small></h4><div data-ch="city"></div></div>' +
-      '<div class="lm-card lm-panel"><h4>' + t('allocBreak') + '</h4><div data-ch="alloc"></div></div>' +
-      '<div class="lm-card lm-panel"><h4>' + t('overTime') + ' <small data-tlmode></small></h4><div data-ch="time"></div></div>' +
-    '</div>' +
-    '<div class="lm-card lm-sec"><div class="lm-tbar"><h4>' + t('leads') + ' <span class="mut" data-rc></span></h4><div class="lm-act"><span data-xf></span><span class="mut" data-selinfo></span></div></div>' +
-      '<div class="lm-tblwrap"><table><thead><tr>' +
-        '<th style="width:30px"><input type="checkbox" data-selall></th>' +
-        th('name', 'cId') + th('customer_name', 'cCompany') + th('date', 'cDate') + th('city', 'cCity') + th('source', 'cSource') +
-        th('contact_person', 'cContact') + '<th>' + t('cPhone') + '</th><th>' + t('cEmail') + '</th><th>' + t('cSp') + '</th>' + th('catalogue_status', 'cCat') + '<th></th>' +
-      '</tr></thead><tbody data-tb></tbody></table></div>' +
-      '<div class="lm-pg"><div class="mut" data-pginfo></div><div class="lm-act"><select data-size class="lm-btn"><option>20</option><option>50</option><option>100</option></select><button class="lm-btn" data-act="prev">' + t('prev') + '</button><button class="lm-btn" data-act="next">' + t('next') + '</button></div></div>' +
-    '</div>' +
-    '<div class="lm-card lm-panel"><h4>' + t('dq') + '</h4><div class="lm-dq">' +
-      dqi('missing', 'dqMissingCE') + dqi('city', 'dqCity') + dqi('person', 'dqContact') + dqi('dup', 'dqDup') +
-    '</div><div class="lm-dups" data-dups></div></div>' +
-    '</div><div data-pane="report"></div><div data-pane="fum"></div>';
-  // restore filter values
-  qa('[data-f]').forEach(function (i) { if (i.tagName !== 'SELECT') i.value = S.f[i.getAttribute('data-f')] || ''; });
-  q('[data-f="alloc"]').value = S.f.alloc;
-  q('[data-size]').value = String(S.size);
-  fillSelects();
-  bind();
-  mountTabs();
-}
-function fi(k, inner) { return '<div class="lm-f"><label>' + t(k) + '</label>' + inner + '</div>'; }
-function kpi(k, ic, tone) {
-  var lab = { total: 'total', assigned: 'assignedL', unassigned: 'unassignedL', catalogue: 'catalogue', missing: 'missing' }[k];
-  return '<div class="lm-card lm-kpi ' + (tone || '') + '" data-kpi="' + k + '" role="button" tabindex="0" title="' + t('clickView') + '"><div class="k-l">' + ic + t(lab) + '</div><div class="k-v"><span class="lm-sk"></span></div><div class="k-s">&nbsp;</div></div>';
-}
-function th(f, k) { var arr = S.sort === f ? (S.dir === 'asc' ? ' ▲' : ' ▼') : ''; return '<th class="s" data-sort="' + f + '">' + t(k) + arr + '</th>'; }
-function dqi(k, lab) { return '<div class="lm-dqi" data-dq="' + k + '"><span>' + t(lab) + '</span><b><span class="lm-sk"></span></b></div>'; }
-function fillSelects() {
-  var c = q('[data-f="city"]'), s = q('[data-f="source"]'), p = q('[data-f="sp"]');
-  c.innerHTML = '<option value="">' + t('all') + '</option><option value="__none__">' + t('notSet') + '</option>' + S.cities.map(function (x) { return '<option value="' + esc(x) + '">' + esc(x) + '</option>'; }).join('');
-  s.innerHTML = '<option value="">' + t('all') + '</option><option value="__none__">' + t('notSet') + '</option>' + S.sources.map(function (x) { return '<option value="' + esc(x) + '">' + esc(x) + '</option>'; }).join('');
-  p.innerHTML = '<option value="">' + t('all') + '</option>' + S.sps.map(function (x) { return '<option value="' + esc(x.v) + '">' + esc(x.l) + '</option>'; }).join('');
-  p.disabled = !S.alloc;
-  c.value = S.f.city; s.value = S.f.source; p.value = S.f.sp;
-}
-
-// ---------- events ----------
-var deb;
-function bind() {
-  qa('[data-lang]').forEach(function (b) { b.onclick = function () { lang = b.getAttribute('data-lang'); try { localStorage.setItem(LS_KEY, lang); } catch (e) {} shell(); renderAll(); }; });
-  R.querySelector('.lm').onclick = function (e) {
-    var a = e.target.closest('[data-act]');
-    if (a) {
-      var act = a.getAttribute('data-act');
-      if (act === 'refresh') refresh(true);
-      if (act === 'apply') { readFilters(); onFilterChange(); }
-      if (act === 'reset') { S.f = { from: '', to: '', city: '', source: '', sp: '', alloc: '', q: '' }; S.extra = null; S.sel = {}; S.sort = 'date'; S.dir = 'desc'; shell(); onFilterChange(); }
-      if (act === 'prev' && S.page > 0) { S.page--; loadTable(); }
-      if (act === 'next' && (S.page + 1) * S.size < S.total) { S.page++; loadTable(); }
-      if (act === 'add') frappe.new_doc(DT);
-      if (act === 'allocate') openAllocate();
-      if (act === 'unassign') openUnassign([a.getAttribute('data-lead')]);
-      if (act === 'unassignsel') openUnassign(Object.keys(S.sel).filter(function (l) { return S.alloc && S.alloc[l] && S.alloc[l].length; }));
-      if (act === 'clearsel') { S.sel = {}; renderTable(S.rows || []); }
-      if (act === 'clearx') { S.extra = null; onFilterChange(); }
-      return;
-    }
-    var k = e.target.closest('[data-kpi]'); if (k) return kpiClick(k.getAttribute('data-kpi'));
-    var d = e.target.closest('[data-dq]'); if (d) return dqClick(d.getAttribute('data-dq'));
-    var s = e.target.closest('[data-sort]'); if (s) { var f = s.getAttribute('data-sort'); S.dir = S.sort === f && S.dir === 'desc' ? 'asc' : 'desc'; S.sort = f; S.page = 0; qa('[data-sort]').forEach(function (h) { var ff = h.getAttribute('data-sort'); h.innerHTML = h.innerHTML.replace(/ [▲▼]$/, '') + (ff === S.sort ? (S.dir === 'asc' ? ' ▲' : ' ▼') : ''); }); loadTable(); return; }
-    var c = e.target.closest('[data-chf]'); if (c) { chartClick(c.getAttribute('data-chf'), c.getAttribute('data-chv')); return; }
-    var m = e.target.closest('[data-more]'); if (m) { var x = m.nextElementSibling; x.style.display = x.style.display === 'none' ? 'block' : 'none'; return; }
-    var dup = e.target.closest('[data-dupv]'); if (dup) { var fld = dup.getAttribute('data-dupf'); var v = dup.getAttribute('data-dupv'); S.extra = { key: 'dup', label: t('dqDup') + ': ' + v, filters: [[DT, fld, '=', v]] }; onFilterChange(true); return; }
+  'use strict';
+  var APP = {
+    key: '__dmsLeadMgmt',
+    period: false,
+    tabs: [
+      { id: 'overview', en: 'Overview', ar: 'نظرة عامة' }, { id: 'leads', en: 'Leads', ar: 'العملاء المحتملون' }, { id: 'report', en: 'Detailed report', ar: 'التقرير التفصيلي' },
+      { id: 'followups', en: 'Follow-up monitoring', ar: 'متابعة المتابعات' }, { id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }
+    ],
+    filters: [
+      { k: 'from', en: 'Lead date from', ar: 'تاريخ العميل من', type: 'date', label: function (v) { return v; } },
+      { k: 'to', en: 'Lead date to', ar: 'تاريخ العميل إلى', type: 'date', label: function (v) { return v; } },
+      { k: 'city', en: 'City', ar: 'المدينة', options: function () { return [{ v: '__none__', l: tr('Missing city', 'بدون مدينة') }].concat(REF.cities); } },
+      { k: 'source', en: 'Source', ar: 'المصدر', options: function () { return [{ v: '__none__', l: tr('Not set', 'غير محدد') }].concat(REF.sources); } },
+      { k: 'sp', en: 'Assigned salesperson', ar: 'المندوب', options: function () { return REF.sps; } },
+      { k: 'alloc', en: 'Allocation', ar: 'التوزيع', options: function () { return [{ v: 'assigned', l: tr('Assigned', 'موزع') }, { v: 'unassigned', l: tr('Unassigned', 'غير موزع') }]; } },
+      { k: 'q', en: 'Search', ar: 'بحث', type: 'text', ph: ['Lead ID, company, contact, email or phone', 'رقم العميل، الشركة، جهة الاتصال، البريد أو الهاتف'] }
+    ],
+    sources: ['ov'],
+    dtLabels: { 'Leads Generation List': ['Lead', 'عميل محتمل'] },
+    title: function () { return tr('Lead Management', 'إدارة العملاء المحتملين'); },
+    stamp: function () { return tr('Lead generation, allocation and follow-up', 'توليد العملاء والتوزيع والمتابعة'); },
+    filterNote: function () { return tr('Dates use the lead record field "Date". Assigned = at least one current allocation; Unassigned = never allocated. Salesperson and allocation filters need coordinator access.', 'التواريخ من حقل "Date" في سجل العميل. موزع = توزيع حالي واحد على الأقل؛ غير موزع = لم يوزع مطلقًا. مرشحا المندوب والتوزيع يحتاجان صلاحية منسق.'); },
+    load: function () { loadAll(); },
+    onFilters: function () { EXTRA = null; },
+    onTab: function (id) { if (id === 'report' && !D.rids && !D.ridsErr) { rApply(); } },
+    actions: function () { return actModel(actSpecs(), 'act', actClient()); },
+    banner: function () { return banner(); },
+    content: function (t, AM) { return ({ overview: tabOverview, leads: tabLeads, report: tabReport, followups: tabFu, actions: tabActions })[t](AM); },
+    drill: function (id) { return drill(id); },
+    onAct: function (a, v, n, id) { return onAct(a, v, n, id); },
+    onInput: function (n) { return onInputApp(n); }
   };
-  R.querySelector('.lm').onchange = function (e) {
-    var cb = e.target;
-    if (cb.matches('[data-row]')) { var n = cb.getAttribute('data-row'); if (cb.checked) S.sel[n] = 1; else delete S.sel[n]; updSel(); }
-    if (cb.matches('[data-selall]')) { (S.rows || []).forEach(function (r) { if (cb.checked) S.sel[r.name] = 1; else delete S.sel[r.name]; }); renderTable(S.rows || []); }
-    if (cb.matches('[data-size]')) { S.size = parseInt(cb.value, 10); S.page = 0; loadTable(); }
-  };
-  var qi = q('[data-f="q"]');
-  qi.oninput = function () { clearTimeout(deb); deb = setTimeout(function () { S.f.q = qi.value; onFilterChange(); }, 400); };
-  qi.onkeydown = function (e) { if (e.key === 'Enter') { clearTimeout(deb); readFilters(); onFilterChange(); } };
-}
-function readFilters() { qa('[data-f]').forEach(function (i) { S.f[i.getAttribute('data-f')] = i.value; }); }
-function onFilterChange(keepExtraBadge) { S.page = 0; S.sel = {}; renderAll(); }
 
-function kpiClick(k) {
-  qa('[data-kpi]').forEach(function (x) { x.classList.toggle('active', x.getAttribute('data-kpi') === k); });
-  S.extra = null;
-  if (k === 'assigned' || k === 'unassigned') { if (!S.alloc) return frappe.show_alert({ message: t('allocUnavailable'), indicator: 'orange' }); S.f.alloc = k; q('[data-f="alloc"]').value = k; }
-  else if (k === 'total') { S.f.alloc = ''; q('[data-f="alloc"]').value = ''; }
-  else if (k === 'catalogue') S.extra = { key: k, label: t('catalogue'), filters: [[DT, 'catalogue_status', '=', 1]] };
-  else if (k === 'missing') S.extra = { key: k, label: t('missing'), filters: MISSING_CONTACT };
-  onFilterChange();
-  q('[data-tb]').scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-function dqClick(k) {
-  var m = { missing: ['dqMissingCE', MISSING_CONTACT], city: ['dqCity', MISSING_CITY], person: ['dqContact', MISSING_PERSON] }[k];
-  if (!m) return;
-  S.extra = { key: 'dq-' + k, label: t(m[0]), filters: m[1] };
-  onFilterChange();
-  q('[data-tb]').scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-function chartClick(f, v) {
-  if (f === 'source') { S.f.source = v; }
-  else if (f === 'city') { if (v === '__other__') { S.extra = { key: 'cityother', label: t('city') + ': ' + t('other'), filters: (S.topCities || []).map(function (c) { return [DT, 'city', '!=', c]; }).concat([[DT, 'city', 'is', 'set']]) }; } else S.f.city = v; }
-  else if (f === 'alloc') { if (!S.alloc) return; S.f.alloc = v; }
-  else if (f === 'time') { var p = v.split('|'); S.f.from = p[0]; S.f.to = p[1]; }
-  shell(); onFilterChange();
-}
+  /* ==== DMS kit v1 · generated from tools/erp/kit/dms-kit.js by build_kit.py — edit the kit, not this copy ==== */
+  /* Shared runtime for DM dashboards on the standard (toolbar, period, filters, tabs, tables, drill-downs, charts,
+     actions pending). Copied into each dashboard.js by tools/erp/kit/build_kit.py; the dashboard defines `APP` before
+     this block. Read-only helpers: frappe.client.get_list / frappe.desk.query_report.run under the viewer's permissions. */
+  var G = window;
+  var ROOT = (typeof root_element !== 'undefined' && root_element) ? root_element : document;
+  var HOST = ROOT.querySelector('[data-dms-root]');
+  if (!HOST) { return; }
+  if (G[APP.key] && typeof G[APP.key].destroy === 'function') { try { G[APP.key].destroy(); } catch (e) { /* ignore */ } }
+  var abort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  var SIG = abort ? { signal: abort.signal } : false;
+  var timers = [], destroyed = false, GEN = 0, BOOTED = false, LOADED = '';
+  G[APP.key] = { destroy: function () { destroyed = true; GEN++; if (abort) { abort.abort(); } timers.forEach(clearTimeout); timers = []; } };
+  var CFG = Object.assign({ conc: 6, pageSize: 25, modalPage: 15, weekStart: 0 }, APP.cfg || {});
+  var CUR = 'SAR';
+  try { CUR = (frappe.boot.sysdefaults && frappe.boot.sysdefaults.currency) || 'SAR'; } catch (e) { /* default */ }
+  var LANG = 'en';
+  try { var sv = G.localStorage.getItem('dms_lang'); if (sv === 'ar' || sv === 'en') { LANG = sv; } } catch (e) { /* storage unavailable */ }
+  function tr(en, ar) { return LANG === 'ar' ? ar : en; }
 
-// ---------- loaders ----------
-function setKpi(k, state, val, sub) {
-  var el = q('[data-kpi="' + k + '"]'); if (!el) return;
-  var v = el.querySelector('.k-v'), s = el.querySelector('.k-s');
-  if (state === 'loading') { v.innerHTML = '<span class="lm-sk"></span>'; s.innerHTML = '&nbsp;'; }
-  else if (state === 'error') { v.innerHTML = '<span class="lm-errtxt">' + esc(val || t('error')) + '</span>'; s.innerHTML = '<button class="lm-more" data-act="refresh">' + (lang === 'ar' ? 'إعادة المحاولة' : 'Retry') + '</button>'; }
-  else { v.textContent = fmtN(val); s.innerHTML = sub || '&nbsp;'; }
-}
-function pct(a, b) { return b ? (Math.round(a * 1000 / b) / 10) + '% ' + t('ofTotal') : '0%'; }
+  /* ---------- helpers ---------- */
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function clean(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+  function plain(s, n) { return clean(String(s || '').replace(/<[^>]*>/g, ' ')).slice(0, n || 90); }
+  function $(sel) { return HOST.querySelector(sel); }
+  function later(fn, ms) { var id = setTimeout(function () { if (!destroyed) { fn(); } }, ms); timers.push(id); return id; }
+  function bdi(s) { return '<bdi>' + esc(s) + '</bdi>'; }
+  function num(n) { return (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString('en-US'); }
+  function money(v) {
+    if (v == null || isNaN(v)) { return '—'; }
+    var a = Math.abs(v), s = v < 0 ? '-' : '';
+    if (a >= 1e9) { return s + (a / 1e9).toFixed(2) + 'B'; }
+    if (a >= 1e6) { return s + (a / 1e6).toFixed(2) + 'M'; }
+    if (a >= 1e4) { return s + (a / 1e3).toFixed(1) + 'K'; }
+    return s + Math.round(a).toLocaleString('en-US');
+  }
+  function amt(v) { return (v == null || isNaN(v)) ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function moneyS(v, cur) { return (cur || CUR) + ' ' + money(v); }
+  function moneyB(v, cur) { return '<bdi>' + esc(moneyS(v, cur)) + '</bdi>'; }
+  function moneyFull(v, cur) { return (v == null || isNaN(v)) ? '' : (cur || CUR) + ' ' + amt(v); }
+  function cur$(v, cur) { return '<bdi>' + esc(money(v)) + '<small>' + esc(cur || CUR) + '</small></bdi>'; }
+  function pct(n, d, dp) { return (d > 0 && n != null) ? (n / d * 100).toFixed(dp == null ? 1 : dp) + '%' : tr('N/A', 'غير متاح'); }
+  function sum(arr, f) { var t = 0; for (var i = 0; i < arr.length; i++) { t += (f ? f(arr[i]) : arr[i]) || 0; } return t; }
+  function vals(o) { return Object.keys(o).map(function (k) { return o[k]; }); }
+  function uniq(a) { var m = {}; a.forEach(function (x) { if (x) { m[x] = 1; } }); return Object.keys(m).sort(function (x, y) { return x.localeCompare(y); }); }
+  function rep(s, n) { var o = ''; for (var i = 0; i < n; i++) { o += s; } return o; }
+  function one(r) { return (r && r[0]) || {}; }
+  function groupBy(rows, f) { var m = {}; rows.forEach(function (r) { var k = f(r); (m[k] || (m[k] = [])).push(r); }); return m; }
+  var NAtxt = function () { return tr('Not assigned', 'غير مُعيَّن'); };
 
-function renderAll() {
-  var id = ++S.req;
-  updXf();
-  ['total', 'assigned', 'unassigned', 'catalogue', 'missing'].forEach(function (k) { setKpi(k, 'loading'); });
-  qa('[data-ch]').forEach(function (c) { c.innerHTML = '<div class="lm-empty">' + t('loading') + '</div>'; });
-  var live = function () { return id === S.req; };
-  // KPIs (cards ignore the table-only drill filter, so they reconcile)
-  var o = { withExtra: false };
-  var pT = countWith([], o), pC = countWith([[DT, 'catalogue_status', '=', 1]], o), pM = countWith(MISSING_CONTACT, o);
-  var pA = S.alloc ? countWith([], { withExtra: false, alloc: 'assigned' }) : Promise.reject(new Error('alloc'));
-  var pU = S.alloc ? countWith([], { withExtra: false, alloc: 'unassigned' }) : Promise.reject(new Error('alloc'));
-  var pH = S.alloc && (S.histIds || []).length ? countWith([[DT, 'name', 'in', S.histIds]], { withExtra: false }) : Promise.resolve(0);
-  pA.catch(function () {}); pU.catch(function () {}); pH.catch(function () {});
-  pT.then(function (tot) {
-    if (!live()) return; S.totalScope = tot; setKpi('total', 'ok', tot, tot ? '' : t('noRows'));
-    pC.then(function (v) { live() && setKpi('catalogue', 'ok', v, pct(v, tot)); }, function () { live() && setKpi('catalogue', 'error'); });
-    pM.then(function (v) { live() && setKpi('missing', 'ok', v, t('noEmailPhone')); }, function () { live() && setKpi('missing', 'error'); });
-    Promise.all([pA, pU, pH]).then(function (r) { if (!live()) return; setKpi('assigned', 'ok', r[0], pct(r[0], tot)); setKpi('unassigned', 'ok', r[1], pct(r[1], tot) + (r[2] ? ' · ' + fmtN(r[2]) + (lang === 'ar' ? ' مغلق/محول فقط (منفصل)' : ' previously allocated, no active allocation (separate)') : '')); renderAllocChart(r[0], r[1]); },
-      function (e) { if (!live()) return; var msg = e && e.message === 'alloc' ? t('allocUnavailable') : t('error'); setKpi('assigned', 'error', msg); setKpi('unassigned', 'error', msg); q('[data-ch="alloc"]').innerHTML = '<div class="lm-empty lm-errtxt">' + esc(S.allocErr || t('error')) + '</div>'; });
-  }, function (e) {
-    if (!live()) return;
-    var msg = e && e.message === 'alloc' ? t('allocUnavailable') : t('error');
-    ['total', 'assigned', 'unassigned', 'catalogue', 'missing'].forEach(function (k) { setKpi(k, 'error', msg); });
-    qa('[data-ch]').forEach(function (c) { c.innerHTML = '<div class="lm-empty lm-errtxt">' + esc(msg) + '</div>'; });
-  });
-  // charts
-  safe(function () { return groupBy('source', o); }).then(function (r) { live() && renderBars('source', r, null); }, function () { live() && chErr('source'); });
-  safe(function () { return groupBy('city', o); }).then(function (r) { live() && renderCity(r); }, function () { live() && chErr('city'); });
-  loadTime(live, o);
-  loadDQ(live);
-  loadTable();
-}
-function safe(fn) { try { return fn(); } catch (e) { return Promise.reject(e); } }
-function chErr(k) { q('[data-ch="' + k + '"]').innerHTML = '<div class="lm-empty lm-errtxt">' + t('error') + '</div>'; }
-
-function renderBars(field, rows, other) {
-  var el = q('[data-ch="' + field + '"]');
-  if (!rows.length) { el.innerHTML = '<div class="lm-empty">' + t('noRows') + '</div>'; return; }
-  var max = Math.max.apply(null, rows.map(function (r) { return r.c; }));
-  el.innerHTML = rows.map(function (r) {
-    var v = r.k == null || r.k === '' ? '__none__' : r.k;
-    var lab = v === '__none__' ? t('notSet') : (v === '__other__' ? t('other') : esc(r.k));
-    var sel = (field === 'source' && S.f.source === v) || (field === 'city' && S.f.city === v);
-    return '<div class="lm-bar' + (sel ? ' sel' : '') + '" data-chf="' + field + '" data-chv="' + esc(v) + '" title="' + lab + '"><span class="bl">' + lab + '</span><span class="bt"><span class="bf" style="display:block;width:' + Math.max(1, r.c * 100 / max) + '%"></span></span><span class="bn">' + fmtN(r.c) + '</span></div>';
-  }).join('');
-}
-function renderCity(rows) {
-  // DB grouping is case-insensitive; keep exact counts
-  var named = rows.filter(function (r) { return r.k != null && /[^\s\-\.]/.test(r.k); });
-  var none = rows.filter(function (r) { return !(r.k != null && /[^\s\-\.]/.test(r.k)); }).reduce(function (a, r) { return a + r.c; }, 0);
-  var top = named.slice(0, 10);
-  var rest = named.slice(10).reduce(function (a, r) { return a + r.c; }, 0);
-  S.topCities = top.map(function (r) { return r.k; });
-  var out = top.slice();
-  if (rest) out.push({ k: '__other__', c: rest });
-  if (none) out.push({ k: null, c: none });
-  renderBars('city', out);
-}
-function renderAllocChart(a, u) {
-  var el = q('[data-ch="alloc"]'), tot = a + u;
-  if (!tot) { el.innerHTML = '<div class="lm-empty">' + t('noRows') + '</div>'; return; }
-  el.innerHTML = '<div class="lm-stack"><div data-chf="alloc" data-chv="assigned" style="width:' + (a * 100 / tot) + '%;background:#15803d" title="' + t('assigned') + '"></div><div data-chf="alloc" data-chv="unassigned" style="width:' + (u * 100 / tot) + '%;background:#d97706" title="' + t('unassigned') + '"></div></div>' +
-    '<div class="lm-legend"><span data-chf="alloc" data-chv="assigned"><i style="background:#15803d"></i>' + t('assigned') + ': <b>' + fmtN(a) + '</b> (' + pct(a, tot) + ')</span><span data-chf="alloc" data-chv="unassigned"><i style="background:#d97706"></i>' + t('unassigned') + ': <b>' + fmtN(u) + '</b> (' + pct(u, tot) + ')</span></div>';
-}
-function loadTime(live, o) {
-  safe(function () { return groupBy('date', o); }).then(function (rows) {
-    if (!live()) return;
-    var el = q('[data-ch="time"]');
-    rows = rows.filter(function (r) { return r.k; }).sort(function (a, b) { return a.k < b.k ? -1 : 1; });
-    if (!rows.length) { el.innerHTML = '<div class="lm-empty">' + t('noRows') + '</div>'; q('[data-tlmode]').textContent = ''; return; }
-    var first = rows[0].k, last = rows[rows.length - 1].k;
-    var span = (new Date(last) - new Date(first)) / 864e5;
-    var daily = span <= 62;
-    q('[data-tlmode]').textContent = daily ? t('byDay') : t('byMonth');
-    var b = {}, order = [];
-    rows.forEach(function (r) { var key = daily ? r.k : r.k.slice(0, 7); if (!(key in b)) { b[key] = 0; order.push(key); } b[key] += r.c; });
-    var max = Math.max.apply(null, order.map(function (k) { return b[k]; }));
-    el.innerHTML = '<div class="lm-tl">' + order.map(function (k) {
-      var rng = daily ? k + '|' + k : k + '-01|' + frappe.datetime.month_end(k + '-01');
-      return '<div class="c" data-chf="time" data-chv="' + rng + '" title="' + k + ': ' + fmtN(b[k]) + '"><div class="v" style="height:' + Math.max(1, b[k] * 100 / max) + '%"></div></div>';
-    }).join('') + '</div><div class="lm-tlx"><span>' + order[0] + '</span><span>' + order[order.length - 1] + '</span></div>';
-  }, function () { live() && chErr('time'); });
-}
-function loadDQ(live) {
-  var o = { withExtra: false };
-  [['missing', MISSING_CONTACT], ['city', MISSING_CITY], ['person', MISSING_PERSON]].forEach(function (p) {
-    var el = q('[data-dq="' + p[0] + '"]');
-    el.querySelector('b').innerHTML = '<span class="lm-sk"></span>';
-    countWith(p[1], o).then(function (v) { if (!live()) return; el.querySelector('b').textContent = fmtN(v); el.classList.toggle('zero', !v); }, function () { live() && (el.querySelector('b').innerHTML = '<span class="lm-errtxt">' + t('error') + '</span>'); });
-  });
-  // potential duplicates: identical email (contains @) or identical phone (contains a digit), counted with DB grouping
-  var dEl = q('[data-dq="dup"]');
-  var gE = safe(function () { var a = { fields: ['customer_email as k', 'count(name) as c'], filters: baseFilters(o).concat([[DT, 'customer_email', 'like', '%@%']]), group_by: 'customer_email', order_by: 'c desc' }; var x = orFilters(); if (x) a.or_filters = x; return getList(a); });
-  var gP = safe(function () { var a = { fields: ['phone as k', 'count(name) as c'], filters: baseFilters(o).concat([[DT, 'phone', 'like', '%_____%']]), group_by: 'phone', order_by: 'c desc' }; var x = orFilters(); if (x) a.or_filters = x; return getList(a); });
-  Promise.all([gE, gP]).then(function (r) {
-    if (!live()) return;
-    var e = r[0].filter(function (x) { return x.c > 1; }), p = r[1].filter(function (x) { return x.c > 1 && /\d{5}/.test(String(x.k).replace(/\D/g, '')); });
-    var g = e.length + p.length, rec = e.concat(p).reduce(function (a, x) { return a + x.c; }, 0);
-    dEl.querySelector('b').textContent = fmtN(g) + ' ' + t('groups');
-    dEl.classList.toggle('zero', !g);
-    var list = e.slice(0, 5).map(function (x) { return '<a data-dupf="customer_email" data-dupv="' + esc(x.k) + '">' + esc(x.k) + '</a> (' + x.c + ')'; })
-      .concat(p.slice(0, 5).map(function (x) { return '<a data-dupf="phone" data-dupv="' + esc(x.k) + '">' + esc(x.k) + '</a> (' + x.c + ')'; }));
-    q('[data-dups]').innerHTML = '<div class="mut">' + t('dqDupNote') + ' ' + fmtN(rec) + ' ' + t('records') + '.</div>' + (list.length ? '<div style="margin-top:4px">' + list.join(' · ') + '</div>' : '');
-  }, function () { live() && (dEl.querySelector('b').innerHTML = '<span class="lm-errtxt">' + t('error') + '</span>'); });
-}
-
-var tblReq = 0;
-function loadTable() {
-  var id = ++tblReq;
-  var tb = q('[data-tb]');
-  tb.innerHTML = '<tr><td colspan="12" class="lm-empty">' + t('loading') + '</td></tr>';
-  var f;
-  try { f = baseFilters(); } catch (e) { tb.innerHTML = '<tr><td colspan="12" class="lm-empty lm-errtxt">' + esc(S.allocErr || t('error')) + '</td></tr>'; q('[data-rc]').textContent = ''; return; }
-  var o = orFilters();
-  var ca = { fields: ['count(name) as c'], filters: f }; if (o) ca.or_filters = o;
-  var la = { fields: ['name', 'customer_name', 'date', 'city', 'source', 'contact_person', 'phone', 'telephone', 'customer_email', 'customer_email_2', 'catalogue_status'], filters: f, order_by: S.sort + ' ' + S.dir + ', name desc', limit_start: S.page * S.size, limit_page_length: S.size };
-  if (o) la.or_filters = o;
-  Promise.all([getList(ca), frappe.xcall('frappe.client.get_list', Object.assign({ doctype: DT }, la))]).then(function (r) {
-    if (id !== tblReq) return;
-    S.total = (r[0][0] && r[0][0].c) || 0;
-    S.rows = r[1];
-    renderTable(r[1]);
-  }, function () { if (id !== tblReq) return; tb.innerHTML = '<tr><td colspan="12" class="lm-empty lm-errtxt">' + t('error') + '</td></tr>'; });
-}
-function usable(v, kind) { if (!v) return false; v = String(v); return kind === 'email' ? v.indexOf('@') > -1 : /[0-9٠-٩]/.test(v); }
-function renderTable(rows) {
-  var tb = q('[data-tb]');
-  q('[data-rc]').textContent = '· ' + fmtN(S.total) + ' ' + t('results');
-  var from = S.total ? S.page * S.size + 1 : 0, to = Math.min(S.total, (S.page + 1) * S.size);
-  q('[data-pginfo]').textContent = from + '–' + to + ' / ' + fmtN(S.total) + ' · ' + t('page') + ' ' + (S.page + 1) + '/' + Math.max(1, Math.ceil(S.total / S.size));
-  q('[data-act="prev"]').disabled = S.page === 0;
-  q('[data-act="next"]').disabled = (S.page + 1) * S.size >= S.total;
-  if (!rows.length) { tb.innerHTML = '<tr><td colspan="12" class="lm-empty">' + t('noRows') + '</td></tr>'; updSel(); return; }
-  tb.innerHTML = rows.map(function (r) {
-    var url = '/app/' + frappe.router.slug(DT) + '/' + encodeURIComponent(r.name);
-    var emails = [r.customer_email, r.customer_email_2].filter(function (e) { return usable(e, 'email'); });
-    var phone = usable(r.phone, 'phone') ? r.phone : (usable(r.telephone, 'phone') ? r.telephone : '');
-    var em = emails.length ? esc(emails[0]) + (emails.length > 1 ? ' <button class="lm-more" data-more>+' + (emails.length - 1) + ' ' + t('more') + '</button><div style="display:none" class="mut">' + emails.slice(1).map(esc).join('<br>') + '</div>' : '') : '<span class="lm-badge warn">—</span>';
-    var al = S.alloc ? (S.alloc[r.name] ? S.alloc[r.name].map(function (a) { return esc(a.sales_person_name); }).join(', ') : ((S.histIds || []).indexOf(r.name) > -1 ? '<span class="lm-badge">' + (lang === 'ar' ? 'موزع سابقاً' : 'Previously allocated') + '</span>' : '<span class="lm-badge warn">' + t('unassigned') + '</span>')) : '<span class="mut">' + t('restricted') + '</span>';
-    return '<tr><td><input type="checkbox" data-row="' + esc(r.name) + '"' + (S.sel[r.name] ? ' checked' : '') + '></td>' +
-      '<td><a href="' + url + '">' + esc(r.name) + '</a></td>' +
-      '<td><a href="' + url + '">' + esc(r.customer_name || '—') + '</a></td>' +
-      '<td style="white-space:nowrap">' + (r.date ? frappe.datetime.str_to_user(r.date) : '<span class="mut">—</span>') + '</td>' +
-      '<td>' + (usable(r.city, 'x') || /[^\s\-\.]/.test(r.city || '') ? esc(r.city) : '<span class="mut">—</span>') + '</td>' +
-      '<td>' + esc(r.source || '—') + '</td>' +
-      '<td>' + (/[^\s\-\.]/.test(r.contact_person || '') ? esc(r.contact_person) : '<span class="mut">—</span>') + '</td>' +
-      '<td style="white-space:nowrap">' + (phone ? esc(phone) : '<span class="lm-badge warn">—</span>') + '</td>' +
-      '<td>' + em + '</td><td>' + al + (CAN_ALLOC && S.alloc && S.alloc[r.name] && S.alloc[r.name].length ? '<br><button class="lm-more" data-act="unassign" data-lead="' + esc(r.name) + '">✕ ' + ut('btn') + '</button>' : '') + '</td>' +
-      '<td>' + (r.catalogue_status ? '<span class="lm-badge ok">' + t('yes') + '</span>' : '<span class="lm-badge warn">' + t('no') + '</span>') + '</td>' +
-      '<td><a href="' + url + '" title="' + t('open') + '">' + ICON.ext + '</a></td></tr>';
-  }).join('');
-  updSel();
-}
-function updSel() {
-  var n = Object.keys(S.sel).length;
-  var sc = q('[data-selc]'); if (sc) sc.textContent = n ? '(' + n + ')' : '';
-  q('[data-selinfo]').innerHTML = n ? n + ' ' + t('selected') + ' <button class="lm-more" data-act="clearsel">' + t('clearSel') + '</button>' : '';
-  var all = q('[data-selall]'); var rows = S.rows || [];
-  all.checked = rows.length > 0 && rows.every(function (r) { return S.sel[r.name]; });
-}
-function updXf() {
-  var x = q('[data-xf]');
-  x.innerHTML = S.extra ? '<span class="lm-chip">' + t('activeFilter') + ': ' + esc(S.extra.label) + ' <button data-act="clearx" title="×">×</button></span>' : '';
-}
-
-// ---------- allocation (reuses bulk_allocate_leads + its server-side checks) ----------
-function openAllocate() {
-  if (!CAN_ALLOC) return frappe.msgprint(t('notAuth'));
-  var names = Object.keys(S.sel);
-  if (!names.length) return frappe.msgprint(t('noSelection'));
-  (function () {
-    var d = new frappe.ui.Dialog({
-      title: t('allocate'),
-      fields: [
-        { fieldtype: 'HTML', fieldname: 'info', options: '<p><b>' + names.length + '</b> ' + t('selLeads') + '</p>' },
-      ].concat(lmSpFields(t('salesperson')), [
-        { fieldname: 'assignment_date', fieldtype: 'Date', label: t('asgnDate'), default: frappe.datetime.get_today(), reqd: 1 },
-        { fieldname: 'priority', fieldtype: 'Select', label: t('priority'), options: ['Low', 'Medium', 'High', 'Urgent'], default: 'Medium', reqd: 1 },
-        { fieldname: 'next_follow_up', fieldtype: 'Datetime', label: t('followUp') }
-      ]),
-      primary_action_label: t('continue'),
-      primary_action: function (v) {
-        if (!v.salesperson_user) { frappe.msgprint(__('Please select a salesperson from the suggestions.')); return; }
-        var spLabel = d.sp_label || v.salesperson_user;
-        var already = S.alloc ? names.filter(function (n) { return S.alloc[n]; }) : [];
-        var warn = already.length ? '<div class="alert alert-warning" style="margin-top:8px">' + already.length + ' ' + t('willSkip') + '<br><small>' + already.slice(0, 10).map(function (n) { return esc(n) + ' → ' + esc(S.alloc[n].map(function (a) { return a.sales_person_name; }).join(', ')); }).join('<br>') + (already.length > 10 ? '<br>…' : '') + '</small></div>' : (S.alloc ? '' : '<div class="alert alert-warning">' + t('allocUnavailable') + '</div>');
-        d.hide();
-        frappe.confirm('<b>' + t('reviewTitle') + '</b><br>' + t('selLeads') + ': <b>' + names.length + '</b><br>' + t('salesperson') + ': <b>' + esc(spLabel) + '</b><br>' + t('asgnDate') + ': ' + esc(v.assignment_date) + ' · ' + t('priority') + ': ' + esc(v.priority) + warn, function () {
-          frappe.call({ method: 'bulk_allocate_leads', args: { leads: JSON.stringify(names), salesperson_user: v.salesperson_user, assignment_date: v.assignment_date, priority: v.priority, next_follow_up: v.next_follow_up }, freeze: true }).then(function (res) {
-            var m = res.message || {};
-            frappe.msgprint({ title: t('done'), indicator: 'green', message: t('created') + ': <b>' + (m.created || 0) + '</b> · ' + t('skipped') + ': <b>' + (m.skipped || 0) + '</b>' + ((m.skipped_leads || []).length ? '<br><small>' + m.skipped_leads.map(esc).join('<br>') + '</small>' : '') });
-            S.sel = {};
-            refresh(true);
-          });
-        }, function () { d.show(); });
+  /* ---------- dates (ERP site time zone, calendar arithmetic) ---------- */
+  function siteTz() {
+    try {
+      if (G.frappe && frappe.boot) {
+        if (frappe.boot.time_zone && frappe.boot.time_zone.system) { return frappe.boot.time_zone.system; }
+        if (frappe.boot.sysdefaults && frappe.boot.sysdefaults.time_zone) { return frappe.boot.sysdefaults.time_zone; }
       }
-    });
-    d.show();
-    lmSpBind(d);
-  })();
-}
-// ---- Salesperson autocomplete (server search: bulk_allocate_leads action=search_salespersons) v3 ----
-function lmSpFields(label) {
-  return [
-    { fieldname: 'sp_search', fieldtype: 'Data', label: label || __('Salesperson'), placeholder: __('Search salesperson by name or email') },
-    { fieldname: 'salesperson_user', fieldtype: 'Data', hidden: 1 }
-  ];
-}
-function lmSpBind(d) {
-  var inp = d.fields_dict.sp_search.$input;
-  inp.attr('placeholder', __('Search salesperson by name or email')).attr('autocomplete', 'off').attr('role', 'combobox').attr('aria-expanded', 'false');
-  var wrap = inp.parent();
-  wrap.css('position', 'relative');
-  var dd = $('<div class="lm-sp-dd" role="listbox" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:1060;background:#fff;border:1px solid #d5dbe5;border-radius:6px;box-shadow:0 6px 16px rgba(16,24,40,.12);max-height:260px;overflow-y:auto;margin-top:2px"></div>');
-  var clr = $('<button type="button" title="' + __('Clear') + '" style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);border:0;background:none;color:#6b7280;font-size:16px;line-height:1;cursor:pointer;padding:2px 6px">×</button>');
-  wrap.append(clr).append(dd);
-  var PAGE = 25;
-  var st = { req: 0, timer: null, txt: '', start: 0, more: false, loading: false, active: -1, open: false };
-  function esc(s) { return frappe.utils.escape_html(s == null ? '' : String(s)); }
-  function items() { return dd.children('.lm-sp-it'); }
-  function close() { st.open = false; st.req++; dd.hide().empty(); inp.attr('aria-expanded', 'false'); st.active = -1; }
-  function status(text, cls) { dd.children('.lm-sp-st').remove(); if (text) dd.append('<div class="lm-sp-st small ' + (cls || 'text-muted') + '" style="padding:9px 12px">' + esc(text) + '</div>'); }
-  function setActive(i) {
-    var its = items(); if (!its.length) return;
-    st.active = Math.max(0, Math.min(i, its.length - 1));
-    its.css('background', '').attr('aria-selected', 'false');
-    var el = its.eq(st.active).css('background', '#eef3fa').attr('aria-selected', 'true')[0];
-    if (el) {
-      var top = el.offsetTop, bot = top + el.offsetHeight;
-      if (top < dd[0].scrollTop) dd[0].scrollTop = top; else if (bot > dd[0].scrollTop + dd[0].clientHeight) dd[0].scrollTop = bot - dd[0].clientHeight;
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+  function siteParts() {
+    var tz = siteTz(), o = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }, p;
+    if (tz) { o.timeZone = tz; }
+    try { p = new Intl.DateTimeFormat('en-CA', o).formatToParts(new Date()); } catch (e) { delete o.timeZone; p = new Intl.DateTimeFormat('en-CA', o).formatToParts(new Date()); }
+    var m = {}; p.forEach(function (x) { m[x.type] = x.value; }); if (m.hour === '24') { m.hour = '00'; } return m;
+  }
+  function parseISO(s) {
+    if (!s || typeof s !== 'string') { return null; }
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s); if (!m) { return null; }
+    var y = +m[1], mo = +m[2], d = +m[3], ms = Date.UTC(y, mo - 1, d), dt = new Date(ms);
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) { return null; }
+    return ms;
+  }
+  function isoOf(ms) { var d = new Date(ms); return d.getUTCFullYear() + '-' + ('0' + (d.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + d.getUTCDate()).slice(-2); }
+  function addDays(iso, n) { return isoOf(parseISO(iso) + n * 86400000); }
+  function diffDays(a, b) { return Math.round((parseISO(b) - parseISO(a)) / 86400000); }
+  var TODAY = '', STAMP = '';
+  function setToday() { var p = siteParts(); TODAY = p.year + '-' + p.month + '-' + p.day; STAMP = p.hour + ':' + p.minute; }
+  function monthStart(iso) { return iso.slice(0, 8) + '01'; }
+  function monthEnd(iso) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7); return isoOf(Date.UTC(y, m, 0)); }
+  function addMonths(iso, n) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n; return isoOf(Date.UTC(y, m, 1)); }
+  function weekStartOf(iso) { var dow = new Date(parseISO(iso)).getUTCDay(); return addDays(iso, -((dow - CFG.weekStart + 7) % 7)); }
+  function quarterStart(iso) { var m = +iso.slice(5, 7); return iso.slice(0, 5) + ('0' + (Math.floor((m - 1) / 3) * 3 + 1)).slice(-2) + '-01'; }
+  function shiftMonths(iso, n) {
+    var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n, d = +iso.slice(8, 10), last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    return isoOf(Date.UTC(y, m, Math.min(d, last)));
+  }
+  function periodRange(key, cf, ct) {
+    var t = TODAY, y = t.slice(0, 4), ws = weekStartOf(t), qs = quarterStart(t), lm = addMonths(monthStart(t), -1);
+    switch (key) {
+      case 'today': return [t, t];
+      case 'yesterday': return [addDays(t, -1), addDays(t, -1)];
+      case 'week': return [ws, addDays(ws, 6)];
+      case 'lastWeek': return [addDays(ws, -7), addDays(ws, -1)];
+      case 'month': return [monthStart(t), monthEnd(t)];
+      case 'lastMonth': return [lm, monthEnd(lm)];
+      case 'quarter': return [qs, monthEnd(addMonths(qs, 2))];
+      case 'year': return [y + '-01-01', y + '-12-31'];
+      case 'prevYear': return [(y - 1) + '-01-01', (y - 1) + '-12-31'];
+      case 'custom': return [cf, ct];
+      default: return [y + '-01-01', t];   // ytd
     }
-    if (st.active >= its.length - 3) loadMore();
   }
-  function choose(x) {
-    var lab = (x.full_name || x.user) + ' — ' + x.email;
-    d.set_value('salesperson_user', x.user);
-    d.sp_label = lab;
-    inp.val(lab);
-    clr.show();
-    close();
+  /* Comparison window: the same span one preset unit earlier; custom ranges compare with the equally long range before. */
+  function prevRange(key, from, to) {
+    switch (key) {
+      case 'today': case 'yesterday': return [addDays(from, -1), addDays(to, -1)];
+      case 'week': case 'lastWeek': return [addDays(from, -7), addDays(to, -7)];
+      case 'month': case 'lastMonth': return [shiftMonths(from, -1), shiftMonths(to, -1)];
+      case 'quarter': return [shiftMonths(from, -3), shiftMonths(to, -3)];
+      case 'ytd': case 'year': case 'prevYear': return [shiftMonths(from, -12), shiftMonths(to, -12)];
+      default: var n = diffDays(from, to) + 1; return [addDays(from, -n), addDays(from, -1)];
+    }
   }
-  function clearSel() { d.set_value('salesperson_user', ''); d.sp_label = ''; clr.hide(); }
-  function fetchPage(reset) {
-    if (reset) { st.start = 0; st.more = false; st.active = -1; dd.empty(); }
-    var id = ++st.req;
-    st.loading = true;
-    st.open = true; dd.show(); inp.attr('aria-expanded', 'true');
-    status(__('Loading…'));
-    frappe.call({ method: 'bulk_allocate_leads', args: { action: 'search_salespersons', txt: st.txt, start: st.start, page_len: PAGE }, error_handlers: { 403: function () {}, 417: function () {} } })
-      .then(function (r) {
-        if (id !== st.req) return;
-        st.loading = false;
-        var m = (r && r.message) || {};
-        var rows = m.results || [];
-        status('');
-        if (reset && !rows.length) { status(__('No matching salesperson')); return; }
-        rows.forEach(function (x) {
-          var lab = (x.full_name || x.user) + ' — ' + x.email;
-          var it = $('<div class="lm-sp-it" role="option" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #f0f2f6"></div>').text(lab);
-          it.on('mouseenter', function () { setActive(items().index(it)); });
-          it.on('mousedown', function (e) { e.preventDefault(); choose(x); });
-          dd.append(it);
-        });
-        st.start += rows.length;
-        st.more = !!m.has_more;
-        if (st.more) status(__('Scroll for more…'));
-        else if (m.total != null) status(__('{0} salespersons', [m.total]));
-      }, function () { if (id !== st.req) return; st.loading = false; status(__('Could not load salespersons (permission or server error)'), 'text-danger'); })
-      .catch(function () { if (id !== st.req) return; st.loading = false; status(__('Could not load salespersons (permission or server error)'), 'text-danger'); });
+  /* In-progress periods stop at today, so this month to date compares with the same days of last month. */
+  function clip(r) { return [r[0], r[1] > TODAY && r[0] <= TODAY ? TODAY : r[1]]; }
+  function cmpRanges() { var c = clip(PERIOD); return { cur: c, prev: prevRange(F.period, c[0], c[1]) }; }
+  function monthList(from, to) { var out = [], cur = monthStart(from); for (var i = 0; i < 72 && cur <= to; i++) { out.push(cur.slice(0, 7)); cur = addMonths(cur, 1); } return out; }
+  function locale() { return LANG === 'ar' ? 'ar-SA-u-nu-latn-ca-gregory' : 'en-GB'; }
+  function fmtDate(iso, yr) {
+    try { var o = { day: 'numeric', month: 'short', timeZone: 'UTC' }; if (yr) { o.year = 'numeric'; } return new Intl.DateTimeFormat(locale(), o).format(new Date(parseISO(String(iso).slice(0, 10)))); } catch (e) { return iso; }
   }
-  function loadMore() { if (st.open && st.more && !st.loading) fetchPage(false); }
-  function openList() { if (d.get_value('salesperson_user')) return; st.txt = (inp.val() || '').trim(); fetchPage(true); }
-  dd.on('scroll', function () { if (dd[0].scrollTop + dd[0].clientHeight >= dd[0].scrollHeight - 30) loadMore(); });
-  inp.on('focus click', function () { if (!st.open) openList(); });
-  inp.on('input', function () {
-    if (d.get_value('salesperson_user')) clearSel();
-    clearTimeout(st.timer);
-    st.timer = setTimeout(function () { st.txt = (inp.val() || '').trim(); fetchPage(true); }, 250);
-  });
-  inp.on('keydown', function (e) {
-    if (e.key === 'ArrowDown') { e.preventDefault(); if (!st.open) openList(); else setActive(st.active + 1); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); if (st.open) setActive(st.active - 1); }
-    else if (e.key === 'Enter') { if (st.open && st.active >= 0) { e.preventDefault(); e.stopPropagation(); items().eq(st.active).trigger('mousedown'); } }
-    else if (e.key === 'Escape') { if (st.open) { e.preventDefault(); e.stopPropagation(); close(); } }
-  });
-  inp.on('blur', function () {
-    setTimeout(function () { if (!inp.is(':focus')) close(); }, 150);
-    if (!d.get_value('salesperson_user') && inp.val()) inp.val('');
-  });
-  clr.on('mousedown', function (e) { e.preventDefault(); clearSel(); inp.val(''); st.txt = ''; inp.trigger('focus'); fetchPage(true); });
-  clr.on('click', function (e) { e.preventDefault(); });
-}
-// ---- end salesperson autocomplete ----
+  function rangeLabel(r) {
+    if (!r || !r[0] || !r[1]) { return ''; }
+    return r[0] === r[1] ? fmtDate(r[0], true) : fmtDate(r[0], r[0].slice(0, 4) !== r[1].slice(0, 4)) + ' – ' + fmtDate(r[1], true);
+  }
+  var PLR = null;
+  function daysTxt(n) {
+    if (LANG !== 'ar') { return num(n) + (n === 1 ? ' day' : ' days'); }
+    var c = 'other'; try { c = (PLR || (PLR = new Intl.PluralRules('ar'))).select(n); } catch (e) { /* generic form */ }
+    return c === 'one' ? 'يوم واحد' : c === 'two' ? 'يومان' : c === 'few' ? n + ' أيام' : c === 'many' ? n + ' يومًا' : n + ' يوم';
+  }
+  function ageOf(iso) { var d = iso ? diffDays(String(iso).slice(0, 10), TODAY) : 0; return isNaN(d) ? 0 : Math.max(0, d); }
+  function lateTxt(iso) {
+    var d = diffDays(String(iso).slice(0, 10), TODAY); if (isNaN(d)) { return ''; }
+    return d > 0 ? tr(daysTxt(d) + ' overdue', 'متأخر ' + daysTxt(d)) : d === 0 ? tr('Due today', 'مستحق اليوم') : tr('Due in ' + daysTxt(-d), 'مستحق خلال ' + daysTxt(-d));
+  }
+  function agoTxt(iso, en, ar) { var a = ageOf(iso); return a ? tr((en || 'Waiting') + ' ' + daysTxt(a), (ar || 'منذ') + ' ' + daysTxt(a)) : tr('Today', 'اليوم'); }
 
-
-// ---------- unassign (ends selected ACTIVE allocations; server: bulk_allocate_leads action=unassign_allocations) ----------
-var UT = {
-  en: { title: 'Unassign Leads', btn: 'Unassign', btnSel: 'Unassign Selected', none: 'Select at least one lead that has an active allocation.', reason: 'Unassignment reason (required)',
-    expl: 'The selected allocations will END with status “Unassigned” (not Closed/Lost/Converted). They are not deleted: outcome, notes, next follow-up and all follow-up history are kept for coordinators. The former salesperson can no longer update them or see them as active work. A lead becomes available for reallocation only when it has no active allocation left.',
-    multi: 'This lead has several active allocations — tick the ones to end.', noActive: 'No active allocation (skipped)', confirm: 'Unassign selected allocations', pick: 'Tick at least one allocation.',
-    done: 'Unassignment results', ok: 'Unassigned', fail: 'Not changed', remaining: 'active allocation(s) remain', loading: 'Loading current allocations…', err: 'Could not load current allocations.' },
-  ar: { title: 'إلغاء إسناد العملاء', btn: 'إلغاء الإسناد', btnSel: 'إلغاء إسناد المحدد', none: 'حدد عميلاً واحداً على الأقل لديه توزيع نشط.', reason: 'سبب إلغاء الإسناد (مطلوب)',
-    expl: 'ستنتهي التوزيعات المحددة بالحالة "Unassigned" (وليست مغلقة/خاسرة/محولة). لا يتم حذفها: تبقى النتيجة والملاحظات والمتابعة وسجل المتابعات للمنسقين. لن يتمكن المندوب السابق من تحديثها. يصبح العميل متاحاً لإعادة التوزيع عند عدم وجود توزيع نشط.',
-    multi: 'لهذا العميل عدة توزيعات نشطة — اختر ما يجب إنهاؤه.', noActive: 'لا يوجد توزيع نشط (تم التخطي)', confirm: 'إلغاء إسناد التوزيعات المحددة', pick: 'اختر توزيعاً واحداً على الأقل.',
-    done: 'نتائج إلغاء الإسناد', ok: 'تم', fail: 'لم يتغير', remaining: 'توزيع نشط متبقٍ', loading: 'جارٍ تحميل التوزيعات الحالية…', err: 'تعذر تحميل التوزيعات الحالية.' }
-};
-function ut(k) { return (UT[lang] && UT[lang][k]) || UT.en[k]; }
-function uPost(args) {
-  return fetch('/api/method/bulk_allocate_leads', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Frappe-CSRF-Token': frappe.csrf_token }, body: JSON.stringify(args) })
-    .then(function (r) { return r.json().then(function (j) { if (!r.ok) { var e = new Error((j._server_messages && JSON.parse(JSON.parse(j._server_messages)[0]).message) || 'error'); e.status = r.status; throw e; } return j.message; }); });
-}
-function openUnassign(leads) {
-  if (!CAN_ALLOC) return frappe.msgprint(t('notAuth'));
-  leads = (leads || []).filter(function (l, i, a) { return l && a.indexOf(l) === i; });
-  if (!leads.length) return frappe.msgprint(ut('none'));
-  var busy = false;
-  var d = new frappe.ui.Dialog({ title: ut('title'), size: 'large', fields: [
-    { fieldtype: 'HTML', fieldname: 'list' },
-    { fieldname: 'reason', fieldtype: 'Small Text', label: ut('reason'), reqd: 1 }
-  ], primary_action_label: ut('confirm'), primary_action: function (v) {
-    if (busy) return;
-    var picks = Array.prototype.slice.call(d.$wrapper[0].querySelectorAll('input[data-ua]:checked')).map(function (c) { return { allocation: c.getAttribute('data-ua'), lead: c.getAttribute('data-ul') }; });
-    if (!picks.length) return frappe.msgprint(ut('pick'));
-    if (!(v.reason || '').trim() || v.reason.trim().length < 5) return frappe.msgprint(ut('reason'));
-    busy = true; d.get_primary_btn().prop('disabled', true);
-    uPost({ action: 'unassign_allocations', reason: v.reason.trim(), allocations: JSON.stringify(picks) }).then(function (m) {
-      d.hide();
-      frappe.msgprint({ title: ut('done'), indicator: m.failed ? 'orange' : 'green', message: '<b>' + ut('ok') + ': ' + m.ok + ' · ' + ut('fail') + ': ' + m.failed + '</b><br>' + (m.results || []).map(function (r) {
-        return (r.ok ? '✔ ' : '✖ ') + esc(r.lead || '') + ' / ' + esc(r.allocation) + ' — ' + esc(r.message) + (r.ok && r.remaining_active ? ' (' + r.remaining_active + ' ' + ut('remaining') + ')' : '');
-      }).join('<br>') });
-      S.sel = {};
-      var rp = q('[data-pane="report"]'); if (rp) rp.removeAttribute('data-built');
-      var fp = q('[data-pane="fum"]'); if (fp) fp.removeAttribute('data-built');
-      refresh(true).then(function () { if (typeof showTab === 'function') showTab(); });
-    }, function (e) { busy = false; d.get_primary_btn().prop('disabled', false); frappe.msgprint({ title: ut('title'), indicator: 'red', message: esc(e.message) }); });
-  } });
-  d.fields_dict.list.$wrapper.html('<div class="text-muted">' + ut('loading') + '</div>');
-  d.show();
-  // fresh read of CURRENT allocations at open time (the server re-checks again at save time)
-  var chunks = []; for (var i = 0; i < leads.length; i += 500) chunks.push(leads.slice(i, i + 500));
-  Promise.all(chunks.map(function (c) { return uPost({ action: 'report_allocations', leads: JSON.stringify(c) }); })).then(function (parts) {
-    var m = {}; parts.forEach(function (p) { Object.assign(m, p || {}); });
-    var html = '<div style="margin-bottom:8px;color:#b45309">' + esc(ut('expl')) + '</div><div style="max-height:45vh;overflow:auto;border:1px solid #e3e7ee;border-radius:6px">';
-    leads.forEach(function (l) {
-      var cur = (m[l] || []).filter(function (a) { return a.current; });
-      var multi = cur.length > 1;
-      html += '<div style="padding:8px 10px;border-bottom:1px solid #f0f2f6"><b>' + esc(l) + '</b>' + (multi ? ' <span style="color:#b91c1c">— ' + esc(ut('multi')) + '</span>' : '');
-      if (!cur.length) html += '<div class="text-muted small">' + esc(ut('noActive')) + '</div>';
-      cur.forEach(function (a) {
-        html += '<label style="display:flex;gap:8px;align-items:flex-start;margin:4px 0 0;font-weight:400"><input type="checkbox" data-ua="' + esc(a.allocation) + '" data-ul="' + esc(l) + '"' + (multi ? '' : ' checked') + '><span>' +
-          esc(a.sales_person_name || a.sales_person) + ' <span class="text-muted">(' + esc(a.sales_person_email || '') + ')</span> · ' + esc(a.allocation) + ' · ' + esc(a.status) + ' · ' + esc(fdt(a.assignment_date)) + (a.fu_count ? ' · ' + a.fu_count + ' follow-ups' : '') + '</span></label>';
-      });
-      html += '</div>';
+  /* ---------- ERP read-only API layer (bounded concurrency, one retry, cancellation) ---------- */
+  var REQ_TIMEOUT = 90000;
+  function callP(method, args) {
+    return new Promise(function (resolve, reject) {
+      var done = false, ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var timer = setTimeout(function () { if (done) { return; } done = true; if (ctl) { try { ctl.abort(); } catch (x) { /* ignore */ } } var te = new Error('Request timed out'); te.timeout = true; reject(te); }, REQ_TIMEOUT);
+      var body = new URLSearchParams();
+      Object.keys(args || {}).forEach(function (k) { var v = args[k]; if (v === undefined || v === null) { return; } body.append(k, (typeof v === 'object') ? JSON.stringify(v) : String(v)); });
+      fetch('/api/method/' + method, { method: 'POST', credentials: 'same-origin', signal: ctl ? ctl.signal : undefined,
+        headers: { 'X-Frappe-CSRF-Token': (G.frappe && frappe.csrf_token) || '', 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' }, body: body.toString() })
+        .then(function (r) { return r.text().then(function (txt) { return { r: r, txt: txt }; }); })
+        .then(function (o) {
+          if (done) { return; } done = true; clearTimeout(timer);
+          var j = null; try { j = JSON.parse(o.txt); } catch (x) { /* ignore */ }
+          if (o.r.ok && j && !j.exc) { resolve(j.message === undefined ? null : j.message); return; }
+          var ex = String((j && (j.exception || j.exc_type)) || '');
+          var perm = o.r.status === 401 || o.r.status === 403 || /permission/i.test(ex);
+          var e = new Error((perm ? 'No access to ' + ((args && (args.doctype || args.report_name)) || method) : (ex.split(':').slice(-1)[0].trim() || ('HTTP ' + o.r.status))));
+          e.status = perm ? 403 : o.r.status; reject(e);
+        })
+        .catch(function (err) { if (done) { return; } done = true; clearTimeout(timer); reject(err || new Error('request failed')); });
     });
-    d.fields_dict.list.$wrapper.html(html + '</div>');
-  }, function (e) { d.fields_dict.list.$wrapper.html('<div class="text-danger">' + esc(ut('err')) + ' ' + esc(e.message || '') + '</div>'); });
-}
+  }
+  var active = 0, queue = [];
+  function pump() {
+    while (active < CFG.conc && queue.length) {
+      var j = queue.shift(); active++;
+      j.fn().then(j.res, j.rej).then(function () { active--; pump(); });
+    }
+  }
+  function limited(fn) { return new Promise(function (res, rej) { queue.push({ fn: fn, res: res, rej: rej }); pump(); }); }
+  function guarded(chk, method, args) {
+    return limited(function () {
+      if (destroyed || (chk && !chk())) { return Promise.resolve(null); }
+      return callP(method, args).catch(function (e) { if (e && (e.status === 403 || e.timeout || e.status === 417)) { throw e; } return new Promise(function (r) { setTimeout(r, 400); }).then(function () { return callP(method, args); }); });
+    });
+  }
+  function errKind(e) {
+    var txt = ''; try { txt = (e && (e.responseText || e.statusText || e.message)) || ''; } catch (x) { /* ignore */ }
+    return (/PermissionError|not permitted|No access|403/i.test(String(txt)) || (e && e.status === 403)) ? 'perm' : 'tech';
+  }
+  function getList(args, chk) { return guarded(chk, 'frappe.client.get_list', args); }
+  function getCount(dt, filters, chk) { return getList({ doctype: dt, fields: ['count(name) as n'], filters: filters || [], limit_page_length: 1 }, chk).then(function (r) { return +one(r).n || 0; }); }
+  /* All rows of a bounded list (paged); rejects with e.tooLarge when the source exceeds `cap`. */
+  function fetchAll(args, chk, cap) {
+    cap = cap || 20000;
+    return getCount(args.doctype, args.filters, chk).then(function (n) {
+      if (n > cap) { var e = new Error('too large'); e.tooLarge = n; throw e; }
+      var jobs = []; for (var i = 0; i < Math.ceil(n / 500); i++) { jobs.push(getList(Object.assign({}, args, { order_by: args.order_by || 'name asc', limit_start: i * 500, limit_page_length: 500 }), chk)); }
+      return Promise.all(jobs).then(function (res) { var out = []; res.forEach(function (r) { if (r) { out = out.concat(r); } }); return out; });
+    });
+  }
+  function docUrl(dt, name) {
+    try { if (G.frappe && frappe.utils && frappe.utils.get_form_link) { return frappe.utils.get_form_link(dt, name); } } catch (e) { /* fall through */ }
+    return '/app/' + dt.toLowerCase().replace(/ /g, '-') + '/' + encodeURIComponent(name);
+  }
+  function docLink(dt, name, label) { return '<a class="dms-link" href="' + esc(docUrl(dt, name)) + '" target="_blank" rel="noopener noreferrer"><bdi>' + esc(label || name) + '</bdi> ↗</a>'; }
 
-// ---------- refresh ----------
-function loadLookups() {
-  var o = [[DT, 'docstatus', '!=', 2]];
-  return Promise.all([
-    getList({ fields: ['city as k', 'count(name) as c'], filters: o.concat([[DT, 'city', 'is', 'set']]), group_by: 'city', order_by: 'city asc' }).then(function (r) { S.cities = r.map(function (x) { return x.k; }).filter(function (x) { return /[^\s\-\.]/.test(x); }); }).catch(function () {}),
-    getList({ fields: ['source as k', 'count(name) as c'], filters: o.concat([[DT, 'source', 'is', 'set']]), group_by: 'source', order_by: 'source asc' }).then(function (r) { S.sources = r.map(function (x) { return x.k; }); }).catch(function () {}),
-    loadAlloc()
-  ]);
-}
-function refresh(full) {
-  setTs(null);
-  return loadLookups().then(function () { fillSelects(); renderAll(); S.lastRefresh = new Date(); setTs(S.lastRefresh); });
-}
-function setTs(d) { var el = q('[data-ts]'); if (el) el.textContent = d ? t('refreshed') + ': ' + frappe.datetime.str_to_user(frappe.datetime.get_datetime_as_string(d)) : t('loading'); }
+  /* ---------- data store: each source loads and renders independently; stale generations are dropped ---------- */
+  var D = {};
+  var softT = null;
+  function soon() { if (softT) { return; } softT = later(function () { softT = null; renderSoft(); }, 40); }
+  function run(key, fn) {
+    var g = GEN, chk = function () { return g === GEN && !destroyed; }, tok = {};
+    D[key] = null; D[key + 'Err'] = null; D[key + 'Tok'] = tok;
+    var mine = function () { return chk() && D[key + 'Tok'] === tok; };
+    fn(mine).then(function (v) { if (!mine()) { return; } D[key] = v; if (APP.afterLoad) { APP.afterLoad(key); } soon(); },
+      function (e) { if (!mine()) { return; } D[key + 'Err'] = e && e.tooLarge ? 'large:' + e.tooLarge : errKind(e); if (G.console && e && !e.status && !e.tooLarge) { console.error(APP.key, key, e); } soon(); });
+  }
+  function busy() { return !BOOTED || (APP.sources || []).some(function (k) { return D[k] == null && D[k + 'Err'] == null; }); }
+  function errText(kind) { return /^large:/.test(String(kind)) ? tr('too many records (' + num(+String(kind).slice(6)) + ') — narrow the filters or period', 'عدد كبير من السجلات (' + num(+String(kind).slice(6)) + ') — ضيّق المرشحات أو الفترة') : kind === 'perm' ? tr('permission denied for your user', 'لا تملك صلاحية القراءة') : tr('technical error while reading', 'خطأ تقني أثناء القراءة'); }
 
-// ================= DETAILED REPORT TAB (2026-11-02) =================
-var RT = {
-  en: { tabOverview: 'Overview', tabReport: 'Detailed Report', from: 'From Date', to: 'To Date', basis: 'Date Basis', bLead: 'Lead Date', bAsg: 'Assignment Date',
-    city: 'City', source: 'Source', sp: 'Assigned Salesperson', spPh: 'Search salesperson by name or email', astat: 'Allocation Status', all: 'All', assigned: 'Assigned (current)', history: 'Previously allocated (no active)', unassigned: 'Unassigned (never allocated)',
-    allocBy: 'Allocated By', cat: 'Catalogue', catY: 'Sent', catN: 'Not sent', priority: 'Priority', fu: 'Follow-up Status', search: 'Search', searchPh: 'Lead ID, company, contact, phone or email',
-    apply: 'Apply', reset: 'Reset', refresh: 'Refresh', columns: 'Columns', showAll: 'Show All Columns', resetCols: 'Reset Columns', exportCsv: 'Export Excel (CSV)', print: 'Print / PDF',
-    matching: 'Matching Leads', assignedL: 'Assigned Leads', unassignedL: 'Unassigned Leads', histL: 'Previously allocated (no active)', catSent: 'Catalogue Sent',
-    defs: 'Definitions — Assigned: lead has at least one current allocation (status not Closed/Converted). Previously allocated: lead has allocation history (Closed / Converted / Unassigned) but no current allocation (shown separately, not as Unassigned). Unassigned: lead has never been allocated. Matching = Assigned + Unassigned + Closed/Converted only. Counts are distinct leads across the complete filtered result.',
-    emailNote: 'Email fields available on leads: Customer Email and Email 2. Emails 3–5 do not exist in ERP and are not shown.',
-    modNote: 'Last Updated On is the record modification time, not the last customer contact (see Last Contacted).',
-    loading: 'Loading…', noRows: 'No leads match the selected filters.', error: 'Could not load data (permission or server error).', denied: 'Allocation details are restricted to Lead Allocation Coordinators and System Managers. Lead fields only are shown.',
-    rows: 'leads', page: 'Page', prev: 'Previous', next: 'Next', details: 'Details', allocs: 'Allocations & follow-up history', noAllocs: 'No allocation records.',
-    current: 'Current', hist: 'History', reportTitle: 'Lead Management — Detailed Report', filters: 'Filters', generated: 'Generated', by: 'by', none: 'None',
-    exportLimit: 'Export limit: first {0} of {1} matching leads were exported.', exporting: 'Preparing export…', truncated: 'Allocation data exceeded the reporting limit; allocation filters may be incomplete.' },
-  ar: { tabOverview: 'نظرة عامة', tabReport: 'التقرير التفصيلي', from: 'من تاريخ', to: 'إلى تاريخ', basis: 'أساس التاريخ', bLead: 'تاريخ العميل', bAsg: 'تاريخ الإسناد',
-    city: 'المدينة', source: 'المصدر', sp: 'مندوب المبيعات', spPh: 'ابحث عن مندوب بالاسم أو البريد', astat: 'حالة التوزيع', all: 'الكل', assigned: 'موزع (حالي)', history: 'مغلق/محول فقط', unassigned: 'لم يوزع مطلقاً',
-    allocBy: 'وزّع بواسطة', cat: 'الكتالوج', catY: 'مرسل', catN: 'غير مرسل', priority: 'الأولوية', fu: 'حالة المتابعة', search: 'بحث', searchPh: 'رقم العميل، الشركة، جهة الاتصال، الهاتف أو البريد',
-    apply: 'تطبيق', reset: 'إعادة ضبط', refresh: 'تحديث', columns: 'الأعمدة', showAll: 'إظهار كل الأعمدة', resetCols: 'إعادة ضبط الأعمدة', exportCsv: 'تصدير Excel (CSV)', print: 'طباعة / PDF',
-    matching: 'العملاء المطابقون', assignedL: 'العملاء الموزعون', unassignedL: 'العملاء غير الموزعين', histL: 'مغلق/محول فقط', catSent: 'تم إرسال الكتالوج',
-    defs: 'التعريفات — موزع: للعميل توزيع حالي واحد على الأقل (الحالة ليست مغلقة/محولة). مغلق/محول فقط: له سجل توزيع دون توزيع حالي (يُعرض منفصلاً). غير موزع: لم يوزع مطلقاً. المطابق = الموزع + غير الموزع + المغلق/المحول فقط. الأعداد للعملاء المميزين عبر كامل النتائج المفلترة.',
-    emailNote: 'حقول البريد المتاحة: بريد العميل والبريد 2. حقول البريد 3–5 غير موجودة في النظام.',
-    modNote: 'تاريخ آخر تحديث هو وقت تعديل السجل وليس آخر تواصل مع العميل.',
-    loading: 'جارٍ التحميل…', noRows: 'لا يوجد عملاء مطابقون.', error: 'تعذر تحميل البيانات (صلاحية أو خطأ في الخادم).', denied: 'تفاصيل التوزيع متاحة لمنسقي التوزيع ومديري النظام فقط.',
-    rows: 'عميل', page: 'صفحة', prev: 'السابق', next: 'التالي', details: 'التفاصيل', allocs: 'سجل التوزيع والمتابعة', noAllocs: 'لا توجد سجلات توزيع.',
-    current: 'حالي', hist: 'سابق', reportTitle: 'إدارة العملاء المحتملين — تقرير تفصيلي', filters: 'الفلاتر', generated: 'تاريخ الإنشاء', by: 'بواسطة', none: 'لا يوجد',
-    exportLimit: 'حد التصدير: تم تصدير أول {0} من {1}.', exporting: 'جارٍ تجهيز التصدير…', truncated: 'تجاوزت بيانات التوزيع الحد؛ قد تكون الفلاتر غير مكتملة.' }
-};
-function rt(k) { return (RT[lang] && RT[lang][k]) || RT.en[k] || k; }
-var RCOLS = [
-  // key, en, ar, kind(lead|alloc), sortField, default
-  ['name', 'Lead ID', 'رقم العميل', 'lead', 'name', 1],
-  ['customer_name', 'Customer / Company', 'العميل / الشركة', 'lead', 'customer_name', 1],
-  ['date', 'Lead Date', 'تاريخ العميل', 'lead', 'date', 1],
-  ['contact_person', 'Contact Person', 'جهة الاتصال', 'lead', 'contact_person', 1],
-  ['designation', 'Designation', 'المسمى', 'lead', 'designation', 0],
-  ['city', 'City', 'المدينة', 'lead', 'city', 1],
-  ['phone', 'Primary Phone', 'الهاتف الأساسي', 'lead', 'phone', 1],
-  ['telephone', 'Telephone', 'الهاتف', 'lead', 'telephone', 0],
-  ['customer_email', 'Customer Email', 'بريد العميل', 'lead', 'customer_email', 1],
-  ['customer_email_2', 'Email 2', 'البريد 2', 'lead', 'customer_email_2', 0],
-  ['source', 'Lead Source', 'المصدر', 'lead', 'source', 1],
-  ['action_taken', 'Action Taken', 'الإجراء المتخذ', 'lead', 'action_taken', 0],
-  ['activities', 'Activities', 'الأنشطة', 'lead', '', 0],
-  ['catalogue_status', 'Catalogue Sent', 'الكتالوج', 'lead', 'catalogue_status', 1],
-  ['remarks', 'Remarks', 'ملاحظات', 'lead', '', 0],
-  ['a_status', 'Allocation Status', 'حالة التوزيع', 'alloc', '', 1],
-  ['a_sp', 'Assigned Salesperson', 'المندوب', 'alloc', '', 1],
-  ['a_sp_email', 'Salesperson Email', 'بريد المندوب', 'alloc', '', 0],
-  ['a_by', 'Allocated By', 'وزّع بواسطة', 'alloc', '', 1],
-  ['a_date', 'Assignment Date', 'تاريخ الإسناد', 'alloc', '', 1],
-  ['a_priority', 'Priority', 'الأولوية', 'alloc', '', 0],
-  ['a_next', 'Next Follow-up', 'المتابعة القادمة', 'alloc', '', 1],
-  ['a_fu', 'Follow-up Status', 'حالة المتابعة', 'alloc', '', 1],
-  ['a_last', 'Last Contacted', 'آخر تواصل', 'alloc', '', 0],
-  ['a_notes', 'Latest Follow-up Notes', 'آخر ملاحظات المتابعة', 'alloc', '', 0],
-  ['f_date', 'Latest Follow-up', 'آخر متابعة', 'alloc', '', 0],
-  ['f_method', 'Follow-up Method / Result', 'وسيلة/نتيجة المتابعة', 'alloc', '', 0],
-  ['f_outcome', 'Follow-up Outcome', 'نتيجة المتابعة', 'alloc', '', 0],
-  ['f_notes', 'Follow-up Notes', 'ملاحظات المتابعة', 'alloc', '', 0],
-  ['f_next', 'Follow-up Next Action', 'الإجراء التالي', 'alloc', '', 0],
-  ['f_count', 'Follow-up Entries', 'عدد المتابعات', 'alloc', '', 0],
-  ['owner', 'Created By', 'أنشئ بواسطة', 'lead', 'owner', 0],
-  ['creation', 'Created On', 'تاريخ الإنشاء', 'lead', 'creation', 0],
-  ['modified_by', 'Last Updated By', 'آخر تحديث بواسطة', 'lead', 'modified_by', 0],
-  ['modified', 'Last Updated On', 'آخر تحديث', 'lead', 'modified', 0]
-];
-var LEAD_FIELDS = ['name', 'date', 'customer_name', 'contact_person', 'designation', 'city', 'phone', 'telephone', 'customer_email', 'customer_email_2', 'source', 'action_taken', 'activities', 'catalogue_status', 'remarks', 'owner', 'creation', 'modified_by', 'modified'];
-var PRIORITIES = ['Low', 'Medium', 'High', 'Urgent'];
-var FU_STATUSES = ['Assigned', 'Contacted', 'Follow Up', 'Interested', 'Quotation Required', 'No Response', 'Not Interested', 'Converted', 'Closed'];
-var RCOL_KEY = 'lm_report_cols_v1';
-function defaultCols() { return RCOLS.filter(function (c) { return c[5]; }).map(function (c) { return c[0]; }); }
-var RS = {
-  tab: 'overview', f: { from: '', to: '', basis: 'lead', city: '', source: '', spUser: '', spLabel: '', astat: '', allocBy: '', cat: '', priority: '', fu: '', q: '' },
-  page: 0, size: 25, sort: 'date', dir: 'desc', cols: null, ids: null, idsErr: null, allocators: [], rows: [], alloc: {}, total: 0, req: 0, open: {}
-};
-try { RS.cols = JSON.parse(localStorage.getItem(RCOL_KEY) || 'null'); } catch (e) {}
-if (!Array.isArray(RS.cols) || !RS.cols.length) RS.cols = defaultCols();
-function saveCols() { try { localStorage.setItem(RCOL_KEY, JSON.stringify(RS.cols)); } catch (e) {} }
-function colLabel(c) { return lang === 'ar' ? c[2] : c[1]; }
-function rq(s) { return R.querySelector('[data-pane="report"] ' + s); }
-function rqa(s) { return Array.prototype.slice.call(R.querySelectorAll('[data-pane="report"] ' + s)); }
-function apiPost(args) {
-  return fetch('/api/method/bulk_allocate_leads', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Frappe-CSRF-Token': frappe.csrf_token }, body: JSON.stringify(args) })
-    .then(function (r) { return r.json().then(function (j) { if (!r.ok) { var e = new Error('http'); e.status = r.status; throw e; } return j.message; }); });
-}
-function userName(u) { if (!u) return ''; try { return frappe.user.full_name(u) || u; } catch (e) { return u; } }
-function fdt(v, withTime) { if (!v) return ''; try { return withTime ? frappe.datetime.str_to_user(String(v).slice(0, 19)) : frappe.datetime.str_to_user(String(v).slice(0, 10)); } catch (e) { return String(v); } }
+  /* ---------- UI primitives ---------- */
+  var ICO = {
+    refresh: '<path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/>', filter: '<path d="M4 5h16l-6.2 7.6V19l-3.6 1.6v-8z"/>',
+    cal: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/>', down: '<path d="m6 9 6 6 6-6"/>',
+    prev: '<path d="m15 6-6 6 6 6"/>', next: '<path d="m9 6 6 6-6 6"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
+    up: '<path d="M12 19V6M6.5 11.5 12 6l5.5 5.5"/>', dn: '<path d="M12 5v13M6.5 12.5 12 18l5.5-5.5"/>', dl: '<path d="M12 4v11M7 10.5 12 15.5l5-5M5 20h14"/>'
+  };
+  function ico(n, cls) { return '<svg class="dms-ico' + (cls ? ' ' + cls : '') + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + ICO[n] + '</svg>'; }
+  function kpi(o) {
+    var inner = '<span class="dms-kpi-h"><span class="dms-kpi-l">' + (o.dot ? '<i class="dms-dot" style="--dms-c:' + o.dot + '"></i>' : '') + esc(o.label) + '</span>' + (o.top || '') + '</span>' +
+      '<span class="dms-kpi-n">' + o.val + '</span>' + (o.sub ? '<span class="dms-kpi-s">' + o.sub + '</span>' : '') + (o.foot != null ? '<span class="dms-kpi-f">' + o.foot + '</span>' : '');
+    var t = o.tip ? ' title="' + esc(o.tip) + '"' : '';
+    return o.act ? '<button type="button" class="dms-kpi" data-act="kpi" data-v="' + esc(o.act) + '"' + t + '>' + inner + '</button>' : '<div class="dms-kpi"' + t + '>' + inner + '</div>';
+  }
+  function kpis(list, ov) { return '<div class="dms-grid dms-kpis' + (ov ? ' dms-ov-kpis' : '') + '">' + list.join('') + '</div>'; }
+  function tagc(txt) { return '<span class="dms-tag">' + txt + '</span>'; }
+  function stat(k, txt) { return '<span class="dms-stat dms-stat-' + k + '">' + esc(txt) + '</span>'; }
+  function ctx(html) { return '<span class="dms-kpi-ctx">' + html + '</span>'; }
+  function badge(txt, color) { return '<span class="dms-badge" style="--dms-c:' + color + '">' + esc(txt) + '</span>'; }
+  function wait() { return '<span class="dms-sm">' + esc(tr('Calculating…', 'جارٍ الحساب…')) + '</span>'; }
+  function asOf() { return tagc(esc(tr('As of today', 'حتى اليوم'))); }
+  /* Value of a source-backed KPI: '…' while loading, '—' when the source failed (never a false zero). */
+  function kv(key, f) { return D[key + 'Err'] ? '—' : D[key] == null ? '…' : f(D[key]); }
+  function ks(key, f) { return D[key + 'Err'] ? esc(tr('Unavailable', 'غير متاح')) : D[key] == null ? wait() : f(D[key]); }
+  function spark(vs) {
+    var n = vs.length, real = vs.filter(function (v) { return v != null; }), pts = [];
+    if (n < 3 || real.length < 3 || !real.some(function (v) { return v > 0; })) { return ''; }
+    var max = Math.max.apply(null, real), min = Math.min(0, Math.min.apply(null, real)), rng = (max - min) || 1;
+    vs.forEach(function (v, i) { if (v != null) { pts.push([(i / (n - 1) * 100).toFixed(2), (26 - (v - min) / rng * 23).toFixed(2)]); } });
+    var line = pts.map(function (p) { return p.join(','); }).join(' L');
+    return '<svg class="dms-spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path class="dms-spark-a" d="M' + pts[0][0] + ',28 L' + line + ' L' + pts[pts.length - 1][0] + ',28 Z"/><path class="dms-spark-l" d="M' + line + '"/></svg>';
+  }
+  /* Change vs the comparison window. fmt formats values; small count bases show "was N" instead of a percentage. */
+  function deltaChip(cur, prev, R, fmt, isCount, lowerIsBetter) {
+    if (cur == null || prev == null || !R) { return ''; }
+    fmt = fmt || moneyS;
+    var tip = tr('This period', 'هذه الفترة') + ' (' + rangeLabel(R[0]) + '): ' + fmt(cur) + '\n' + tr('Previous', 'السابقة') + ' (' + rangeLabel(R[1]) + '): ' + fmt(prev);
+    var sr = '<span class="dms-sr"> ' + esc(tr('vs previous period', 'مقارنة بالفترة السابقة')) + '</span>';
+    if (prev === 0 || (isCount && prev < 5)) { return '<span class="dms-delta dms-flat" data-tip="' + esc(tip) + '">' + esc(tr('was', 'كان')) + ' <bdi>' + esc(fmt(prev)) + '</bdi>' + sr + '</span>'; }
+    var p = (cur - prev) / prev * 100, a = Math.abs(p), k = a < 0.05 ? 'flat' : p > 0 ? 'up' : 'down', tone = k === 'flat' ? 'flat' : ((k === 'up') !== !!lowerIsBetter ? 'up' : 'down');
+    var txt = a > 999 ? '10×+' : (a < 10 ? a.toFixed(1) : Math.round(a)) + '%';
+    return '<span class="dms-delta dms-' + tone + '" data-tip="' + esc(tip) + '">' + (k === 'flat' ? '' : ico(k === 'up' ? 'up' : 'dn')) + '<bdi>' + (k === 'down' ? '−' : '') + txt + '</bdi>' + sr + '</span>';
+  }
+  function panel(title, body, extra, meta) {
+    return '<section class="dms-panelbox ' + (extra || '') + '"><div class="dms-ph"><h3 class="dms-h3">' + esc(title) + '</h3>' + (meta ? '<span class="dms-ph-meta">' + meta + '</span>' : '') + '</div>' + body + '</section>';
+  }
+  function note(txt) { return '<p class="dms-note">' + txt + '</p>'; }
+  function alertBox(kind, html) { return '<div class="dms-alert dms-alert-' + kind + '" role="' + (kind === 'err' ? 'alert' : 'status') + '">' + html + '</div>'; }
+  function empty(txt) { return '<div class="dms-empty">' + esc(txt || tr('No data for the current filters.', 'لا توجد بيانات للمرشحات الحالية.')) + '</div>'; }
+  function srcErr(kind, what) { return alertBox('err', '<b>' + esc(tr('Source unavailable', 'المصدر غير متاح')) + ':</b> ' + esc(what) + ' — ' + esc(errText(kind))); }
+  function skel(n, cls) { return rep('<div class="dms-skel ' + (cls || '') + '"></div>', n); }
+  /* Body for a panel backed by source `key`: skeleton while loading, named error on failure, else f(data). */
+  function src(key, what, f) { return D[key + 'Err'] ? srcErr(D[key + 'Err'], what) : D[key] == null ? skel(1, 'dms-skel-panel') : f(D[key]); }
 
-function mountTabs() {
-  var el = q('.lm');
-  var tabs = el.querySelector('.lm-tabs');
-  if (!tabs) return;
-  tabs.innerHTML = '<button data-tab="overview" class="' + (RS.tab === 'overview' ? 'on' : '') + '">' + rt('tabOverview') + '</button><button data-tab="report" class="' + (RS.tab === 'report' ? 'on' : '') + '">' + rt('tabReport') + '</button><button data-tab="fum" class="' + (RS.tab === 'fum' ? 'on' : '') + '">' + ft('tab') + '</button>';
-  tabs.onclick = function (e) { var b = e.target.closest('[data-tab]'); if (!b) return; RS.tab = b.getAttribute('data-tab'); showTab(); };
-  showTab();
-}
-function showTab() {
-  var el = q('.lm');
-  el.querySelector('[data-pane="overview"]').style.display = RS.tab === 'overview' ? '' : 'none';
-  var rp = el.querySelector('[data-pane="report"]');
-  rp.style.display = RS.tab === 'report' ? '' : 'none';
-  qa('.lm-tabs [data-tab]').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-tab') === RS.tab); });
-  var fp = el.querySelector('[data-pane="fum"]'); fp.style.display = RS.tab === 'fum' ? '' : 'none';
-  if (RS.tab === 'report') { if (!rp.getAttribute('data-built')) { buildReport(); rApply(); } }
-  if (RS.tab === 'fum') { if (!fp.getAttribute('data-built')) { fumBuild(); fumLoad(); } }
-}
-function opt(v, l, sel) { return '<option value="' + esc(v) + '"' + (sel === v ? ' selected' : '') + '>' + esc(l) + '</option>'; }
-function buildReport() {
-  var rp = q('[data-pane="report"]');
-  rp.setAttribute('data-built', '1');
-  var F = RS.f;
-  rp.innerHTML =
-    '<div class="lm-card lm-filters">' +
-      rf('from', '<input type="date" data-rf="from" value="' + esc(F.from) + '">') + rf('to', '<input type="date" data-rf="to" value="' + esc(F.to) + '">') +
-      rf('basis', '<select data-rf="basis">' + opt('lead', rt('bLead'), F.basis) + opt('asg', rt('bAsg'), F.basis) + '</select>') +
-      rf('city', '<select data-rf="city">' + opt('', rt('all'), F.city) + S.cities.map(function (c) { return opt(c, c, F.city); }).join('') + '</select>') +
-      rf('source', '<select data-rf="source">' + opt('', rt('all'), F.source) + S.sources.map(function (c) { return opt(c, c, F.source); }).join('') + '</select>') +
-      '<div class="lm-f"><label>' + rt('sp') + '</label><div style="position:relative"><input type="text" data-rsp autocomplete="off" placeholder="' + rt('spPh') + '" value="' + esc(F.spLabel) + '"><div data-rspdd class="lm-rdd" style="display:none"></div></div></div>' +
-      rf('astat', '<select data-rf="astat">' + opt('', rt('all'), F.astat) + opt('assigned', rt('assigned'), F.astat) + opt('unassigned', rt('unassigned'), F.astat) + opt('history', rt('history'), F.astat) + '</select>') +
-      rf('allocBy', '<select data-rf="allocBy">' + opt('', rt('all'), F.allocBy) + RS.allocators.map(function (a) { return opt(a.user, a.full_name, F.allocBy); }).join('') + '</select>') +
-      rf('cat', '<select data-rf="cat">' + opt('', rt('all'), F.cat) + opt('1', rt('catY'), F.cat) + opt('0', rt('catN'), F.cat) + '</select>') +
-      rf('priority', '<select data-rf="priority">' + opt('', rt('all'), F.priority) + PRIORITIES.map(function (p) { return opt(p, p, F.priority); }).join('') + '</select>') +
-      rf('fu', '<select data-rf="fu">' + opt('', rt('all'), F.fu) + FU_STATUSES.map(function (p) { return opt(p, p, F.fu); }).join('') + '</select>') +
-      '<div class="lm-f wide"><label>' + rt('search') + '</label><input type="search" data-rf="q" placeholder="' + rt('searchPh') + '" value="' + esc(F.q) + '"></div>' +
-      '<div class="lm-fbtn"><button class="lm-btn pri" data-ract="apply">' + rt('apply') + '</button><button class="lm-btn" data-ract="reset">' + rt('reset') + '</button><button class="lm-btn" data-ract="refresh">' + ICON.refresh + rt('refresh') + '</button></div>' +
-    '</div>' +
-    '<div class="lm-kpis lm-rk">' + rk('matching') + rk('assignedL', 'ok') + rk('unassignedL', 'warn') + rk('histL') + rk('catSent') + '</div>' +
-    '<div class="lm-note" style="margin:-4px 0 12px">' + rt('defs') + '<br>' + rt('emailNote') + ' ' + rt('modNote') + ' <span data-rwarn class="lm-errtxt"></span></div>' +
-    '<div class="lm-card lm-sec"><div class="lm-tbar"><h4>' + rt('tabReport') + ' <span class="mut" data-rcount></span></h4><div class="lm-act" style="position:relative">' +
-      '<button class="lm-btn" data-ract="cols">' + rt('columns') + '</button><div data-rcolp class="lm-colp" style="display:none"></div>' +
-      '<button class="lm-btn" data-ract="csv">' + rt('exportCsv') + '</button><button class="lm-btn" data-ract="print">' + rt('print') + '</button></div></div>' +
-      '<div class="lm-tblwrap lm-rwrap"><table class="lm-rt"><thead data-rhead></thead><tbody data-rbody></tbody></table></div>' +
-      '<div class="lm-pg"><div class="mut" data-rpg></div><div class="lm-act"><select data-rsize class="lm-btn">' + [25, 50, 100].map(function (n) { return '<option' + (RS.size === n ? ' selected' : '') + '>' + n + '</option>'; }).join('') + '</select><button class="lm-btn" data-ract="prev">' + rt('prev') + '</button><button class="lm-btn" data-ract="next">' + rt('next') + '</button></div></div>' +
-    '</div>';
-  bindReport();
-}
-function rf(k, inner) { return '<div class="lm-f"><label>' + rt(k) + '</label>' + inner + '</div>'; }
-function rk(k, tone) { return '<div class="lm-card lm-kpi ' + (tone || '') + '" data-rk="' + k + '" style="cursor:default"><div class="k-l">' + rt(k) + '</div><div class="k-v"><span class="lm-sk"></span></div><div class="k-s">&nbsp;</div></div>'; }
-function setRk(k, state, v) {
-  var el = rq('[data-rk="' + k + '"] .k-v'); if (!el) return;
-  if (state === 'loading') el.innerHTML = '<span class="lm-sk"></span>';
-  else if (state === 'error') el.innerHTML = '<span class="lm-errtxt">' + esc(v || rt('error')) + '</span>';
-  else el.textContent = fmtN(v);
-}
-function readRF() { rqa('[data-rf]').forEach(function (i) { RS.f[i.getAttribute('data-rf')] = i.value; }); }
+  /* ---------- charts (HTML/CSS; hover details via the shared tooltip, data-tip) ---------- */
+  function niceMax(v) { if (!(v > 0)) { return 1; } var p = Math.pow(10, Math.floor(Math.log(v) / Math.LN10)), f = v / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
+  function axisFmt(v) { var a = Math.abs(v); return a >= 1e9 ? +(v / 1e9).toFixed(1) + 'B' : a >= 1e6 ? +(v / 1e6).toFixed(1) + 'M' : a >= 1e3 ? +(v / 1e3).toFixed(1) + 'K' : String(a < 10 ? +v.toFixed(2) : Math.round(v)); }
+  function bucketLabel(k, g, short) {
+    if (g === 'cat') { return String(k); }
+    if (g === 'week' && !short) { return tr('Week of ', 'أسبوع ') + fmtDate(k, true); }
+    if (g !== 'month') { return fmtDate(k, !short); }
+    try { return new Intl.DateTimeFormat(locale(), { month: 'short', year: '2-digit', timeZone: 'UTC' }).format(new Date(parseISO(k + '-01'))); } catch (e) { return k; }
+  }
+  /* Count charts get whole-number ticks (top is a multiple of 4), so small counts never show 0, 1, 1, 2, 2. */
+  function countTop(max, fmt) { var t = niceMax(max); return fmt === num ? Math.max(4, Math.ceil(t / 4) * 4) : t; }
+  function granName(g) { return g === 'day' ? tr('by day', 'يوميًا') : g === 'week' ? tr('by week', 'أسبوعيًا') : tr('by month', 'شهريًا'); }
+  /* Time buckets for a range: daily up to 45 days, weekly up to 120 days, monthly beyond; stops at today. */
+  function buckets(range) {
+    var from = range[0], to = clip(range)[1], span = diffDays(from, to) + 1, g = span <= 45 ? 'day' : span <= 120 ? 'week' : 'month', keys = [], cur, i;
+    function keyOf(iso) { iso = String(iso).slice(0, 10); return g === 'day' ? iso : g === 'week' ? weekStartOf(iso) : iso.slice(0, 7); }
+    if (to < from) { return { keys: [], gran: g, keyOf: keyOf }; }
+    if (g === 'month') { keys = monthList(from, to); } else { cur = keyOf(from); for (i = 0; i < 200 && cur <= to; i++) { keys.push(cur); cur = addDays(cur, g === 'day' ? 1 : 7); } }
+    return { keys: keys, gran: g, keyOf: keyOf };
+  }
+  /* Grouped rows (one per date) folded into buckets: rows[dateField], rows[valField]. */
+  function series(range, rows, dateF, valF) {
+    var B = buckets(range), d = {}; B.keys.forEach(function (k) { d[k] = { v: 0, n: 0 }; });
+    (rows || []).forEach(function (r) { var k = B.keyOf(r[dateF]); if (d[k]) { d[k].v += valF ? (+r[valF] || 0) : 1; d[k].n += +r.n || (valF ? 0 : 1); } });
+    B.d = d; return B;
+  }
+  function legend(series) { return '<div class="dms-legend">' + series.map(function (s) { return '<span><i style="--dms-c:' + s.color + '"></i>' + esc(s.label) + '</span>'; }).join('') + '</div>'; }
+  /* Column chart. ser = [{label, color, val: function (key) {}}]; fmt formats values (default money). */
+  function barChart(keys, gran, ser, fmt, extraTip, emptyTxt) {
+    if (!Array.isArray(ser)) { ser = [ser]; }
+    fmt = fmt || moneyFull; var max = 0;
+    keys.forEach(function (k) { ser.forEach(function (s) { max = Math.max(max, s.val(k) || 0); }); });
+    if (!keys.length || !max) { return empty(emptyTxt || tr('Nothing in this range.', 'لا شيء في هذا النطاق.')); }
+    var top = countTop(max, fmt), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, gran) + ser.map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k) || 0); }).join('') + (extraTip ? extraTip(k) : '');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '">' + ser.map(function (s) { var v = s.val(k) || 0; return '<i class="dms-bar' + (v ? '' : ' dms-bar-0') + '" style="height:' + (v / top * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i>'; }).join('') + '</div>';
+    }).join('');
+    var aria = ser.map(function (s) { return s.label + ': ' + keys.map(function (k) { return bucketLabel(k, gran, true) + ' ' + fmt(s.val(k) || 0); }).join(', '); }).join('; ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + (ser.length > 1 ? legend(ser) : '');
+  }
+  /* Line chart for balances (may go negative). ser = [{label, color, val(key), dash?}]; the first series is the main line. */
+  function lineChart(keys, gran, ser, fmt) {
+    fmt = fmt || moneyFull; var all = [];
+    keys.forEach(function (k) { ser.forEach(function (s) { var v = s.val(k); if (v != null) { all.push(v); } }); });
+    if (!keys.length || !all.length) { return empty(); }
+    var mx = Math.max.apply(null, all), mn = Math.min.apply(null, all), hi = mx > 0 ? niceMax(mx) : 0, lo = mn < 0 ? -niceMax(-mn) : 0;
+    if (hi === lo) { hi = lo + 1; }
+    var y = function (v) { return (100 - (v - lo) / (hi - lo) * 100).toFixed(2); }, x = function (i) { return (keys.length < 2 ? 50 : i / (keys.length - 1) * 100).toFixed(2); };
+    var ticks = [0, 0.25, 0.5, 0.75, 1].map(function (t) { return lo + (hi - lo) * t; });
+    var paths = ser.map(function (s) { var pts = keys.map(function (k, i) { var v = s.val(k); return v == null ? null : x(i) + ',' + y(v); }).filter(Boolean); return '<polyline class="dms-line' + (s.dash ? ' dms-line-ref' : '') + '" style="--dms-c:' + s.color + '" points="' + pts.join(' ') + '"/>'; }).join('');
+    var zero = lo < 0 ? '<i class="dms-gl dms-gl-0" style="bottom:' + ((0 - lo) / (hi - lo) * 100).toFixed(2) + '%"></i>' : '';
+    var hits = keys.map(function (k) { return '<div class="dms-col dms-col-hit" data-tip="' + esc(bucketLabel(k, gran) + ser.map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k)); }).join('')) + '"></div>'; }).join('');
+    var aria = ser[0].label + ': ' + keys.map(function (k) { return bucketLabel(k, gran, true) + ' ' + fmt(ser[0].val(k)); }).join(', ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (v, i) { return '<span style="bottom:' + i * 25 + '%">' + axisFmt(v) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + [0, 25, 50, 75, 100].map(function (b) { return '<i class="dms-gl" style="bottom:' + b + '%"></i>'; }).join('') + zero + '<svg class="dms-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">' + paths + '</svg><div class="dms-cols">' + hits + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + (ser.length > 1 ? legend(ser) : '');
+  }
+  /* Stacked columns (one bar per key, segments per series). */
+  function stackChart(keys, gran, ser, fmt) {
+    fmt = fmt || num; var tot = {}, max = 0;
+    keys.forEach(function (k) { tot[k] = sum(ser, function (s) { return s.val(k) || 0; }); max = Math.max(max, tot[k]); });
+    if (!keys.length || !max) { return empty(); }
+    var top = countTop(max, fmt), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, gran) + ser.filter(function (s) { return s.val(k); }).map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k)); }).join('');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '"><span class="dms-stackbar" style="height:' + (tot[k] / top * 100).toFixed(2) + '%">' + ser.map(function (s) { var v = s.val(k) || 0; return v ? '<i style="flex:' + v + ' 0 0;background:' + s.color + '"></i>' : ''; }).join('') + '</span></div>';
+    }).join('');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(ser.map(function (s) { return s.label; }).join(', ')) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + legend(ser);
+  }
+  function fitChartLabels() {
+    HOST.querySelectorAll('.dms-xaxis').forEach(function (axis) {
+      var labels = axis.querySelectorAll('span'), widest = 0;
+      labels.forEach(function (label) { var range = document.createRange(); range.selectNodeContents(label); widest = Math.max(widest, range.getBoundingClientRect().width); });
+      var slots = Math.max(1, Math.min(8, Math.floor(axis.clientWidth / (widest + 16)))), step = Math.max(1, Math.ceil(labels.length / slots));
+      labels.forEach(function (label, i) { label.style.visibility = i % step ? 'hidden' : 'visible'; });
+    });
+  }
+  /* Share rows: label · bar · value · %. items = [{label, value, color, act?, tip?}]; ordered=true keeps the given order. */
+  function shareList(items, head, fmt, ordered) {
+    fmt = fmt || num; var tot = sum(items, function (s) { return s.value; }), rows = items.filter(function (s) { return s.value; });
+    if (!ordered) { rows = rows.slice().sort(function (a, b) { return b.value - a.value; }); }
+    if (!tot) { return empty(); }
+    return (head ? '<div class="dms-share-t">' + head + '</div>' : '') + rows.map(function (s) {
+      var tip = s.tip || (s.label + ': ' + fmt(s.value) + ' (' + pct(s.value, tot) + ')');
+      var inner = '<span class="dms-share-l"><i class="dms-dot" style="--dms-c:' + s.color + '"></i>' + bdi(s.label) + '</span><span class="dms-share-b"><i style="width:' + (s.value / tot * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i></span>' +
+        '<span class="dms-num">' + esc(fmt(s.value)) + '</span><span class="dms-share-p dms-num">' + pct(s.value, tot, 0) + '</span>';
+      return s.act ? '<button type="button" class="dms-share dms-share-btn" data-act="kpi" data-v="' + esc(s.act) + '" data-tip="' + esc(tip) + '">' + inner + '</button>' : '<div class="dms-share" data-tip="' + esc(tip) + '">' + inner + '</div>';
+    }).join('');
+  }
+  /* Ranked horizontal bars: items = [{label, value, color?, act?}]. */
+  function hbars(items, fmt, color) {
+    if (!items.length) { return empty(); }
+    var max = Math.max.apply(null, items.map(function (i) { return Math.abs(i.value); }).concat([1])); fmt = fmt || num;
+    return items.map(function (i) {
+      var inner = '<span class="dms-split-l">' + bdi(i.label) + '</span><span class="dms-split"><i style="width:' + (Math.abs(i.value) / max * 100).toFixed(2) + '%;background:' + (i.color || color || 'var(--dms-royal)') + '"></i></span><span class="dms-num dms-split-v">' + esc(fmt(i.value)) + '</span>';
+      var tip = ' data-tip="' + esc(i.label + ': ' + fmt(i.value)) + '"';
+      return i.act ? '<button type="button" class="dms-stack-row dms-split-row" data-act="kpi" data-v="' + esc(i.act) + '"' + tip + '>' + inner + '</button>' : '<div class="dms-stack-row dms-split-row"' + tip + '>' + inner + '</div>';
+    }).join('');
+  }
+  /* Two-part bars ranked by total: items = [{label, total, part, act?}]; parts = [{label, color}] for part and remainder. */
+  function splitBars(items, parts, fmt) {
+    if (!items.length) { return empty(); }
+    fmt = fmt || money; var max = Math.max.apply(null, items.map(function (i) { return i.total; }).concat([1]));
+    return items.map(function (i) {
+      var tip = i.label + '\n' + parts[0].label + ': ' + fmt(i.part) + '\n' + parts[1].label + ': ' + fmt(i.total - i.part);
+      var bar = '<span class="dms-split"><i style="width:' + (i.part / max * 100).toFixed(2) + '%;background:' + parts[0].color + '"></i><i style="width:' + (Math.max(0, i.total - i.part) / max * 100).toFixed(2) + '%;background:' + parts[1].color + '"></i></span>';
+      var inner = '<span class="dms-split-l">' + bdi(i.label) + '</span>' + bar + '<span class="dms-num dms-split-v">' + esc(fmt(i.total)) + '</span>';
+      return i.act ? '<button type="button" class="dms-stack-row dms-split-row" data-act="kpi" data-v="' + esc(i.act) + '" data-tip="' + esc(tip) + '">' + inner + '</button>' : '<div class="dms-stack-row dms-split-row" data-tip="' + esc(tip) + '">' + inner + '</div>';
+    }).join('') + legend(parts);
+  }
+  function mixBar(segs) {
+    var tot = sum(segs, function (s) { return s.value; }); if (!tot) { return ''; }
+    return '<span class="dms-mix"><span class="dms-mix-b">' + segs.map(function (s) { return s.value ? '<i style="width:' + (s.value / tot * 100).toFixed(2) + '%;background:' + s.color + '" data-tip="' + esc(s.label + ': ' + (s.fmt || num)(s.value)) + '"></i>' : ''; }).join('') + '</span></span>';
+  }
+  var PAL = ['var(--dms-royal)', '#6b8be0', '#1f8a5b', '#d97a1e', '#8a97a8', '#a3b4ef', '#c2412d', '#d6a419', '#4b5a6e', '#b6bfca'];
 
-var rDeb, spDeb, spReq = 0;
-function bindReport() {
-  var rp = q('[data-pane="report"]');
-  rp.onclick = function (e) {
-    e.stopPropagation();
-    var a = e.target.closest('[data-ract]');
-    if (a) {
-      var act = a.getAttribute('data-ract');
-      if (act === 'apply') { readRF(); RS.page = 0; rApply(); }
-      if (act === 'reset') { RS.f = { from: '', to: '', basis: 'lead', city: '', source: '', spUser: '', spLabel: '', astat: '', allocBy: '', cat: '', priority: '', fu: '', q: '' }; RS.page = 0; RS.sort = 'date'; RS.dir = 'desc'; buildReport(); rApply(); }
-      if (act === 'refresh') { readRF(); rApply(); }
-      if (act === 'prev' && RS.page > 0) { RS.page--; rLoadPage(); }
-      if (act === 'next' && (RS.page + 1) * RS.size < RS.total) { RS.page++; rLoadPage(); }
-      if (act === 'cols') toggleColPanel();
-      if (act === 'showall') { RS.cols = RCOLS.map(function (c) { return c[0]; }); saveCols(); renderColPanel(); rRender(); }
-      if (act === 'resetcols') { RS.cols = defaultCols(); saveCols(); renderColPanel(); rRender(); }
-      if (act === 'csv') rExport('csv');
-      if (act === 'print') rExport('print');
-      if (act === 'expand') { var n = a.getAttribute('data-lead'); RS.open[n] = !RS.open[n]; rRender(); }
-      if (act === 'spclear') { RS.f.spUser = ''; RS.f.spLabel = ''; rq('[data-rsp]').value = ''; }
+  /* ---------- tables: client-side (search / sort / pagination / CSV) and server-side (paginated, sortable, CSV) ---------- */
+  var TBL = {}, TS = {}, SS = {}, focusId = null;
+  function regTable(spec) { TBL[spec.id] = spec; return '<div class="dms-tbl" data-tbl="' + esc(spec.id) + '"></div>'; }
+  function fillTables(scope) { var els = (scope || HOST).querySelectorAll('[data-tbl]'); for (var i = 0; i < els.length; i++) { fillTable(els[i].getAttribute('data-tbl'), els[i]); } }
+  function clientRows(sp, st) {
+    var rows = sp.rows, q = st.q.trim().toLowerCase();
+    if (q) { rows = rows.filter(function (r) { return sp.text(r).toLowerCase().indexOf(q) >= 0; }); }
+    if (st.sk) { var col = sp.cols.filter(function (c) { return c.k === st.sk; })[0]; if (col && col.s) { rows = rows.slice().sort(function (a, b) { var x = col.s(a), y = col.s(b); return (x < y ? -1 : x > y ? 1 : 0) * st.dir; }); } }
+    return rows;
+  }
+  function thead(sp, sk, dir, act, id) {
+    return '<thead><tr>' + sp.cols.map(function (c) {
+      var key = act === 'ssort' ? c.sf : c.k, can = act === 'ssort' ? !!c.sf : !!c.s, on = can && sk === key;
+      return '<th class="' + (can ? 'dms-th-s' : '') + (c.num ? ' dms-th-n' : '') + '"' + (can ? ' data-act="' + act + '" data-id="' + esc(id) + '" data-v="' + esc(key) + '" tabindex="0" aria-sort="' + (on ? (dir > 0 ? 'ascending' : 'descending') : 'none') + '"' : '') + '>' + esc(c.h) + (on ? (dir > 0 ? ' ▲' : ' ▼') : '') + '</th>';
+    }).join('') + '</tr></thead>';
+  }
+  function tcells(sp, r) { return '<tr>' + sp.cols.map(function (c) { return '<td' + (c.num ? ' class="dms-td-n"' : '') + '>' + c.r(r) + '</td>'; }).join('') + '</tr>'; }
+  function fillTable(id, el) {
+    var sp = TBL[id]; el = el || HOST.querySelector('[data-tbl="' + id + '"]'); if (!sp || !el) { return; }
+    if (sp.server) { return fillServer(id, el); }
+    var st = TS[id] || (TS[id] = { q: '', page: 1, sk: sp.sk || '', dir: sp.dir || 1 }), rows = clientRows(sp, st);
+    var ps = sp.pageSize || CFG.pageSize, pages = Math.max(1, Math.ceil(rows.length / ps)); if (st.page > pages) { st.page = pages; }
+    var slice = rows.slice((st.page - 1) * ps, st.page * ps);
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(tr('Search this table…', 'ابحث في الجدول…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search this table', 'ابحث في الجدول')) + '"><span class="dms-tb-r"><span class="dms-sm">' + num(rows.length) + ' ' + esc(rows.length === 1 ? tr('row', 'سجل') : tr('rows', 'سجل')) + (st.q ? ' / ' + num(sp.rows.length) : '') + '</span>' +
+      (rows.length ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csv" data-id="' + esc(id) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    if (sp.notice) { h += sp.notice; }
+    if (!rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
+    h += '<div class="dms-tablewrap"><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'tsort', id) + '<tbody>' + slice.map(function (r) { return tcells(sp, r); }).join('') + '</tbody>' + (sp.foot ? '<tfoot>' + sp.foot(rows) + '</tfoot>' : '') + '</table></div>';
+    h += pager(id, 'tpage', st.page, pages, rows.length, ps);
+    el.innerHTML = h; restoreFocus(el, id);
+  }
+  function pager(id, act, pg, pages, total, ps) {
+    if (total <= ps) { return ''; }
+    return '<div class="dms-pager"><span>' + esc(tr('Showing', 'عرض')) + ' ' + num((pg - 1) * ps + 1) + '–' + num(Math.min(pg * ps, total)) + ' / ' + num(total) + '</span><span><button type="button" class="dms-btn" data-act="' + act + '" data-id="' + esc(id) + '" data-v="-1"' + (pg <= 1 ? ' disabled' : '') + '>‹ ' + esc(tr('Previous', 'السابق')) + '</button> ' +
+      esc(tr('Page', 'صفحة')) + ' ' + pg + ' ' + esc(tr('of', 'من')) + ' ' + pages + ' <button type="button" class="dms-btn" data-act="' + act + '" data-id="' + esc(id) + '" data-v="1"' + (pg >= pages ? ' disabled' : '') + '>' + esc(tr('Next', 'التالي')) + ' ›</button></span></div>';
+  }
+  function restoreFocus(el, id) { if (focusId === id) { var i = el.querySelector('[data-tq]'); if (i) { i.focus(); try { i.setSelectionRange(i.value.length, i.value.length); } catch (e) { /* ignore */ } } } }
+  function srvArgs(sp, st) {
+    var q = st.q.trim(), base = { doctype: sp.dt, filters: sp.filters };
+    if (sp.parent) { base.parent = sp.parent; }
+    if (q && sp.search) { base.or_filters = sp.search.map(function (f) { return [sp.dt, f, 'like', '%' + q + '%']; }); }
+    return base;
+  }
+  function srvOrder(sp, st) { return st.sk ? st.sk + (st.dir > 0 ? ' asc' : ' desc') : sp.order; }
+  function fillServer(id, el) {
+    var sp = TBL[id], st = SS[id] || (SS[id] = { q: '', page: 1, total: null, rows: null, loading: false, err: null, req: 0, sk: '', dir: 1 });
+    if (!st.dirty && st.rows && st.key === JSON.stringify(sp.filters)) { return paintServer(id, el); }
+    st.dirty = false; st.key = JSON.stringify(sp.filters);
+    var req = ++st.req; st.loading = true; st.err = null;
+    var ps = sp.pageSize || CFG.modalPage, base = srvArgs(sp, st);
+    paintServer(id, el);
+    var chk = function () { return !destroyed && SS[id] && SS[id].req === req; };
+    if (sp.loader) { sp.loader(st.page - 1, ps, st.q.trim(), srvOrder(sp, st)).then(function (res) { if (!chk()) { return; } st.total = res.total; st.rows = res.rows || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); }, function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } }); return; }
+    var cnt = getList(Object.assign({}, base, { fields: ['count(name) as n'], limit_page_length: 1 }), chk).then(function (r) { return r ? +one(r).n || 0 : null; });
+    var rows = getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: (st.page - 1) * ps, limit_page_length: ps }), chk);
+    Promise.all([cnt, rows]).then(function (res) {
+      if (!chk()) { return; } st.total = res[0]; st.rows = res[1] || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]'));
+    }).catch(function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } });
+  }
+  function paintServer(id, el) {
+    if (!el) { return; } var sp = TBL[id], st = SS[id], ps = sp.pageSize || CFG.modalPage;
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(sp.searchHint || tr('Search…', 'بحث…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search', 'بحث')) + '"><span class="dms-tb-r"><span class="dms-sm">' + (st.total == null ? '' : num(st.total) + ' ' + esc(st.total === 1 ? tr('record', 'سجل') : tr('records', 'سجل'))) + '</span>' +
+      (st.total ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csvall" data-id="' + esc(id) + '" title="' + esc(tr('Export up to 5,000 rows', 'تصدير حتى 5,000 سجل')) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    if (st.err) { el.innerHTML = h + alertBox('err', esc(st.err === 'perm' ? tr('Permission denied for your user.', 'لا تملك صلاحية القراءة.') : tr('Technical error while reading this list.', 'خطأ تقني أثناء قراءة القائمة.')) + ' <button type="button" class="dms-linkbtn" data-act="sretry" data-id="' + esc(id) + '">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>'); return restoreFocus(el, id); }
+    if (st.loading && !st.rows) { el.innerHTML = h + '<div class="dms-skel"></div>'; return restoreFocus(el, id); }
+    if (!st.rows || !st.rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
+    var pages = Math.max(1, Math.ceil((st.total || 0) / ps));
+    h += '<div class="dms-tablewrap" style="opacity:' + (st.loading ? .55 : 1) + '"' + (st.loading ? ' aria-busy="true"' : '') + '><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'ssort', id) + '<tbody>' + st.rows.map(function (r) { return tcells(sp, r); }).join('') + '</tbody></table></div>' + pager(id, 'spage', st.page, pages, st.total || 0, ps);
+    el.innerHTML = h; restoreFocus(el, id);
+  }
+  function csvCell(v) { v = v == null ? '' : String(v); if (/^[=+\-@\t\r]/.test(v) && !/^-?[\d.,]+$/.test(v)) { v = "'" + v; } return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  function download(name, sp, rows) {
+    var cols = sp.cols.filter(function (c) { return c.c; }), lines = [cols.map(function (c) { return csvCell(c.h); }).join(',')].concat(rows.map(function (r) { return cols.map(function (c) { return csvCell(c.c(r)); }).join(','); }));
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+    a.download = String(name).replace(/[^\w-]+/g, '_') + '_' + TODAY + '.csv'; HOST.appendChild(a); a.click(); later(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+  function exportServer(id) {
+    var sp = TBL[id], st = SS[id], out = [], step = 500, base = srvArgs(sp, st), g = GEN;
+    if (sp.loader) { toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…')); var acc = [], pg = function (p) { return sp.loader(p, 500, st.q.trim(), srvOrder(sp, st)).then(function (res) { acc = acc.concat(res.rows || []); return (res.rows || []).length === 500 && acc.length < 5000 ? pg(p + 1) : acc; }); }; pg(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); }); return; }
+    function next(s) {
+      return getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: s, limit_page_length: step }), function () { return g === GEN; }).then(function (r) {
+        out = out.concat(r || []); return (r && r.length === step && out.length < 5000) ? next(s + step) : out;
+      });
+    }
+    toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…'));
+    next(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); });
+  }
+  function toast(msg, bad) { var e = document.createElement('div'); e.className = 'dms-toast' + (bad ? ' dms-toast-err' : ''); e.setAttribute('role', 'status'); e.textContent = msg; HOST.appendChild(e); later(function () { e.remove(); }, 3500); }
+  /* common cells */
+  function dtc(v) { return v ? '<span class="dms-num">' + esc(String(v).slice(0, 10)) + '</span>' : '<span class="dms-sm">—</span>'; }
+  function who(v) { return v ? bdi(v) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>'; }
+  function txt(v) { return v ? bdi(v) : '<span class="dms-sm">—</span>'; }
+  function amc(v) { return v == null || v === '' ? '<span class="dms-sm">—</span>' : '<span class="dms-num">' + esc(amt(v)) + '</span>'; }
+  function overdueTag(due) { var d = diffDays(String(due || TODAY).slice(0, 10), TODAY); return d > 0 ? '<span class="dms-days ' + (d > 90 ? 'dms-days-bad' : 'dms-days-warn') + '">' + num(d) + '</span>' : '<span class="dms-sm">—</span>'; }
+  function col(h, f, o) { o = o || {}; return Object.assign({ h: h, sf: o.sort === false ? undefined : f, r: function (x) { return o.fmt ? o.fmt(x[f], x) : txt(x[f]); }, c: function (x) { return x[f]; } }, o); }
+  function linkCol(h, dt, f, labelF) { return { h: h, sf: f, r: function (x) { return docLink(typeof dt === 'function' ? dt(x) : dt, x[f], labelF ? x[labelF] || x[f] : x[f]); }, c: function (x) { return x[f]; } }; }
+
+  /* ---------- actions pending ---------- */
+  var PRIO = { high: ['High', 'عالية'], med: ['Medium', 'متوسطة'], low: ['Low', 'منخفضة'] };
+  function score(p, amount, age) { return { high: 300, med: 200, low: 100 }[p] + Math.min(40, Math.log(1 + Math.abs(amount || 0)) / Math.LN10 * 6) + Math.min(20, (age || 0) / 10); }
+  /* Server specs ({id, server:true, dt, filters, fields, order, it(row) → item}) load count + 6 most urgent rows each. */
+  function loadActions(specs, key) {
+    run(key || 'act', function (chk) {
+      return Promise.all(specs.filter(function (s) { return s.server; }).map(function (s) {
+        var c = getList({ doctype: s.dt, fields: ['count(name) as n'], filters: s.filters, limit_page_length: 1 }, chk).then(function (r) { return +one(r).n || 0; }, function (e) { return 'ERR:' + errKind(e); });
+        var l = (s.rank ? fetchAll({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order }, chk, 2000) : getList({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order, limit_page_length: 6 }, chk)).then(function (r) { return r || []; }, function (e) { return 'ERR:' + errKind(e); });
+        return Promise.all([c, l]).then(function (x) { return { id: s.id, count: typeof x[1] === 'string' ? x[1] : x[0], rows: Array.isArray(x[1]) ? x[1] : [] }; });
+      })).then(function (res) { var o = {}; res.forEach(function (x) { o[x.id] = x; }); return o; });
+    });
+  }
+  /* client: {id: {rows, item}} for client specs, null while their sources load, or 'ERR:kind'. */
+  function actModel(specs, key, client) {
+    var counts = {}, items = [], A = D[key || 'act'], AE = D[(key || 'act') + 'Err'];
+    specs.forEach(function (s) {
+      if (s.client) {
+        var c = client == null ? null : typeof client === 'string' ? client : client[s.id];
+        if (typeof c === 'string') { counts[s.id] = c; }
+        else if (c) { counts[s.id] = c.count != null ? c.count : c.rows.length; c.rows.slice(0, 6).forEach(function (r) { items.push(c.item(r)); }); }
+        return;
+      }
+      if (AE) { counts[s.id] = 'ERR:' + AE; return; }
+      var x = A && A[s.id]; if (!x) { return; }
+      counts[s.id] = x.count;
+      x.rows.forEach(function (r) { var it = s.it(r); it.dt = it.dt || s.dt; it.name = it.name || r.name; items.push(it); });
+    });
+    items.sort(function (a, b) { return b.score - a.score; });
+    var seen = {}; items = items.filter(function (it) { var k = it.dt + '|' + it.name; if (seen[k]) { return false; } seen[k] = 1; return true; });   /* one row per record, under its most urgent category */
+    return { specs: specs, counts: counts, items: items, ready: specs.every(function (s) { return counts[s.id] !== undefined; }) };
+  }
+  function pendingTotal(AM) {
+    if (!AM) { return null; }
+    var t = 0, any = false; Object.keys(AM.counts).forEach(function (k) { var c = AM.counts[k]; if (typeof c === 'number') { t += c; any = true; } });
+    return any ? t : null;
+  }
+  function dtLabel(dt) { var L = APP.dtLabels && APP.dtLabels[dt]; return L ? tr(L[0], L[1]) : dt; }
+  function arow(it) {
+    return '<a class="dms-arow" href="' + esc(it.href || docUrl(it.dt, it.name)) + '" target="_blank" rel="noopener noreferrer">' +
+      '<span class="dms-prio dms-prio-' + it.p + '">' + esc(tr(PRIO[it.p][0], PRIO[it.p][1])) + '</span>' +
+      '<span class="dms-arow-main"><span class="dms-arow-t"><bdi>' + esc(it.title || it.name) + '</bdi><span class="dms-arow-dt">' + esc(dtLabel(it.dt)) + '</span></span><span class="dms-arow-d">' + bdi(it.desc || '') + '</span></span>' +
+      '<span class="dms-arow-who">' + (it.who ? bdi(it.who) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>') + '</span>' +
+      '<span class="dms-arow-due dms-tone-' + (it.tone || 'n') + '">' + esc(it.due || '') + '</span><span class="dms-sr"> (' + esc(tr('opens in a new tab', 'يفتح في علامة تبويب جديدة')) + ')</span></a>';
+  }
+  function drillId(s) { return s.drill || ((s.client ? 'cli:' : 'srv:') + s.id); }
+  function catBtn(s, c) {
+    var err = typeof c === 'string', inner = '<span class="dms-acat-t">' + esc(s.short) + '</span><b class="dms-num">' + (err || c == null ? '—' : num(c)) + '</b>';
+    return (!err && c) ? '<button type="button" class="dms-acat" data-act="kpi" data-v="' + esc(drillId(s)) + '" title="' + esc(s.title + ' — ' + tr('view all', 'عرض الكل')) + '">' + inner + '</button>'
+      : '<div class="dms-acat dms-acat-off" title="' + esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.title) + '">' + inner + '</div>';
+  }
+  function actionsPanel(AM) {
+    var tot = pendingTotal(AM);
+    var h = '<section class="dms-panelbox dms-actpanel" id="dms-pending" tabindex="-1" aria-labelledby="dms-pending-h"><div class="dms-ph"><h3 class="dms-h3" id="dms-pending-h">' + esc(tr('Actions pending', 'الإجراءات المعلقة')) +
+      (tot != null ? ' <span class="dms-h3-n dms-num">' + num(tot) + '</span>' : '') + '</h3><span class="dms-ph-meta">' + esc(tr('As of today · most urgent first', 'حتى اليوم · الأكثر إلحاحًا أولًا')) + '</span>' +
+      (tab !== 'actions' && APP.tabs.some(function (x) { return x.id === 'actions'; }) ? '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="goto:actions">' + esc(tr('View all', 'عرض الكل')) + '</button>' : '') + '</div>';
+    if (!AM) { return h + '<div class="dms-arows" aria-busy="true">' + skel(6, 'dms-skel-row') + '</div></section>'; }
+    var known = AM.specs.filter(function (s) { return AM.counts[s.id] !== undefined; });
+    if (!known.length) { return h + '<div class="dms-arows" aria-busy="true">' + skel(6, 'dms-skel-row') + '</div></section>'; }
+    var errs = known.filter(function (s) { return typeof AM.counts[s.id] === 'string'; });
+    if (AM.ready && errs.length === AM.specs.length) { return h + alertBox('err', esc(tr('Pending actions could not be loaded.', 'تعذر تحميل الإجراءات المعلقة.')) + ' <button type="button" class="dms-linkbtn" data-act="refresh">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>') + '</section>'; }
+    var items = AM.items.slice(0, CFG.actRows || 7);
+    h += items.length ? '<div class="dms-arows">' + items.map(arow).join('') + '</div>' : (AM.ready ? '<div class="dms-empty dms-empty-sm">' + esc(tr('Nothing pending for this selection.', 'لا توجد إجراءات معلقة لهذا الاختيار.')) + '</div>' : '<div class="dms-arows" aria-busy="true">' + skel(4, 'dms-skel-row') + '</div>');
+    h += '<div class="dms-acats">' + AM.specs.map(function (s) { return catBtn(s, AM.counts[s.id]); }).join('') + '</div>';
+    if (errs.length) { h += note(esc(tr('Could not load: ', 'تعذر التحميل: ') + errs.map(function (s) { return s.short; }).join(', '))); }
+    return h + '</section>';
+  }
+  function actionsTab(AM, info) {
+    var h = alertBox('info', esc(info || tr('Action lists are as of today and not filtered by the period. They follow the filters where the source supports them.', 'قوائم الإجراءات حتى اليوم وغير مرتبطة بالفترة، وتتبع المرشحات حيثما يدعمها المصدر.')));
+    h += kpis((AM ? AM.specs : []).map(function (s) {
+      var c = AM.counts[s.id], err = typeof c === 'string';
+      return kpi({ label: s.title, val: c === undefined ? '…' : err ? '—' : num(c), sub: esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.why), act: (!err && c) ? drillId(s) : null });
+    }));
+    return h + actionsPanel(AM);
+  }
+
+  /* ---------- drill-downs (overlay) ---------- */
+  var OVL = null;
+  function openDrill(id) {
+    if (id.indexOf('goto:') === 0) { goTab(id.slice(5)); return; }
+    var r = null;
+    if (id.indexOf('srv:') === 0 && APP.actSpecs) {
+      var s = APP.actSpecs().filter(function (x) { return x.id === id.slice(4); })[0];
+      if (s && s.table) { delete SS.drill; r = { title: s.title, sub: s.why, spec: Object.assign({ id: 'drill', server: true, dt: s.dt, filters: s.filters, order: s.order, file: s.id }, s.table()) }; }
+    }
+    if (!r && APP.drill) { r = APP.drill(id); }
+    if (!r || (!r.spec && r.body == null)) { return; }
+    if (r.spec) { r.spec.id = 'drill'; if (!r.spec.server && !r.spec.pageSize) { r.spec.pageSize = CFG.modalPage; } }
+    delete SS.drill; delete TS.drill;
+    var opener = OVL ? OVL.opener : activeEl();
+    OVL = Object.assign(r, { id: id, prev: OVL && r.stack !== false ? OVL : null, opener: opener, openerKey: OVL ? OVL.openerKey : opener && opener.getAttribute && opener.getAttribute('data-v') }); renderOverlay();
+  }
+  function overlayHTML() {
+    if (!OVL) { return ''; }
+    var link = OVL.link ? ' ' + docLink(OVL.link[0], OVL.link[1], OVL.link[2]) : '';
+    return '<div class="dms-overlay" data-act="ovbg"><div class="dms-modal" role="dialog" aria-modal="true" aria-labelledby="dms-dialog-title"><div class="dms-dhead"><div>' + (OVL.prev ? '<button type="button" class="dms-linkbtn" data-act="ovback">‹ ' + esc(tr('Back', 'رجوع')) + '</button>' : '') + '<h3 id="dms-dialog-title">' + esc(OVL.title) + '</h3>' + (OVL.sub || link ? '<p class="dms-sm">' + esc(OVL.sub || '') + link + '</p>' : '') + '</div><button type="button" class="dms-x" data-act="closeov" aria-label="' + esc(tr('Close', 'إغلاق')) + '">×</button></div>' + (OVL.body || '') + (OVL.spec ? regTable(OVL.spec) : '') + '</div></div>';
+  }
+  function renderOverlay() { var el = $('[data-ref="overlay"]'); if (!el) { return; } var app = $('.dms-app'); if (app) { app.inert = !!OVL; } if (!OVL) { Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { delete TBL[k]; } }); } else { delete TBL.drill; } el.innerHTML = overlayHTML(); fillTables(el); var x = el.querySelector('.dms-x'); if (x) { x.focus(); } }
+  function closeOverlay() {
+    var previous = OVL; OVL = null; renderOverlay(); delete SS.drill; delete TS.drill;
+    if (!previous) { return; }
+    var opener = previous.opener;
+    if (!opener || !opener.isConnected) { opener = Array.prototype.find.call(HOST.querySelectorAll('[data-act="kpi"]'), function (el) { return el.getAttribute('data-v') === previous.openerKey; }); }
+    if (opener) { opener.focus({ preventScroll: true }); }
+  }
+
+  /* ---------- filters, period, toolbar, tabs ---------- */
+  var F = { period: APP.period || 'month', from: '', to: '' }, PERIOD = [];
+  (APP.filters || []).forEach(function (f) { F[f.k] = ''; });
+  var tab = APP.tabs[0].id, POP = null, FD = null, FS = {}, CAL = null, ANIM = false, built = false, AMC = null;
+  var PERIODS = [['today', 'Today', 'اليوم'], ['yesterday', 'Yesterday', 'أمس'], ['week', 'This week', 'هذا الأسبوع'], ['lastWeek', 'Last week', 'الأسبوع الماضي'],
+    ['month', 'This month', 'هذا الشهر'], ['lastMonth', 'Last month', 'الشهر الماضي'], ['quarter', 'This quarter', 'هذا الربع'], ['ytd', 'Year to date', 'السنة حتى اليوم'],
+    ['year', 'This year', 'هذه السنة'], ['prevYear', 'Previous year', 'السنة الماضية'], ['custom', 'Custom range', 'نطاق مخصص']];
+  var PGROUPS = [['today', 'yesterday'], ['week', 'lastWeek'], ['month', 'lastMonth'], ['quarter', 'ytd', 'year', 'prevYear'], ['custom']];
+  function curPeriod() { return periodRange(F.period, F.from, F.to); }
+  function periodName(k) { var p = PERIODS.filter(function (x) { return x[0] === k; })[0]; return p ? tr(p[1], p[2]) : k; }
+  function filterCount() { return (APP.filters || []).filter(function (f) { return F[f.k]; }).length; }
+  function optList(f, draft) { var l = f.options ? f.options(draft || F) : []; return (l || []).map(function (x) { return typeof x === 'string' ? { v: x, l: x } : x; }); }
+  function optLabel(f, v) { var o = optList(f).filter(function (x) { return x.v === v; })[0]; return o ? o.l : (f.label ? f.label(v) : v); }
+  function pendingBtnHTML() {
+    var n = pendingTotal(AMC), lbl = n == null ? (AMC && AMC.ready ? '—' : '…') : num(n);
+    return '<button type="button" class="dms-pend' + (n ? ' dms-pend-on' : '') + '" data-act="pending" data-fk="pending" title="' + esc(tr('Pending actions as of today — show the list', 'الإجراءات المعلقة حتى اليوم — عرض القائمة')) + '">' +
+      '<i class="dms-pend-dot" aria-hidden="true"></i><b class="dms-num">' + lbl + '</b><span class="dms-pend-l">' + esc(tr('pending', 'معلّقة')) + '</span></button>';
+  }
+  function opt(v, label, cur) { return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(label) + '</option>'; }
+  function ffield(f) {
+    if (f.type === 'text' || f.type === 'date') { return '<div class="dms-ff"><label for="dms-fd-' + f.k + '">' + esc(tr(f.en, f.ar)) + '</label><input type="' + (f.type === 'date' ? 'date' : 'search') + '" id="dms-fd-' + f.k + '" class="dms-input" data-fd="' + f.k + '" data-fk="fd:' + f.k + '" value="' + esc(FD[f.k] || '') + '" placeholder="' + esc(f.ph ? tr(f.ph[0], f.ph[1]) : '') + '" autocomplete="off"></div>'; }
+    var list = optList(f, FD), label = tr(f.en, f.ar), k = f.k;
+    var q = clean(FS[k]).toLowerCase(), cur = FD[k], shown = list.filter(function (x) { return !q || String(x.l).toLowerCase().indexOf(q) >= 0 || String(x.v).toLowerCase().indexOf(q) >= 0; }), more = shown.length > 200;
+    shown = shown.slice(0, 200);
+    if (cur && !shown.some(function (x) { return x.v === cur; })) { shown.unshift({ v: cur, l: optLabel(f, cur) }); }
+    var h = '<div class="dms-ff"><label for="dms-fd-' + k + '">' + esc(label) + '</label>';
+    if (list.length > 8) { h += '<input type="search" class="dms-input" data-fs="' + k + '" data-fk="fs:' + k + '" value="' + esc(FS[k] || '') + '" placeholder="' + esc(tr('Search ' + num(list.length) + ' options', 'ابحث في ' + num(list.length) + ' خيار')) + '" aria-label="' + esc(tr('Search', 'بحث') + ' — ' + label) + '" autocomplete="off">'; }
+    h += '<select id="dms-fd-' + k + '" class="dms-input" data-fd="' + k + '" data-fk="fd:' + k + '">' + opt('', f.none ? tr(f.none[0], f.none[1]) : tr('All', 'الكل'), cur) + shown.map(function (x) { return opt(x.v, x.l, cur); }).join('') + '</select>';
+    if (q && !shown.length) { h += '<span class="dms-ff-hint">' + esc(tr('No matches', 'لا نتائج')) + '</span>'; }
+    else if (more) { h += '<span class="dms-ff-hint">' + esc(tr('First 200 matches — type to narrow', 'أول 200 نتيجة — اكتب للتضييق')) + '</span>'; }
+    return h + '</div>';
+  }
+  function filtersPopHTML() {
+    var n = APP.filterNote ? APP.filterNote() : '';
+    return '<div class="dms-pop dms-pop-filters" role="dialog" aria-label="' + esc(tr('Filters', 'المرشحات')) + '"><div class="dms-pop-b">' + APP.filters.map(ffield).join('') + '</div>' +
+      (n ? '<p class="dms-pop-note">' + esc(n) + '</p>' : '') +
+      '<div class="dms-pop-f"><button type="button" class="dms-btn" data-act="fclear" data-fk="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button><button type="button" class="dms-btn dms-btn-primary" data-act="fapply" data-fk="fapply">' + esc(tr('Apply', 'تطبيق')) + '</button></div></div>';
+  }
+  function calendarHTML() {
+    var v = CAL.view, first = weekStartOf(v), mon = v.slice(0, 7), fdy = CAL.focus && CAL.focus.slice(0, 7) === mon ? CAL.focus : (CAL.from && CAL.from.slice(0, 7) === mon ? CAL.from : v), wd = '', rows = '', r, c, d;
+    for (c = 0; c < 7; c++) { try { wd += '<span role="columnheader">' + esc(new Intl.DateTimeFormat(locale(), { weekday: 'narrow', timeZone: 'UTC' }).format(new Date(parseISO(addDays(first, c))))) + '</span>'; } catch (e) { wd += '<span></span>'; } }
+    for (r = 0; r < 6; r++) {
+      rows += '<div role="row" class="dms-cal-row">';
+      for (c = 0; c < 7; c++) {
+        d = addDays(first, r * 7 + c);
+        var end = d === CAL.from || d === CAL.to, inR = CAL.from && CAL.to && d > CAL.from && d < CAL.to;
+        rows += '<button type="button" role="gridcell" class="dms-day' + (d.slice(0, 7) !== mon ? ' dms-out' : '') + (d === TODAY ? ' dms-today' : '') + (inR ? ' dms-in' : '') + (end ? ' dms-end' : '') +
+          (CAL.from && CAL.to && d === CAL.from && d !== CAL.to ? ' dms-s' : '') + (CAL.from && CAL.to && d === CAL.to && d !== CAL.from ? ' dms-e' : '') + '" data-act="calday" data-v="' + d + '" data-fk="day:' + d + '" tabindex="' + (d === fdy ? 0 : -1) +
+          '" aria-pressed="' + end + '" aria-label="' + esc(fmtDate(d, true)) + '"><bdi>' + (+d.slice(8, 10)) + '</bdi></button>';
+      }
+      rows += '</div>';
+    }
+    var ok = CAL.from && CAL.to, msg = ok ? '<bdi>' + esc(rangeLabel([CAL.from, CAL.to])) + '</bdi> · ' + esc(daysTxt(diffDays(CAL.from, CAL.to) + 1)) : esc(CAL.from ? tr('Select an end date', 'اختر تاريخ النهاية') : tr('Select a start date', 'اختر تاريخ البداية'));
+    var title = v; try { title = new Intl.DateTimeFormat(locale(), { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(parseISO(v))); } catch (e) { /* ISO fallback */ }
+    return '<div class="dms-cal"><div class="dms-cal-h"><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="-1" data-fk="calprev" aria-label="' + esc(tr('Previous month', 'الشهر السابق')) + '">' + ico('prev', 'dms-flip') + '</button>' +
+      '<b aria-live="polite">' + esc(title) + '</b><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="1" data-fk="calnext" aria-label="' + esc(tr('Next month', 'الشهر التالي')) + '">' + ico('next', 'dms-flip') + '</button></div>' +
+      '<div class="dms-cal-g" role="grid" aria-label="' + esc(title) + '"><div class="dms-cal-wd" role="row">' + wd + '</div>' + rows + '</div>' +
+      '<div class="dms-cal-f"><span class="dms-cal-msg" aria-live="polite">' + msg + '</span><span class="dms-cal-btns"><button type="button" class="dms-btn" data-act="popclose" data-fk="calcancel">' + esc(tr('Cancel', 'إلغاء')) + '</button>' +
+      '<button type="button" class="dms-btn dms-btn-primary" data-act="calapply" data-fk="calapply"' + (ok ? '' : ' disabled') + '>' + esc(tr('Apply', 'تطبيق')) + '</button></span></div></div>';
+  }
+  function periodPopHTML() {
+    var n = APP.periodNote ? APP.periodNote() : '';
+    return '<div class="dms-pop dms-pop-period' + (CAL ? ' dms-has-cal' : '') + '" role="dialog" aria-label="' + esc(tr('Select period', 'اختر الفترة')) + '"><div class="dms-presets">' +
+      PGROUPS.map(function (g) {
+        return '<div class="dms-pgroup">' + g.map(function (k) {
+          var on = CAL ? k === 'custom' : F.period === k;
+          return '<button type="button" class="dms-preset' + (on ? ' dms-on' : '') + '" aria-pressed="' + on + '" data-act="preset" data-v="' + k + '" data-fk="preset:' + k + '"><span>' + esc(periodName(k)) + '</span>' +
+            (k !== 'custom' ? '<small><bdi>' + esc(rangeLabel(periodRange(k))) + '</bdi></small>' : '') + '</button>';
+        }).join('') + '</div>';
+      }).join('') + '</div>' + (CAL ? calendarHTML() : '') + (n ? '<p class="dms-pop-note dms-pop-note-p">' + esc(n) + '</p>' : '') + '</div>';
+  }
+  function toolbarHTML() {
+    var ac = filterCount(), R = PERIOD, hasF = APP.filters && APP.filters.length;
+    return '<div class="dms-topbar"><div class="dms-tb-title"><h2 class="dms-title">' + esc(APP.title()) + '</h2><p class="dms-sub" data-ref="stamp"></p></div>' +
+      '<div class="dms-tb-ctrls"><div class="dms-pendwrap" data-ref="pendwrap">' + pendingBtnHTML() + '</div>' +
+      (APP.period === false ? '' : '<div class="dms-anchor"><button type="button" class="dms-btn dms-period" data-act="pop" data-v="period" data-fk="pop:period" aria-haspopup="dialog" aria-expanded="' + (POP === 'period') + '" aria-label="' + esc(tr('Period', 'الفترة') + ': ' + periodName(F.period) + ' ' + rangeLabel(R)) + '">' + ico('cal') +
+        '<span class="dms-period-t"><b>' + esc(periodName(F.period)) + '</b><span class="dms-period-r"><bdi>' + esc(rangeLabel(R)) + '</bdi></span></span>' + ico('down', 'dms-chev') + '</button>' + (POP === 'period' ? periodPopHTML() : '') + '</div>') +
+      (hasF ? '<div class="dms-anchor"><button type="button" class="dms-btn' + (ac ? ' dms-btn-on' : '') + '" data-act="pop" data-v="filters" data-fk="pop:filters" aria-haspopup="dialog" aria-expanded="' + (POP === 'filters') + '">' + ico('filter') +
+        '<span class="dms-btn-t">' + esc(tr('Filters', 'المرشحات')) + '</span>' + (ac ? '<span class="dms-count" aria-label="' + esc(ac + ' ' + tr('active', 'نشط')) + '">' + ac + '</span>' : '') + '</button>' + (POP === 'filters' ? filtersPopHTML() : '') + '</div>' : '') +
+      '<button type="button" class="dms-btn dms-icobtn" data-act="refresh" data-ref="refresh" data-fk="refresh" aria-label="' + esc(tr('Refresh data', 'تحديث البيانات')) + '" title="' + esc(tr('Refresh data (keeps filters)', 'تحديث البيانات (مع الإبقاء على المرشحات)')) + '">' + ico('refresh') + '</button></div>' +
+      '<div class="dms-lang" role="group" aria-label="Language / اللغة"><button type="button" data-act="lang" data-v="en" data-fk="lang:en" lang="en" aria-pressed="' + (LANG === 'en') + '"' + (LANG === 'en' ? ' class="dms-on"' : '') + '>English</button>' +
+        '<button type="button" data-act="lang" data-v="ar" data-fk="lang:ar" lang="ar" aria-pressed="' + (LANG === 'ar') + '"' + (LANG === 'ar' ? ' class="dms-on"' : '') + '>العربية</button></div></div>';
+  }
+  function chipsHTML() {
+    var a = (APP.filters || []).filter(function (f) { return F[f.k]; }); if (!a.length) { return ''; }
+    return '<div class="dms-chips">' + a.map(function (f) {
+      var v = optLabel(f, F[f.k]), lab = tr(f.en, f.ar);
+      return '<span class="dms-chip"><span class="dms-chip-k">' + esc(lab) + '</span><bdi>' + esc(v) + '</bdi><button type="button" class="dms-chip-x" data-act="rmf" data-v="' + f.k + '" data-fk="rmf:' + f.k + '" aria-label="' + esc(tr('Remove filter', 'إزالة المرشح') + ' ' + lab + ': ' + v) + '">' + ico('x') + '</button></span>';
+    }).join('') + (a.length > 1 ? '<button type="button" class="dms-linkbtn" data-act="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button>' : '') + '</div>';
+  }
+  function tabsHTML() {
+    var pend = pendingTotal(AMC);
+    return '<div class="dms-tabs" role="tablist" aria-label="' + esc(tr('Sections', 'الأقسام')) + '">' + APP.tabs.map(function (x) {
+      var on = x.id === tab, lbl = tr(x.en, x.ar), b = x.id === 'actions' && pend ? '<span class="dms-tab-n dms-num" title="' + esc(tr('Pending actions as of today', 'الإجراءات المعلقة حتى اليوم')) + '">' + num(pend) + '</span>' : '';
+      return '<button class="dms-tab' + (on ? ' dms-on' : '') + '" role="tab" id="dms-tab-' + x.id + '" aria-selected="' + on + '" aria-controls="dms-panel" tabindex="' + (on ? 0 : -1) + '" data-act="tab" data-v="' + x.id + '" data-fk="tab:' + x.id + '" title="' + esc(lbl) + '" type="button"><span>' + esc(lbl) + '</span>' + b + '</button>';
+    }).join('') + '</div>';
+  }
+
+  /* ---------- rendering: a fixed skeleton whose regions repaint independently (focus kept via data-fk) ---------- */
+  function activeEl() { try { return ROOT.activeElement || null; } catch (e) { return null; } }
+  function paint(el, html) {
+    if (!el) { return; }
+    var a = activeEl(), fk = a && el.contains(a) && a.getAttribute ? a.getAttribute('data-fk') : null, ss = null;
+    if (fk && typeof a.selectionStart === 'number') { try { ss = [a.selectionStart, a.selectionEnd]; } catch (e) { /* not a text input */ } }
+    el.innerHTML = html;
+    if (fk) { focusFk(fk); if (ss) { var n = activeEl(); try { n.setSelectionRange(ss[0], ss[1]); } catch (e) { /* ignore */ } } }
+  }
+  function focusFk(k) { var n = HOST.querySelector('[data-fk="' + k + '"]'); if (n) { try { n.focus({ preventScroll: true }); } catch (e) { n.focus(); } } }
+  function skeleton() {
+    HOST.innerHTML = '<div class="dms-app"><div data-ref="tb"></div><div data-ref="chips"></div><div data-ref="tabs"></div><div class="dms-sheet" role="tabpanel" id="dms-panel" data-ref="sheet"><div data-ref="banner"></div><div class="dms-content" data-ref="content"></div></div>' +
+      '<div class="dms-tip" data-ref="tip" role="tooltip" hidden></div></div><div data-ref="overlay"></div>';
+    built = true;
+  }
+  function renderHeaderState() {
+    var b = $('[data-ref="refresh"]'), s = $('[data-ref="stamp"]'), bz = busy();
+    if (b) { b.classList.toggle('dms-busy', bz); b.setAttribute('aria-busy', String(bz)); }
+    if (s) { s.textContent = (APP.stamp ? APP.stamp() : tr('Read-only', 'للقراءة فقط')) + (LOADED ? ' · ' + tr('Updated ', 'آخر تحديث ') + LOADED : '') + (bz ? ' · ' + tr('loading…', 'جارٍ التحميل…') : ''); }
+    paint($('[data-ref="pendwrap"]'), pendingBtnHTML());
+    paint($('[data-ref="tabs"]'), tabsHTML());
+  }
+  function renderToolbar() { paint($('[data-ref="tb"]'), toolbarHTML()); paint($('[data-ref="chips"]'), chipsHTML()); renderHeaderState(); }
+  function contentHTML() {
+    if (!BOOTED) {
+      return '<div class="dms-grid dms-kpis dms-ov-kpis" aria-busy="true">' + skel(CFG.kpiCount || 6, 'dms-skel-kpi') + '</div><div class="dms-main2"><div class="dms-skel dms-skel-panel"></div><div class="dms-skel dms-skel-panel"></div></div>' +
+        note(esc(tr('Loading from ERPNext…', 'جارٍ التحميل من ERPNext…')));
+    }
+    if (APP.period !== false && (!PERIOD[0] || PERIOD[0] > PERIOD[1])) { return alertBox('err', esc(tr('Choose a valid date range.', 'اختر نطاق تاريخ صحيحًا.'))); }
+    return APP.content(tab, AMC);
+  }
+  function renderSoft() {
+    PERIOD = curPeriod(); AMC = APP.actions ? APP.actions() : null;
+    var keep = {}; Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { keep[k] = TBL[k]; } }); TBL = keep;
+    var b = $('[data-ref="banner"]'), c = $('[data-ref="content"]'), sh = $('[data-ref="sheet"]');
+    if (b) { b.innerHTML = BOOTED && APP.banner ? APP.banner() : ''; }
+    if (c) { paint(c, contentHTML()); c.classList.remove('dms-enter'); if (ANIM) { void c.offsetWidth; c.classList.add('dms-enter'); } ANIM = false; fillTables(c); fitChartLabels(); if (APP.afterRender) { APP.afterRender(c); } }
+    if (sh) { sh.setAttribute('aria-labelledby', 'dms-tab-' + tab); }
+    renderHeaderState();
+  }
+  function renderAll() {
+    HOST.setAttribute('dir', LANG === 'ar' ? 'rtl' : 'ltr'); HOST.setAttribute('lang', LANG);
+    if (!built) { skeleton(); }
+    PERIOD = curPeriod(); renderToolbar(); renderSoft();
+  }
+  /* Full reload (filters, refresh): new generation, empty store, tables back to page 1. */
+  function reload() {
+    setToday(); PERIOD = curPeriod(); GEN++; D = {}; LOADED = STAMP;
+    Object.keys(SS).forEach(function (k) { SS[k].dirty = true; SS[k].page = 1; }); Object.keys(TS).forEach(function (k) { TS[k].page = 1; });
+    APP.load(); ANIM = true; renderAll();
+  }
+
+  /* ---------- navigation and popovers ---------- */
+  function goTab(id, focusTab, force) {
+    if (tab !== id || force) { tab = id; ANIM = true; if (APP.onTab) { APP.onTab(id); } renderAll(); }
+    var t = $('#dms-tab-' + id); if (!t) { return; }
+    try { t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) { /* ignore */ }
+    if (focusTab) { t.focus(); }
+  }
+  function openPop(w) {
+    POP = w; CAL = null;
+    if (w === 'filters') { FD = {}; APP.filters.forEach(function (f) { FD[f.k] = F[f.k]; }); FS = {}; }
+    else if (F.period === 'custom' && F.from && F.to) { CAL = { from: F.from, to: F.to, view: monthStart(F.from), focus: F.from }; }
+    renderToolbar(); focusFk(w === 'filters' ? 'fd:' + APP.filters[0].k : CAL ? 'day:' + CAL.focus : 'preset:' + F.period);
+  }
+  function closePop(restore) { var w = POP; if (!w) { return; } POP = null; CAL = null; renderToolbar(); if (restore) { focusFk('pop:' + w); } }
+  function applyFilters(next) {
+    var prev = {}; APP.filters.forEach(function (f) { prev[f.k] = F[f.k]; F[f.k] = (next && next[f.k]) || ''; }); POP = null;
+    if (APP.onFilters) { APP.onFilters(prev); }
+    reload();
+  }
+  function applyPeriod(key, from, to) {
+    F.period = key; if (key === 'custom') { F.from = from; F.to = to; }
+    POP = null; CAL = null; setToday(); PERIOD = curPeriod();
+    Object.keys(SS).forEach(function (k) { if (TBL[k] && TBL[k].period) { SS[k].dirty = true; SS[k].page = 1; } });
+    if (APP.onPeriod) { APP.onPeriod(); } else { reload(); return; }
+    ANIM = true; renderAll(); focusFk('pop:period');
+  }
+  function calPick(d) {
+    if (!CAL.from || CAL.to) { CAL.from = d; CAL.to = null; } else if (d < CAL.from) { CAL.to = CAL.from; CAL.from = d; } else { CAL.to = d; }
+    CAL.focus = d;
+  }
+  function calMove(d) { CAL.focus = d; if (d.slice(0, 7) !== CAL.view.slice(0, 7)) { CAL.view = monthStart(d); } renderToolbar(); focusFk('day:' + d); }
+
+  /* ---------- tooltip (one shared element; positioned against the dashboard, clamped to its width) ---------- */
+  function showTip(n) {
+    var tip = $('[data-ref="tip"]'), app = $('.dms-app'); if (!tip || !app) { return; }
+    tip.textContent = n.getAttribute('data-tip'); tip.hidden = false;
+    var a = app.getBoundingClientRect(), r = n.getBoundingClientRect(), w = tip.offsetWidth, hgt = tip.offsetHeight;
+    var x = Math.max(4, Math.min(r.left - a.left + r.width / 2 - w / 2, a.width - w - 4)), y = r.top - a.top - hgt - 8;
+    if (y < 0) { y = r.bottom - a.top + 8; }
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  }
+  function hideTip() { var tip = $('[data-ref="tip"]'); if (tip) { tip.hidden = true; } }
+  function onOver(ev) { var n = ev.target.closest ? ev.target.closest('[data-tip]') : null; if (n && HOST.contains(n)) { showTip(n); } else { hideTip(); } }
+
+  /* ---------- events (single delegated set, removed on destroy) ---------- */
+  function onClick(ev) {
+    var n = ev.target.closest ? ev.target.closest('[data-act]') : null;
+    if (POP && !(ev.target.closest && ev.target.closest('.dms-anchor'))) { closePop(false); }
+    if (!n || !HOST.contains(n)) { return; }
+    var a = n.getAttribute('data-act'), v = n.getAttribute('data-v'), id = n.getAttribute('data-id');
+    if (APP.onAct && APP.onAct(a, v, n, id) === true) { return; }
+    if (a === 'ovbg') { if (ev.target === n) { closeOverlay(); } return; }
+    if (a === 'closeov') { closeOverlay(); return; }
+    if (a === 'ovback' && OVL && OVL.prev) { var pv = OVL.prev; delete SS.drill; delete TS.drill; OVL = pv; if (OVL.spec) { regTable(OVL.spec); } renderOverlay(); return; }
+    if (a === 'tab') { goTab(v); return; }
+    if (a === 'lang') { if (LANG !== v) { LANG = v; try { G.localStorage.setItem('dms_lang', LANG); } catch (e) { /* ignore */ } POP = null; CAL = null; renderAll(); if (OVL) { var o = OVL; OVL = null; renderOverlay(); openDrill(o.id); } focusFk('lang:' + v); } return; }
+    if (a === 'refresh') { if (APP.onRefresh) { APP.onRefresh(); } reload(); return; }
+    if (a === 'pop') { if (POP === v) { closePop(true); } else { openPop(v); } return; }
+    if (a === 'popclose') { closePop(true); return; }
+    if (a === 'preset') {
+      if (v !== 'custom') { applyPeriod(v); return; }
+      var r0 = PERIOD[0] || TODAY, r1 = PERIOD[1] || TODAY; CAL = { from: r0, to: r1, view: monthStart(r1 > TODAY ? TODAY : r1), focus: r1 > TODAY ? TODAY : r1 };
+      renderToolbar(); focusFk('day:' + CAL.focus); return;
+    }
+    if (a === 'calnav' && CAL) { CAL.view = addMonths(CAL.view, +v); CAL.focus = CAL.view; renderToolbar(); return; }
+    if (a === 'calday' && CAL) { calPick(v); renderToolbar(); focusFk('day:' + v); return; }
+    if (a === 'calapply' && CAL && CAL.from && CAL.to) { applyPeriod('custom', CAL.from, CAL.to); return; }
+    if (a === 'fapply') { applyFilters(FD); focusFk('pop:filters'); return; }
+    if (a === 'fclear') { applyFilters(null); focusFk('pop:filters'); return; }
+    if (a === 'rmf') { var nf = {}; APP.filters.forEach(function (f) { nf[f.k] = F[f.k]; }); nf[v] = ''; applyFilters(nf); focusFk('pop:filters'); return; }
+    if (a === 'pending') {
+      goTab(APP.tabs[0].id); var p = $('#dms-pending');
+      if (p) { var still = G.matchMedia && G.matchMedia('(prefers-reduced-motion: reduce)').matches; try { p.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' }); } catch (e) { p.scrollIntoView(); } p.focus({ preventScroll: true }); }
       return;
     }
-    var s = e.target.closest('[data-rsort]');
-    if (s) { var fld = s.getAttribute('data-rsort'); RS.dir = RS.sort === fld && RS.dir === 'desc' ? 'asc' : 'desc'; RS.sort = fld; RS.page = 0; rLoadPage(); return; }
-    if (!e.target.closest('[data-rcolp]')) { var p = rq('[data-rcolp]'); if (p) p.style.display = 'none'; }
-  };
-  rp.onchange = function (e) {
-    e.stopPropagation();
-    var c = e.target;
-    if (c.matches('[data-rcol]')) { var k = c.getAttribute('data-rcol'); if (c.checked) { if (RS.cols.indexOf(k) < 0) RS.cols.push(k); } else RS.cols = RS.cols.filter(function (x) { return x !== k; }); if (!RS.cols.length) RS.cols = ['name']; saveCols(); rRender(); }
-    if (c.matches('[data-rsize]')) { RS.size = parseInt(c.value, 10); RS.page = 0; rLoadPage(); }
-  };
-  var qi = rq('[data-rf="q"]');
-  qi.oninput = function (e) { e.stopPropagation(); clearTimeout(rDeb); rDeb = setTimeout(function () { readRF(); RS.page = 0; rApply(); }, 400); };
-  qi.onkeydown = function (e) { if (e.key === 'Enter') { clearTimeout(rDeb); readRF(); RS.page = 0; rApply(); } };
-  // salesperson searchable selector (same server search: Sales User OR Salesman)
-  var si = rq('[data-rsp]'), dd = rq('[data-rspdd]');
-  function spSearch() {
-    var id = ++spReq, txt = si.value.trim();
-    dd.style.display = 'block'; dd.innerHTML = '<div class="mut" style="padding:8px 10px">' + rt('loading') + '</div>';
-    apiPost({ action: 'search_salespersons', txt: txt, page_len: 50 }).then(function (m) {
-      if (id !== spReq) return;
-      var rows = (m && m.results) || [];
-      dd.innerHTML = rows.length ? rows.map(function (x) { return '<div class="lm-rdi" data-u="' + esc(x.user) + '">' + esc((x.full_name || x.user) + ' — ' + x.email) + '</div>'; }).join('') + (m.has_more ? '<div class="mut" style="padding:6px 10px">' + fmtN(m.total) + ' — ' + rt('search') + '…</div>' : '') : '<div class="mut" style="padding:8px 10px">' + rt('noRows') + '</div>';
-    }, function () { if (id === spReq) dd.innerHTML = '<div class="lm-errtxt" style="padding:8px 10px">' + rt('error') + '</div>'; });
+    if (a === 'kpi') { openDrill(v); return; }
+    if (a === 'tpage') { TS[id].page = Math.max(1, TS[id].page + (+v)); fillTable(id); return; }
+    if (a === 'tsort') { var st = TS[id]; if (st.sk === v) { st.dir = -st.dir; } else { st.sk = v; st.dir = 1; } st.page = 1; fillTable(id); focusHead(id, v); return; }
+    if (a === 'spage') { var ss = SS[id]; ss.page = Math.max(1, ss.page + (+v)); ss.dirty = true; fillTable(id); return; }
+    if (a === 'ssort') { var s2 = SS[id]; if (s2.sk === v) { s2.dir = -s2.dir; } else { s2.sk = v; s2.dir = 1; } s2.page = 1; s2.dirty = true; fillTable(id); focusHead(id, v); return; }
+    if (a === 'sretry') { SS[id].dirty = true; fillTable(id); return; }
+    if (a === 'csv') { var sp = TBL[id]; download(sp.file || id, sp, clientRows(sp, TS[id])); return; }
+    if (a === 'csvall') { exportServer(id); return; }
   }
-  si.onfocus = function () { if (!RS.f.spUser) spSearch(); };
-  si.oninput = function (e) { e.stopPropagation(); RS.f.spUser = ''; RS.f.spLabel = ''; clearTimeout(spDeb); spDeb = setTimeout(spSearch, 250); };
-  si.onkeydown = function (e) { if (e.key === 'Escape') dd.style.display = 'none'; };
-  si.onblur = function () { setTimeout(function () { dd.style.display = 'none'; if (!RS.f.spUser) si.value = ''; }, 150); };
-  dd.onmousedown = function (e) { var it = e.target.closest('[data-u]'); if (!it) return; e.preventDefault(); RS.f.spUser = it.getAttribute('data-u'); RS.f.spLabel = it.textContent; si.value = it.textContent; dd.style.display = 'none'; };
-}
-function toggleColPanel() { var p = rq('[data-rcolp]'); if (p.style.display === 'none') { renderColPanel(); p.style.display = 'block'; } else p.style.display = 'none'; }
-function renderColPanel() {
-  var p = rq('[data-rcolp]');
-  p.innerHTML = '<div style="display:flex;gap:6px;margin-bottom:6px"><button class="lm-btn" data-ract="showall">' + rt('showAll') + '</button><button class="lm-btn" data-ract="resetcols">' + rt('resetCols') + '</button></div>' +
-    RCOLS.map(function (c) { return '<label style="display:flex;gap:6px;align-items:center;padding:2px 0;font-weight:400"><input type="checkbox" data-rcol="' + c[0] + '"' + (RS.cols.indexOf(c[0]) > -1 ? ' checked' : '') + '>' + esc(colLabel(c)) + '</label>'; }).join('');
-}
-
-// ---- query building (permission-aware lead queries + server-checked allocation ID sets) ----
-function rBaseFilters() {
-  var F = RS.f, f = [[DT, 'docstatus', '!=', 2]];
-  if (F.basis === 'lead') { if (F.from) f.push([DT, 'date', '>=', F.from]); if (F.to) f.push([DT, 'date', '<=', F.to]); }
-  if (F.city) f.push([DT, 'city', '=', F.city]);
-  if (F.source) f.push([DT, 'source', '=', F.source]);
-  if (F.cat !== '') f.push([DT, 'catalogue_status', '=', parseInt(F.cat, 10)]);
-  var I = RS.ids;
-  if (I && I.matched) f.push([DT, 'name', 'in', I.matched.length ? I.matched : ['__none__']]);
-  return f;
-}
-function rOr() { var s = (RS.f.q || '').trim(); if (!s) return null; var l = '%' + s + '%'; return ['name', 'customer_name', 'contact_person', 'phone', 'telephone', 'customer_email', 'customer_email_2'].map(function (x) { return [DT, x, 'like', l]; }); }
-function rStatusFilter(st) {
-  var I = RS.ids, cur = I.current, his = I.history_only;
-  if (st === 'assigned') return [[DT, 'name', 'in', cur.length ? cur : ['__none__']]];
-  if (st === 'history') return [[DT, 'name', 'in', his.length ? his : ['__none__']]];
-  if (st === 'unassigned_all') return cur.length ? [[DT, 'name', 'not in', cur]] : [];
-  if (st === 'unassigned') { var u = cur.concat(his); return u.length ? [[DT, 'name', 'not in', u]] : []; }
-  return [];
-}
-function rFilters() { return rBaseFilters().concat(rStatusFilter(RS.f.astat)); }
-function rCount(extra) {
-  var a = { fields: ['count(name) as c'], filters: rBaseFilters().concat(extra) }; var o = rOr(); if (o) a.or_filters = o;
-  return getList(a).then(function (r) { return (r && r[0] && r[0].c) || 0; });
-}
-function allocArgs() {
-  var F = RS.f, a = { action: 'report_lead_ids' };
-  if (F.spUser) a.salesperson_user = F.spUser;
-  if (F.allocBy) a.allocated_by = F.allocBy;
-  if (F.priority) a.priority = F.priority;
-  if (F.fu) a.fu_status = F.fu;
-  if (F.basis === 'asg') { if (F.from) a.asg_from = F.from; if (F.to) a.asg_to = F.to; }
-  return a;
-}
-function rApply() {
-  var id = ++RS.req;
-  ['matching', 'assignedL', 'unassignedL', 'histL', 'catSent'].forEach(function (k) { setRk(k, 'loading'); });
-  rq('[data-rbody]').innerHTML = '<tr><td class="lm-empty" colspan="40">' + rt('loading') + '</td></tr>';
-  apiPost(allocArgs()).then(function (m) {
-    if (id !== RS.req) return;
-    RS.ids = m; RS.idsErr = null;
-    var hadAllocators = RS.allocators.length;
-    RS.allocators = m.allocators || [];
-    if (!hadAllocators && RS.allocators.length) { var sel = rq('[data-rf="allocBy"]'); if (sel) sel.innerHTML = opt('', rt('all'), RS.f.allocBy) + RS.allocators.map(function (a) { return opt(a.user, a.full_name, RS.f.allocBy); }).join(''); }
-    rq('[data-rwarn]').textContent = m.truncated ? rt('truncated') : '';
-    rSummary(id); rLoadPage();
-  }, function (e) {
-    if (id !== RS.req) return;
-    RS.ids = null; RS.idsErr = (e && (e.status === 403 || e.status === 417)) ? rt('denied') : rt('error');
-    ['matching', 'assignedL', 'unassignedL', 'histL', 'catSent'].forEach(function (k) { setRk(k, 'error', RS.idsErr); });
-    rq('[data-rbody]').innerHTML = '<tr><td class="lm-empty lm-errtxt" colspan="40">' + esc(RS.idsErr) + '</td></tr>';
-  });
-}
-function rSummary(id) {
-  var st = rStatusFilter(RS.f.astat);
-  rCount(st).then(function (v) { if (id === RS.req) setRk('matching', 'ok', v); }, function () { id === RS.req && setRk('matching', 'error'); });
-  // Assigned/Unassigned/History are computed inside the same filtered scope (incl. the status filter)
-  rCount(st.concat(rStatusFilter('assigned'))).then(function (v) { if (id === RS.req) setRk('assignedL', 'ok', v); }, function () { id === RS.req && setRk('assignedL', 'error'); });
-  rCount(st.concat(rStatusFilter('unassigned'))).then(function (v) { if (id === RS.req) setRk('unassignedL', 'ok', v); }, function () { id === RS.req && setRk('unassignedL', 'error'); });
-  rCount(st.concat(rStatusFilter('history'))).then(function (v) { if (id === RS.req) setRk('histL', 'ok', v); }, function () { id === RS.req && setRk('histL', 'error'); });
-  rCount(st.concat([[DT, 'catalogue_status', '=', 1]])).then(function (v) { if (id === RS.req) setRk('catSent', 'ok', v); }, function () { id === RS.req && setRk('catSent', 'error'); });
-}
-var rPageReq = 0;
-function rLoadPage() {
-  if (!RS.ids) return;
-  var id = ++rPageReq;
-  rq('[data-rbody]').innerHTML = '<tr><td class="lm-empty" colspan="40">' + rt('loading') + '</td></tr>';
-  var f = rFilters(), o = rOr();
-  var ca = { fields: ['count(name) as c'], filters: f }; if (o) ca.or_filters = o;
-  var la = { doctype: DT, fields: LEAD_FIELDS, filters: f, order_by: RS.sort + ' ' + RS.dir + ', name desc', limit_start: RS.page * RS.size, limit_page_length: RS.size }; if (o) la.or_filters = o;
-  Promise.all([getList(ca), frappe.xcall('frappe.client.get_list', la)]).then(function (r) {
-    if (id !== rPageReq) return;
-    RS.total = (r[0][0] && r[0][0].c) || 0; RS.rows = r[1];
-    var names = RS.rows.map(function (x) { return x.name; });
-    if (!names.length) { RS.alloc = {}; rRender(); return; }
-    apiPost({ action: 'report_allocations', leads: JSON.stringify(names) }).then(function (m) { if (id !== rPageReq) return; RS.alloc = m || {}; RS.allocErr = null; rRender(); },
-      function () { if (id !== rPageReq) return; RS.alloc = {}; RS.allocErr = rt('denied'); rRender(); });
-  }, function () { if (id !== rPageReq) return; rq('[data-rbody]').innerHTML = '<tr><td class="lm-empty lm-errtxt" colspan="40">' + rt('error') + '</td></tr>'; });
-}
-
-// ---- cell values (shared by table, CSV and print) ----
-function allocSummary(lead) {
-  var all = (RS.alloc && RS.alloc[lead]) || [];
-  var cur = all.filter(function (a) { return a.current; });
-  var hist = all.filter(function (a) { return !a.current; });
-  var latest = all[0] || null; // server returns newest first
-  return { all: all, cur: cur, hist: hist, latest: latest, show: cur.length ? cur : (latest ? [latest] : []) };
-}
-function cellText(key, r) {
-  var A = allocSummary(r.name), sh = A.show;
-  function j(fn) { return sh.map(fn).filter(function (x) { return x; }).join('; '); }
-  switch (key) {
-    case 'date': return fdt(r.date);
-    case 'catalogue_status': return r.catalogue_status ? rt('catY') : rt('catN');
-    case 'owner': return userName(r.owner);
-    case 'modified_by': return userName(r.modified_by);
-    case 'creation': return fdt(r.creation, 1);
-    case 'modified': return fdt(r.modified, 1);
-    case 'a_status': return RS.allocErr ? '' : (A.cur.length ? rt('assigned') + (A.cur.length > 1 ? ' (' + A.cur.length + ')' : '') : (A.hist.length ? rt('history') : rt('unassigned')));
-    case 'a_sp': return j(function (a) { return a.sales_person_name; }) + (A.cur.length ? '' : (A.latest ? ' (' + rt('hist') + ')' : ''));
-    case 'a_sp_email': return j(function (a) { return a.sales_person_email; });
-    case 'a_by': return j(function (a) { return a.allocated_by; });
-    case 'a_date': return j(function (a) { return fdt(a.assignment_date); });
-    case 'a_priority': return j(function (a) { return a.priority; });
-    case 'a_next': return j(function (a) { return fdt(a.next_follow_up, 1); });
-    case 'a_fu': return j(function (a) { return [a.status, a.outcome].filter(function (x) { return x; }).join(' / '); });
-    case 'a_last': return j(function (a) { return fdt(a.last_contacted, 1); });
-    case 'a_notes': return A.latest ? (A.latest.remarks || '') : '';
-    case 'f_date': case 'f_method': case 'f_outcome': case 'f_notes': case 'f_next': case 'f_count':
-      var fl = null, fc = 0; A.all.forEach(function (a) { fc += a.fu_count || 0; if (a.fu_latest && (!fl || a.fu_latest.date > fl.date)) fl = a.fu_latest; });
-      if (key === 'f_count') return String(fc);
-      if (!fl) return '';
-      return key === 'f_date' ? fdt(fl.date, 1) : key === 'f_method' ? (fl.method || '') + ' / ' + (fl.result || '') : key === 'f_outcome' ? (fl.outcome || '') : key === 'f_notes' ? (fl.notes || '') : (fl.next_action || '');
-    default: return r[key] == null ? '' : String(r[key]);
-  }
-}
-function rRender() {
-  var cols = RCOLS.filter(function (c) { return RS.cols.indexOf(c[0]) > -1; });
-  var stickL = lang === 'ar' ? 'right' : 'left';
-  rq('[data-rhead]').innerHTML = '<tr><th class="lm-st0" style="' + stickL + ':0"></th>' + cols.map(function (c) {
-    var st = c[0] === 'name' ? ' class="lm-st1"' : (c[0] === 'customer_name' ? ' class="lm-st2"' : '');
-    var srt = c[4] ? ' data-rsort="' + c[4] + '" style="cursor:pointer"' : '';
-    var arr = c[4] && RS.sort === c[4] ? (RS.dir === 'asc' ? ' ▲' : ' ▼') : '';
-    return '<th' + st + srt + '>' + esc(colLabel(c)) + arr + '</th>';
-  }).join('') + '</tr>';
-  var tb = rq('[data-rbody]');
-  rq('[data-rcount]').textContent = '· ' + fmtN(RS.total) + ' ' + rt('rows');
-  var from = RS.total ? RS.page * RS.size + 1 : 0, to = Math.min(RS.total, (RS.page + 1) * RS.size);
-  rq('[data-rpg]').textContent = from + '–' + to + ' / ' + fmtN(RS.total) + ' · ' + rt('page') + ' ' + (RS.page + 1) + '/' + Math.max(1, Math.ceil(RS.total / RS.size));
-  rq('[data-ract="prev"]').disabled = RS.page === 0; rq('[data-ract="next"]').disabled = (RS.page + 1) * RS.size >= RS.total;
-  if (!RS.rows.length) { tb.innerHTML = '<tr><td class="lm-empty" colspan="40">' + rt('noRows') + '</td></tr>'; return; }
-  var url = function (n) { return '/app/' + frappe.router.slug(DT) + '/' + encodeURIComponent(n); };
-  tb.innerHTML = RS.rows.map(function (r) {
-    var A = allocSummary(r.name);
-    var tds = cols.map(function (c) {
-      var k = c[0], v = cellText(k, r), html;
-      if (k === 'name' || k === 'customer_name') html = '<a href="' + url(r.name) + '">' + esc(v || '—') + '</a>';
-      else if (k === 'catalogue_status') html = '<span class="lm-badge ' + (r.catalogue_status ? 'ok' : 'warn') + '">' + esc(v) + '</span>';
-      else if (k === 'a_status') html = RS.allocErr ? '<span class="mut">' + esc(rt('denied')) + '</span>' : '<span class="lm-badge ' + (A.cur.length ? 'ok' : (A.hist.length ? '' : 'warn')) + '">' + esc(v) + '</span>';
-      else if (k === 'activities' || k === 'remarks' || k === 'a_notes') html = v ? '<span class="lm-clip" title="' + esc(v) + '">' + esc(v.length > 60 ? v.slice(0, 60) + '…' : v) + '</span>' : '<span class="mut">—</span>';
-      else html = v ? esc(v).replace(/; /g, '<br>') : '<span class="mut">—</span>';
-      var cls = k === 'name' ? ' class="lm-st1"' : (k === 'customer_name' ? ' class="lm-st2"' : '');
-      return '<td' + cls + '>' + html + '</td>';
-    }).join('');
-    var row = '<tr><td class="lm-st0" style="' + stickL + ':0"><button class="lm-more" data-ract="expand" data-lead="' + esc(r.name) + '" title="' + rt('details') + '">' + (RS.open[r.name] ? '▾' : '▸') + '</button></td>' + tds + '</tr>';
-    if (RS.open[r.name]) {
-      var al = A.all.length ? '<table class="lm-sub"><tr><th></th><th>' + RT[lang === 'ar' ? 'ar' : 'en'].sp + '</th><th>' + colLabel(RCOLS[18]) + '</th><th>' + colLabel(RCOLS[19]) + '</th><th>' + colLabel(RCOLS[20]) + '</th><th>' + colLabel(RCOLS[22]) + '</th><th>' + colLabel(RCOLS[23]) + '</th><th>' + colLabel(RCOLS[21]) + '</th><th>' + colLabel(RCOLS[14]) + '</th></tr>' +
-        A.all.map(function (a) { return '<tr><td><span class="lm-badge ' + (a.current ? 'ok' : '') + '">' + (a.current ? rt('current') : rt('hist')) + '</span></td><td>' + esc(a.sales_person_name) + '<br><span class="mut">' + esc(a.sales_person_email || '') + '</span></td><td>' + esc(a.allocated_by || '') + '</td><td>' + esc(fdt(a.assignment_date)) + '</td><td>' + esc(a.priority || '') + '</td><td>' + esc([a.status, a.outcome].filter(function (x) { return x; }).join(' / ')) + '</td><td>' + esc(fdt(a.last_contacted, 1)) + '</td><td>' + esc(fdt(a.next_follow_up, 1)) + '</td><td style="white-space:pre-wrap">' + esc(a.remarks || '') + '</td></tr>'; }).join('') + '</table>'
-        : '<div class="mut">' + (RS.allocErr ? esc(RS.allocErr) : rt('noAllocs')) + '</div>';
-      row += '<tr class="lm-exp"><td></td><td colspan="' + cols.length + '"><div class="lm-expd">' +
-        '<div><b>' + colLabel(RCOLS[12]) + ':</b> <span style="white-space:pre-wrap">' + esc(r.activities || '—') + '</span></div>' +
-        '<div><b>' + colLabel(RCOLS[14]) + ':</b> <span style="white-space:pre-wrap">' + esc(r.remarks || '—') + '</span></div>' +
-        '<div><b>' + colLabel(RCOLS[8]) + ':</b> ' + esc(r.customer_email || '—') + ' · <b>' + colLabel(RCOLS[9]) + ':</b> ' + esc(r.customer_email_2 || '—') + '</div>' +
-        '<div style="margin-top:6px"><b>' + rt('allocs') + '</b></div>' + al + '</div></td></tr>';
+  function focusHead(id, v) { var th = HOST.querySelector('[data-tbl="' + id + '"] th[data-v="' + v + '"]'); if (th) { th.focus(); } }
+  function onInput(ev) {
+    var n = ev.target; if (!n || !n.getAttribute || !HOST.contains(n)) { return; }
+    var fs = n.getAttribute('data-fs'), fd = n.getAttribute('data-fd'), tq = n.getAttribute('data-tq');
+    if (APP.onInput && APP.onInput(n, ev) === true) { return; }
+    if (fs) { if (FS[fs] === n.value) { return; } FS[fs] = n.value; renderToolbar(); return; }
+    if (fd) { if (!FD || FD[fd] === n.value) { return; } FD[fd] = n.value; if (n.type === 'search') { return; } if (APP.filters.some(function (f) { return f.dependsOn === fd; })) { APP.filters.forEach(function (f) { if (f.dependsOn === fd && FD[f.k] && !optList(f, FD).some(function (x) { return x.v === FD[f.k]; })) { FD[f.k] = ''; } }); renderToolbar(); } return; }
+    if (tq) {
+      focusId = tq; var spx = TBL[tq]; if (!spx) { return; }
+      if (spx.server) { var s2 = SS[tq]; if (s2.q === n.value) { return; } s2.q = n.value; s2.page = 1; clearTimeout(onInput.t); onInput.t = later(function () { s2.dirty = true; fillTable(tq); }, 350); }
+      else { var s1 = TS[tq] || (TS[tq] = { q: '', page: 1, sk: spx.sk || '', dir: spx.dir || 1 }); if (s1.q === n.value) { return; } s1.q = n.value; s1.page = 1; fillTable(tq); }
     }
-    return row;
-  }).join('');
-}
-
-// ---- export (complete filtered scope, chunked, permission-aware) ----
-var EXPORT_MAX = 10000;
-function csvCell(v) {
-  v = v == null ? '' : String(v);
-  if (/^[=+\-@\t\r]/.test(v) && !/^-+$/.test(v.trim())) v = "'" + v; // neutralise spreadsheet formulas
-  return '"' + v.replace(/"/g, '""') + '"';
-}
-function filterSummary() {
-  var F = RS.f, p = [];
-  if (F.from || F.to) p.push(rt('basis') + ': ' + (F.basis === 'asg' ? rt('bAsg') : rt('bLead')) + ' ' + (F.from || '…') + ' → ' + (F.to || '…'));
-  if (F.city) p.push(rt('city') + ': ' + F.city);
-  if (F.source) p.push(rt('source') + ': ' + F.source);
-  if (F.spUser) p.push(rt('sp') + ': ' + F.spLabel);
-  if (F.astat) p.push(rt('astat') + ': ' + rt(F.astat));
-  if (F.allocBy) p.push(rt('allocBy') + ': ' + ((RS.allocators.filter(function (a) { return a.user === F.allocBy; })[0] || {}).full_name || F.allocBy));
-  if (F.cat !== '') p.push(rt('cat') + ': ' + (F.cat === '1' ? rt('catY') : rt('catN')));
-  if (F.priority) p.push(rt('priority') + ': ' + F.priority);
-  if (F.fu) p.push(rt('fu') + ': ' + F.fu);
-  if (F.q) p.push(rt('search') + ': "' + F.q + '"');
-  return p.length ? p.join(' | ') : rt('none');
-}
-function fetchAllForExport() {
-  var f = rFilters(), o = rOr(), out = [], allocs = {};
-  var total = RS.total, n = Math.min(total, EXPORT_MAX), start = 0;
-  function step() {
-    if (start >= n) return Promise.resolve();
-    var la = { doctype: DT, fields: LEAD_FIELDS, filters: f, order_by: RS.sort + ' ' + RS.dir + ', name desc', limit_start: start, limit_page_length: Math.min(500, n - start) }; if (o) la.or_filters = o;
-    return frappe.xcall('frappe.client.get_list', la).then(function (rows) {
-      out = out.concat(rows); start += rows.length;
-      if (!rows.length) { start = n; return; }
-      return apiPost({ action: 'report_allocations', leads: JSON.stringify(rows.map(function (x) { return x.name; })) }).then(function (m) { Object.assign(allocs, m || {}); }, function () {});
-    }).then(step);
   }
-  return step().then(function () { return { rows: out, allocs: allocs, total: total, limited: total > EXPORT_MAX }; });
-}
-function rExport(kind) {
-  if (!RS.ids) return;
-  var win = kind === 'print' ? window.open('', '_blank') : null;
-  frappe.show_alert({ message: rt('exporting'), indicator: 'blue' });
-  fetchAllForExport().then(function (res) {
-    var keep = RS.alloc; RS.alloc = res.allocs;
-    var cols = RCOLS.filter(function (c) { return RS.cols.indexOf(c[0]) > -1; });
-    var now = frappe.datetime.str_to_user(frappe.datetime.now_datetime());
-    var by = frappe.session.user_fullname || frappe.session.user;
-    var limitMsg = res.limited ? rt('exportLimit').replace('{0}', fmtN(res.rows.length)).replace('{1}', fmtN(res.total)) : '';
-    if (kind === 'csv') {
-      var lines = [];
-      lines.push(csvCell(rt('reportTitle')));
-      lines.push(csvCell(rt('filters') + ': ' + filterSummary()));
-      lines.push(csvCell(rt('generated') + ': ' + now + ' ' + rt('by') + ' ' + by));
-      lines.push(csvCell(fmtN(res.rows.length) + ' / ' + fmtN(res.total) + ' ' + rt('rows') + (limitMsg ? ' — ' + limitMsg : '')));
-      lines.push(csvCell(rt('emailNote')));
-      lines.push('');
-      lines.push(cols.map(function (c) { return csvCell(colLabel(c)); }).join(','));
-      res.rows.forEach(function (r) { lines.push(cols.map(function (c) { return csvCell(cellText(c[0], r)); }).join(',')); });
-      var blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-      var a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-      a.download = 'Lead_Detailed_Report_' + frappe.datetime.now_date() + '.csv';
-      document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-    } else if (win) {
-      var dir = lang === 'ar' ? 'rtl' : 'ltr';
-      var html = '<!doctype html><html dir="' + dir + '"><head><meta charset="utf-8"><title>' + esc(rt('reportTitle')) + '</title><style>' +
-        'body{font-family:"Segoe UI",Tahoma,Arial,sans-serif;color:#1f2937;margin:18px;font-size:10.5px}h1{color:#14325c;font-size:16px;margin:0 0 4px}.m{color:#6b7280;margin:2px 0}' +
-        'table{border-collapse:collapse;width:100%;margin-top:10px}th{background:#14325c;color:#fff;text-align:start;padding:4px 5px;font-weight:600}td{border-bottom:1px solid #e3e7ee;padding:4px 5px;vertical-align:top;white-space:pre-wrap}tr:nth-child(even) td{background:#f8fafc}' +
-        '@page{size:A4 landscape;margin:10mm}thead{display:table-header-group}.w{color:#b45309;font-weight:600}</style></head><body>' +
-        '<h1>' + esc(rt('reportTitle')) + '</h1><div class="m"><b>' + esc(rt('filters')) + ':</b> ' + esc(filterSummary()) + '</div>' +
-        '<div class="m"><b>' + esc(rt('generated')) + ':</b> ' + esc(now) + ' ' + esc(rt('by')) + ' ' + esc(by) + ' · ' + fmtN(res.rows.length) + ' / ' + fmtN(res.total) + ' ' + esc(rt('rows')) + '</div>' +
-        (limitMsg ? '<div class="m w">' + esc(limitMsg) + '</div>' : '') + '<div class="m">' + esc(rt('emailNote')) + '</div>' +
-        '<table><thead><tr>' + cols.map(function (c) { return '<th>' + esc(colLabel(c)) + '</th>'; }).join('') + '</tr></thead><tbody>' +
-        res.rows.map(function (r) { return '<tr>' + cols.map(function (c) { return '<td>' + esc(cellText(c[0], r)) + '</td>'; }).join('') + '</tr>'; }).join('') +
-        '</tbody></table><script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script></body></html>';
-      win.document.open(); win.document.write(html); win.document.close();
+  function onKey(ev) {
+    var t = ev.target, act = t && t.getAttribute ? t.getAttribute('data-act') : null, rtl = LANG === 'ar', k = ev.key;
+    if (k === 'Escape') {
+      if (POP) { ev.preventDefault(); closePop(true); return; }
+      if (OVL) { closeOverlay(); }
+      return;
     }
-    RS.alloc = keep;
-  }, function () { if (win) win.close(); frappe.msgprint(rt('error')); });
-}
-// ================= END DETAILED REPORT TAB =================
+    if ((k === 'Enter' || k === ' ') && (act === 'tsort' || act === 'ssort')) { ev.preventDefault(); t.click(); return; }
+    if (k === 'Tab' && OVL) {
+      var modal = $('.dms-modal'), controls = Array.prototype.filter.call(modal.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), [tabindex="0"]'), function (el) { return el.getClientRects().length; });
+      var first = controls[0], last = controls[controls.length - 1];
+      if (ev.shiftKey && t === first) { ev.preventDefault(); last.focus(); }
+      else if (!ev.shiftKey && t === last) { ev.preventDefault(); first.focus(); }
+    }
+    if (act === 'tab' && /^(ArrowLeft|ArrowRight|Home|End)$/.test(k)) {
+      var ids = APP.tabs.map(function (x) { return x.id; }), i = ids.indexOf(t.getAttribute('data-v')), L = ids.length;
+      var d = k === 'Home' ? -i : k === 'End' ? L - 1 - i : ((k === 'ArrowRight') !== rtl ? 1 : -1);
+      ev.preventDefault(); goTab(ids[(i + d + L) % L], true); return;
+    }
+    if (act === 'calday' && CAL) {
+      var cur = t.getAttribute('data-v'), step = { ArrowRight: rtl ? -1 : 1, ArrowLeft: rtl ? 1 : -1, ArrowUp: -7, ArrowDown: 7 }[k];
+      if (step) { ev.preventDefault(); calMove(addDays(cur, step)); return; }
+      if (k === 'PageUp' || k === 'PageDown') { ev.preventDefault(); calMove(shiftMonths(cur, k === 'PageUp' ? -1 : 1)); return; }
+      if (k === 'Home' || k === 'End') { ev.preventDefault(); calMove(k === 'Home' ? weekStartOf(cur) : addDays(weekStartOf(cur), 6)); }
+    }
+  }
+  /* Start: wire events, render the skeleton, run APP.boot (reference lists), then the first load. */
+  function start() {
+    HOST.addEventListener('click', onClick, SIG);
+    HOST.addEventListener('input', onInput, SIG);
+    HOST.addEventListener('change', onInput, SIG);
+    HOST.addEventListener('keydown', onKey, SIG);
+    HOST.addEventListener('pointerover', onOver, SIG);
+    HOST.addEventListener('pointerleave', hideTip, SIG);
+    HOST.addEventListener('focusin', function (ev) { var n = ev.target.closest && ev.target.closest('[data-tip]'); if (n) { showTip(n); } }, SIG);
+    HOST.addEventListener('focusout', hideTip, SIG);
+    document.addEventListener('pointerdown', function (ev) {
+      if (!POP) { return; } var p = ev.composedPath ? ev.composedPath() : [];
+      for (var i = 0; i < p.length; i++) { if (p[i] === HOST) { return; } }
+      closePop(false);
+    }, SIG);
+    if (!G.frappe || !frappe.call) { HOST.innerHTML = '<div class="dms-empty">Frappe client API not available.</div>'; return; }
+    setToday(); PERIOD = curPeriod();
+    var chartResize = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fitChartLabels) : null;
+    if (chartResize) { chartResize.observe(HOST); if (abort) { abort.signal.addEventListener('abort', function () { chartResize.disconnect(); }); } }
+    if (document.fonts) { document.fonts.ready.then(function () { if (!destroyed) { fitChartLabels(); } }); }
+    renderAll();
+    var g = GEN, chk = function () { return g === GEN && !destroyed; };
+    Promise.resolve(APP.boot ? APP.boot(chk) : null).catch(function (e) { if (G.console) { console.error(APP.key, 'boot', e); } }).then(function () { if (destroyed) { return; } BOOTED = true; reload(); });
+  }
+  /* ==== end DMS kit ==== */
 
+  /* ============================================================ v1 definitions (unchanged) */
+  var DT = 'Leads Generation List';
+  var CAN_ALLOC = false;
+  try { var ROLES = (G.frappe && (frappe.user_roles || (frappe.boot && frappe.boot.user && frappe.boot.user.roles))) || []; CAN_ALLOC = ROLES.indexOf('Lead Allocation Coordinator') > -1 || ROLES.indexOf('System Manager') > -1 || (G.frappe && frappe.session && frappe.session.user === 'Administrator'); } catch (e) { /* not in Desk */ }
+  var DIG = '0123456789٠١٢٣٤٥٦٧٨٩'.split('');
+  var LET = 'abcdefghijklmnopqrstuvwxyzابتثجحخدذرزسشصضطظعغفقكلمنهويةىءأإآؤئ'.split('');
+  function noDigits(f) { return DIG.map(function (d) { return [DT, f, 'not like', '%' + d + '%']; }); }
+  function noLetters(f) { return LET.map(function (d) { return [DT, f, 'not like', '%' + d + '%']; }); }
+  var MISSING_CONTACT = [[DT, 'customer_email', 'not like', '%@%'], [DT, 'customer_email_2', 'not like', '%@%']].concat(noDigits('phone'), noDigits('telephone'));
+  var MISSING_CITY = noLetters('city');
+  var MISSING_PERSON = noLetters('contact_person');
+  var PRIORITIES = ['Low', 'Medium', 'High', 'Urgent'];
+  var FU_STATUSES = ['Assigned', 'Contacted', 'Follow Up', 'Interested', 'Quotation Required', 'No Response', 'Not Interested', 'Converted', 'Closed'];
+  var FU_ST = FU_STATUSES.slice(0, 7);
+  var LEAD_FIELDS = ['name', 'date', 'customer_name', 'contact_person', 'designation', 'city', 'phone', 'telephone', 'customer_email', 'customer_email_2', 'source', 'action_taken', 'activities', 'catalogue_status', 'remarks', 'owner', 'creation', 'modified_by', 'modified'];
+  /* key, en, ar, sort field, default */
+  var RCOLS = [['name', 'Lead ID', 'رقم العميل', 'name', 1], ['customer_name', 'Customer / Company', 'العميل / الشركة', 'customer_name', 1], ['date', 'Lead date', 'تاريخ العميل', 'date', 1], ['contact_person', 'Contact person', 'جهة الاتصال', 'contact_person', 1],
+    ['designation', 'Designation', 'المسمى', 'designation', 0], ['city', 'City', 'المدينة', 'city', 1], ['phone', 'Primary phone', 'الهاتف الأساسي', 'phone', 1], ['telephone', 'Telephone', 'الهاتف', 'telephone', 0],
+    ['customer_email', 'Customer email', 'بريد العميل', 'customer_email', 1], ['customer_email_2', 'Email 2', 'البريد 2', 'customer_email_2', 0], ['source', 'Lead source', 'المصدر', 'source', 1], ['action_taken', 'Action taken', 'الإجراء المتخذ', 'action_taken', 0],
+    ['activities', 'Activities', 'الأنشطة', '', 0], ['catalogue_status', 'Catalogue sent', 'الكتالوج', 'catalogue_status', 1], ['remarks', 'Remarks', 'ملاحظات', '', 0], ['a_status', 'Allocation status', 'حالة التوزيع', '', 1],
+    ['a_sp', 'Assigned salesperson', 'المندوب', '', 1], ['a_sp_email', 'Salesperson email', 'بريد المندوب', '', 0], ['a_by', 'Allocated by', 'وزّع بواسطة', '', 1], ['a_date', 'Assignment date', 'تاريخ الإسناد', '', 1],
+    ['a_priority', 'Priority', 'الأولوية', '', 0], ['a_next', 'Next follow-up', 'المتابعة القادمة', '', 1], ['a_fu', 'Follow-up status', 'حالة المتابعة', '', 1], ['a_last', 'Last contacted', 'آخر تواصل', '', 0],
+    ['a_notes', 'Latest follow-up notes', 'آخر ملاحظات المتابعة', '', 0], ['f_date', 'Latest follow-up', 'آخر متابعة', '', 0], ['f_method', 'Follow-up method / result', 'وسيلة/نتيجة المتابعة', '', 0], ['f_outcome', 'Follow-up outcome', 'نتيجة المتابعة', '', 0],
+    ['f_notes', 'Follow-up notes', 'ملاحظات المتابعة', '', 0], ['f_next', 'Follow-up next action', 'الإجراء التالي', '', 0], ['f_count', 'Follow-up entries', 'عدد المتابعات', '', 0], ['owner', 'Created by', 'أنشئ بواسطة', 'owner', 0],
+    ['creation', 'Created on', 'تاريخ الإنشاء', 'creation', 0], ['modified_by', 'Last updated by', 'آخر تحديث بواسطة', 'modified_by', 0], ['modified', 'Last updated on', 'آخر تحديث', 'modified', 0]];
+  function usable(v, kind) { if (!v) { return false; } v = String(v); return kind === 'email' ? v.indexOf('@') > -1 : /[0-9٠-٩]/.test(v); }
+  function hasText(v) { return /[^\s\-.]/.test(v || ''); }
+  function userName(u) { if (!u) { return ''; } try { return frappe.user.full_name(u) || u; } catch (e) { return u; } }
+  function fdt(v, withTime) { return v ? String(v).slice(0, withTime ? 16 : 10).replace('T', ' ') : ''; }
 
-// ================= FOLLOW-UP MONITORING TAB (2026-11-09) =================
-var FT = {
-  en: { tab: 'Follow-up Monitoring', active: 'Active Assigned Leads', overdue: 'Overdue Follow-ups', today: 'Due Today', upcoming: 'Upcoming', nofu: 'No Follow-up Scheduled', nolog: 'No Recorded Follow-up', activities: 'Recorded follow-up entries',
-    defs: 'Lead cards count DISTINCT leads with a current allocation (status not Closed/Converted) within your filters. Overdue / Due Today / Upcoming use the allocation’s Next Follow-up in Asia/Riyadh time. “No Follow-up Scheduled” = none of the lead’s current allocations has a next follow-up. “No Recorded Follow-up” = no entry in the Lead Follow-up Log (tracking started 09-11-2026; earlier contacts are not recorded). Table rows are allocations; a lead with two current allocations is flagged.',
-    sp: 'Salesperson', allocBy: 'Allocated By', status: 'Status', priority: 'Priority', due: 'Due Category', dbasis: 'Date refers to', dNext: 'Scheduled next follow-up', dAct: 'Latest recorded follow-up', from: 'From', to: 'To', search: 'Customer / Lead', all: 'All',
-    apply: 'Apply', reset: 'Reset', refresh: 'Refresh', cLead: 'Lead', cSp: 'Salesperson', cAsg: 'Assigned', cStatus: 'Status / Priority', cLast: 'Latest follow-up', cNotes: 'Latest notes', cNext: 'Next action / follow-up', cOver: 'Overdue', cCnt: 'Entries', hist: 'View History',
-    days: 'days', loading: 'Loading…', empty: 'No allocations match.', err: 'Could not load follow-up data.', denied: 'Follow-up monitoring is limited to Lead Allocation Coordinators and System Managers.', retry: 'Retry', prev: 'Previous', next: 'Next', results: 'allocations', dup: 'Duplicate current allocation',
-    histTitle: 'Follow-up history', noHist: 'No follow-ups recorded for this lead.', recBy: 'Recorded by', resNo: 'Attempted - no response', resOK: 'Conversation held' },
-  ar: { tab: 'متابعة المتابعات', active: 'العملاء الموزعون النشطون', overdue: 'متابعات متأخرة', today: 'مستحقة اليوم', upcoming: 'قادمة', nofu: 'بدون متابعة مجدولة', nolog: 'بدون متابعة مسجلة', activities: 'إدخالات المتابعة المسجلة',
-    defs: 'بطاقات العملاء تعدّ العملاء المميزين الذين لديهم توزيع حالي ضمن الفلاتر. المتأخرة/اليوم/القادمة حسب المتابعة القادمة بتوقيت الرياض. "بدون متابعة مسجلة" = لا يوجد إدخال في سجل المتابعات (بدأ التتبع 09-11-2026). صفوف الجدول توزيعات.',
-    sp: 'المندوب', allocBy: 'وزّع بواسطة', status: 'الحالة', priority: 'الأولوية', due: 'فئة الاستحقاق', dbasis: 'التاريخ يشير إلى', dNext: 'المتابعة القادمة المجدولة', dAct: 'آخر متابعة مسجلة', from: 'من', to: 'إلى', search: 'العميل / الرقم', all: 'الكل',
-    apply: 'تطبيق', reset: 'إعادة ضبط', refresh: 'تحديث', cLead: 'العميل', cSp: 'المندوب', cAsg: 'الإسناد', cStatus: 'الحالة / الأولوية', cLast: 'آخر متابعة', cNotes: 'آخر الملاحظات', cNext: 'الإجراء / المتابعة القادمة', cOver: 'التأخير', cCnt: 'الإدخالات', hist: 'عرض السجل',
-    days: 'يوم', loading: 'جارٍ التحميل…', empty: 'لا توجد توزيعات مطابقة.', err: 'تعذر تحميل بيانات المتابعة.', denied: 'متاحة لمنسقي التوزيع ومديري النظام فقط.', retry: 'إعادة المحاولة', prev: 'السابق', next: 'التالي', results: 'توزيع', dup: 'توزيع حالي مكرر',
-    histTitle: 'سجل المتابعات', noHist: 'لا توجد متابعات مسجلة لهذا العميل.', recBy: 'سجّلها', resNo: 'Attempted - no response', resOK: 'Conversation held' }
-};
-function ft(k) { return (FT[lang] && FT[lang][k]) || FT.en[k] || k; }
-var FS = { f: { sp_user: '', alloc_by: '', status: '', priority: '', due: '', dbasis: 'next', dfrom: '', dto: '', q: '' }, page: 0, size: 25, sort: 'next_follow_up', dir: 'asc', req: 0, total: 0, sps: [], allocators: [] };
-function fq(s) { return R.querySelector('[data-pane="fum"] ' + s); }
-var FU_ST = ['Assigned', 'Contacted', 'Follow Up', 'Interested', 'Quotation Required', 'No Response', 'Not Interested'];
-function fumBuild() {
-  var p = q('[data-pane="fum"]'); p.setAttribute('data-built', '1');
-  var F = FS.f;
-  function sel(k, opts) { return '<div class="lm-f"><label>' + ft(k === 'sp_user' ? 'sp' : (k === 'alloc_by' ? 'allocBy' : k)) + '</label><select data-ff="' + k + '">' + opts + '</select></div>'; }
-  p.innerHTML = '<div class="lm-card lm-filters">' +
-    sel('sp_user', opt('', ft('all'), F.sp_user) + FS.sps.map(function (x) { return opt(x.user, x.name, F.sp_user); }).join('')) +
-    sel('alloc_by', opt('', ft('all'), F.alloc_by) + FS.allocators.map(function (x) { return opt(x.user, x.name, F.alloc_by); }).join('')) +
-    sel('status', opt('', ft('all'), F.status) + FU_ST.map(function (x) { return opt(x, x, F.status); }).join('')) +
-    sel('priority', opt('', ft('all'), F.priority) + ['Low', 'Medium', 'High', 'Urgent'].map(function (x) { return opt(x, x, F.priority); }).join('')) +
-    sel('due', opt('', ft('all'), F.due) + ['overdue', 'today', 'upcoming', 'nofu', 'nolog'].map(function (x) { return opt(x, ft(x), F.due); }).join('')) +
-    sel('dbasis', opt('next', ft('dNext'), F.dbasis) + opt('activity', ft('dAct'), F.dbasis)) +
-    '<div class="lm-f"><label>' + ft('from') + '</label><input type="date" data-ff="dfrom" value="' + esc(F.dfrom) + '"></div><div class="lm-f"><label>' + ft('to') + '</label><input type="date" data-ff="dto" value="' + esc(F.dto) + '"></div>' +
-    '<div class="lm-f wide"><label>' + ft('search') + '</label><input type="search" data-ff="q" value="' + esc(F.q) + '"></div>' +
-    '<div class="lm-fbtn"><button class="lm-btn pri" data-fact="apply">' + ft('apply') + '</button><button class="lm-btn" data-fact="reset">' + ft('reset') + '</button><button class="lm-btn" data-fact="refresh">' + ICON.refresh + ft('refresh') + '</button></div></div>' +
-    '<div class="lm-kpis lm-fk">' + ['active', 'overdue', 'today', 'upcoming', 'nofu', 'nolog'].map(function (k) { return '<div class="lm-card lm-kpi ' + ({ overdue: 'bad', today: 'warn', active: 'ok' }[k] || '') + '" data-fcard="' + k + '" role="button"><div class="k-l">' + ft(k) + '</div><div class="k-v"><span class="lm-sk"></span></div><div class="k-s">&nbsp;</div></div>'; }).join('') + '</div>' +
-    '<div class="lm-note" style="margin:-4px 0 10px">' + ft('defs') + ' <b data-fact-count></b></div>' +
-    '<div class="lm-card lm-sec"><div class="lm-tbar"><h4>' + ft('tab') + ' <span class="mut" data-fcount></span></h4></div><div class="lm-tblwrap"><table><thead><tr>' +
-    [['customer_name', 'cLead'], ['salesperson', 'cSp'], ['assignment_date', 'cAsg'], ['status', 'cStatus'], ['last_fu_date', 'cLast'], ['', 'cNotes'], ['next_follow_up', 'cNext'], ['overdue_days', 'cOver'], ['fu_count', 'cCnt'], ['', '']].map(function (c) { return '<th' + (c[0] ? ' data-fsort="' + c[0] + '" style="cursor:pointer"' : '') + '>' + (c[1] ? ft(c[1]) : '') + (c[0] && FS.sort === c[0] ? (FS.dir === 'asc' ? ' ▲' : ' ▼') : '') + '</th>'; }).join('') +
-    '</tr></thead><tbody data-fbody></tbody></table></div><div class="lm-pg"><div class="mut" data-fpg></div><div class="lm-act"><button class="lm-btn" data-fact="prev">' + ft('prev') + '</button><button class="lm-btn" data-fact="next">' + ft('next') + '</button></div></div></div>';
-  p.onclick = function (e) {
-    e.stopPropagation();
-    var a = e.target.closest('[data-fact]');
-    if (a) { var k = a.getAttribute('data-fact');
-      if (k === 'apply' || k === 'refresh') { fumRead(); FS.page = 0; fumLoad(); }
-      if (k === 'reset') { FS.f = { sp_user: '', alloc_by: '', status: '', priority: '', due: '', dbasis: 'next', dfrom: '', dto: '', q: '' }; FS.page = 0; fumBuild(); fumLoad(); }
-      if (k === 'prev' && FS.page > 0) { FS.page--; fumLoad(); }
-      if (k === 'next' && (FS.page + 1) * FS.size < FS.total) { FS.page++; fumLoad(); }
-      if (k === 'hist') fumHistory(a.getAttribute('data-lead'), a.getAttribute('data-name'));
-      return; }
-    var c = e.target.closest('[data-fcard]'); if (c) { var d = c.getAttribute('data-fcard'); fumRead(); FS.f.due = d === 'active' ? '' : d; var s = fq('[data-ff="due"]'); if (s) s.value = FS.f.due; FS.page = 0; fumLoad(); fq('[data-fbody]').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
-    var so = e.target.closest('[data-fsort]'); if (so) { var f = so.getAttribute('data-fsort'); FS.dir = FS.sort === f && FS.dir === 'asc' ? 'desc' : 'asc'; FS.sort = f; FS.page = 0; fumBuild(); fumLoad(); }
-  };
-  p.onchange = function (e) { e.stopPropagation(); };
-  p.oninput = function (e) { e.stopPropagation(); };
-}
-function fumRead() { Array.prototype.slice.call(R.querySelectorAll('[data-pane="fum"] [data-ff]')).forEach(function (i) { FS.f[i.getAttribute('data-ff')] = i.value; }); }
-function fpost(args) {
-  return fetch('/api/method/bulk_allocate_leads', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Frappe-CSRF-Token': frappe.csrf_token }, body: JSON.stringify(args) })
-    .then(function (r) { return r.json().then(function (j) { if (!r.ok) { var e = new Error('http'); e.status = r.status; throw e; } return j.message; }); });
-}
-function fumLoad() {
-  var id = ++FS.req;
-  ['active', 'overdue', 'today', 'upcoming', 'nofu', 'nolog'].forEach(function (k) { var v = fq('[data-fcard="' + k + '"] .k-v'); if (v) v.innerHTML = '<span class="lm-sk"></span>'; });
-  fq('[data-fbody]').innerHTML = '<tr><td colspan="10" class="lm-empty">' + ft('loading') + '</td></tr>';
-  fpost({ action: 'fu_monitor', f: JSON.stringify(FS.f), sort: FS.sort, dir: FS.dir, start: FS.page * FS.size, page_len: FS.size }).then(function (m) {
-    if (id !== FS.req) return;
-    var rebuild = !FS.sps.length && (m.salespersons || []).length;
-    FS.sps = m.salespersons || FS.sps; FS.allocators = m.allocators || FS.allocators;
-    if (rebuild) { fumBuild(); return fumLoad(); }
-    Object.keys(m.cards).forEach(function (k) { var v = fq('[data-fcard="' + k + '"] .k-v'); if (v) v.textContent = fmtN(m.cards[k]); });
-    fq('[data-fact-count]').textContent = ft('activities') + ': ' + fmtN(m.cards.activities) + (m.truncated ? ' ⚠' : '');
-    FS.total = m.total;
-    fq('[data-fcount]').textContent = '· ' + fmtN(m.total) + ' ' + ft('results');
-    var a = m.total ? FS.page * FS.size + 1 : 0, b = Math.min(m.total, (FS.page + 1) * FS.size);
-    fq('[data-fpg]').textContent = a + '–' + b + ' / ' + fmtN(m.total);
-    fq('[data-fact="prev"]').disabled = FS.page === 0; fq('[data-fact="next"]').disabled = (FS.page + 1) * FS.size >= m.total;
-    if (!m.rows.length) { fq('[data-fbody]').innerHTML = '<tr><td colspan="10" class="lm-empty">' + ft('empty') + '</td></tr>'; return; }
-    var url = function (n) { return '/app/' + frappe.router.slug(DT) + '/' + encodeURIComponent(n); };
-    fq('[data-fbody]').innerHTML = m.rows.map(function (r) {
-      var dueB = { overdue: '<span class="lm-badge err">' + ft('overdue') + '</span>', today: '<span class="lm-badge warn">' + ft('today') + '</span>', upcoming: '<span class="lm-badge ok">' + ft('upcoming') + '</span>', nofu: '<span class="lm-badge warn">' + ft('nofu') + '</span>' }[r.due] || '';
-      return '<tr><td><a href="' + url(r.lead) + '">' + esc(r.lead) + '</a><br>' + esc(r.customer_name || '') + (r.dup ? ' <span class="lm-badge err">' + ft('dup') + '</span>' : '') + '</td>' +
-        '<td>' + esc(r.salesperson || '') + '<br><span class="mut">' + esc(r.allocated_by || '') + '</span></td><td>' + esc(fdt(r.assignment_date)) + '</td>' +
-        '<td>' + esc(r.status) + '<br><span class="mut">' + esc(r.priority || '') + '</span></td>' +
-        '<td>' + (r.last_fu_date ? esc(fdt(r.last_fu_date, 1)) + '<br><span class="mut">' + esc(r.last_fu_method) + ' · ' + esc(r.last_fu_result === 'Attempted - no response' ? ft('resNo') : ft('resOK')) + (r.last_fu_outcome ? ' · ' + esc(r.last_fu_outcome) : '') + '</span>' : '<span class="mut">—</span>') + '</td>' +
-        '<td style="white-space:normal;max-width:260px">' + (r.last_notes ? esc(r.last_notes.length > 90 ? r.last_notes.slice(0, 90) + '…' : r.last_notes) : '<span class="mut">—</span>') + '</td>' +
-        '<td>' + (r.next_action ? esc(r.next_action) + '<br>' : '') + (r.next_follow_up ? esc(fdt(r.next_follow_up, 1)) : '') + ' ' + dueB + '</td>' +
-        '<td>' + (r.overdue_days ? '<span class="lm-errtxt">' + r.overdue_days + ' ' + ft('days') + '</span>' : '—') + '</td>' +
-        '<td>' + r.fu_count + (r.lead_fu_count !== r.fu_count ? ' <span class="mut">(' + r.lead_fu_count + ')</span>' : '') + '</td>' +
-        '<td><button class="lm-btn" data-fact="hist" data-lead="' + esc(r.lead) + '" data-name="' + esc(r.customer_name || r.lead) + '">' + ft('hist') + '</button></td></tr>';
-    }).join('');
-  }, function (e) {
-    if (id !== FS.req) return;
-    var msg = e && (e.status === 403 || e.status === 417) ? ft('denied') : ft('err');
-    ['active', 'overdue', 'today', 'upcoming', 'nofu', 'nolog'].forEach(function (k) { var v = fq('[data-fcard="' + k + '"] .k-v'); if (v) v.innerHTML = '<span class="lm-errtxt">' + esc(msg) + '</span>'; });
-    fq('[data-fbody]').innerHTML = '<tr><td colspan="10" class="lm-empty lm-errtxt">' + esc(msg) + ' <button class="lm-btn" data-fact="refresh">' + ft('retry') + '</button></td></tr>';
-  });
-}
-function fumHistory(lead, name) {
-  var d = new frappe.ui.Dialog({ title: ft('histTitle') + ' — ' + name + ' (' + lead + ')', size: 'large', fields: [{ fieldtype: 'HTML', fieldname: 'h' }] });
-  d.fields_dict.h.$wrapper.html('<div class="text-muted">' + ft('loading') + '</div>'); d.show();
-  fpost({ action: 'fu_history', lead: lead }).then(function (rows) {
-    if (!rows.length) { d.fields_dict.h.$wrapper.html('<div class="text-muted">' + esc(ft('noHist')) + '</div>'); return; }
-    d.fields_dict.h.$wrapper.html('<div dir="' + (lang === 'ar' ? 'rtl' : 'ltr') + '" style="display:grid;gap:8px">' + rows.map(function (r) {
-      var okc = r.contact_result !== 'Attempted - no response';
-      return '<div style="border-inline-start:3px solid ' + (okc ? '#15803d' : '#b45309') + ';padding:4px 10px"><div><b>' + esc(fdt(r.followup_datetime, 1)) + '</b> · ' + esc(r.contact_method) + ' · ' + esc(okc ? ft('resOK') : ft('resNo')) + (r.outcome ? ' · ' + esc(r.outcome) : '') + (r.contact_person ? ' · ' + esc(r.contact_person) : '') + '</div>' +
-        '<div style="white-space:pre-wrap">' + esc(r.notes) + '</div>' + (r.next_action ? '<div class="text-muted">→ ' + esc(r.next_action) + '</div>' : '') +
-        '<div class="text-muted small">' + esc(r.status_before || '') + ' → ' + esc(r.status_after || '') + (r.next_follow_up ? ' · ' + esc(fdt(r.next_follow_up, 1)) : '') + ' · ' + ft('recBy') + ': ' + esc(r.recorded_by) + ' · ' + esc(r.allocation) + '</div></div>';
-    }).join('') + '</div>');
-  }, function (e) { d.fields_dict.h.$wrapper.html('<div class="text-danger">' + esc(e && (e.status === 403 || e.status === 417) ? ft('denied') : ft('err')) + '</div>'); });
-}
-// ================= END FOLLOW-UP MONITORING =================
+  /* ============================================================ data access */
+  function gl(args) { return guarded(null, 'frappe.client.get_list', Object.assign({ doctype: DT, limit_page_length: 0 }, args)).then(function (r) { return r || []; }); }
+  /* bulk_allocate_leads takes a JSON body (as in v1) */
+  function jpost(args) {
+    return fetch('/api/method/bulk_allocate_leads', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Frappe-CSRF-Token': (G.frappe && frappe.csrf_token) || '' }, body: JSON.stringify(args) })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok || j.exc) { var msg = ''; try { msg = j._server_messages ? JSON.parse(JSON.parse(j._server_messages)[0]).message : (j.exception || ''); } catch (x) { /* ignore */ } var e = new Error(String(msg || ('HTTP ' + r.status)).replace(/<[^>]+>/g, '')); e.status = r.status === 403 || /Permission/i.test(j.exc_type || '') || /not authorized|not permitted/i.test(msg) ? 403 : r.status; throw e; } return j.message; }); });
+  }
+  var REF = { cities: [], sources: [], sps: [], alloc: null, hist: [], allocErr: null, truncated: false }, EXTRA = null;
+  function loadRef() {
+    var o = [[DT, 'docstatus', '!=', 2]];
+    var pc = gl({ fields: ['city as k', 'count(name) as c'], filters: o.concat([[DT, 'city', 'is', 'set']]), group_by: 'city', order_by: 'city asc' }).then(function (r) { REF.cities = r.map(function (x) { return x.k; }).filter(hasText).map(function (c) { return { v: c, l: c }; }); }, function () { /* options stay empty */ });
+    var ps = gl({ fields: ['source as k', 'count(name) as c'], filters: o.concat([[DT, 'source', 'is', 'set']]), group_by: 'source', order_by: 'source asc' }).then(function (r) { REF.sources = r.map(function (x) { return { v: x.k, l: x.k }; }); }, function () { /* options stay empty */ });
+    var pa = jpost({ action: 'report_lead_ids' }).then(function (ids) {
+      var cur = ids.current || [], chunks = []; REF.hist = ids.history_only || []; REF.truncated = !!ids.truncated;
+      for (var i = 0; i < cur.length; i += 500) { chunks.push(cur.slice(i, i + 500)); }
+      return Promise.all(chunks.map(function (c) { return jpost({ action: 'report_allocations', leads: JSON.stringify(c) }); })).then(function (parts) {
+        var m = {}, sps = {};
+        cur.forEach(function (l) { m[l] = []; });
+        parts.forEach(function (p) { Object.keys(p || {}).forEach(function (l) { (p[l] || []).forEach(function (al) { if (!al.current) { return; } (m[l] = m[l] || []).push(al); sps[al.sales_person] = al.sales_person_name || al.sales_person; }); }); });
+        REF.alloc = m; REF.allocErr = null; REF.sps = Object.keys(sps).map(function (k) { return { v: k, l: sps[k] }; }).sort(function (a, b) { return a.l.localeCompare(b.l); });
+      });
+    }).catch(function (e) { REF.alloc = null; REF.hist = []; REF.sps = []; REF.allocErr = errKind(e); });
+    return Promise.all([pc, ps, pa]);
+  }
+  function allocLeads() { return REF.alloc ? Object.keys(REF.alloc) : []; }
+  function spLeads(sp) { var o = []; if (!REF.alloc) { return o; } Object.keys(REF.alloc).forEach(function (k) { if (REF.alloc[k].some(function (a) { return a.sales_person === sp; })) { o.push(k); } }); return o; }
+  function noAlloc() { var e = new Error('Allocation data is restricted to Lead Allocation Coordinators and System Managers'); e.status = 403; return e; }
+  /* v1 baseFilters: global filters → Leads Generation List filters (throws when allocation data is needed but unavailable) */
+  function baseFilters(opts) {
+    opts = opts || {};
+    var f = [[DT, 'docstatus', '!=', 2]];
+    if (F.from) { f.push([DT, 'date', '>=', F.from]); } if (F.to) { f.push([DT, 'date', '<=', F.to]); }
+    if (F.city) { if (F.city === '__none__') { f = f.concat(MISSING_CITY); } else { f.push([DT, 'city', '=', F.city]); } }
+    if (F.source) { f.push(F.source === '__none__' ? [DT, 'source', 'is', 'not set'] : [DT, 'source', '=', F.source]); }
+    if (F.sp) { if (!REF.alloc) { throw noAlloc(); } var l = spLeads(F.sp); f.push([DT, 'name', 'in', l.length ? l : ['__none__']]); }
+    var al = opts.alloc !== undefined ? opts.alloc : F.alloc;
+    if (al) {
+      if (!REF.alloc) { throw noAlloc(); }
+      var a = allocLeads();
+      if (al === 'assigned') { f.push([DT, 'name', 'in', a.length ? a : ['__none__']]); } else { var un = a.concat(REF.hist || []); if (un.length) { f.push([DT, 'name', 'not in', un]); } }
+    }
+    if (opts.withExtra !== false && EXTRA) { f = f.concat(EXTRA.filters); }
+    return f;
+  }
+  function orFilters(q) { var s = String(q == null ? F.q || '' : q).trim(); if (!s) { return null; } var like = '%' + s + '%'; return ['name', 'customer_name', 'contact_person', 'customer_email', 'customer_email_2', 'phone', 'telephone'].map(function (x) { return [DT, x, 'like', like]; }); }
+  function safe(fn) { try { return Promise.resolve(fn()); } catch (e) { return Promise.reject(e); } }
+  function countWith(extra, opts) { return safe(function () { var a = { fields: ['count(name) as c'], filters: baseFilters(opts).concat(extra || []) }, o = orFilters(); if (o) { a.or_filters = o; } return gl(a).then(function (r) { return +((r[0] || {}).c) || 0; }); }); }
+  function lmGroup(field, opts) { return safe(function () { var a = { fields: [field + ' as k', 'count(name) as c'], filters: baseFilters(opts), group_by: field, order_by: 'c desc' }, o = orFilters(); if (o) { a.or_filters = o; } return gl(a); }); }
+  function settle(p) { return p.then(function (v) { return { v: v }; }, function (e) { return { e: errKind(e) }; }); }
 
+  /* ============================================================ loading */
+  var REFP = null;
+  function loadAll() {
+    REFP = loadRef(); RS.ids = null; FU.ver++;
+    var o = { withExtra: false };
+    run('ov', function () {
+      return REFP.then(function () {
+        var dupArgs = function (f, like) { return safe(function () { var a = { fields: [f + ' as k', 'count(name) as c'], filters: baseFilters(o).concat([[DT, f, 'like', like]]), group_by: f, order_by: 'c desc' }, x = orFilters(); if (x) { a.or_filters = x; } return gl(a); }); };
+        var jobs = { tot: countWith([], o), cat: countWith([[DT, 'catalogue_status', '=', 1]], o), miss: countWith(MISSING_CONTACT, o), city0: countWith(MISSING_CITY, o), person0: countWith(MISSING_PERSON, o),
+          as: countWith([], { withExtra: false, alloc: 'assigned' }), un: countWith([], { withExtra: false, alloc: 'unassigned' }), hist: REF.alloc && REF.hist.length ? countWith([[DT, 'name', 'in', REF.hist]], o) : Promise.resolve(REF.alloc ? 0 : Promise.reject(noAlloc())),
+          src: lmGroup('source', o), city: lmGroup('city', o), dates: lmGroup('date', o), dupE: dupArgs('customer_email', '%@%'), dupP: dupArgs('phone', '%_____%') };
+        var keys = Object.keys(jobs);
+        return Promise.all(keys.map(function (k) { return settle(jobs[k]); })).then(function (r) { var out = {}; keys.forEach(function (k, i) { out[k] = r[i]; }); return out; });
+      });
+    });
+    ['overdue', 'today', 'nofu'].forEach(function (d) { run('fu_' + d, function () { return jpost({ action: 'fu_monitor', f: JSON.stringify({ sp_user: '', alloc_by: '', status: '', priority: '', due: d, dbasis: 'next', dfrom: '', dto: '', q: '' }), sort: d === 'overdue' ? 'overdue_days' : 'next_follow_up', dir: d === 'overdue' ? 'desc' : 'asc', start: 0, page_len: 6 }); }); });
+    run('una', function () { return REFP.then(function () { if (!REF.alloc) { throw noAlloc(); } var u = allocLeads().concat(REF.hist); return gl({ fields: ['name', 'customer_name', 'date', 'city', 'source', 'contact_person'], filters: [[DT, 'docstatus', '!=', 2]].concat(u.length ? [[DT, 'name', 'not in', u]] : []), order_by: 'date desc', limit_page_length: 6 }); }); });
+    run('mis', function () { return gl({ fields: ['name', 'customer_name', 'date', 'city', 'source'], filters: [[DT, 'docstatus', '!=', 2]].concat(MISSING_CONTACT), order_by: 'date desc', limit_page_length: 6 }); });
+    if (tab === 'report') { rApply(); }
+  }
 
-var HOST = R.querySelector('.lm-root') || R;
-HOST.innerHTML = '<div class="lm"></div>';
-shell();
-refresh(true);
+  /* ============================================================ actions pending */
+  function actSpecs() {
+    return [
+      { id: 'a_over', client: true, short: tr('Overdue follow-ups', 'متابعات متأخرة'), title: tr('Allocated leads with an overdue follow-up', 'عملاء موزعون بمتابعة متأخرة'), why: tr('Next follow-up passed (Riyadh time). Most overdue first.', 'المتابعة القادمة مضت (بتوقيت الرياض). الأكثر تأخرًا أولًا.') },
+      { id: 'a_today', client: true, short: tr('Due today', 'مستحقة اليوم'), title: tr('Follow-ups due today', 'متابعات مستحقة اليوم'), why: tr('Allocated leads whose next follow-up is today.', 'عملاء موزعون متابعتهم القادمة اليوم.') },
+      { id: 'a_un', client: true, short: tr('Never allocated', 'لم توزع'), title: tr('Leads never allocated', 'عملاء لم يوزعوا مطلقًا'), why: tr('All dates. Newest first. Select them in the Leads tab and allocate.', 'كل التواريخ. الأحدث أولًا. حددها في تبويب العملاء ثم وزّعها.') },
+      { id: 'a_nofu', client: true, short: tr('No follow-up scheduled', 'بلا متابعة مجدولة'), title: tr('Allocated leads with no follow-up scheduled', 'عملاء موزعون بلا متابعة مجدولة'), why: tr('None of the lead’s current allocations has a next follow-up.', 'لا يوجد لأي توزيع حالي متابعة قادمة.') },
+      { id: 'a_miss', client: true, short: tr('Missing contact details', 'بيانات اتصال ناقصة'), title: tr('Leads with no usable email or phone', 'عملاء بلا بريد أو هاتف صالح'), why: tr('All dates. Complete the record before allocating.', 'كل التواريخ. أكمل السجل قبل التوزيع.') }
+    ];
+  }
+  function fuItem(p, tone) { return function (r) { return { p: p, score: score(p, 0, +r.overdue_days || 0), dt: DT, name: r.lead, title: r.customer_name || r.lead, desc: r.lead + ' · ' + (r.status || '') + (r.priority ? ' · ' + r.priority : ''), who: r.salesperson || null, due: r.overdue_days ? tr(daysTxt(r.overdue_days) + ' overdue', 'متأخر ' + daysTxt(r.overdue_days)) : r.next_follow_up ? fdt(r.next_follow_up, true) : tr('Not scheduled', 'غير مجدولة'), tone: tone }; }; }
+  function leadItem(p, tone, why) { return function (r) { return { p: p, score: score(p, 0, ageOf(r.date)), dt: DT, name: r.name, title: r.customer_name || r.name, desc: [r.name, r.city, r.source].filter(Boolean).join(' · '), who: null, due: why || (r.date ? tr('Lead date ', 'تاريخ العميل ') + fdt(r.date) : ''), tone: tone }; }; }
+  function actClient() {
+    var o = {};
+    [['a_over', 'fu_overdue', 'overdue', 'high', 'bad'], ['a_today', 'fu_today', 'today', 'med', 'warn'], ['a_nofu', 'fu_nofu', 'nofu', 'low', 'n']].forEach(function (x) {
+      if (D[x[1] + 'Err']) { o[x[0]] = 'ERR:' + D[x[1] + 'Err']; } else if (D[x[1]]) { o[x[0]] = { rows: D[x[1]].rows || [], count: +((D[x[1]].cards || {})[x[2]]) || 0, item: fuItem(x[3], x[4]) }; }
+    });
+    var ov = D.ov;
+    if (D.unaErr) { o.a_un = 'ERR:' + D.unaErr; } else if (D.una && ov) { o.a_un = { rows: D.una, count: ov.un.v != null ? ov.un.v : D.una.length, item: leadItem('med', 'warn') }; }
+    if (D.misErr) { o.a_miss = 'ERR:' + D.misErr; } else if (D.mis && ov) { o.a_miss = { rows: D.mis, count: ov.miss.v != null ? ov.miss.v : D.mis.length, item: leadItem('low', 'n') }; }
+    return Object.keys(o).length ? o : null;
+  }
+
+  /* ============================================================ banner and overview */
+  function banner() {
+    var h = '';
+    if (REF.allocErr === 'perm') { h += alertBox('info', esc(tr('Allocation details, the salesperson filter and follow-up monitoring are limited to Lead Allocation Coordinators and System Managers. Lead counts and data quality are shown.', 'تفاصيل التوزيع ومرشح المندوب ومتابعة المتابعات متاحة لمنسقي التوزيع ومديري النظام فقط. تظهر أعداد العملاء وجودة البيانات.'))); }
+    if (REF.truncated) { h += alertBox('warn', esc(tr('Allocation data exceeded the reporting limit; allocation counts may be incomplete.', 'تجاوزت بيانات التوزيع الحد؛ قد تكون أعداد التوزيع غير مكتملة.'))); }
+    if (EXTRA) { h += alertBox('info', esc(tr('Leads table filter: ', 'مرشح جدول العملاء: ') + EXTRA.label) + ' <button type="button" class="dms-linkbtn" data-act="clearx">' + esc(tr('Clear', 'مسح')) + '</button>'); }
+    return h;
+  }
+  function vv(x, f) { return !x ? '…' : x.e ? '—' : (f || num)(x.v); }
+  function tabOverview(AM) {
+    if (D.ovErr) { return srcErr(D.ovErr, DT) + actionsPanel(AM); }
+    var ov = D.ov;
+    if (!ov) { return '<div class="dms-grid dms-kpis dms-ov-kpis" aria-busy="true">' + skel(6, 'dms-skel-kpi') + '</div><div class="dms-main2">' + actionsPanel(AM) + '<div class="dms-skel dms-skel-panel"></div></div>'; }
+    var tot = ov.tot.v || 0, fo = D.fu_overdue, foE = D.fu_overdueErr;
+    var h = kpis([
+      kpi({ label: tr('Total leads', 'إجمالي العملاء'), val: vv(ov.tot), sub: esc(F.from || F.to ? (F.from || '…') + ' → ' + (F.to || '…') : tr('All lead dates', 'كل التواريخ')), act: 'xl:total' }),
+      kpi({ label: tr('Assigned', 'موزعون'), dot: 'var(--dms-ok)', val: vv(ov.as), top: ov.as.v != null ? tagc(esc(pct(ov.as.v, tot, 0))) : '', sub: esc(ov.as.e ? tr('Coordinator access needed', 'تحتاج صلاحية منسق') : tr('At least one current allocation', 'توزيع حالي واحد على الأقل')),
+        foot: ov.as.v != null && ov.un.v != null ? mixBar([{ label: tr('Assigned', 'موزع'), value: ov.as.v, color: 'var(--dms-ok)' }, { label: tr('Unassigned', 'غير موزع'), value: ov.un.v, color: 'var(--dms-age3)' }, { label: tr('Previously allocated', 'موزع سابقًا'), value: ov.hist.v || 0, color: '#8a97a8' }]) : null, act: ov.as.e ? null : 'xl:assigned' }),
+      kpi({ label: tr('Unassigned', 'غير موزعين'), dot: 'var(--dms-age3)', val: vv(ov.un), top: ov.un.v != null ? tagc(esc(pct(ov.un.v, tot, 0))) : '', sub: esc(ov.hist.v ? tr('Not incl. ', 'لا يشمل ') + num(ov.hist.v) + ' ' + tr('previously allocated', 'موزعين سابقًا') : tr('Never allocated', 'لم يوزعوا مطلقًا')), act: ov.un.e ? null : 'xl:unassigned' }),
+      kpi({ label: tr('Catalogue sent', 'تم إرسال الكتالوج'), val: vv(ov.cat), top: ov.cat.v != null ? tagc(esc(pct(ov.cat.v, tot, 0))) : '', sub: esc(tr('Catalogue status ticked', 'حالة الكتالوج مفعّلة')), act: 'xl:catalogue' }),
+      kpi({ label: tr('Missing contact details', 'بيانات اتصال ناقصة'), dot: ov.miss.v ? 'var(--dms-bad)' : 'var(--dms-ok)', val: vv(ov.miss), sub: esc(tr('No usable email or phone', 'بلا بريد أو هاتف صالح')), act: 'xl:missing' }),
+      kpi({ label: tr('Overdue follow-ups', 'متابعات متأخرة'), dot: 'var(--dms-bad)', val: foE ? '—' : !fo ? '…' : num((fo.cards || {}).overdue), sub: esc(foE ? tr('Coordinator access needed', 'تحتاج صلاحية منسق') : fo ? tr('Due today ', 'مستحقة اليوم ') + num((fo.cards || {}).today) + ' · ' + tr('active ', 'نشطة ') + num((fo.cards || {}).active) : ''), act: foE ? null : 'goto:followups' })
+    ], true);
+    var src = panel(tr('Leads by source', 'العملاء حسب المصدر'), ov.src.e ? srcErr(ov.src.e, DT) : hbars(ov.src.v.map(function (r) { var v = r.k == null || r.k === '' ? '__none__' : r.k; return { label: v === '__none__' ? tr('Not set', 'غير محدد') : r.k, value: r.c, act: 'xf:source:' + v }; }), num));
+    h += '<div class="dms-main2">' + actionsPanel(AM) + '<div class="dms-stackcol">' + panel(tr('Leads generated over time', 'العملاء عبر الزمن'), timeChart(ov.dates), '', esc(tr('By lead date', 'حسب تاريخ العميل'))) + src + '</div></div>';
+    h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Leads by city', 'العملاء حسب المدينة'), ov.city.e ? srcErr(ov.city.e, DT) : cityBars(ov.city.v), '', esc(tr('Top 10 + other', 'أعلى 10 + أخرى'))) + panel(tr('Data quality', 'جودة البيانات'), dqHtml(ov)) + '</div>';
+    return h;
+  }
+  function timeChart(x) {
+    if (!x || x.e) { return x ? srcErr(x.e, DT) : skel(1, 'dms-skel-panel'); }
+    var rows = x.v.filter(function (r) { return r.k; }).sort(function (a, b) { return a.k < b.k ? -1 : 1; });
+    if (!rows.length) { return empty(tr('No leads match the current filters.', 'لا عملاء مطابقون.')); }
+    var span = diffDays(String(rows[0].k).slice(0, 10), String(rows[rows.length - 1].k).slice(0, 10)), daily = span <= 62, b = {}, keys = [];
+    if (daily) { var cur = String(rows[0].k).slice(0, 10), end = String(rows[rows.length - 1].k).slice(0, 10); while (cur <= end) { keys.push(cur); b[cur] = 0; cur = addDays(cur, 1); } }
+    else { keys = monthList(String(rows[0].k).slice(0, 10), String(rows[rows.length - 1].k).slice(0, 10)); keys.forEach(function (k) { b[k] = 0; }); }
+    rows.forEach(function (r) { var k = daily ? String(r.k).slice(0, 10) : String(r.k).slice(0, 7); b[k] = (b[k] || 0) + r.c; });
+    return barChart(keys, daily ? 'day' : 'month', [{ label: tr('Leads', 'العملاء'), color: 'var(--dms-royal)', val: function (k) { return b[k] || 0; } }], num);
+  }
+  var TOPCITIES = [];
+  function cityBars(rows) {
+    var named = rows.filter(function (r) { return r.k != null && hasText(r.k); }), none = rows.filter(function (r) { return !(r.k != null && hasText(r.k)); }).reduce(function (a, r) { return a + r.c; }, 0);
+    var top = named.slice(0, 10), rest = named.slice(10).reduce(function (a, r) { return a + r.c; }, 0); TOPCITIES = top.map(function (r) { return r.k; });
+    var items = top.map(function (r) { return { label: r.k, value: r.c, act: 'xf:city:' + r.k }; });
+    if (rest) { items.push({ label: tr('Other', 'أخرى'), value: rest, color: '#8a97a8', act: 'xl:cityother' }); }
+    if (none) { items.push({ label: tr('Missing city', 'بدون مدينة'), value: none, color: 'var(--dms-age3)', act: 'xf:city:__none__' }); }
+    return hbars(items, num);
+  }
+  function dqHtml(ov) {
+    var e = (ov.dupE.v || []).filter(function (x) { return x.c > 1; }), p = (ov.dupP.v || []).filter(function (x) { return x.c > 1 && /\d{5}/.test(String(x.k).replace(/\D/g, '')); });
+    var row = function (lab, x, act) { return '<div><span class="dms-sm">' + esc(lab) + '</span><b class="dms-num">' + (x.e ? '—' : act && x.v ? '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="' + act + '">' + num(x.v) + '</button>' : num(x.v)) + '</b></div>'; };
+    var dups = e.slice(0, 5).map(function (x) { return '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="dup:customer_email:' + esc(x.k) + '">' + esc(x.k) + '</button> (' + num(x.c) + ')'; }).concat(p.slice(0, 5).map(function (x) { return '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="dup:phone:' + esc(x.k) + '">' + esc(x.k) + '</button> (' + num(x.c) + ')'; }));
+    return '<div class="dms-facts">' + row(tr('Missing phone and email', 'بلا هاتف وبريد'), ov.miss, 'xl:missing') + row(tr('Missing city', 'بلا مدينة'), ov.city0, 'xl:dqcity') + row(tr('Missing contact person', 'بلا جهة اتصال'), ov.person0, 'xl:dqperson') +
+      '<div><span class="dms-sm">' + esc(tr('Potential duplicates', 'تكرارات محتملة')) + '</span><b class="dms-num">' + (ov.dupE.e || ov.dupP.e ? '—' : num(e.length + p.length) + ' ' + esc(e.length + p.length === 1 ? tr('group', 'مجموعة') : tr('groups', 'مجموعات'))) + '</b></div></div>' +
+      (dups.length ? note(esc(tr('Same email (with @) or same phone (5+ digits): ', 'نفس البريد أو نفس الهاتف: ')) + dups.join(' · ')) : '');
+  }
+
+  /* ============================================================ leads table, selection, allocate, unassign */
+  var LS = { sel: {}, page: [] };
+  function leadUrl(n) { return docUrl(DT, n); }
+  function allocCell(r) {
+    if (!REF.alloc) { return '<span class="dms-sm">' + esc(tr('Restricted', 'مقيد')) + '</span>'; }
+    var a = REF.alloc[r.name];
+    var h = a && a.length ? bdi(a.map(function (x) { return x.sales_person_name || x.sales_person; }).join(', ')) : (REF.hist.indexOf(r.name) > -1 ? stat('n', tr('Previously allocated', 'موزع سابقًا')) : stat('warn', tr('Unassigned', 'غير موزع')));
+    return h + (CAN_ALLOC && a && a.length ? ' <button type="button" class="dms-linkbtn dms-tone-bad" data-act="ua1" data-v="' + esc(r.name) + '">' + esc(tr('Unassign', 'إلغاء الإسناد')) + '</button>' : '');
+  }
+  function tabLeads() {
+    var n = Object.keys(LS.sel).length;
+    var add = '<a class="dms-btn dms-btn-sm" href="/app/leads-generation-list/new" target="_blank" rel="noopener noreferrer">+ ' + esc(tr('Add lead', 'إضافة عميل')) + ' ↗</a>';
+    var tools = !CAN_ALLOC ? '<div class="lm-tools lm-tools-end">' + add + '</div>' : '<div class="lm-tools"><span class="dms-sm" aria-live="polite">' + esc(n ? num(n) + ' ' + tr('selected', 'محدد') : tr('Select leads to allocate or unassign them', 'حدد العملاء لتوزيعهم أو إلغاء إسنادهم')) + '</span>' +
+      '<button type="button" class="dms-btn dms-btn-sm" data-act="lsel" data-v="page">' + esc(tr('Select page', 'تحديد الصفحة')) + '</button>' + (n ? '<button type="button" class="dms-btn dms-btn-sm" data-act="lsel" data-v="clear">' + esc(tr('Clear selection', 'مسح التحديد')) + '</button>' : '') +
+      (CAN_ALLOC ? '<button type="button" class="dms-btn dms-btn-sm dms-btn-primary" data-act="alloc"' + (n ? '' : ' disabled') + '>' + esc(tr('Allocate', 'توزيع')) + (n ? ' (' + num(n) + ')' : '') + '</button><button type="button" class="dms-btn dms-btn-sm" data-act="uasel"' + (n ? '' : ' disabled') + '>' + esc(tr('Unassign selected', 'إلغاء إسناد المحدد')) + '</button>' : '') +
+      '<a class="dms-btn dms-btn-sm" href="/app/leads-generation-list/new" target="_blank" rel="noopener noreferrer">+ ' + esc(tr('Add lead', 'إضافة عميل')) + ' ↗</a></div>';
+    var key = JSON.stringify([F.from, F.to, F.city, F.source, F.sp, F.alloc, F.q, EXTRA && EXTRA.key, GEN]);
+    return tools + panel(tr('Leads', 'العملاء المحتملون'), regTable({ id: 't_leads', server: true, filters: [key], pageSize: 20, file: 'leads', order: 'date desc', searchHint: tr('Lead ID, company, contact, email or phone', 'رقم العميل، الشركة، جهة الاتصال، البريد أو الهاتف'), empty: tr('No leads match the current filters.', 'لا عملاء مطابقون.'),
+      loader: function (p, size, q, order) {
+        return safe(function () {
+          var f = baseFilters(), o = orFilters(q || F.q), ca = { fields: ['count(name) as c'], filters: f }, la = { fields: ['name', 'customer_name', 'date', 'city', 'source', 'contact_person', 'phone', 'telephone', 'customer_email', 'customer_email_2', 'catalogue_status'], filters: f, order_by: (order || 'date desc') + ', name desc', limit_start: p * size, limit_page_length: size };
+          if (o) { ca.or_filters = o; la.or_filters = o; }
+          return Promise.all([gl(ca), gl(la)]).then(function (r) { LS.page = r[1]; return { rows: r[1], total: +((r[0][0] || {}).c) || 0 }; });
+        });
+      },
+      cols: (CAN_ALLOC ? [{ h: tr('Select', 'تحديد'), r: function (r) { return '<input type="checkbox" class="lm-chk" data-sel="' + esc(r.name) + '" aria-label="' + esc(tr('Select ', 'تحديد ') + r.name) + '"' + (LS.sel[r.name] ? ' checked' : '') + '>'; } }] : []).concat([
+        { h: tr('Lead', 'العميل'), sf: 'name', r: function (r) { return docLink(DT, r.name) + '<span class="dms-sm lm-sub">' + esc(r.customer_name || '—') + '</span>'; }, c: function (r) { return r.name + ' ' + (r.customer_name || ''); } },
+        { h: tr('Lead date', 'تاريخ العميل'), sf: 'date', r: function (r) { return r.date ? dtc(r.date) : '<span class="dms-sm">—</span>'; }, c: function (r) { return r.date; } },
+        { h: tr('City', 'المدينة'), sf: 'city', r: function (r) { return hasText(r.city) ? bdi(r.city) : '<span class="dms-sm">—</span>'; }, c: function (r) { return r.city; } },
+        { h: tr('Source', 'المصدر'), sf: 'source', r: function (r) { return bdi(r.source || '—'); }, c: function (r) { return r.source; } },
+        { h: tr('Contact', 'جهة الاتصال'), r: function (r) { var em = [r.customer_email, r.customer_email_2].filter(function (e) { return usable(e, 'email'); }), ph = usable(r.phone, 'phone') ? r.phone : (usable(r.telephone, 'phone') ? r.telephone : ''); return (hasText(r.contact_person) ? bdi(r.contact_person) : '<span class="dms-sm">—</span>') + '<span class="dms-sm lm-sub"><bdi>' + esc(ph || '') + '</bdi>' + (ph && em.length ? ' · ' : '') + esc(em.join(', ')) + (!ph && !em.length ? stat('warn', tr('No email or phone', 'بلا بريد أو هاتف')) : '') + '</span>'; }, c: function (r) { return [r.contact_person, r.phone, r.customer_email].join(' '); } },
+        { h: tr('Assigned salesperson', 'المندوب'), r: allocCell, c: function (r) { var a = REF.alloc && REF.alloc[r.name]; return a ? a.map(function (x) { return x.sales_person_name; }).join('; ') : ''; } },
+        { h: tr('Catalogue', 'الكتالوج'), sf: 'catalogue_status', r: function (r) { return r.catalogue_status ? stat('ok', tr('Sent', 'مرسل')) : stat('n', tr('Not sent', 'غير مرسل')); }, c: function (r) { return r.catalogue_status ? 'Sent' : 'Not sent'; } }]) }), '', esc(EXTRA ? tr('Filtered: ', 'مُرشّح: ') + EXTRA.label : ''));
+  }
+  /* Allocate (v1 flow: salesperson search → details → review → bulk_allocate_leads) */
+  var AL = null, UA = null, ALT = null;
+  function alBody() {
+    var names = AL.names, f = function (lab, inner, id) { return '<div class="dms-ff"><label for="' + id + '">' + esc(lab) + '</label>' + inner + '</div>'; };
+    if (AL.step === 'done') { var m = AL.res || {}; return alertBox((m.skipped ? 'warn' : 'info'), '<b>' + esc(tr('Created: ', 'تم الإنشاء: ') + num(m.created || 0) + ' · ' + tr('Skipped: ', 'تم التخطي: ') + num(m.skipped || 0)) + '</b>' + ((m.skipped_leads || []).length ? '<br>' + esc(m.skipped_leads.join(', ')) : '')) + '<div class="dms-actions-row"><button type="button" class="dms-btn dms-btn-primary" data-act="closeov">' + esc(tr('Done', 'تم')) + '</button></div>'; }
+    var already = REF.alloc ? names.filter(function (n) { return REF.alloc[n] && REF.alloc[n].length; }) : [];
+    if (AL.step === 'review') {
+      return '<div class="dms-facts"><div><span class="dms-sm">' + esc(tr('Selected leads', 'العملاء المحددون')) + '</span><b>' + num(names.length) + '</b></div><div><span class="dms-sm">' + esc(tr('Salesperson', 'المندوب')) + '</span><b>' + esc(AL.label) + '</b></div><div><span class="dms-sm">' + esc(tr('Assignment date', 'تاريخ الإسناد')) + '</span><b>' + esc(AL.date) + '</b></div><div><span class="dms-sm">' + esc(tr('Priority', 'الأولوية')) + '</span><b>' + esc(AL.prio) + '</b></div></div>' +
+        (already.length ? alertBox('warn', esc(num(already.length) + ' ' + tr('already have an active allocation and will be skipped (no automatic reassignment).', 'لديها توزيع نشط وسيتم تخطيها (لا إعادة إسناد تلقائية).')) + '<br><span class="dms-sm">' + esc(already.slice(0, 10).join(', ')) + '</span>') : '') + (AL.err ? alertBox('err', esc(AL.err)) : '') +
+        '<div class="dms-actions-row lm-end"><button type="button" class="dms-btn" data-act="al" data-v="back"' + (AL.busy ? ' disabled' : '') + '>' + esc(tr('Back', 'رجوع')) + '</button><button type="button" class="dms-btn dms-btn-primary" data-act="al" data-v="confirm"' + (AL.busy ? ' disabled' : '') + '>' + esc(AL.busy ? tr('Allocating…', 'جارٍ التوزيع…') : tr('Confirm allocation', 'تأكيد التوزيع')) + '</button></div>';
+    }
+    var res = AL.results || [];
+    return '<p><b>' + num(names.length) + '</b> ' + esc(tr('selected leads', 'عملاء محددون')) + '</p>' +
+      f(tr('Salesperson', 'المندوب'), '<input id="al-sp" type="search" class="dms-input" data-alq="1" autocomplete="off" value="' + esc(AL.user ? AL.label : AL.txt) + '" placeholder="' + esc(tr('Search salesperson by name or email', 'ابحث عن مندوب بالاسم أو البريد')) + '">', 'al-sp') +
+      (AL.user ? '' : '<div class="lm-dd" role="listbox" aria-label="' + esc(tr('Salespeople', 'المندوبون')) + '">' + (AL.loading ? '<p class="dms-sm">' + esc(tr('Loading…', 'جارٍ التحميل…')) + '</p>' : AL.serr ? alertBox('err', esc(AL.serr)) : res.length ? res.map(function (x, i) { return '<button type="button" role="option" class="lm-dd-i" data-act="al" data-v="pick:' + i + '">' + esc((x.full_name || x.user) + ' — ' + (x.email || '')) + '</button>'; }).join('') : AL.searched ? '<p class="dms-sm">' + esc(tr('No matching salesperson', 'لا مندوب مطابق')) + '</p>' : '') + '</div>') +
+      '<div class="lm-row">' + f(tr('Assignment date', 'تاريخ الإسناد'), '<input id="al-d" type="date" class="dms-input" data-al="date" value="' + esc(AL.date) + '">', 'al-d') +
+      f(tr('Priority', 'الأولوية'), '<select id="al-p" class="dms-input" data-al="prio">' + PRIORITIES.map(function (p) { return '<option' + (AL.prio === p ? ' selected' : '') + '>' + p + '</option>'; }).join('') + '</select>', 'al-p') +
+      f(tr('Next follow-up', 'المتابعة القادمة'), '<input id="al-n" type="datetime-local" class="dms-input" data-al="next" value="' + esc(AL.next) + '">', 'al-n') + '</div>' + (AL.err ? alertBox('err', esc(AL.err)) : '') +
+      '<div class="dms-actions-row lm-end"><button type="button" class="dms-btn dms-btn-primary" data-act="al" data-v="review">' + esc(tr('Continue', 'متابعة')) + '</button></div>';
+  }
+  function alRedraw(sel) { if (OVL && OVL.lm === 'al') { OVL.body = alBody(); renderOverlay(); var el = sel && HOST.querySelector(sel); if (el) { el.focus(); if (el.setSelectionRange && el.type === 'search') { try { el.setSelectionRange(el.value.length, el.value.length); } catch (e) { /* ignore */ } } } } }
+  function alSearch() {
+    var me = ++AL.req; AL.loading = true; AL.serr = ''; alRedraw('[data-alq]');
+    callP('bulk_allocate_leads', { action: 'search_salespersons', txt: AL.txt, start: 0, page_len: 25 }).then(function (m) { if (!AL || me !== AL.req) { return; } AL.loading = false; AL.searched = true; AL.results = (m && m.results) || []; alRedraw('[data-alq]'); },
+      function () { if (!AL || me !== AL.req) { return; } AL.loading = false; AL.serr = tr('Could not load salespersons (permission or server error).', 'تعذر تحميل المندوبين (صلاحية أو خطأ).'); alRedraw('[data-alq]'); });
+  }
+  function uaBody() {
+    if (UA.done) { var m = UA.done; return alertBox(m.failed ? 'warn' : 'info', '<b>' + esc(tr('Unassigned: ', 'تم: ') + num(m.ok) + ' · ' + tr('Not changed: ', 'لم يتغير: ') + num(m.failed)) + '</b><br>' + (m.results || []).map(function (r) { return esc((r.ok ? '✔ ' : '✖ ') + (r.lead || '') + ' / ' + r.allocation + ' — ' + (r.message || '') + (r.ok && r.remaining_active ? ' (' + r.remaining_active + ' ' + tr('active remain', 'نشطة متبقية') + ')' : '')); }).join('<br>')) + '<div class="dms-actions-row"><button type="button" class="dms-btn dms-btn-primary" data-act="closeov">' + esc(tr('Done', 'تم')) + '</button></div>'; }
+    var h = alertBox('warn', esc(tr('The selected allocations end with status “Unassigned”. They are not deleted: outcome, notes, next follow-up and history are kept. A lead is available for reallocation only when no active allocation is left.', 'تنتهي التوزيعات المحددة بالحالة "Unassigned" ولا تحذف: تبقى النتيجة والملاحظات والمتابعة والسجل. يصبح العميل متاحًا لإعادة التوزيع عند عدم وجود توزيع نشط.')));
+    if (UA.loading) { return h + skel(1, 'dms-skel-panel'); }
+    if (UA.lerr) { return h + alertBox('err', esc(UA.lerr)); }
+    h += '<div class="lm-ua">' + UA.leads.map(function (l) {
+      var cur = (UA.allocs[l] || []).filter(function (a) { return a.current; });
+      return '<div class="lm-ua-l"><b>' + esc(l) + '</b>' + (cur.length > 1 ? ' <span class="dms-sm dms-tone-bad">' + esc(tr('several active allocations — tick the ones to end', 'عدة توزيعات نشطة — اختر ما يجب إنهاؤه')) + '</span>' : '') +
+        (cur.length ? cur.map(function (a) { return '<label class="lm-opt"><input type="checkbox" data-ua="' + esc(a.allocation) + '" data-ul="' + esc(l) + '"' + (UA.picks[a.allocation] ? ' checked' : '') + '><span>' + esc((a.sales_person_name || a.sales_person) + ' · ' + a.allocation + ' · ' + (a.status || '') + ' · ' + fdt(a.assignment_date) + (a.fu_count ? ' · ' + a.fu_count + ' ' + tr('follow-ups', 'متابعة') : '')) + '</span></label>'; }).join('') : '<p class="dms-sm">' + esc(tr('No active allocation (skipped)', 'لا توزيع نشط (تخطي)')) + '</p>') + '</div>';
+    }).join('') + '</div>';
+    return h + '<label class="lm-note"><span>' + esc(tr('Unassignment reason (required)', 'سبب إلغاء الإسناد (مطلوب)')) + '</span><textarea class="dms-input dms-ta" data-uareason="1" maxlength="500">' + esc(UA.reason) + '</textarea></label>' + (UA.err ? alertBox('err', esc(UA.err)) : '') +
+      '<div class="dms-actions-row lm-end"><button type="button" class="dms-btn dms-btn-primary lm-danger" data-act="ua" data-v="go"' + (UA.busy ? ' disabled' : '') + '>' + esc(UA.busy ? tr('Working…', 'جارٍ التنفيذ…') : tr('Unassign selected allocations', 'إلغاء إسناد التوزيعات المحددة')) + '</button></div>';
+  }
+  function uaRedraw(sel) { if (OVL && OVL.lm === 'ua') { OVL.body = uaBody(); renderOverlay(); var el = sel && HOST.querySelector(sel); if (el) { el.focus(); } } }
+  function openUnassign(leads) {
+    leads = leads.filter(function (l, i, a) { return l && a.indexOf(l) === i; });
+    if (!leads.length) { toast(tr('Select at least one lead that has an active allocation.', 'حدد عميلًا لديه توزيع نشط.'), true); return; }
+    UA = { leads: leads, allocs: {}, picks: {}, reason: '', loading: true }; openDrill('ua');
+    var chunks = []; for (var i = 0; i < leads.length; i += 500) { chunks.push(leads.slice(i, i + 500)); }
+    Promise.all(chunks.map(function (c) { return jpost({ action: 'report_allocations', leads: JSON.stringify(c) }); })).then(function (parts) {
+      if (!UA) { return; } parts.forEach(function (p) { Object.assign(UA.allocs, p || {}); });
+      leads.forEach(function (l) { var cur = (UA.allocs[l] || []).filter(function (a) { return a.current; }); if (cur.length === 1) { UA.picks[cur[0].allocation] = l; } });
+      UA.loading = false; uaRedraw('[data-uareason]');
+    }, function (e) { if (UA) { UA.loading = false; UA.lerr = tr('Could not load current allocations. ', 'تعذر تحميل التوزيعات الحالية. ') + (e.message || ''); uaRedraw(); } });
+  }
+
+  /* ============================================================ detailed report (v1 logic, kit table) */
+  var RS = { f: { basis: 'lead', spUser: '', astat: '', allocBy: '', cat: '', priority: '', fu: '' }, ids: null, allocators: [], alloc: {}, cols: null };
+  try { RS.cols = JSON.parse(G.localStorage.getItem('lm_report_cols_v1') || 'null'); } catch (e) { /* ignore */ }
+  if (!Array.isArray(RS.cols) || !RS.cols.length) { RS.cols = RCOLS.filter(function (c) { return c[4]; }).map(function (c) { return c[0]; }); }
+  function rBaseFilters() {
+    var f = [[DT, 'docstatus', '!=', 2]];
+    if (RS.f.basis === 'lead') { if (F.from) { f.push([DT, 'date', '>=', F.from]); } if (F.to) { f.push([DT, 'date', '<=', F.to]); } }
+    if (F.city && F.city !== '__none__') { f.push([DT, 'city', '=', F.city]); } else if (F.city === '__none__') { f = f.concat(MISSING_CITY); }
+    if (F.source) { f.push(F.source === '__none__' ? [DT, 'source', 'is', 'not set'] : [DT, 'source', '=', F.source]); }
+    if (RS.f.cat !== '') { f.push([DT, 'catalogue_status', '=', parseInt(RS.f.cat, 10)]); }
+    var I = RS.ids; if (I && I.matched) { f.push([DT, 'name', 'in', I.matched.length ? I.matched : ['__none__']]); }
+    return f;
+  }
+  function rStatus(st) {
+    var I = RS.ids, cur = I.current || [], his = I.history_only || [];
+    if (st === 'assigned') { return [[DT, 'name', 'in', cur.length ? cur : ['__none__']]]; }
+    if (st === 'history') { return [[DT, 'name', 'in', his.length ? his : ['__none__']]]; }
+    if (st === 'unassigned') { var u = cur.concat(his); return u.length ? [[DT, 'name', 'not in', u]] : []; }
+    return [];
+  }
+  function rCount(extra) { var a = { fields: ['count(name) as c'], filters: rBaseFilters().concat(extra) }, o = orFilters(); if (o) { a.or_filters = o; } return gl(a).then(function (r) { return +((r[0] || {}).c) || 0; }); }
+  function allocArgs() { var a = { action: 'report_lead_ids' }, R = RS.f; if (R.spUser) { a.salesperson_user = R.spUser; } if (R.allocBy) { a.allocated_by = R.allocBy; } if (R.priority) { a.priority = R.priority; } if (R.fu) { a.fu_status = R.fu; } if (R.basis === 'asg') { if (F.from) { a.asg_from = F.from; } if (F.to) { a.asg_to = F.to; } } return a; }
+  function rApply() {
+    run('rids', function () { return jpost(allocArgs()).then(function (m) { RS.ids = m; if ((m.allocators || []).length) { RS.allocators = m.allocators; } return m; }); });
+    run('rcnt', function () {
+      var wait = function () { return D.rids ? Promise.resolve() : D.ridsErr ? Promise.reject(Object.assign(new Error('ids'), { status: D.ridsErr === 'perm' ? 403 : 500 })) : new Promise(function (r) { later(r, 120); }).then(wait); };
+      return wait().then(function () { var st = rStatus(RS.f.astat); return Promise.all([rCount(st), rCount(st.concat(rStatus('assigned'))), rCount(st.concat(rStatus('unassigned'))), rCount(st.concat(rStatus('history'))), rCount(st.concat([[DT, 'catalogue_status', '=', 1]]))]); });
+    });
+  }
+  function allocSummary(lead) { var all = (RS.alloc && RS.alloc[lead]) || [], cur = all.filter(function (a) { return a.current; }), hist = all.filter(function (a) { return !a.current; }), latest = all[0] || null; return { all: all, cur: cur, hist: hist, latest: latest, show: cur.length ? cur : (latest ? [latest] : []) }; }
+  function cellText(key, r) {
+    var A = allocSummary(r.name), sh = A.show, j = function (fn) { return sh.map(fn).filter(function (x) { return x; }).join('; '); };
+    switch (key) {
+      case 'date': return fdt(r.date);
+      case 'catalogue_status': return r.catalogue_status ? tr('Sent', 'مرسل') : tr('Not sent', 'غير مرسل');
+      case 'owner': return userName(r.owner); case 'modified_by': return userName(r.modified_by);
+      case 'creation': return fdt(r.creation, 1); case 'modified': return fdt(r.modified, 1);
+      case 'a_status': return A.cur.length ? tr('Assigned (current)', 'موزع (حالي)') + (A.cur.length > 1 ? ' (' + A.cur.length + ')' : '') : (A.hist.length ? tr('Previously allocated', 'موزع سابقًا') : tr('Unassigned', 'غير موزع'));
+      case 'a_sp': return j(function (a) { return a.sales_person_name; }) + (A.cur.length ? '' : (A.latest ? ' (' + tr('history', 'سابق') + ')' : ''));
+      case 'a_sp_email': return j(function (a) { return a.sales_person_email; });
+      case 'a_by': return j(function (a) { return a.allocated_by; });
+      case 'a_date': return j(function (a) { return fdt(a.assignment_date); });
+      case 'a_priority': return j(function (a) { return a.priority; });
+      case 'a_next': return j(function (a) { return fdt(a.next_follow_up, 1); });
+      case 'a_fu': return j(function (a) { return [a.status, a.outcome].filter(function (x) { return x; }).join(' / '); });
+      case 'a_last': return j(function (a) { return fdt(a.last_contacted, 1); });
+      case 'a_notes': return A.latest ? (A.latest.remarks || '') : '';
+      case 'f_date': case 'f_method': case 'f_outcome': case 'f_notes': case 'f_next': case 'f_count':
+        var fl = null, fc = 0; A.all.forEach(function (a) { fc += a.fu_count || 0; if (a.fu_latest && (!fl || a.fu_latest.date > fl.date)) { fl = a.fu_latest; } });
+        if (key === 'f_count') { return String(fc); } if (!fl) { return ''; }
+        return key === 'f_date' ? fdt(fl.date, 1) : key === 'f_method' ? (fl.method || '') + ' / ' + (fl.result || '') : key === 'f_outcome' ? (fl.outcome || '') : key === 'f_notes' ? (fl.notes || '') : (fl.next_action || '');
+      default: return r[key] == null ? '' : String(r[key]);
+    }
+  }
+  function rLoader(p, size, q, order) {
+    if (!RS.ids) { return Promise.resolve({ rows: [], total: 0 }); }
+    var f = rBaseFilters().concat(rStatus(RS.f.astat)), o = orFilters(q || F.q), ca = { fields: ['count(name) as c'], filters: f }, la = { fields: LEAD_FIELDS, filters: f, order_by: (order || 'date desc') + ', name desc', limit_start: p * size, limit_page_length: size };
+    if (o) { ca.or_filters = o; la.or_filters = o; }
+    return Promise.all([gl(ca), gl(la)]).then(function (r) {
+      var rows = r[1], names = rows.map(function (x) { return x.name; }), res = { rows: rows, total: +((r[0][0] || {}).c) || 0 };
+      if (!names.length) { return res; }
+      return jpost({ action: 'report_allocations', leads: JSON.stringify(names) }).then(function (m) { Object.assign(RS.alloc, m || {}); RS.allocErr = null; return res; }, function () { RS.allocErr = 'perm'; return res; });
+    });
+  }
+  function rSelect(k, label, opts) { return '<div class="dms-ff lm-ff"><label for="rf-' + k + '">' + esc(label) + '</label><select id="rf-' + k + '" class="dms-input" data-rf="' + k + '">' + opts.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (RS.f[k] === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select></div>'; }
+  function tabReport() {
+    var A = [['', tr('All', 'الكل')]];
+    var h = '<div class="lm-tools">' + rSelect('basis', tr('Date basis', 'أساس التاريخ'), [['lead', tr('Lead date', 'تاريخ العميل')], ['asg', tr('Assignment date', 'تاريخ الإسناد')]]) +
+      rSelect('astat', tr('Allocation status', 'حالة التوزيع'), A.concat([['assigned', tr('Assigned (current)', 'موزع (حالي)')], ['unassigned', tr('Never allocated', 'لم يوزع')], ['history', tr('Previously allocated', 'موزع سابقًا')]])) +
+      rSelect('spUser', tr('Salesperson', 'المندوب'), A.concat(fuSps().map(function (s) { return [s.user, s.name]; }))) + rSelect('allocBy', tr('Allocated by', 'وزّع بواسطة'), A.concat(RS.allocators.map(function (a) { return [a.user, a.full_name]; }))) +
+      rSelect('cat', tr('Catalogue', 'الكتالوج'), A.concat([['1', tr('Sent', 'مرسل')], ['0', tr('Not sent', 'غير مرسل')]])) + rSelect('priority', tr('Priority', 'الأولوية'), A.concat(PRIORITIES.map(function (p) { return [p, p]; }))) +
+      rSelect('fu', tr('Follow-up status', 'حالة المتابعة'), A.concat(FU_STATUSES.map(function (p) { return [p, p]; }))) + '</div>';
+    if (D.ridsErr) { return h + (D.ridsErr === 'perm' ? alertBox('info', esc(tr('Allocation details are restricted to Lead Allocation Coordinators and System Managers.', 'تفاصيل التوزيع متاحة لمنسقي التوزيع ومديري النظام فقط.'))) : srcErr(D.ridsErr, 'bulk_allocate_leads')); }
+    var c = D.rcnt, cv = function (i) { return D.rcntErr ? '—' : c ? num(c[i]) : '…'; };
+    h += kpis([kpi({ label: tr('Matching leads', 'العملاء المطابقون'), val: cv(0) }), kpi({ label: tr('Assigned', 'موزعون'), dot: 'var(--dms-ok)', val: cv(1) }), kpi({ label: tr('Never allocated', 'لم يوزعوا'), dot: 'var(--dms-age3)', val: cv(2) }), kpi({ label: tr('Previously allocated', 'موزعون سابقًا'), val: cv(3) }), kpi({ label: tr('Catalogue sent', 'تم إرسال الكتالوج'), val: cv(4) })]);
+    if (D.rids && D.rids.truncated) { h += alertBox('warn', esc(tr('Allocation data exceeded the reporting limit; allocation filters may be incomplete.', 'تجاوزت بيانات التوزيع الحد؛ قد تكون الفلاتر غير مكتملة.'))); }
+    var cols = RCOLS.filter(function (x) { return RS.cols.indexOf(x[0]) > -1; });
+    var chooser = '<details class="lm-cols"><summary>' + esc(tr('Columns', 'الأعمدة')) + ' (' + num(cols.length) + ')</summary><div class="lm-cols-g">' + RCOLS.map(function (x) { return '<label class="lm-opt"><input type="checkbox" data-rcol="' + x[0] + '"' + (RS.cols.indexOf(x[0]) > -1 ? ' checked' : '') + '><span>' + esc(tr(x[1], x[2])) + '</span></label>'; }).join('') + '</div><div class="dms-actions-row"><button type="button" class="dms-btn dms-btn-sm" data-act="rcols" data-v="all">' + esc(tr('Show all columns', 'كل الأعمدة')) + '</button><button type="button" class="dms-btn dms-btn-sm" data-act="rcols" data-v="reset">' + esc(tr('Reset columns', 'إعادة ضبط الأعمدة')) + '</button></div></details>';
+    var key = JSON.stringify([RS.f, F.from, F.to, F.city, F.source, F.q, D.rids ? 1 : 0, GEN]);
+    return h + panel(tr('Detailed report', 'التقرير التفصيلي'), '<div class="lm-tools">' + chooser + '<button type="button" class="dms-btn dms-btn-sm" data-act="rprint">' + esc(tr('Printable report', 'تقرير للطباعة')) + '</button></div>' +
+      (D.rids ? regTable({ id: 't_rep', server: true, filters: [key], pageSize: 25, order: 'date desc', file: 'Lead_Detailed_Report', loader: rLoader, searchHint: tr('Lead ID, company, contact, phone or email', 'رقم العميل، الشركة، جهة الاتصال، الهاتف أو البريد'), empty: tr('No leads match the selected filters.', 'لا عملاء مطابقون.'),
+        cols: cols.map(function (x) { var k = x[0]; return { h: tr(x[1], x[2]), sf: x[3] || undefined, r: function (r) { var v = cellText(k, r); if (k === 'name') { return docLink(DT, r.name); } if (k === 'customer_name') { return bdi(v || '—'); } if (v && /^(date|a_date|a_next|a_last|f_date|creation|modified)$/.test(k)) { return '<span class="lm-nw dms-num">' + esc(v).replace(/; /g, '<br>') + '</span>'; } if (k === 'catalogue_status') { return stat(r.catalogue_status ? 'ok' : 'n', v); } if (k === 'a_status') { var A = allocSummary(r.name); return RS.allocErr ? '<span class="dms-sm">' + esc(tr('Restricted', 'مقيد')) + '</span>' : stat(A.cur.length ? 'ok' : A.hist.length ? 'n' : 'warn', v); } return v ? '<span class="lm-clip" title="' + esc(v) + '">' + esc(v.length > 60 ? v.slice(0, 60) + '…' : v).replace(/; /g, '<br>') + '</span>' : '<span class="dms-sm">—</span>'; }, c: function (r) { return cellText(k, r); } }; }).concat([{ h: '', r: function (r) { return '<button type="button" class="dms-btn dms-btn-sm" data-act="rlead" data-v="' + esc(r.name) + '">' + esc(tr('Details', 'التفاصيل')) + '</button>'; } }]) }) : skel(1, 'dms-skel-panel')), '', esc(tr('Assigned: current allocation. Previously allocated: history only, no current allocation. Never allocated: no allocation at all.', 'موزع: توزيع حالي. موزع سابقًا: سجل فقط بلا توزيع حالي. لم يوزع: لا توزيع مطلقًا.')));
+  }
+  function rPrint() {
+    var win = G.open('', '_blank'); if (!win) { toast(tr('Allow pop-ups to open the printable report.', 'اسمح بالنوافذ المنبثقة.'), true); return; }
+    toast(tr('Preparing the report…', 'جارٍ تجهيز التقرير…'));
+    var out = [], step = function (p) { return rLoader(p, 500, '', 'date desc').then(function (res) { out = out.concat(res.rows); return res.rows.length === 500 && out.length < 10000 ? step(p + 1) : res.total; }); };
+    step(0).then(function (total) {
+      var cols = RCOLS.filter(function (x) { return RS.cols.indexOf(x[0]) > -1; }), dir = LANG === 'ar' ? 'rtl' : 'ltr';
+      win.document.open(); win.document.write('<!doctype html><html dir="' + dir + '"><head><meta charset="utf-8"><title>' + esc(tr('Lead Management — Detailed Report', 'إدارة العملاء — تقرير تفصيلي')) + '</title><style>body{font-family:"Segoe UI",Tahoma,Arial,sans-serif;color:#1f2937;margin:18px;font-size:10.5px}h1{color:#14325c;font-size:16px;margin:0 0 4px}.m{color:#6b7280;margin:2px 0}table{border-collapse:collapse;width:100%;margin-top:10px}th{background:#14325c;color:#fff;text-align:start;padding:4px 5px}td{border-bottom:1px solid #e3e7ee;padding:4px 5px;vertical-align:top;white-space:pre-wrap}@page{size:A4 landscape;margin:10mm}thead{display:table-header-group}</style></head><body><h1>' + esc(tr('Lead Management — Detailed Report', 'إدارة العملاء — تقرير تفصيلي')) + '</h1><div class="m">' + esc(num(out.length) + ' / ' + num(total) + ' · ' + TODAY) + '</div><table><thead><tr>' + cols.map(function (x) { return '<th>' + esc(tr(x[1], x[2])) + '</th>'; }).join('') + '</tr></thead><tbody>' + out.map(function (r) { return '<tr>' + cols.map(function (x) { return '<td>' + esc(cellText(x[0], r)) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></body></html>');
+      win.document.close(); later(function () { win.print(); }, 400);
+    }, function () { win.close(); toast(tr('Export failed.', 'تعذر التصدير.'), true); });
+  }
+
+  /* ============================================================ follow-up monitoring (fu_monitor / fu_history) */
+  var FU = { f: { sp_user: '', alloc_by: '', status: '', priority: '', due: '', dbasis: 'next', dfrom: '', dto: '', q: '' }, ver: 0, cards: null, sps: [], allocators: [], err: null, hist: null };
+  var FCARDS = [['active', 'Active leads', 'العملاء النشطون', 'var(--dms-ok)'], ['overdue', 'Overdue follow-ups', 'متابعات متأخرة', 'var(--dms-bad)'], ['today', 'Due today', 'مستحقة اليوم', 'var(--dms-age3)'], ['upcoming', 'Upcoming', 'قادمة', 'var(--dms-royal)'], ['nofu', 'No follow-up scheduled', 'بلا متابعة مجدولة', '#8a97a8'], ['nolog', 'No recorded follow-up', 'بلا متابعة مسجلة', '#8a97a8']];
+  function fuLoader(p, size, q, order) {
+    var o = String(order || 'next_follow_up asc').split(' '), f = Object.assign({}, FU.f, { q: q || FU.f.q });
+    return jpost({ action: 'fu_monitor', f: JSON.stringify(f), sort: o[0], dir: o[1] || 'asc', start: p * size, page_len: size }).then(function (m) {
+      var first = !FU.cards; FU.cards = m.cards || {}; FU.err = null; if ((m.salespersons || []).length) { FU.sps = m.salespersons; } if ((m.allocators || []).length) { FU.allocators = m.allocators; } FU.trunc = m.truncated;
+      if (first) { soon(); } return { rows: m.rows || [], total: +m.total || 0 };
+    }, function (e) { FU.err = errKind(e); soon(); throw e; });
+  }
+  function fuSps() { return FU.sps.length ? FU.sps : ((D.fu_overdue || {}).salespersons || []); }
+  function fSelect(k, label, opts) { return '<div class="dms-ff lm-ff"><label for="ff-' + k + '">' + esc(label) + '</label><select id="ff-' + k + '" class="dms-input" data-ff="' + k + '">' + opts.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (FU.f[k] === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select></div>'; }
+  function tabFu() {
+    var A = [['', tr('All', 'الكل')]], due = { overdue: tr('Overdue', 'متأخرة'), today: tr('Due today', 'مستحقة اليوم'), upcoming: tr('Upcoming', 'قادمة'), nofu: tr('No follow-up scheduled', 'بلا متابعة مجدولة'), nolog: tr('No recorded follow-up', 'بلا متابعة مسجلة') };
+    var h = '<div class="lm-tools">' + fSelect('sp_user', tr('Salesperson', 'المندوب'), A.concat(fuSps().map(function (x) { return [x.user, x.name]; }))) + fSelect('alloc_by', tr('Allocated by', 'وزّع بواسطة'), A.concat(FU.allocators.map(function (x) { return [x.user, x.name]; }))) +
+      fSelect('status', tr('Status', 'الحالة'), A.concat(FU_ST.map(function (x) { return [x, x]; }))) + fSelect('priority', tr('Priority', 'الأولوية'), A.concat(PRIORITIES.map(function (x) { return [x, x]; }))) +
+      fSelect('due', tr('Due category', 'فئة الاستحقاق'), A.concat(Object.keys(due).map(function (k) { return [k, due[k]]; }))) + fSelect('dbasis', tr('Date refers to', 'التاريخ يشير إلى'), [['next', tr('Scheduled next follow-up', 'المتابعة القادمة')], ['activity', tr('Latest recorded follow-up', 'آخر متابعة مسجلة')]]) +
+      '<div class="dms-ff lm-ff"><label for="ff-dfrom">' + esc(tr('From', 'من')) + '</label><input id="ff-dfrom" type="date" class="dms-input" data-ff="dfrom" value="' + esc(FU.f.dfrom) + '"></div><div class="dms-ff lm-ff"><label for="ff-dto">' + esc(tr('To', 'إلى')) + '</label><input id="ff-dto" type="date" class="dms-input" data-ff="dto" value="' + esc(FU.f.dto) + '"></div></div>';
+    if (FU.err === 'perm') { return h + alertBox('info', esc(tr('Follow-up monitoring is limited to Lead Allocation Coordinators and System Managers.', 'متابعة المتابعات متاحة لمنسقي التوزيع ومديري النظام فقط.'))); }
+    var c = FU.cards;
+    h += kpis(FCARDS.map(function (x) { var on = FU.f.due === x[0] || (!FU.f.due && x[0] === 'active'); return kpi({ label: tr(x[1], x[2]), dot: x[3], val: c ? num(c[x[0]]) : FU.err ? '—' : '…', top: on ? tagc(esc(tr('Shown', 'معروضة'))) : '', act: 'fdue:' + x[0] }); }));
+    var key = JSON.stringify([FU.f, FU.ver, GEN]), dueTag = function (r) { return r.due === 'overdue' ? stat('bad', due.overdue) : r.due === 'today' ? stat('warn', due.today) : r.due === 'upcoming' ? stat('ok', due.upcoming) : r.due === 'nofu' ? stat('warn', due.nofu) : ''; };
+    return h + panel(tr('Follow-up monitoring', 'متابعة المتابعات'), regTable({ id: 't_fu', server: true, filters: [key], pageSize: 25, order: 'next_follow_up asc', file: 'lead_followups', loader: fuLoader, searchHint: tr('Customer / lead', 'العميل / الرقم'), empty: tr('No allocations match.', 'لا توزيعات مطابقة.'), cols: [
+      { h: tr('Lead', 'العميل'), sf: 'customer_name', r: function (r) { return docLink(DT, r.lead) + '<span class="dms-sm lm-sub">' + esc(r.customer_name || '') + '</span>' + (r.dup ? ' ' + stat('bad', tr('Duplicate current allocation', 'توزيع حالي مكرر')) : ''); }, c: function (r) { return r.lead + ' ' + (r.customer_name || ''); } },
+      { h: tr('Salesperson', 'المندوب'), sf: 'salesperson', r: function (r) { return bdi(r.salesperson || '') + '<span class="dms-sm lm-sub">' + esc(r.allocated_by || '') + '</span>'; }, c: function (r) { return r.salesperson; } },
+      { h: tr('Assigned', 'الإسناد'), sf: 'assignment_date', r: function (r) { return r.assignment_date ? dtc(String(r.assignment_date).slice(0, 10)) : '—'; }, c: function (r) { return r.assignment_date; } },
+      { h: tr('Status / priority', 'الحالة / الأولوية'), sf: 'status', r: function (r) { return bdi(r.status || '') + '<span class="dms-sm lm-sub">' + esc(r.priority || '') + '</span>'; }, c: function (r) { return r.status + ' ' + (r.priority || ''); } },
+      { h: tr('Latest follow-up', 'آخر متابعة'), sf: 'last_fu_date', r: function (r) { return r.last_fu_date ? esc(fdt(r.last_fu_date, 1)) + '<span class="dms-sm lm-sub">' + esc([r.last_fu_method, r.last_fu_result, r.last_fu_outcome].filter(Boolean).join(' · ')) + '</span>' : '<span class="dms-sm">—</span>'; }, c: function (r) { return r.last_fu_date; } },
+      { h: tr('Latest notes', 'آخر الملاحظات'), r: function (r) { return r.last_notes ? '<span class="dms-sm" title="' + esc(r.last_notes) + '">' + esc(plain(r.last_notes, 90)) + '</span>' : '<span class="dms-sm">—</span>'; }, c: function (r) { return r.last_notes; } },
+      { h: tr('Next action / follow-up', 'الإجراء / المتابعة القادمة'), sf: 'next_follow_up', r: function (r) { return (r.next_action ? bdi(r.next_action) + '<br>' : '') + (r.next_follow_up ? '<span class="dms-num">' + esc(fdt(r.next_follow_up, 1)) + '</span> ' : '') + dueTag(r); }, c: function (r) { return (r.next_action || '') + ' ' + (r.next_follow_up || ''); } },
+      { h: tr('Overdue', 'التأخير'), sf: 'overdue_days', num: 1, r: function (r) { return r.overdue_days ? '<b class="dms-num dms-tone-bad">' + esc(daysTxt(r.overdue_days)) + '</b>' : '—'; }, c: function (r) { return r.overdue_days; } },
+      { h: tr('Entries', 'الإدخالات'), sf: 'fu_count', num: 1, r: function (r) { return num(r.fu_count) + (r.lead_fu_count !== r.fu_count ? ' <span class="dms-sm">(' + num(r.lead_fu_count) + ')</span>' : ''); }, c: function (r) { return r.fu_count; } },
+      { h: '', r: function (r) { return '<button type="button" class="dms-btn dms-btn-sm" data-act="fuh" data-v="' + esc(r.lead) + '" data-id="' + esc(r.customer_name || r.lead) + '">' + esc(tr('History', 'السجل')) + '</button>'; } }] }), '', esc(tr('Rows are allocations. Overdue / today / upcoming use the allocation’s next follow-up in Riyadh time. Follow-up log tracking started 09-11-2026.', 'الصفوف توزيعات. المتأخرة/اليوم/القادمة حسب المتابعة القادمة بتوقيت الرياض. بدأ سجل المتابعات في 09-11-2026.') + (c && c.activities != null ? ' · ' + tr('Recorded entries: ', 'الإدخالات المسجلة: ') + num(c.activities) : '')));
+  }
+  function histBody() {
+    var H = FU.hist; if (H.loading) { return skel(1, 'dms-skel-panel'); } if (H.err) { return alertBox('err', esc(H.err)); }
+    if (!H.rows.length) { return empty(tr('No follow-ups recorded for this lead.', 'لا متابعات مسجلة لهذا العميل.')); }
+    return '<div class="lm-hist">' + H.rows.map(function (r) { var ok = r.contact_result !== 'Attempted - no response'; return '<div class="lm-hist-i' + (ok ? '' : ' lm-hist-no') + '"><b>' + esc(fdt(r.followup_datetime, 1)) + '</b> · ' + esc([r.contact_method, r.contact_result, r.outcome, r.contact_person].filter(Boolean).join(' · ')) + '<div class="lm-pre">' + esc(r.notes || '') + '</div>' + (r.next_action ? '<div class="dms-sm">→ ' + esc(r.next_action) + '</div>' : '') + '<div class="dms-sm">' + esc((r.status_before || '') + ' → ' + (r.status_after || '') + (r.next_follow_up ? ' · ' + fdt(r.next_follow_up, 1) : '') + ' · ' + tr('Recorded by ', 'سجّلها ') + (r.recorded_by || '') + ' · ' + (r.allocation || '')) + '</div></div>'; }).join('') + '</div>';
+  }
+  function tabActions(AM) { return actionsTab(AM, tr('Follow-up categories cover all allocated leads (coordinators only); never-allocated and missing-contact leads cover all dates. Not limited by the filters.', 'فئات المتابعة تشمل كل العملاء الموزعين (للمنسقين فقط)؛ وغير الموزعين وناقصو البيانات يشملون كل التواريخ. غير مقيدة بالمرشحات.')); }
+
+  /* ============================================================ drill-downs and events */
+  function drill(id) {
+    if (id === 'al' && AL) { return { title: tr('Allocate leads', 'توزيع العملاء'), sub: tr('Leads that already have an active allocation are skipped; nothing is reassigned automatically.', 'العملاء الذين لديهم توزيع نشط يتم تخطيهم؛ لا إعادة إسناد تلقائية.'), body: alBody(), lm: 'al', stack: false }; }
+    if (id === 'ua' && UA) { return { title: tr('Unassign leads', 'إلغاء إسناد العملاء'), sub: num(UA.leads.length) + ' ' + tr('leads', 'عملاء'), body: uaBody(), lm: 'ua', stack: false }; }
+    if (id.indexOf('fuh:') === 0 && FU.hist) { return { title: tr('Follow-up history — ', 'سجل المتابعات — ') + FU.hist.name, sub: FU.hist.lead, body: histBody(), lm: 'fh', link: [DT, FU.hist.lead, FU.hist.lead] }; }
+    if (id.indexOf('rlead:') === 0) {
+      var nm = id.slice(6), r = null; Object.keys(SS).forEach(function (k) { (SS[k].rows || []).forEach(function (x) { if (x.name === nm) { r = x; } }); }); if (!r) { return null; }
+      var A = allocSummary(nm);
+      return { title: r.customer_name || nm, sub: nm, link: [DT, nm, nm], body: '<div class="dms-facts"><div><span class="dms-sm">' + esc(tr('Activities', 'الأنشطة')) + '</span><b class="lm-pre">' + esc(r.activities || '—') + '</b></div><div><span class="dms-sm">' + esc(tr('Remarks', 'ملاحظات')) + '</span><b class="lm-pre">' + esc(r.remarks || '—') + '</b></div><div><span class="dms-sm">' + esc(tr('Emails', 'البريد')) + '</span><b>' + esc([r.customer_email, r.customer_email_2].filter(Boolean).join(', ') || '—') + '</b></div></div>',
+        spec: { rows: A.all, file: 'allocations_' + nm, empty: RS.allocErr ? tr('Allocation details are restricted.', 'تفاصيل التوزيع مقيدة.') : tr('No allocation records.', 'لا سجلات توزيع.'), cols: [
+          { h: '', r: function (a) { return stat(a.current ? 'ok' : 'n', a.current ? tr('Current', 'حالي') : tr('History', 'سابق')); }, c: function (a) { return a.current ? 'Current' : 'History'; } },
+          { h: tr('Salesperson', 'المندوب'), r: function (a) { return bdi(a.sales_person_name || '') + '<span class="dms-sm lm-sub">' + esc(a.sales_person_email || '') + '</span>'; }, c: function (a) { return a.sales_person_name; } },
+          { h: tr('Allocated by', 'وزّع بواسطة'), r: function (a) { return bdi(a.allocated_by || ''); }, c: function (a) { return a.allocated_by; } },
+          { h: tr('Assignment date', 'تاريخ الإسناد'), r: function (a) { return esc(fdt(a.assignment_date)); }, c: function (a) { return a.assignment_date; } },
+          { h: tr('Status', 'الحالة'), r: function (a) { return esc([a.status, a.outcome].filter(Boolean).join(' / ')); }, c: function (a) { return a.status; } },
+          { h: tr('Next follow-up', 'المتابعة القادمة'), r: function (a) { return esc(fdt(a.next_follow_up, 1)); }, c: function (a) { return a.next_follow_up; } },
+          { h: tr('Remarks', 'ملاحظات'), r: function (a) { return '<span class="dms-sm lm-pre">' + esc(a.remarks || '') + '</span>'; }, c: function (a) { return a.remarks; } }] } };
+    }
+    if (id.indexOf('cli:') === 0) {
+      var k = id.slice(4), cc = actClient(), x = cc && cc[k], sp = actSpecs().filter(function (y) { return y.id === k; })[0];
+      if (!x || typeof x === 'string' || !sp) { return null; }
+      return { title: sp.title, sub: sp.why, body: k === 'a_un' || k === 'a_miss' ? '<div class="dms-actions-row"><button type="button" class="dms-btn dms-btn-primary" data-act="kpi" data-v="xl:' + (k === 'a_un' ? 'unassigned' : 'missing') + '">' + esc(tr('Show all in the Leads tab', 'عرض الكل في تبويب العملاء')) + '</button></div>' : k === 'a_over' || k === 'a_today' || k === 'a_nofu' ? '<div class="dms-actions-row"><button type="button" class="dms-btn dms-btn-primary" data-act="kpi" data-v="fdue:' + { a_over: 'overdue', a_today: 'today', a_nofu: 'nofu' }[k] + '">' + esc(tr('Open in follow-up monitoring', 'فتح في متابعة المتابعات')) + '</button></div>' : '',
+        spec: { rows: x.rows.map(x.item), file: k, text: function (it) { return [it.title, it.desc, it.who].join(' '); }, cols: [
+          { h: tr('Lead', 'العميل'), r: function (it) { return docLink(it.dt, it.name, it.title); }, c: function (it) { return it.name; } },
+          { h: tr('Details', 'التفاصيل'), r: function (it) { return '<span class="dms-sm">' + bdi(it.desc) + '</span>'; }, c: function (it) { return it.desc; } },
+          { h: tr('Salesperson', 'المندوب'), r: function (it) { return bdi(it.who || '—'); }, c: function (it) { return it.who; } },
+          { h: tr('When', 'متى'), r: function (it) { return '<span class="dms-tone-' + it.tone + '">' + esc(it.due) + '</span>'; }, c: function (it) { return it.due; } }] } };
+    }
+    return null;
+  }
+  function nextFilters(patch) { var nf = {}; APP.filters.forEach(function (f) { nf[f.k] = F[f.k]; }); return Object.assign(nf, patch); }
+  function toLeads(extra) { EXTRA = extra || null; if (SS.t_leads) { SS.t_leads.page = 1; } closeOverlay(); goTab('leads', false, true); }
+  function onAct(a, v, n, id) {
+    if (a === 'kpi' && v.indexOf('xl:') === 0) {
+      var k = v.slice(3);
+      if (k === 'total') { toLeads(null); }
+      else if (k === 'assigned' || k === 'unassigned') { closeOverlay(); applyFilters(nextFilters({ alloc: k })); goTab('leads'); }
+      else if (k === 'catalogue') { toLeads({ key: k, label: tr('Catalogue sent', 'تم إرسال الكتالوج'), filters: [[DT, 'catalogue_status', '=', 1]] }); }
+      else if (k === 'missing') { toLeads({ key: k, label: tr('Missing contact details', 'بيانات اتصال ناقصة'), filters: MISSING_CONTACT }); }
+      else if (k === 'dqcity') { toLeads({ key: k, label: tr('Missing city', 'بلا مدينة'), filters: MISSING_CITY }); }
+      else if (k === 'dqperson') { toLeads({ key: k, label: tr('Missing contact person', 'بلا جهة اتصال'), filters: MISSING_PERSON }); }
+      else if (k === 'cityother') { toLeads({ key: k, label: tr('City: other', 'المدينة: أخرى'), filters: TOPCITIES.map(function (c) { return [DT, 'city', '!=', c]; }).concat([[DT, 'city', 'is', 'set']]) }); }
+      return true;
+    }
+    if (a === 'kpi' && v.indexOf('xf:') === 0) { var p = v.slice(3), i = p.indexOf(':'), patch = {}; patch[p.slice(0, i)] = p.slice(i + 1); applyFilters(nextFilters(patch)); goTab('leads'); return true; }
+    if (a === 'kpi' && v.indexOf('dup:') === 0) { var q = v.slice(4), j = q.indexOf(':'); toLeads({ key: 'dup', label: tr('Same ', 'نفس ') + q.slice(0, j) + ': ' + q.slice(j + 1), filters: [[DT, q.slice(0, j), '=', q.slice(j + 1)]] }); return true; }
+    if (a === 'kpi' && v.indexOf('fdue:') === 0) { var d = v.slice(5); FU.f.due = d === 'active' ? '' : d; FU.ver++; closeOverlay(); goTab('followups', false, true); return true; }
+    if (a === 'clearx') { EXTRA = null; if (SS.t_leads) { SS.t_leads.page = 1; } renderAll(); return true; }
+    if (a === 'lsel') { if (v === 'clear') { LS.sel = {}; } else { LS.page.forEach(function (r) { LS.sel[r.name] = 1; }); } renderSoft(); return true; }
+    if (a === 'alloc') { var names = Object.keys(LS.sel); if (!names.length) { return true; } AL = { names: names, step: 'form', txt: '', results: [], user: '', label: '', date: TODAY, prio: 'Medium', next: '', req: 0 }; openDrill('al'); alSearch(); return true; }
+    if (a === 'al' && AL) {
+      if (v.indexOf('pick:') === 0) { var x = AL.results[+v.slice(5)]; if (x) { AL.user = x.user; AL.label = (x.full_name || x.user) + ' — ' + (x.email || ''); AL.err = ''; alRedraw('[data-al="date"]'); } }
+      else if (v === 'review') { if (!AL.user) { AL.err = tr('Select a salesperson from the suggestions.', 'اختر مندوبًا من الاقتراحات.'); alRedraw('[data-alq]'); } else if (!AL.date) { AL.err = tr('Choose the assignment date.', 'اختر تاريخ الإسناد.'); alRedraw('[data-al="date"]'); } else { AL.err = ''; AL.step = 'review'; alRedraw('[data-act="al"][data-v="confirm"]'); } }
+      else if (v === 'back') { AL.step = 'form'; alRedraw('[data-alq]'); }
+      else if (v === 'confirm' && !AL.busy) {
+        AL.busy = true; AL.err = ''; alRedraw();
+        callP('bulk_allocate_leads', { leads: JSON.stringify(AL.names), salesperson_user: AL.user, assignment_date: AL.date, priority: AL.prio, next_follow_up: AL.next ? AL.next.replace('T', ' ') + ':00' : '' }).then(function (m) {
+          AL.busy = false; AL.res = m || {}; AL.step = 'done'; LS.sel = {}; alRedraw('[data-act="closeov"]'); reload();
+        }, function (e) { AL.busy = false; AL.err = e && e.message ? e.message : tr('Allocation failed.', 'تعذر التوزيع.'); alRedraw(); });
+      }
+      return true;
+    }
+    if (a === 'uasel') { openUnassign(Object.keys(LS.sel)); return true; }
+    if (a === 'ua1') { openUnassign([v]); return true; }
+    if (a === 'ua' && UA && v === 'go' && !UA.busy) {
+      var picks = Object.keys(UA.picks).map(function (al) { return { allocation: al, lead: UA.picks[al] }; });
+      if (!picks.length) { UA.err = tr('Tick at least one allocation.', 'اختر توزيعًا واحدًا على الأقل.'); uaRedraw(); return true; }
+      if (String(UA.reason || '').trim().length < 5) { UA.err = tr('Write the unassignment reason (at least 5 characters).', 'اكتب سبب إلغاء الإسناد (5 أحرف على الأقل).'); uaRedraw('[data-uareason]'); return true; }
+      UA.busy = true; UA.err = ''; uaRedraw();
+      jpost({ action: 'unassign_allocations', reason: UA.reason.trim(), allocations: JSON.stringify(picks) }).then(function (m) { UA.busy = false; UA.done = m || {}; LS.sel = {}; uaRedraw('[data-act="closeov"]'); reload(); }, function (e) { UA.busy = false; UA.err = e && e.message ? e.message : tr('Could not unassign.', 'تعذر إلغاء الإسناد.'); uaRedraw(); });
+      return true;
+    }
+    if (a === 'rcols') { RS.cols = v === 'all' ? RCOLS.map(function (c) { return c[0]; }) : RCOLS.filter(function (c) { return c[4]; }).map(function (c) { return c[0]; }); try { G.localStorage.setItem('lm_report_cols_v1', JSON.stringify(RS.cols)); } catch (e) { /* ignore */ } renderSoft(); return true; }
+    if (a === 'rprint') { rPrint(); return true; }
+    if (a === 'rlead') { openDrill('rlead:' + v); return true; }
+    if (a === 'fuh') {
+      FU.hist = { lead: v, name: id || v, loading: true, rows: [] }; openDrill('fuh:' + v);
+      jpost({ action: 'fu_history', lead: v }).then(function (rows) { if (FU.hist && FU.hist.lead === v) { FU.hist.loading = false; FU.hist.rows = rows || []; if (OVL && OVL.lm === 'fh') { OVL.body = histBody(); renderOverlay(); } } }, function (e) { if (FU.hist) { FU.hist.loading = false; FU.hist.err = errKind(e) === 'perm' ? tr('Follow-up history is limited to coordinators.', 'سجل المتابعات متاح للمنسقين فقط.') : tr('Could not load follow-up data.', 'تعذر تحميل بيانات المتابعة.'); if (OVL && OVL.lm === 'fh') { OVL.body = histBody(); renderOverlay(); } } });
+      return true;
+    }
+    return false;
+  }
+  var ALQT = null;
+  function onInputApp(n) {
+    var g = function (k) { return n.getAttribute(k); };
+    if (g('data-sel')) { if (n.checked) { LS.sel[g('data-sel')] = 1; } else { delete LS.sel[g('data-sel')]; } var t1 = HOST.querySelector('.lm-tools'); if (t1 && tab === 'leads') { renderSoft(); var el = HOST.querySelector('[data-sel="' + g('data-sel') + '"]'); if (el) { el.focus(); } } return true; }
+    if (g('data-alq')) { if (AL && AL.txt !== n.value) { AL.txt = n.value; AL.user = ''; clearTimeout(ALQT); ALQT = later(alSearch, 250); } return true; }
+    if (g('data-al')) { if (AL) { AL[g('data-al')] = n.value; } return true; }
+    if (g('data-ua')) { if (UA) { if (n.checked) { UA.picks[g('data-ua')] = g('data-ul'); } else { delete UA.picks[g('data-ua')]; } } return true; }
+    if (g('data-uareason')) { if (UA) { UA.reason = n.value; } return true; }
+    if (g('data-rf')) { if (RS.f[g('data-rf')] !== n.value) { RS.f[g('data-rf')] = n.value; RS.alloc = {}; rApply(); renderSoft(); var r1 = HOST.querySelector('[data-rf="' + g('data-rf') + '"]'); if (r1) { r1.focus(); } } return true; }
+    if (g('data-rcol')) { var k = g('data-rcol'); RS.cols = RCOLS.map(function (c) { return c[0]; }).filter(function (c) { return c === k ? n.checked : RS.cols.indexOf(c) > -1; }); if (!RS.cols.length) { RS.cols = ['name']; } try { G.localStorage.setItem('lm_report_cols_v1', JSON.stringify(RS.cols)); } catch (e) { /* ignore */ } renderSoft(); var dt = HOST.querySelector('.lm-cols'); if (dt) { dt.open = true; } var c1 = HOST.querySelector('[data-rcol="' + k + '"]'); if (c1) { c1.focus(); } return true; }
+    if (g('data-ff')) { if (FU.f[g('data-ff')] !== n.value) { FU.f[g('data-ff')] = n.value; FU.ver++; renderSoft(); var f1 = HOST.querySelector('[data-ff="' + g('data-ff') + '"]'); if (f1) { f1.focus(); } } return true; }
+    return false;
+  }
+
+  start();
+})();
+
+/* ==== DM theme sync (same as tools/erp/shell/dark_theme.py output; maintained here since this block left the generated shell) ==== */
+;(function () {
+  var r = typeof root_element !== 'undefined' ? root_element : null, h = r && r.host;
+  if (!h || h.__dmsTheme) return; h.__dmsTheme = 1;
+  var s = function () { h.setAttribute('data-dms-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'); };
+  s(); new MutationObserver(s).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 })();

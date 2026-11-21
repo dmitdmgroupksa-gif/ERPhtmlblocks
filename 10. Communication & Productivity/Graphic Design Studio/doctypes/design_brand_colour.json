@@ -1,0 +1,43 @@
+{
+ "doctype": "DocType",
+ "name": "Design Brand Colour",
+ "module": "Custom",
+ "custom": 1,
+ "istable": 1,
+ "issingle": 0,
+ "track_changes": 0,
+ "fields": [
+  {
+   "fieldname": "colour_name",
+   "fieldtype": "Data",
+   "label": "Name",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "hex",
+   "fieldtype": "Data",
+   "label": "HEX",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "rgb",
+   "fieldtype": "Data",
+   "label": "RGB",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "cmyk",
+   "fieldtype": "Data",
+   "label": "CMYK",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "role",
+   "fieldtype": "Select",
+   "label": "Role",
+   "options": "Primary\nSecondary\nAccent\nNeutral\nText",
+   "in_list_view": 1
+  }
+ ],
+ "permissions": []
+}

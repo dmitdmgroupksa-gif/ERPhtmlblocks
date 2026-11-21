@@ -1,0 +1,190 @@
+{
+  "_about": "Selectors are relative to root. header = navy title band; tabs = royal tab bar; bar = royal strip holding tabs + buttons when there is no title header; filters = white filter card; order = parent whose children are reordered header -> tabs -> filters ('&' = root itself). Excluded on purpose: CEO Agent, Durar Messenger, Durar Sheets (apps with their own chrome), the six Blocked Customer cards (compact cards without a header), CEO Command Center, Credit Controller Dashboard, FM & Inventory Dashboard, Treasury Dashboard, Accounts Payable, Finance Manager Dashboard, Finance Internal Controller, VAT & ZATCA Compliance, SOA Manager, SOA Request Dashboard, Collector, Payroll Cost Center, DMS Sales Management, Lead Management, My Leads, Pre-Procurement, DN & GRN Tracker, Customs & Post-Processing, Inventory Dashboard, Logistics Dashboard, Operation Dashboard, Delivery & Forklift, Scaffolding Rental, Manufacturing Dashboard, Production Dashboard, Plant & Furniture Asset Dashboard, Admin HR Dashboard, Admin & HR Platform, Employee Vacation, Government Relations Dashboard, Technical Department, DMS Technical Department, My DMS Projects, DM Contracting Dashboard and Quotation & SO Tracker (built on the standard directly).",
+  "08. Operations & Logistics/Fleet Dashboard": {
+    "root": "#dm-fleet",
+    "header": ".df-header",
+    "hbtn": ".df-btn",
+    "hprimary": ".df-btn.primary",
+    "tabs": ".df-tabs",
+    "tab": "button",
+    "active": [
+      "button.active",
+      "button[aria-selected='true']"
+    ],
+    "filters": ".df-filters",
+    "grid": false,
+    "fbtn": [
+      ".df-btn"
+    ],
+    "dark": "#dm-fleet.df-dark",
+    "extra": [
+      ".df-tabs { display: flex; grid-auto-flow: unset; }"
+    ]
+  },
+  "05. HR & Administration/Employee Dashboard": {
+    "root": "#ess",
+    "header": ".top",
+    "tabs": ".top nav",
+    "tab": "a",
+    "active": [
+      "a.on"
+    ],
+    "tabs_in_header": true,
+    "lang": [
+      ".edp-lang"
+    ],
+    "langon": ".on"
+  },
+  "07. IT & Digital Systems/Digital Marketing Dashboard": {
+    "root": ".dmo",
+    "bar": ".dmo-top",
+    "barbtn": [
+      ".dmo-refresh",
+      ".dmo-lang"
+    ],
+    "barlabel": [
+      ".dmo-auto"
+    ],
+    "tabs": ".dmo-tabs",
+    "tab": ".dmo-tab",
+    "active": [
+      ".dmo-tab.active"
+    ],
+    "tabs_in_header": true,
+    "filters": ".dmo-filters",
+    "grid": false,
+    "fbtn": [
+      "button"
+    ]
+  },
+  "07. IT & Digital Systems/ERP User Access": {
+    "root": ".uad",
+    "header": ".uad-head",
+    "hbtn": ".uad-refresh",
+    "hprimary": ".uad-refresh",
+    "lang": [
+      ".uaa-lang"
+    ],
+    "langon": ".on",
+    "tabs": ".uad-tabs",
+    "tab": "button",
+    "active": [
+      "button.active",
+      "button[aria-selected='true']"
+    ],
+    "hextra": [
+      ".uad-sel { color: rgb(255 255 255 / 85%); }",
+      ".uad-sel select { height: 34px; border-radius: 8px; border: 1px solid rgb(255 255 255 / 30%); background: rgb(255 255 255 / 10%); color: #fff; }",
+      ".uad-sel select option { color: #16202e; }"
+    ]
+  },
+  "07. IT & Digital Systems/IT Asset Acquisition": {
+    "root": "#dm-aar-dashboard",
+    "header": ".aar-hero",
+    "hbtn": ".aar-btns button",
+    "hprimary": ".aar-btns button:last-child",
+    "tabs": ".aar-tabs",
+    "tab": ".aar-tab",
+    "active": [
+      ".aar-tab.active",
+      ".aar-tab.on",
+      ".aar-tab[aria-selected='true']"
+    ],
+    "filters": ".aar-toolbar",
+    "field": [
+      ".aar-field"
+    ],
+    "fbtn": [
+      "button"
+    ],
+    "order": "&"
+  },
+  "07. IT & Digital Systems/IT Platforms Expiry": {
+    "root": "#dm-it-renewals",
+    "header": ".dmr-header",
+    "hbtn": ".dmr-head-actions button",
+    "hprimary": "#dmr-refresh",
+    "tabs": "#dmr-nav",
+    "tab": "button",
+    "active": [
+      "button.active"
+    ],
+    "tabs_in_header": true,
+    "hextra": [
+      "{ display: grid; grid-template-columns: 1fr auto; }",
+      "#dmr-nav { grid-column: 1 / -1; }",
+      ".dmr-heading { grid-column: 1 / -1; }"
+    ]
+  },
+  "09. Legal & Documentation/Legal Dashboard": {
+    "root": "#tld",
+    "header": "#rail",
+    "hbtn": ".btn-rail",
+    "hprimary": "#btnRefresh",
+    "tabs": "#rail nav.tabs",
+    "tab": ".tab",
+    "active": [
+      ".tab.active"
+    ],
+    "tabs_in_header": true,
+    "filters": ".main > .filters",
+    "field": [
+      ".f-field"
+    ],
+    "fbtn": [
+      "button"
+    ],
+    "hextra": [
+      ".rail-in { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; width: 100%; background: none; }",
+      ".rlink { color: rgb(255 255 255 / 85%); }"
+    ]
+  },
+  "09. Legal & Documentation/Document Control": {
+    "root": "#dmdc",
+    "header": ".dm-hd",
+    "hbtn": ".dm-btn",
+    "hprimary": ".dm-btn:first-of-type",
+    "tabs": "#dm-tabs",
+    "tab": ".dm-tab",
+    "active": [
+      ".dm-tab.on"
+    ],
+    "filters": "#dm-fl",
+    "field": [
+      "div"
+    ],
+    "fbtn": [
+      "button"
+    ],
+    "order": "&",
+    "hextra": [
+      ".dm-logo { background: #fff; color: var(--dms-navy); }"
+    ]
+  },
+  "01. Leadership & Corporate/DMCC Dashboard": {
+    "root": ".erp",
+    "header": ".erp-bar",
+    "hbtn": "button",
+    "hprimary": "#f-reload",
+    "hextra": [
+      ".erp-filters label { color: rgb(255 255 255 / 85%); }",
+      ".erp-filters input { height: 34px; border-radius: 8px; border: 1px solid rgb(255 255 255 / 30%); background: rgb(255 255 255 / 10%); color: #fff; }"
+    ],
+    "tabs": ".erp-tabs",
+    "tab": "button",
+    "active": [
+      "button.on",
+      "button.active"
+    ]
+  },
+  "_dark": [
+    "01. Leadership & Corporate/DMCC Dashboard",
+    "07. IT & Digital Systems/ERP User Access",
+    "07. IT & Digital Systems/IT Asset Acquisition",
+    "07. IT & Digital Systems/IT Platforms Expiry",
+    "09. Legal & Documentation/Document Control"
+  ],
+  "_i18n": {
+    "01. Leadership & Corporate/DMCC Dashboard": ".erp-bar"
+  }
+}

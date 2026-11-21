@@ -1,791 +1,15 @@
-/* Plant & Furniture Asset Dashboard — DM Group KSA
-   Frappe Custom HTML Block (JS field). root_element is the block's shadow root.
-   Read-only: uses only frappe.call -> frappe.client.get_list / get / get_count (permission-checked). No writes. */
+/* ===== DM Group KSA — Plant & Furniture Asset Dashboard — SCRIPT field · v2 =====
+   Moves v1 onto the DM dashboard standard. Read-only; permission-checked get_list / get only. Kept from v1 unchanged: the scope
+   (Asset categories "Plant and Machinery Direct" and "Fixtures & Fittings-Indirect", DM Assets chairs and tables, never merged),
+   the status rule (active = submitted, not sold / scrapped / decapitalized), the transparent valuation proof (verified only when
+   cost − opening − journal-posted depreciation equals the ERP value field ±1, one finance book per asset, first 150 assets),
+   amounts in each company's currency, the maintenance overdue rule, the exception and audit checks, and every label and
+   translation (the v1 dictionary is reused as is). The shared runtime between the "DMS kit" markers is generated from
+   tools/erp/kit/dms-kit.js (edit the kit, not the copy). */
 (function () {
-'use strict';
-const R = root_element;
-if (R.__pfadDestroy) { try { R.__pfadDestroy(); } catch (e) {} }
-const ac = new AbortController();
-R.__pfadDestroy = () => ac.abort();
-const root = R.querySelector('#pfad');
-if (!root) return;
-
-/* ---------- constants ---------- */
-const SC = { plant: 'Plant and Machinery Direct', furn: 'Fixtures & Fittings-Indirect' };
-const SCOPE_CATS = [SC.plant, SC.furn];
-const DM_FURN = ['Chair', 'Table'];
-const DISPOSED = ['Sold', 'Scrapped', 'Decapitalized'];
-const CAP = 5000;
-const TABS = [
-  ['overview', 'grid'], ['register', 'list'], ['plant', 'layers'], ['furniture', 'box'], ['valuation', 'dollar'],
-  ['assign', 'users'], ['movement', 'swap'], ['audit', 'shield']
-];
-const IC = {
-  grid: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>',
-  list: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>',
-  layers: '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>',
-  box: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>',
-  dollar: '<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
-  tool: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
-  clipboard: '<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/>',
-  users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
-  swap: '<polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>',
-  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
-  search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
-  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
-  x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
-  ext: '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',
-  refresh: '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
-  eye: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>',
-  clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
-  warn: '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>'
-};
-const ic = n => '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">' + (IC[n] || '') + '</svg>';
-
-/* ---------- state ---------- */
-let lsLang = 'en';
-try { lsLang = localStorage.getItem('pfad_lang') || 'en'; } catch (e) {}
-const today = new Date(); const TODAY = isoDate(today);
-const S = {
-  lang: lsLang === 'ar' ? 'ar' : 'en', tab: 'overview', tok: 0,
-  f: { company: '', category: '', location: '', department: '', custodian: '', status: 'active', from: '', to: '', q: '' },
-  T: {}, cal: { y: today.getFullYear(), m: today.getMonth() }, opt: { mvAll: false, dmAll: false, acqAll: false },
-  meta: null, detail: null
-};
-const MEMO = new Map();
-const DOCS = new Map();
-let METRIC = {}; // per-render scratch
-
-/* ---------- utils ---------- */
-function isoDate(d) { const p = n => String(n).padStart(2, '0'); return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()); }
-const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const nf = (n, d) => (Number(n) || 0).toLocaleString('en-US', { maximumFractionDigits: d == null ? 0 : d });
-const dstr = v => v ? String(v).slice(0, 10) : '';
-const isNum = v => v !== null && v !== undefined && v !== '' && !isNaN(Number(v));
-const num = v => isNum(v) ? Number(v) : 0;
-const uniq = a => [...new Set(a.filter(x => x !== null && x !== undefined && x !== ''))];
-const sum = (a, f) => a.reduce((s, x) => s + num(f(x)), 0);
-const dayDiff = (a, b) => Math.round((new Date(a) - new Date(b)) / 864e5);
-function slug(dt) { try { return frappe.router.slug(dt); } catch (e) { return String(dt).toLowerCase().replace(/ /g, '-'); } }
-const formUrl = (dt, name) => '/app/' + slug(dt) + '/' + encodeURIComponent(name);
-const link = (dt, name, txt) => name ? '<a class="lk" target="_blank" rel="noopener" href="' + esc(formUrl(dt, name)) + '">' + esc(txt || name) + '</a>' : '';
-const canRead = dt => { try { return frappe.model.can_read(dt); } catch (e) { return true; } };
-const cmp = (a, b) => {
-  const an = a === null || a === undefined || a === '', bn = b === null || b === undefined || b === '';
-  if (an && bn) return 0; if (an) return 1; if (bn) return -1;
-  if (typeof a === 'number' && typeof b === 'number') return a - b;
-  return String(a).localeCompare(String(b), undefined, { numeric: true });
-};
-function pool(items, n, fn) {
-  let i = 0; const out = new Array(items.length);
-  const w = async () => { while (i < items.length) { const k = i++; try { out[k] = await fn(items[k], k); } catch (e) { out[k] = { __err: e }; } } };
-  return Promise.all(Array.from({ length: Math.min(n, items.length) }, w)).then(() => out);
-}
-function memo(key, fn) { if (!MEMO.has(key)) { const p = Promise.resolve().then(fn); MEMO.set(key, p); p.catch(() => MEMO.delete(key)); } return MEMO.get(key); }
-
-/* ---------- ERP access (read only, permission-checked) ---------- */
-function call(method, args) {
-  return new Promise((res, rej) => frappe.call({ method, args, silent: true, no_spinner: true, callback: r => res(r.message), error: e => rej(e || new Error('call failed')) }));
-}
-async function list(dt, o) {
-  o = o || {};
-  const a = { doctype: dt, fields: JSON.stringify(o.fields || ['name']), filters: JSON.stringify(o.filters || []), limit_start: o.start || 0, limit_page_length: o.limit || 500 };
-  if (o.or) a.or_filters = JSON.stringify(o.or);
-  if (o.order) a.order_by = o.order;
-  if (o.parent) a.parent = o.parent;
-  if (o.group) a.group_by = o.group;
-  return (await call('frappe.client.get_list', a)) || [];
-}
-async function fetchAll(dt, o, cap) {
-  cap = cap || CAP; const out = []; let start = 0; const step = 500;
-  for (;;) {
-    const page = await list(dt, Object.assign({}, o, { start, limit: step }));
-    out.push(...page);
-    if (page.length < step || out.length >= cap) break;
-    start += step;
-  }
-  return { rows: out.slice(0, cap), capped: out.length >= cap };
-}
-async function countOf(dt, o) {
-  const r = await list(dt, { fields: ['count(name) as n'], filters: o.filters, or: o.or, limit: 1 });
-  return r && r[0] ? num(r[0].n) : 0;
-}
-const getDoc = (dt, name) => { const k = dt + '|' + name; if (!DOCS.has(k)) { const p = call('frappe.client.get', { doctype: dt, name }); DOCS.set(k, p); p.catch(() => DOCS.delete(k)); } return DOCS.get(k); };
-
-/* ---------- i18n ---------- */
-let I = { en: {}, ar: {} };
-const tr = (k, ...a) => {
-  const d = I[S.lang] || I.en; let s = d[k] != null ? d[k] : (I.en[k] != null ? I.en[k] : k);
-  return a.length ? s.replace(/[{]([0-9]+)[}]/g, (m, i) => a[+i]) : s;
-};
-
-/* ---------- filters ---------- */
-const ASSET_F = ['name', 'asset_name', 'asset_category', 'company', 'location', 'custodian', 'department', 'status', 'docstatus', 'purchase_date', 'available_for_use_date', 'total_asset_cost', 'gross_purchase_amount', 'additional_asset_cost', 'value_after_depreciation', 'opening_accumulated_depreciation', 'is_fully_depreciated', 'calculate_depreciation', 'maintenance_required', 'asset_quantity', 'disposal_date', 'insurance_end_date', 'default_finance_book'];
-const STATUS_OPTS = ['Submitted', 'Partially Depreciated', 'Fully Depreciated', 'Sold', 'Scrapped', 'In Maintenance', 'Out of Order', 'Issue', 'Receipt', 'Capitalized', 'Decapitalized'];
-function aFilters(o) {
-  o = o || {}; const f = S.f, F = [];
-  F.push(['asset_category', 'in', f.category ? [f.category] : SCOPE_CATS]);
-  if (f.company) F.push(['company', '=', f.company]);
-  const nz = (fld, v) => F.push(v === '__none__' ? [fld, 'is', 'not set'] : [fld, '=', v]);
-  if (f.location) nz('location', f.location);
-  if (f.department) nz('department', f.department);
-  if (f.custodian) nz('custodian', f.custodian);
-  const st = o.status || f.status;
-  if (st === 'active') { F.push(['docstatus', '=', 1]); F.push(['status', 'not in', DISPOSED]); }
-  else if (st === 'cancelled') F.push(['docstatus', '=', 2]);
-  else if (st === 'draft') F.push(['docstatus', '=', 0]);
-  else if (st === 'noncancelled') F.push(['docstatus', '<', 2]);
-  else if (st.indexOf('st:') === 0) { F.push(['docstatus', '=', 1]); F.push(['status', '=', st.slice(3)]); }
-  if (!o.noDate) { if (f.from) F.push(['purchase_date', '>=', f.from]); if (f.to) F.push(['purchase_date', '<=', f.to]); }
-  return F;
-}
-const aOr = () => S.f.q ? [['name', 'like', '%' + S.f.q + '%'], ['asset_name', 'like', '%' + S.f.q + '%']] : null;
-function dmFilters(all) {
-  const f = S.f, F = [['docstatus', '<', 2]];
-  if (!all) F.push(['category', 'in', DM_FURN]);
-  if (f.location) F.push(f.location === '__none__' ? ['location', 'is', 'not set'] : ['location', '=', f.location]);
-  if (f.custodian) F.push(f.custodian === '__none__' ? ['employee', 'is', 'not set'] : ['employee', '=', f.custodian]);
-  if (f.from) F.push(['date', '>=', f.from]); if (f.to) F.push(['date', '<=', f.to]);
-  if (f.category && SCOPE_CATS.indexOf(f.category) >= 0 && f.category === SC.plant) F.push(['name', '=', '__none__']); // plant category selected -> no furniture rows
-  return F;
-}
-const dmOr = () => S.f.q ? [['name', 'like', '%' + S.f.q + '%'], ['asset_id', 'like', '%' + S.f.q + '%'], ['description', 'like', '%' + S.f.q + '%']] : null;
-const filterKey = () => JSON.stringify(S.f);
-
-/* ---------- loaders ---------- */
-const L = {};
-L.meta = () => memo('meta', async () => {
-  const [companies, cats] = await Promise.all([
-    list('Company', { fields: ['name', 'default_currency'], limit: 200 }).catch(() => []),
-    list('Asset Category', { fields: ['name'], limit: 200 }).catch(() => [])
-  ]);
-  const cur = {}; companies.forEach(c => cur[c.name] = c.default_currency);
-  const perms = {}; ['Asset', 'DM Assets', 'Asset Maintenance', 'Asset Maintenance Log', 'Asset Repair', 'Asset Movement', 'Asset Acquisition Records'].forEach(d => perms[d] = canRead(d));
-  const dmRows = perms['DM Assets'] ? (await fetchAll('DM Assets', { fields: ['location', 'employee'], filters: [['docstatus', '<', 2]] }).catch(() => ({ rows: [] }))).rows : [];
-  const dmLoc = dmRows.map(x => ({ location: x.location })), dmEmp = dmRows.map(x => ({ employee: x.employee }));
-  return { companies, cur, catNames: cats.map(c => c.name), perms, dmLoc: uniq(dmLoc.map(x => x.location)), dmEmp: uniq(dmEmp.map(x => x.employee)) };
-});
-L.scope = () => memo('scope', async () => {
-  const r = await fetchAll('Asset', { fields: ASSET_F, filters: [['asset_category', 'in', SCOPE_CATS]], order: 'modified desc' });
-  const map = {}; r.rows.forEach(a => map[a.name] = a);
-  return { rows: r.rows, map, capped: r.capped };
-});
-L.assets = o => memo('assets|' + filterKey() + '|' + JSON.stringify(o || {}), async () => {
-  const r = await fetchAll('Asset', { fields: ASSET_F, filters: aFilters(o), or: aOr(), order: 'purchase_date desc, modified desc' });
-  return r;
-});
-L.mnt = () => memo('mnt', async () => {
-  const sc = (await L.scope()).map; const P = (await L.meta()).perms; const out = { denied: {}, plans: [], tasks: [], logs: [], repairs: [], consumed: [] };
-  const ld = async (key, dt, fn) => { if (!canRead(dt)) { out.denied[key] = true; return; } try { await fn(); } catch (e) { out.denied[key] = true; out.err = out.err || {}; out.err[key] = errText(e); } };
-  await Promise.all([
-    ld('plans', 'Asset Maintenance', async () => {
-      const p = (await fetchAll('Asset Maintenance', { fields: ['name', 'asset_name', 'asset_category', 'company', 'maintenance_team', 'maintenance_manager', 'maintenance_manager_name'] })).rows.filter(x => sc[x.asset_name]);
-      out.plans = p; const names = new Set(p.map(x => x.name));
-      const t = (await fetchAll('Asset Maintenance Task', { parent: 'Asset Maintenance', fields: ['name', 'parent', 'maintenance_task', 'maintenance_type', 'maintenance_status', 'start_date', 'end_date', 'periodicity', 'next_due_date', 'last_completion_date', 'certificate_required', 'assign_to', 'assign_to_name', 'description'] })).rows;
-      out.tasks = t.filter(x => names.has(x.parent));
-    }),
-    ld('logs', 'Asset Maintenance Log', async () => {
-      out.logs = (await fetchAll('Asset Maintenance Log', { fields: ['name', 'asset_maintenance', 'asset_name', 'task', 'task_name', 'maintenance_type', 'maintenance_status', 'due_date', 'completion_date', 'actions_performed', 'has_certificate', 'certificate_attachement', 'assign_to_name', 'docstatus'] })).rows.filter(x => sc[x.asset_name]);
-    }),
-    ld('repairs', 'Asset Repair', async () => {
-      out.repairs = (await fetchAll('Asset Repair', { fields: ['name', 'asset', 'company', 'repair_status', 'failure_date', 'completion_date', 'repair_cost', 'total_repair_cost', 'capitalize_repair_cost', 'downtime', 'description', 'actions_performed', 'docstatus'] })).rows.filter(x => sc[x.asset]);
-      const names = new Set(out.repairs.map(x => x.name));
-      if (names.size) out.consumed = (await fetchAll('Asset Repair Consumed Item', { parent: 'Asset Repair', fields: ['parent', 'item_code', 'consumed_quantity', 'valuation_rate', 'total_value'] })).rows.filter(x => names.has(x.parent));
-      out.repairsTotalAll = await countOf('Asset Repair', { filters: [] }).catch(() => null);
-    })
-  ]);
-  return out;
-});
-L.dm = all => memo('dm|' + filterKey() + '|' + !!all, async () => {
-  if (!canRead('DM Assets')) return { denied: true, rows: [] };
-  const r = await fetchAll('DM Assets', { fields: ['name', 'asset_id', 'date', 'employee', 'location', 'category', 'description', 'docstatus'], filters: dmFilters(all), or: dmOr(), order: 'date desc' });
-  return r;
-});
-L.mv = () => memo('mv', async () => {
-  if (!canRead('Asset Movement')) return { denied: true, rows: [] };
-  const p = (await fetchAll('Asset Movement', { fields: ['name', 'company', 'purpose', 'transaction_date', 'reference_doctype', 'reference_name', 'docstatus'] })).rows;
-  const pm = {}; p.forEach(x => pm[x.name] = x);
-  const it = (await fetchAll('Asset Movement Item', { parent: 'Asset Movement', fields: ['name', 'parent', 'asset', 'asset_name', 'source_location', 'target_location', 'from_employee', 'to_employee', 'request_category', 'company'] })).rows;
-  const rows = it.filter(x => pm[x.parent]).map(x => Object.assign({}, x, { _p: pm[x.parent] }));
-  return { rows, parents: p };
-});
-L.acq = () => memo('acq', async () => {
-  if (!canRead('Asset Acquisition Records')) return { denied: true, rows: [] };
-  const p = (await fetchAll('Asset Acquisition Records', { fields: ['name', 'date', 'employee', 'branch', 'custom_job_location', 'workflow_state', 'satus', 'approval_status', 'emp_status', 'request_type', 'docstatus'] })).rows;
-  const pm = {}; p.forEach(x => pm[x.name] = x);
-  const it = (await fetchAll('Asset Acquisition Table', { parent: 'Asset Acquisition Records', fields: ['name', 'parent', 'item_name', 'dmasset_no', 'quanity', 'life_cercle_end', 'ids', 'condition_item', 'detail_desc', 'life_cercle_frm'] })).rows;
-  return { rows: it.filter(x => pm[x.parent]).map(x => Object.assign({}, x, { _p: pm[x.parent] })), parents: p };
-});
-function errText(e) {
-  try { if (e && e.responseJSON && e.responseJSON._server_messages) { const m = JSON.parse(JSON.parse(e.responseJSON._server_messages)[0]); return String(m.message || '').replace(/<[^>]+>/g, '').slice(0, 160); } } catch (x) {}
-  return (e && (e.message || e.statusText)) ? String(e.message || e.statusText).slice(0, 160) : tr('err_generic');
-}
-
-/* ---------- valuation (read-only, transparent rule) ---------- */
-function valuate(d) {
-  const r = { name: d.name, status: d.status, cost: num(d.total_asset_cost), company: d.company, verified: false, nbv: null, acc: null, reason: '', disposed: false, multiFB: false, sched: [], fb: null, posted: 0 };
-  if (d.docstatus !== 1) { r.reason = 'not_submitted'; return r; }
-  if (DISPOSED.indexOf(d.status) >= 0) { r.disposed = true; r.reason = 'disposed'; return r; }
-  const fbs = d.finance_books || []; r.multiFB = fbs.length > 1;
-  const fb = fbs.find(x => x.finance_book && x.finance_book === d.default_finance_book) || fbs[0] || null; r.fb = fb ? (fb.finance_book || '(default)') : null;
-  let sched = d.schedules || [];
-  if (fbs.length > 1 && fb) sched = sched.filter(s => (s.finance_book || null) === (fb.finance_book || null));
-  r.sched = sched;
-  const posted = sched.filter(s => s.journal_entry);
-  r.posted = sum(posted, s => s.depreciation_amount);
-  r.acc = num(d.opening_accumulated_depreciation) + r.posted;
-  const field = fb && isNum(fb.value_after_depreciation) ? num(fb.value_after_depreciation) : num(d.value_after_depreciation);
-  const derived = r.cost - r.acc; r.field = field; r.derived = derived;
-  if (!(r.cost > 0)) { r.reason = 'no_cost'; return r; }
-  if (!d.calculate_depreciation && !num(d.opening_accumulated_depreciation) && !sched.length) { r.reason = 'no_dep_calc'; return r; }
-  if (Math.abs(field - derived) <= 1) { r.verified = true; r.nbv = Math.max(0, derived); return r; }
-  r.reason = field <= 0.5 ? 'zero_unproven' : 'mismatch';
-  return r;
-}
-L.val = () => memo('val|' + filterKey(), async () => {
-  const a = (await L.assets()).rows.filter(x => x.docstatus === 1);
-  const sel = a.slice(0, 150);
-  const docs = await pool(sel, 5, x => getDoc('Asset', x.name));
-  const vals = docs.map((d, i) => d && !d.__err ? valuate(d) : { name: sel[i].name, verified: false, reason: 'load_failed', cost: num(sel[i].total_asset_cost), company: sel[i].company, status: sel[i].status, sched: [] });
-  const vm = {}; vals.forEach(v => vm[v.name] = v);
-  return { vals, vm, partial: a.length > sel.length, total: a.length, docs: docs.filter(d => d && !d.__err) };
-});
-
-/* ---------- money helpers ---------- */
-function curOf(company) { const m = S.meta; return (m && m.cur[company]) || ''; }
-function byCur(rows, f) { const o = {}; rows.forEach(r => { const c = curOf(r.company) || '—'; o[c] = (o[c] || 0) + num(f(r)); }); return o; }
-function moneyMap(o, d) { const k = Object.keys(o); if (!k.length) return nf(0, d); return k.map(c => (c === '—' ? '' : c + ' ') + (d == null ? mf2(o[c]) : nf(o[c], d))).join(' · '); }
-const mf2 = n => (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const money = (n, company) => (curOf(company) ? curOf(company) + ' ' : '') + mf2(n);
-
-/* ---------- UI components ---------- */
-const PAL = ['var(--c1)', 'var(--c2)', 'var(--c3)', 'var(--c4)', 'var(--c5)', 'var(--c6)', 'var(--c7)'];
-const attrSet = o => ' data-set="' + esc(JSON.stringify(o || {})) + '"';
-function kpi(o) {
-  const cls = 'kpi ' + (o.cls || '') + (o.na ? ' na' : '');
-  const inner = '<div class="l"><span class="dot"></span>' + esc(o.l) + '</div><div class="v">' + (o.raw ? o.v : esc(o.v)) + '</div>' + (o.s ? '<div class="s">' + esc(o.s) + '</div>' : '');
-  if (o.go) return '<button class="' + cls + '" data-act="drill" data-go="' + o.go + '"' + attrSet(o.set) + ' title="' + esc(tr('drill_hint')) + '">' + inner + '</button>';
-  return '<div class="' + cls + '">' + inner + '</div>';
-}
-const empty = (t, s) => '<div class="empty"><b>' + esc(t || tr('empty')) + '</b>' + (s ? esc(s) : '') + '</div>';
-const nc = (t, s) => '<div class="nc"><b>' + esc(t || tr('not_configured')) + '</b><div>' + esc(s || '') + '</div></div>';
-const chip = (t, c) => '<span class="chip ' + (c || '') + '">' + esc(t) + '</span>';
-const banner = (t, c) => '<div class="banner ' + (c || 'info') + '">' + (t.indexOf('<') === 0 ? t : esc(t)) + '</div>';
-const card = (title, hint, body, extra) => '<div class="card"><div class="top"><div><h3>' + esc(title) + '</h3>' + (hint ? '<div class="hint">' + esc(hint) + '</div>' : '') + '</div>' + (extra || '') + '</div>' + body + '</div>';
-
-function bars(items, o) {
-  o = o || {}; if (!items.length || !items.some(i => i.value > 0)) return empty();
-  const max = Math.max.apply(null, items.map(i => i.value)) || 1;
-  return '<div class="bars">' + items.map((i, k) => {
-    const inner = '<span class="bl" title="' + esc(i.label) + '">' + esc(i.label) + '</span><span class="track"><span class="fill" style="display:block;width:' + Math.max(1, Math.round(i.value / max * 100)) + '%;background:' + (i.color || PAL[k % PAL.length]) + '"></span></span><span class="bv">' + esc(i.disp != null ? i.disp : nf(i.value)) + '</span>';
-    return i.go ? '<button class="bar" data-act="drill" data-go="' + i.go + '"' + attrSet(i.set) + '>' + inner + '</button>' : '<div class="bar">' + inner + '</div>';
-  }).join('') + '</div>';
-}
-function donut(items) {
-  items = items.filter(i => i.value > 0); const tot = sum(items, i => i.value);
-  if (!tot) return empty();
-  let off = 0, segs = '';
-  items.forEach((i, k) => {
-    const p = i.value / tot * 100, col = PAL[k % PAL.length];
-    const d = '<circle class="hit" r="15.9155" cx="21" cy="21" fill="none" stroke="' + col + '" stroke-width="6" stroke-dasharray="' + p.toFixed(3) + ' ' + (100 - p).toFixed(3) + '" stroke-dashoffset="' + (25 - off).toFixed(3) + '"' + (i.go ? ' data-act="drill" data-go="' + i.go + '"' + attrSet(i.set) : '') + '><title>' + esc(i.label + ': ' + nf(i.value)) + '</title></circle>';
-    segs += d; off += p; i._c = col;
-  });
-  return '<div class="donutw"><svg viewBox="0 0 42 42" role="img"><circle r="15.9155" cx="21" cy="21" fill="none" stroke="#eef1f7" stroke-width="6"/>' + segs + '<text x="21" y="21.5" text-anchor="middle" font-size="6.5" font-weight="700" fill="#16213a">' + nf(tot) + '</text><text x="21" y="26.5" text-anchor="middle" font-size="2.6" fill="#64708a">' + esc(tr('records')) + '</text></svg><div class="leg">' +
-    items.map(i => '<button' + (i.go ? ' data-act="drill" data-go="' + i.go + '"' + attrSet(i.set) + '' : '') + '><i style="background:' + i._c + '"></i><span>' + esc(i.label) + '</span><b>' + nf(i.value) + '</b></button>').join('') + '</div></div>';
-}
-function lineChart(items, o) {
-  o = o || {}; if (!items.length) return empty();
-  const W = 600, H = 190, pl = 40, pr = 12, pt = 14, pb = 28; const max = Math.max.apply(null, items.map(i => i.value)) || 1;
-  const x = k => items.length === 1 ? W / 2 : pl + k * (W - pl - pr) / (items.length - 1), y = v => H - pb - v / max * (H - pb - pt);
-  const pts = items.map((i, k) => x(k).toFixed(1) + ',' + y(i.value).toFixed(1)).join(' ');
-  const step = Math.ceil(items.length / 8);
-  let s = '<div class="linew"><svg viewBox="0 0 ' + W + ' ' + H + '" role="img">';
-  [0, .5, 1].forEach(g => { const yy = y(max * g); s += '<line x1="' + pl + '" x2="' + (W - pr) + '" y1="' + yy + '" y2="' + yy + '" stroke="#e4e8f1"/><text x="' + (pl - 5) + '" y="' + (yy + 3) + '" text-anchor="end" font-size="10" fill="#64708a">' + esc(o.axis ? o.axis(max * g) : nf(max * g)) + '</text>'; });
-  s += '<polygon points="' + pl + ',' + (H - pb) + ' ' + pts + ' ' + x(items.length - 1) + ',' + (H - pb) + '" fill="rgba(43,95,217,.10)"/><polyline points="' + pts + '" fill="none" stroke="#2b5fd9" stroke-width="2.2"/>';
-  items.forEach((i, k) => {
-    s += '<g class="hit"' + (i.go ? ' data-act="drill" data-go="' + i.go + '"' + attrSet(i.set) : '') + '><circle cx="' + x(k) + '" cy="' + y(i.value) + '" r="4.5" fill="#fff" stroke="#2b5fd9" stroke-width="2"/><title>' + esc(i.label + ': ' + (i.disp || nf(i.value))) + '</title></g>';
-    if (k % step === 0 || k === items.length - 1) s += '<text x="' + x(k) + '" y="' + (H - 9) + '" text-anchor="' + (k === 0 && items.length > 1 ? 'start' : k === items.length - 1 && items.length > 1 ? 'end' : 'middle') + '" font-size="10" fill="#64708a">' + esc(i.label) + '</text>';
-  });
-  return s + '</svg></div>';
-}
-
-/* generic client-side table with sort + pagination + CSV */
-const REG = {};
-function table(id, cols, rows, o) {
-  o = o || {}; const st = S.T[id] || (S.T[id] = { page: 1, sort: o.sort || null, dir: o.dir || 1, size: o.size || 10 });
-  REG[id] = { cols, rows, name: o.name || id };
-  if (!rows.length) return empty(o.emptyTitle, o.emptyMsg);
-  let data = rows;
-  if (st.sort) { const c = cols.find(c => c.id === st.sort); if (c) { const g = c.v || (r => r[c.id]); data = rows.slice().sort((a, b) => cmp(g(a), g(b)) * st.dir); } }
-  const pages = Math.max(1, Math.ceil(data.length / st.size)); if (st.page > pages) st.page = pages;
-  const slice = data.slice((st.page - 1) * st.size, st.page * st.size);
-  return tableMarkup(id, cols, slice, { total: data.length, page: st.page, size: st.size, pages, sort: st.sort, dir: st.dir, csv: !o.noCsv });
-}
-function tableMarkup(id, cols, slice, p) {
-  let h = '<div class="tw"><table class="t"><thead><tr>' + cols.map(c => '<th class="' + (c.n ? 'n ' : '') + (c.nosort ? '' : 's') + '"' + (c.nosort ? '' : ' data-act="sort" data-t="' + id + '" data-c="' + c.id + '"') + '>' + esc(c.label) + (p.sort === c.id ? (p.dir > 0 ? ' ▲' : ' ▼') : '') + '</th>').join('') + '</tr></thead><tbody>';
-  h += slice.map(r => '<tr>' + cols.map(c => '<td class="' + (c.n ? 'n ' : '') + (c.nw ? 'nw' : '') + '">' + (c.h ? c.h(r) : esc(r[c.id] == null ? '' : r[c.id])) + '</td>').join('') + '</tr>').join('');
-  h += '</tbody></table></div>';
-  const from = p.total ? (p.page - 1) * p.size + 1 : 0, to = Math.min(p.total, p.page * p.size);
-  h += '<div class="pg"><span>' + esc(tr('showing', from, to, nf(p.total))) + '</span><span class="pb">' +
-    '<button class="btn sm" data-act="pg" data-t="' + id + '" data-d="-1"' + (p.page <= 1 ? ' disabled' : '') + '>‹</button><span>' + p.page + ' / ' + p.pages + '</span><button class="btn sm" data-act="pg" data-t="' + id + '" data-d="1"' + (p.page >= p.pages ? ' disabled' : '') + '>›</button>' +
-    '<select data-act="size" data-t="' + id + '" style="font:inherit;font-size:11px;border:1px solid var(--line);border-radius:6px;padding:2px">' + [10, 25, 50, 100].map(n => '<option' + (n === p.size ? ' selected' : '') + '>' + n + '</option>').join('') + '</select>' +
-    (p.csv === false ? '' : '<button class="btn sm" data-act="csv" data-t="' + id + '">' + ic('download') + esc(tr('export_csv')) + '</button>') + '</span></div>';
-  return h;
-}
-function csvText(cols, rows) {
-  const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-  const cs = cols.filter(c => !c.noExport);
-  return String.fromCharCode(65279) + [cs.map(c => q(c.label)).join(',')].concat(rows.map(r => cs.map(c => q(c.x ? c.x(r) : c.v ? c.v(r) : r[c.id])).join(','))).join(String.fromCharCode(13, 10));
-}
-function download(name, text) {
-  const b = new Blob([text], { type: 'text/csv;charset=utf-8' }); const u = URL.createObjectURL(b);
-  const a = document.createElement('a'); a.href = u; a.download = name + '_' + TODAY + '.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 1500);
-}
-
-/* status chips (ERP values preserved) */
-function stChip(s, docstatus) {
-  if (docstatus === 2 || s === 'Cancelled') return chip(s || 'Cancelled', 'bad');
-  const m = { 'Fully Depreciated': 'warn', 'In Maintenance': 'info', 'Out of Order': 'bad', Sold: '', Scrapped: '', Submitted: 'ok', 'Partially Depreciated': 'ok', Draft: 'warn', Completed: 'ok', Planned: 'pri', Overdue: 'bad', Pending: 'warn' };
-  return chip(s || '—', m[s] || '');
-}
-const sevChip = s => chip(tr('sev_' + s), s === 'high' ? 'bad' : s === 'medium' ? 'warn' : s === 'low' ? 'info' : '');
-const actBtns = (dt, name, kind) => '<span class="nw"><button class="btn sm" data-act="detail" data-dt="' + esc(dt) + '" data-n="' + esc(name) + '">' + ic('eye') + esc(tr('view')) + '</button> <a class="btn sm" target="_blank" rel="noopener" href="' + esc(formUrl(dt, name)) + '">' + ic('ext') + esc(tr('open_erp')) + '</a></span>';
-
-/* ---------- maintenance helpers ---------- */
-function taskState(t) {
-  if (t.maintenance_status === 'Cancelled') return 'cancelled';
-  if (t.end_date && t.end_date < TODAY) return 'ended';
-  if (t.next_due_date && t.next_due_date < TODAY) return 'overdue';
-  if (t.maintenance_status === 'Overdue') return 'overdue';
-  return 'planned';
-}
-function inRange(d) { if (!d) return !(S.f.from || S.f.to); const x = dstr(d); return (!S.f.from || x >= S.f.from) && (!S.f.to || x <= S.f.to); }
-/* maintenance dataset restricted to the assets currently selected by the global filters (status/category/company/location/etc.; date range applies to event dates) */
-async function mScope() {
-  const [M, A, sc] = await Promise.all([L.mnt(), L.assets({ noDate: true }), L.scope()]);
-  const set = new Set(A.rows.map(a => a.name));
-  const plans = M.plans.filter(p => set.has(p.asset_name)); const pn = new Set(plans.map(p => p.name)); const pmap = {}; plans.forEach(p => pmap[p.name] = p);
-  const dr = !!(S.f.from || S.f.to);
-  const tasks = M.tasks.filter(t => pn.has(t.parent) && (!dr || inRange(t.next_due_date))).map(t => Object.assign({}, t, { _asset: pmap[t.parent].asset_name, _plan: pmap[t.parent], _state: taskState(t) }));
-  const logs = M.logs.filter(l => set.has(l.asset_name) && l.docstatus !== 2 && (!dr || inRange(l.due_date || l.completion_date)));
-  const repairs = M.repairs.filter(r => set.has(r.asset) && r.docstatus !== 2 && (!dr || inRange(r.failure_date)));
-  const rn = new Set(repairs.map(r => r.name)); const consumed = M.consumed.filter(c => rn.has(c.parent));
-  const od = new Map();
-  logs.forEach(l => { if (['Planned', 'Overdue'].indexOf(l.maintenance_status) >= 0 && l.due_date && dstr(l.due_date) < TODAY) od.set(l.task || l.name, { asset: l.asset_name, task: l.task_name, due: dstr(l.due_date), src: 'Asset Maintenance Log', ref: l.name }); });
-  tasks.forEach(t => { if (t._state === 'overdue' && !od.has(t.name)) od.set(t.name, { asset: t._asset, task: t.maintenance_task, due: dstr(t.next_due_date), src: 'Asset Maintenance', ref: t.parent }); });
-  return { M, A, assetRows: A.rows, set, plans, tasks, logs, repairs, consumed, overdue: [...od.values()], denied: M.denied, sc };
-}
-const repCost = r => num(r.total_repair_cost) || num(r.repair_cost);
-function lastNext(M) {
-  const last = {}, next = {};
-  M.tasks.forEach(t => { const a = (M.plans.find(p => p.name === t.parent) || {}).asset_name; if (!a) return; if (t.last_completion_date && (!last[a] || t.last_completion_date > last[a])) last[a] = dstr(t.last_completion_date); if (t.maintenance_status !== 'Cancelled' && t.next_due_date && (!next[a] || t.next_due_date < next[a])) next[a] = dstr(t.next_due_date); });
-  M.logs.forEach(l => { if (l.maintenance_status === 'Completed' && l.completion_date && (!last[l.asset_name] || dstr(l.completion_date) > last[l.asset_name])) last[l.asset_name] = dstr(l.completion_date); });
-  return { last, next };
-}
-const grp = (rows, f) => { const o = {}; rows.forEach(r => { const k = f(r); o[k] = (o[k] || 0) + 1; }); return o; };
-const NONE = () => tr('none_set');
-
-/* ---------- drill / filters ---------- */
-function drill(go, set) {
-  Object.keys(set || {}).forEach(k => { S.f[k] = set[k]; });
-  S.T = {}; syncFilterInputs(); show(go || 'register');
-}
-function syncFilterInputs() {
-  root.querySelectorAll('[data-f]').forEach(el => { const v = S.f[el.dataset.f]; if (el.tagName === 'SELECT' && v && !Array.from(el.options).some(o => o.value === v)) { const o = document.createElement('option'); o.value = v; o.textContent = v === '__none__' ? NONE() : v; el.appendChild(o); } el.value = v || ''; });
-}
-
-/* ---------- OVERVIEW ---------- */
-const DRAW = {};
-DRAW.overview = async () => {
-  const [A, M, V, dm, total] = await Promise.all([L.assets(), mScope(), L.val(), L.dm(false), countOf('Asset', { filters: aFilters(), or: aOr() })]);
-  const rows = A.rows, plant = rows.filter(r => r.asset_category === SC.plant), furn = rows.filter(r => r.asset_category === SC.furn);
-  const cost = byCur(rows.filter(r => r.docstatus === 1), r => r.total_asset_cost);
-  const verified = V.vals.filter(v => v.verified), unver = V.vals.filter(v => !v.verified && !v.disposed);
-  const nbv = byCur(verified, v => v.nbv);
-  const fd = rows.filter(r => r.status === 'Fully Depreciated'), im = rows.filter(r => r.status === 'In Maintenance');
-  const nocust = rows.filter(r => !r.custodian), nofin = rows.filter(r => !r.location || !(num(r.total_asset_cost) > 0));
-  const calib = M.tasks.filter(t => t.maintenance_type === 'Calibration' && t._state !== 'cancelled');
-  const recOk = total === rows.length && !A.capped;
-  let h = banner(tr('measures_note'), 'info');
-  h += '<div class="kpis">' +
-    kpi({ l: tr('k_plant'), v: nf(plant.length), s: tr('s_qty', nf(sum(plant, r => r.asset_quantity)), nf(plant.length)), go: 'plant', cls: 'ok' }) +
-    kpi({ l: tr('k_furn'), v: nf(furn.length + dm.rows.length), s: tr('s_furn', nf(furn.length), nf(dm.rows.length)), go: 'furniture' }) +
-    kpi({ l: tr('k_cost'), v: moneyMap(cost, 0), s: tr('s_hist'), go: 'valuation' }) +
-    kpi({ l: tr('k_nbv'), v: verified.length ? moneyMap(nbv, 0) : tr('unavailable'), s: tr('s_nbv', nf(verified.length), nf(V.vals.length)) + (V.partial ? ' · ' + tr('partial') : ''), go: 'valuation', cls: verified.length ? '' : 'warn', na: !verified.length }) +
-    kpi({ l: tr('k_fd'), v: nf(fd.length), s: tr('s_status'), go: 'register', set: { status: 'st:Fully Depreciated' } }) +
-    kpi({ l: tr('k_im'), v: nf(im.length), s: tr('s_status'), go: 'register', set: { status: 'st:In Maintenance' }, cls: im.length ? 'warn' : '' }) +
-    kpi({ l: tr('k_nocust'), v: nf(nocust.length), s: tr('s_of', nf(rows.length)), go: 'audit', cls: nocust.length ? 'warn' : 'ok' }) +
-    kpi({ l: tr('k_nofin'), v: nf(nofin.length), s: tr('s_nofin'), go: 'audit', cls: nofin.length ? 'warn' : 'ok' }) + '</div>';
-  h += banner(recOk ? tr('recon_ok', nf(total), nf(rows.length)) : tr('recon_bad', nf(total), nf(rows.length)), recOk ? 'ok' : 'warn');
-  if (!rows.length && !dm.rows.length) h += empty(tr('empty_scope'), tr('empty_scope_s'));
-
-  const cat = grp(rows, r => r.asset_category); const catItems = Object.keys(cat).map(k => ({ label: k, value: cat[k], go: 'register', set: { category: k } }));
-  if (dm.rows.length) catItems.push({ label: tr('dm_furn_lbl'), value: dm.rows.length, go: 'furniture', set: {} });
-  const loc = grp(rows, r => r.location || '__none__'); const locItems = Object.keys(loc).map(k => ({ label: k === '__none__' ? NONE() : k, value: loc[k], go: 'register', set: { location: k } })).sort((a, b) => b.value - a.value).slice(0, 12);
-  const cc = {}; rows.filter(r => r.docstatus === 1).forEach(r => { const k = r.asset_category + ((Object.keys(cost).length > 1) ? ' (' + (curOf(r.company) || '—') + ')' : ''); cc[k] = cc[k] || { v: 0, cat: r.asset_category, company: r.company }; cc[k].v += num(r.total_asset_cost); });
-  const costItems = Object.keys(cc).map(k => ({ label: k, value: cc[k].v, disp: nf(cc[k].v, 0), go: 'register', set: { category: cc[k].cat } }));
-  const st = grp(rows, r => r.docstatus === 2 ? 'Cancelled' : r.status || '—'); const stItems = Object.keys(st).map(k => ({ label: k, value: st[k], go: 'register', set: { status: k === 'Cancelled' ? 'cancelled' : 'st:' + k } }));
-  const mo = {}; let nodate = 0; rows.forEach(r => { if (!r.purchase_date) { nodate++; return; } const k = dstr(r.purchase_date).slice(0, 7); mo[k] = mo[k] || { n: 0, c: 0 }; mo[k].n++; mo[k].c += num(r.total_asset_cost); });
-  const trend = Object.keys(mo).sort().map(k => { const last = new Date(+k.slice(0, 4), +k.slice(5, 7), 0).getDate(); return { label: k, value: mo[k].n, disp: nf(mo[k].n) + ' · ' + nf(mo[k].c, 0), go: 'register', set: { from: k + '-01', to: k + '-' + last } }; });
-  const ms = {}; M.tasks.forEach(t => { ms[t._state] = (ms[t._state] || 0) + 1; }); const msItems = Object.keys(ms).map(k => ({ label: tr('ts_' + k), value: ms[k], go: 'maintenance', set: {} }));
-  const ls = grp(M.logs, l => l.maintenance_status); const lsItems = Object.keys(ls).map(k => ({ label: k, value: ls[k], go: 'maintenance', set: {} }));
-
-  h += '<div class="grid g2">' +
-    card(tr('c_cat'), tr('h_records'), donut(catItems)) +
-    card(tr('c_loc'), tr('h_records'), bars(locItems)) +
-    card(tr('c_costcat'), tr('h_hist'), bars(costItems)) +
-    card(tr('ch_status'), tr('h_records'), donut(stItems)) +
-    card(tr('c_trend'), tr('h_trend') + (nodate ? ' · ' + tr('n_nodate', nf(nodate)) : ''), lineChart(trend)) +
-    '</div>';
-  return h;
-};
-
-/* ---------- REGISTER (server-side pagination) ---------- */
-const REG_SORT = { id: 'name', asset_name: 'asset_name', asset_category: 'asset_category', company: 'company', location: 'location', custodian: 'custodian', purchase_date: 'purchase_date', cost: 'total_asset_cost', status: 'status' };
-function nbvCell(v) {
-  if (!v) return '<span class="mut">—</span>';
-  if (v.disposed) return chip(tr('disposed'), '');
-  if (v.verified) return '<span title="' + esc(tr('nbv_rule')) + '">' + esc(money(v.nbv, v.company)) + '</span>';
-  return '<span title="' + esc(tr('r_' + v.reason)) + '">' + chip(tr('unverified'), 'warn') + '</span>';
-}
-DRAW.register = async () => {
-  const st = S.T.register || (S.T.register = { page: 1, sort: 'purchase_date', dir: -1, size: 25 });
-  const F = aFilters(), OR = aOr();
-  const key = 'reg|' + JSON.stringify([F, OR, st.page, st.sort, st.dir, st.size]);
-  const { total, rows } = await memo(key, async () => ({ total: await countOf('Asset', { filters: F, or: OR }), rows: await list('Asset', { fields: ASSET_F, filters: F, or: OR, order: (REG_SORT[st.sort] || 'purchase_date') + ' ' + (st.dir > 0 ? 'asc' : 'desc') + ', name asc', start: (st.page - 1) * st.size, limit: st.size }) }));
-  const M = await L.mnt(); const ln = lastNext(M);
-  const docs = await pool(rows.filter(r => r.docstatus === 1), 5, r => getDoc('Asset', r.name));
-  const vm = {}; docs.forEach(d => { if (d && !d.__err) vm[d.name] = valuate(d); });
-  const cols = [
-    { id: 'id', label: tr('c_id'), h: r => '<a class="lk" href="#" data-act="detail" data-dt="Asset" data-n="' + esc(r.name) + '">' + esc(r.name) + '</a>', x: r => r.name },
-    { id: 'asset_name', label: tr('c_name') }, { id: 'asset_category', label: tr('c_category') }, { id: 'company', label: tr('c_company') },
-    { id: 'location', label: tr('c_location'), h: r => r.location ? esc(r.location) : '<span class="mut">' + esc(NONE()) + '</span>' },
-    { id: 'custodian', label: tr('c_custodian'), h: r => r.custodian ? esc(r.custodian) : '<span class="mut">' + esc(NONE()) + '</span>' },
-    { id: 'purchase_date', label: tr('c_pdate'), nw: 1, h: r => esc(dstr(r.purchase_date)) },
-    { id: 'cost', label: tr('c_cost'), n: 1, nw: 1, h: r => esc(money(r.total_asset_cost, r.company)), x: r => num(r.total_asset_cost) },
-    { id: 'nbv', label: tr('c_nbv'), n: 1, nosort: 1, h: r => r.docstatus === 1 ? nbvCell(vm[r.name]) : '<span class="mut">—</span>', x: r => vm[r.name] && vm[r.name].verified ? vm[r.name].nbv : '' },
-    { id: 'status', label: tr('c_status'), h: r => stChip(r.docstatus === 2 ? 'Cancelled' : r.status, r.docstatus), x: r => r.status },
-    { id: 'lm', label: tr('c_lastm'), nosort: 1, nw: 1, h: r => esc(ln.last[r.name] || '—'), x: r => ln.last[r.name] || '' },
-    { id: 'nm', label: tr('c_nextm'), nosort: 1, nw: 1, h: r => esc(ln.next[r.name] || '—'), x: r => ln.next[r.name] || '' },
-    { id: 'act', label: tr('c_actions'), nosort: 1, noExport: 1, h: r => actBtns('Asset', r.name) + ' <button class="btn sm" data-act="detail" data-dt="Asset" data-n="' + esc(r.name) + '" data-hist="1">' + ic('clock') + esc(tr('history')) + '</button>' }
-  ];
-  REG.register = { cols, rows, name: 'asset_register', exportAll: async () => (await fetchAll('Asset', { fields: ASSET_F, filters: F, or: OR, order: 'name asc' })).rows };
-  const costs = byCur(rows, r => r.total_asset_cost);
-  let h = card(tr('t_register'), tr('h_register'), (rows.length ? tableMarkup('register', cols, rows, { total, page: st.page, size: st.size, pages: Math.max(1, Math.ceil(total / st.size)), sort: st.sort, dir: st.dir }) : empty(tr('empty_filter'), tr('empty_filter_s'))));
-  h += '<div class="banner info" style="margin-top:10px">' + esc(tr('reg_foot', nf(total), moneyMap(costs, 2))) + '</div>';
-  return h;
-};
-
-/* ---------- PLANT ---------- */
-DRAW.plant = async () => {
-  const [A, M] = await Promise.all([L.assets({ status: 'noncancelled' }), mScope()]);
-  const rows = A.rows.filter(r => r.asset_category === SC.plant);
-  const act = rows.filter(r => r.docstatus === 1 && DISPOSED.indexOf(r.status) < 0);
-  const set = new Set(rows.map(r => r.name)); const logs = M.logs.filter(l => set.has(l.asset_name)), rep = M.repairs.filter(r => set.has(r.asset)), tasks = M.tasks.filter(t => set.has(t._asset));
-  const cost = byCur(act, r => r.total_asset_cost);
-  let h = banner(tr('note_nostatus'), 'info');
-  h += '<div class="kpis">' +
-    kpi({ l: tr('p_total'), v: nf(rows.length), s: tr('s_nodisp', nf(rows.length - act.length)), go: 'register', set: { category: SC.plant, status: 'noncancelled' } }) +
-    kpi({ l: tr('p_active'), v: nf(act.length), s: tr('s_active_def'), cls: 'ok', go: 'register', set: { category: SC.plant, status: 'active' } }) +
-    kpi({ l: tr('k_im'), v: nf(rows.filter(r => r.status === 'In Maintenance').length), go: 'register', set: { category: SC.plant, status: 'st:In Maintenance' } }) +
-    kpi({ l: tr('p_ooo'), v: nf(rows.filter(r => r.status === 'Out of Order').length), go: 'register', set: { category: SC.plant, status: 'st:Out of Order' }, cls: 'bad' }) +
-    kpi({ l: tr('k_fd'), v: nf(rows.filter(r => r.status === 'Fully Depreciated').length), go: 'register', set: { category: SC.plant, status: 'st:Fully Depreciated' } }) +
-    kpi({ l: tr('p_cost'), v: moneyMap(cost, 0), s: tr('s_hist') }) + '</div>';
-  if (!rows.length) return h + empty(tr('empty_plant'), tr('empty_filter_s'));
-  const loc = grp(rows, r => r.location || '__none__'), st = grp(rows, r => r.docstatus === 1 ? r.status : 'Cancelled');
-  h += '<div class="grid g2">' +
-    card(tr('c_loc'), tr('h_records'), bars(Object.keys(loc).map(k => ({ label: k === '__none__' ? NONE() : k, value: loc[k], go: 'register', set: { category: SC.plant, location: k, status: 'noncancelled' } })))) +
-    card(tr('ch_status'), tr('h_records'), donut(Object.keys(st).map(k => ({ label: k, value: st[k], go: 'register', set: { category: SC.plant, status: 'st:' + k } })))) + '</div>';
-  const cols = [
-    { id: 'name', label: tr('c_id'), h: r => '<a class="lk" href="#" data-act="detail" data-dt="Asset" data-n="' + esc(r.name) + '">' + esc(r.name) + '</a>' },
-    { id: 'asset_name', label: tr('c_name') }, { id: 'company', label: tr('c_company') }, { id: 'location', label: tr('c_location') },
-    { id: 'custodian', label: tr('c_custodian'), h: r => r.custodian ? esc(r.custodian) : '<span class="mut">' + esc(NONE()) + '</span>' },
-    { id: 'status', label: tr('c_status'), h: r => stChip(r.status, r.docstatus) }, { id: 'purchase_date', label: tr('c_pdate'), h: r => esc(dstr(r.purchase_date)) },
-    { id: 'cost', label: tr('c_cost'), n: 1, v: r => num(r.total_asset_cost), h: r => esc(money(r.total_asset_cost, r.company)) },
-    { id: 'mreq', label: tr('c_mreq'), v: r => r.maintenance_required ? 1 : 0, h: r => r.maintenance_required ? chip(tr('yes'), 'warn') : chip(tr('no'), '') + (M.plans.some(p => p.asset_name === r.name) ? ' ' + chip(tr('has_plan'), 'ok') : ''), x: r => r.maintenance_required ? 'Yes' : 'No' },
-    { id: 'a', label: tr('c_actions'), nosort: 1, noExport: 1, h: r => actBtns('Asset', r.name) }
-  ];
-  h += '<div class="sec">' + esc(tr('t_inventory')) + '</div>' + table('plantInv', cols, rows, { name: 'plant_inventory', sort: 'purchase_date', dir: -1 });
-  const cu = grp(rows.filter(r => r.docstatus === 1), r => r.custodian || '__none__');
-  h += '<div class="grid g2"><div>' + '<div class="sec">' + esc(tr('t_custodian')) + '</div>' + table('plantCust', [{ id: 'k', label: tr('c_custodian'), h: r => r.k === '__none__' ? '<span class="mut">' + esc(NONE()) + '</span>' : esc(r.k) }, { id: 'n', label: tr('c_count'), n: 1 }], Object.keys(cu).map(k => ({ k, n: cu[k] })), { name: 'plant_custodians' }) + '</div><div>' +
-    '<div class="sec">' + esc(tr('t_mreq')) + '</div>' + (M.denied.plans ? nc(tr('no_access'), 'Asset Maintenance') : card(tr('t_mreq'), '', '<div class="kv"><dt>' + esc(tr('mreq_flag')) + '</dt><dd>' + nf(rows.filter(r => r.maintenance_required).length) + '</dd><dt>' + esc(tr('k_plans')) + '</dt><dd>' + nf(M.plans.filter(p => set.has(p.asset_name)).length) + '</dd><dt>' + esc(tr('mreq_noplan')) + '</dt><dd>' + nf(rows.filter(r => r.maintenance_required && !M.plans.some(p => p.asset_name === r.name)).length) + '</dd></div>')) + '</div></div>';
-  h += '<div class="sec">' + esc(tr('t_mhist')) + '</div>' + (logs.length ? table('plantLogs', [{ id: 'asset_name', label: tr('c_id') }, { id: 'task_name', label: tr('c_task') }, { id: 'maintenance_type', label: tr('c_mtype') }, { id: 'maintenance_status', label: tr('c_status'), h: r => stChip(r.maintenance_status) }, { id: 'due_date', label: tr('c_due'), h: r => esc(dstr(r.due_date)) }, { id: 'completion_date', label: tr('c_completed'), h: r => esc(dstr(r.completion_date)) }], logs, { name: 'plant_maintenance_history' }) : empty(tr('no_logs')));
-  h += '<div class="sec">' + esc(tr('t_repairs')) + '</div>' + repairTable('plantRep', rep);
-  h += '<div class="grid g2" style="margin-top:12px">' + card(tr('c_avail'), '', nc(tr('unsupported'), tr('avail_msg', rep.filter(r => r.downtime).length ? rep.filter(r => r.downtime).map(r => r.asset + ': ' + r.downtime).join('; ') : tr('no_downtime')))) + '</div>';
-  return h;
-};
-function repairTable(id, rep) {
-  if (!rep.length) return empty(tr('no_repairs'), tr('no_repairs_s'));
-  const cols = [
-    { id: 'name', label: tr('c_ref'), h: r => link('Asset Repair', r.name) }, { id: 'asset', label: tr('c_id'), h: r => '<a class="lk" href="#" data-act="detail" data-dt="Asset" data-n="' + esc(r.asset) + '">' + esc(r.asset) + '</a>', x: r => r.asset },
-    { id: 'repair_status', label: tr('c_status'), h: r => stChip(r.repair_status) }, { id: 'failure_date', label: tr('c_failure'), h: r => esc(dstr(r.failure_date)) }, { id: 'completion_date', label: tr('c_completed'), h: r => esc(dstr(r.completion_date)) },
-    { id: 'cost', label: tr('c_repcost'), n: 1, v: r => repCost(r), h: r => esc(money(repCost(r), r.company)) + (r.capitalize_repair_cost ? ' ' + chip(tr('capitalized'), 'info') : '') },
-    { id: 'downtime', label: tr('c_downtime') }, { id: 'description', label: tr('c_desc'), h: r => esc(String(r.description || '').replace(/<[^>]+>/g, '').slice(0, 90)), x: r => String(r.description || '').replace(/<[^>]+>/g, '') }
-  ];
-  return table(id, cols, rep, { name: 'asset_repairs', sort: 'failure_date', dir: -1 });
-}
-
-/* ---------- FURNITURE ---------- */
-DRAW.furniture = async () => {
-  const [dm, A] = await Promise.all([L.dm(false), L.assets({ status: 'noncancelled' })]);
-  const fx = A.rows.filter(r => r.asset_category === SC.furn);
-  let h = banner(tr('note_dm'), 'info');
-  if (dm.denied) return h + nc(tr('no_access'), 'DM Assets');
-  const R_ = dm.rows, chairs = R_.filter(r => r.category === 'Chair'), tables = R_.filter(r => r.category === 'Table');
-  const assigned = R_.filter(r => r.employee), unassigned = R_.length - assigned.length, nodesc = R_.filter(r => !String(r.description || '').trim());
-  h += '<div class="kpis">' +
-    kpi({ l: tr('f_chairs'), v: nf(chairs.length), s: tr('s_records_only'), cls: 'ok' }) + kpi({ l: tr('f_tables'), v: nf(tables.length), s: tr('s_records_only'), cls: 'ok' }) +
-    kpi({ l: tr('f_other'), v: nf(fx.length), s: tr('s_other', SC.furn), go: 'register', set: { category: SC.furn, status: 'noncancelled' } }) +
-    kpi({ l: tr('f_assigned'), v: nf(assigned.length), s: tr('s_assigned_note') }) + kpi({ l: tr('f_unassigned'), v: nf(unassigned), cls: unassigned ? 'warn' : '' }) +
-    kpi({ l: tr('f_incomplete'), v: nf(nodesc.length), s: tr('s_nodesc'), cls: nodesc.length ? 'warn' : '' }) + '</div>';
-  const loc = grp(R_, r => r.location || '__none__'), emp = grp(R_, r => r.employee || '__none__');
-  h += '<div class="grid g2">' + card(tr('f_byloc'), tr('h_records'), bars(Object.keys(loc).map(k => ({ label: k === '__none__' ? NONE() : k, value: loc[k], go: 'furniture', set: { location: k } })))) +
-    card(tr('f_byemp'), tr('h_records'), bars(Object.keys(emp).map(k => ({ label: k === '__none__' ? NONE() : k, value: emp[k], go: 'furniture', set: { custodian: k } })))) + '</div>';
-  const cols = [
-    { id: 'asset_id', label: tr('c_id'), h: r => '<a class="lk" href="#" data-act="detail" data-dt="DM Assets" data-n="' + esc(r.name) + '">' + esc(r.asset_id || r.name) + '</a>', x: r => r.asset_id }, { id: 'category', label: tr('c_category') },
-    { id: 'description', label: tr('c_desc'), h: r => esc(String(r.description || '').slice(0, 120)) }, { id: 'employee', label: tr('c_employee') }, { id: 'location', label: tr('c_location') },
-    { id: 'date', label: tr('c_recdate'), h: r => esc(dstr(r.date)) }, { id: 'cond', label: tr('c_condition'), nosort: 1, h: () => '<span class="mut">' + esc(tr('not_recorded')) + '</span>', x: () => '' },
-    { id: 'a', label: tr('c_actions'), nosort: 1, noExport: 1, h: r => actBtns('DM Assets', r.name) }
-  ];
-  h += '<div class="sec">' + esc(tr('t_furn_reg')) + '</div>' + table('furnReg', cols, R_, { name: 'furniture_register', sort: 'date', dir: -1, emptyTitle: tr('empty_furn'), emptyMsg: tr('empty_filter_s') });
-  h += '<div class="sec">' + esc(tr('t_fx')) + '</div>' + (fx.length ? table('fx', [{ id: 'name', label: tr('c_id'), h: r => '<a class="lk" href="#" data-act="detail" data-dt="Asset" data-n="' + esc(r.name) + '">' + esc(r.name) + '</a>' }, { id: 'asset_name', label: tr('c_name') }, { id: 'location', label: tr('c_location') }, { id: 'custodian', label: tr('c_custodian') }, { id: 'status', label: tr('c_status'), h: r => stChip(r.status, r.docstatus) }, { id: 'cost', label: tr('c_cost'), n: 1, v: r => num(r.total_asset_cost), h: r => esc(money(r.total_asset_cost, r.company)) }], fx, { name: 'fixtures_assets' }) : empty(tr('empty_fx'), tr('empty_fx_s', SC.furn)));
-  return h;
-};
-
-/* ---------- VALUATION ---------- */
-const AGE = [['<1', 0, 1], ['1-3', 1, 3], ['3-5', 3, 5], ['5-10', 5, 10], ['10+', 10, 1e9]];
-DRAW.valuation = async () => {
-  const [A, V, allA] = await Promise.all([L.assets(), L.val(), L.assets({ status: 'all' })]);
-  const rows = A.rows.filter(r => r.docstatus === 1), cost = byCur(rows, r => r.total_asset_cost);
-  const ver = V.vals.filter(v => v.verified), unv = V.vals.filter(v => !v.verified && !v.disposed);
-  const acc = byCur(ver, v => v.acc), nbv = byCur(ver, v => v.nbv);
-  const fd = A.rows.filter(r => r.status === 'Fully Depreciated');
-  const disp = allA.rows.filter(r => DISPOSED.indexOf(r.status) >= 0 || r.docstatus === 2);
-  let h = banner(tr('val_rule'), 'info');
-  if (V.partial) h += banner(tr('val_partial', nf(V.total)), 'warn');
-  h += '<div class="kpis">' +
-    kpi({ l: tr('v_cost'), v: moneyMap(cost, 0), s: tr('s_hist') + ' · ' + tr('s_excl_cancel') }) +
-    kpi({ l: tr('v_acc'), v: ver.length ? moneyMap(acc, 0) : tr('unavailable'), s: tr('s_verified_only', nf(ver.length)), na: !ver.length }) +
-    kpi({ l: tr('k_nbv'), v: ver.length ? moneyMap(nbv, 0) : tr('unavailable'), s: tr('s_nbv', nf(ver.length), nf(V.vals.length)), na: !ver.length, cls: 'ok' }) +
-    kpi({ l: tr('v_unver'), v: nf(unv.length), s: tr('s_unver_cost', moneyMap(byCur(unv, v => v.cost), 0)), cls: unv.length ? 'warn' : 'ok', go: 'audit' }) +
-    kpi({ l: tr('k_fd'), v: nf(fd.length), s: tr('s_status'), go: 'register', set: { status: 'st:Fully Depreciated' } }) +
-    kpi({ l: tr('v_disp'), v: nf(disp.length), s: tr('s_disp'), go: 'audit' }) + '</div>';
-  if (!rows.length) return h + empty(tr('empty_scope'), tr('empty_scope_s'));
-  const cc = {}; rows.forEach(r => { const k = r.asset_category + (Object.keys(cost).length > 1 ? ' (' + (curOf(r.company) || '—') + ')' : ''); cc[k] = cc[k] || { v: 0, c: r.asset_category }; cc[k].v += num(r.total_asset_cost); });
-  const yr = {}; V.vals.forEach(v => (v.sched || []).forEach(s => { const y = String(s.schedule_date || '').slice(0, 4); if (!y) return; yr[y] = yr[y] || { p: 0, s: 0 }; if (s.journal_entry) yr[y].p += num(s.depreciation_amount); else yr[y].s += num(s.depreciation_amount); }));
-  const yItems = Object.keys(yr).sort().map(y => ({ label: y, value: yr[y].p + yr[y].s, disp: nf(yr[y].p, 0) + ' ' + tr('posted') + ' / ' + nf(yr[y].s, 0) + ' ' + tr('scheduled') }));
-  const ages = AGE.map(a => ({ label: a[0] + ' ' + tr('yrs'), value: 0, color: 'var(--c1)' })); let noAge = 0;
-  rows.forEach(r => { const d = r.available_for_use_date || r.purchase_date; if (!d) { noAge++; return; } const y = dayDiff(TODAY, dstr(d)) / 365.25; const i = AGE.findIndex(a => y >= a[1] && y < a[2]); if (i >= 0) ages[i].value++; });
-  h += '<div class="grid g2">' + card(tr('v_costcat'), tr('h_hist'), bars(Object.keys(cc).map(k => ({ label: k, value: cc[k].v, disp: nf(cc[k].v, 0), go: 'register', set: { category: cc[k].c } })))) +
-    card(tr('v_depyear'), tr('h_depyear'), yItems.length ? bars(yItems) : empty(tr('no_sched'))) +
-    card(tr('v_age'), noAge ? tr('n_nodate', nf(noAge)) : tr('h_age'), bars(ages)) + '</div>';
-  const reason = v => v.reason ? tr('r_' + v.reason) : '';
-  const cols = [
-    { id: 'name', label: tr('c_id'), h: r => '<a class="lk" href="#" data-act="detail" data-dt="Asset" data-n="' + esc(r.name) + '">' + esc(r.name) + '</a>' },
-    { id: 'cost', label: tr('c_cost'), n: 1, h: r => esc(money(r.cost, r.company)), v: r => r.cost },
-    { id: 'open', label: tr('v_open'), n: 1, v: r => r.open, h: r => esc(mf2(r.open)) }, { id: 'posted', label: tr('v_posted'), n: 1, v: r => r.posted, h: r => esc(mf2(r.posted)) },
-    { id: 'derived', label: tr('v_derived'), n: 1, v: r => r.derived, h: r => r.derived == null ? '—' : esc(mf2(r.derived)) }, { id: 'field', label: tr('v_field'), n: 1, v: r => r.field, h: r => r.field == null ? '—' : esc(mf2(r.field)) },
-    { id: 'fb', label: tr('v_fb'), h: r => esc(r.fb || '—') + (r.multiFB ? ' ' + chip(tr('multi_fb'), 'info') : '') },
-    { id: 'res', label: tr('v_result'), v: r => r.verified ? 1 : 0, h: r => r.verified ? chip(tr('verified'), 'ok') : chip(tr('unverified'), r.disposed ? '' : 'warn') + ' <span class="mut">' + esc(reason(r)) + '</span>', x: r => r.verified ? 'Verified' : 'Unverified: ' + reason(r) }
-  ];
-  const docMap = {}; V.docs.forEach(d => docMap[d.name] = d);
-  const vrows = V.vals.map(v => Object.assign({}, v, { open: num((docMap[v.name] || {}).opening_accumulated_depreciation) }));
-  h += '<div class="sec">' + esc(tr('t_valuation')) + '</div>' + table('valTbl', cols, vrows, { name: 'valuation', emptyTitle: tr('empty') });
-  h += '<div class="sec">' + esc(tr('t_disposed')) + '</div>' + (disp.length ? table('dispTbl', [{ id: 'name', label: tr('c_id'), h: r => '<a class="lk" href="#" data-act="detail" data-dt="Asset" data-n="' + esc(r.name) + '">' + esc(r.name) + '</a>' }, { id: 'asset_name', label: tr('c_name') }, { id: 'status', label: tr('c_status'), h: r => stChip(r.docstatus === 2 ? 'Cancelled' : r.status, r.docstatus) }, { id: 'disposal_date', label: tr('c_disposal'), h: r => esc(dstr(r.disposal_date)) }, { id: 'cost', label: tr('c_cost'), n: 1, v: r => num(r.total_asset_cost), h: r => esc(money(r.total_asset_cost, r.company)) + ' ' + chip(tr('excluded'), '') }], disp, { name: 'disposed_cancelled' }) : empty(tr('no_disposed')));
-  return h;
-};
-
-/* ---------- MAINTENANCE ---------- */
-function calendarHTML(M) {
-  const y = S.cal.y, m = S.cal.m, first = new Date(y, m, 1), days = new Date(y, m + 1, 0).getDate(), lead = first.getDay();
-  const ev = {}; const push = (d, label, cls, ref) => { d = dstr(d); if (!d) return; (ev[d] = ev[d] || []).push({ label, cls, ref }); };
-  M.tasks.forEach(t => { if (t._state !== 'cancelled') push(t.next_due_date, t._asset + ' · ' + t.maintenance_task, t._state === 'overdue' ? 'bad' : '', t.parent); });
-  M.logs.forEach(l => { if (l.maintenance_status === 'Completed') push(l.completion_date, l.asset_name + ' ✓', 'ok', l.name); });
-  M.repairs.forEach(r => push(r.failure_date, r.asset + ' ⚠', 'warn', r.name));
-  const names = tr('weekdays').split(','); let g = '<div class="calh"><button class="btn sm" data-act="calnav" data-d="-1">‹</button><span>' + esc(new Date(y, m, 1).toLocaleString(S.lang === 'ar' ? 'ar-SA-u-nu-latn' : 'en-US', { month: 'long', year: 'numeric' })) + '</span><button class="btn sm" data-act="calnav" data-d="1">›</button></div><div class="cal">' + names.map(n => '<div class="dh">' + esc(n) + '</div>').join('');
-  for (let i = 0; i < lead; i++) g += '<div class="d o"></div>';
-  for (let d = 1; d <= days; d++) { const k = y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0'); g += '<div class="d' + (k === TODAY ? ' today' : '') + '"><b>' + d + '</b>' + (ev[k] || []).slice(0, 3).map(e => '<span class="ev ' + e.cls + '" title="' + esc(e.label) + '">' + esc(e.label) + '</span>').join('') + ((ev[k] || []).length > 3 ? '<span class="mut">+' + ((ev[k] || []).length - 3) + '</span>' : '') + '</div>'; }
-  return g + '</div>';
-}
-DRAW.maintenance = async () => {
-  const M = await mScope(); let h = banner(tr('note_mnt'), 'info');
-  if (M.denied.plans && M.denied.logs && M.denied.repairs) return h + nc(tr('no_access'), 'Asset Maintenance · Asset Maintenance Log · Asset Repair');
-  ['plans', 'logs', 'repairs'].forEach(k => { if (M.denied[k]) h += banner(tr('partial_denied', k), 'warn'); });
-  const planned = M.tasks.filter(t => t._state === 'planned'), done = M.logs.filter(l => l.maintenance_status === 'Completed'), pend = M.repairs.filter(r => r.repair_status === 'Pending'), comp = M.repairs.filter(r => r.repair_status === 'Completed');
-  const needs = M.assetRows.filter(a => a.maintenance_required), rc = byCur(M.repairs.filter(r => r.repair_status !== 'Cancelled'), r => repCost(r));
-  h += '<div class="kpis">' + kpi({ l: tr('k_plans'), v: nf(M.plans.length), s: tr('s_tasks', nf(M.tasks.length)) }) + kpi({ l: tr('m_planned'), v: nf(planned.length), cls: 'ok' }) +
-    kpi({ l: tr('k_od'), v: nf(M.overdue.length), s: tr('s_od'), cls: M.overdue.length ? 'bad' : '' }) + kpi({ l: tr('m_done'), v: nf(done.length) }) +
-    kpi({ l: tr('m_pend'), v: nf(pend.length), cls: pend.length ? 'warn' : '' }) + kpi({ l: tr('m_comp'), v: nf(comp.length) }) +
-    kpi({ l: tr('m_repcost'), v: moneyMap(rc, 0), s: tr('s_repcost') }) + kpi({ l: tr('m_needs'), v: nf(needs.length), s: tr('s_needs'), go: 'audit' }) + '</div>';
-  if (!M.plans.length && !M.logs.length && !M.repairs.length) h += empty(tr('no_maint_plans'), tr('no_maint_plans_s'));
-  const stc = t => (t._state === 'overdue' ? chip(tr('overdue_c'), 'bad') + ' ' : '') + stChip(t.maintenance_status);
-  const cols = [
-    { id: 'asset', label: tr('c_id'), v: t => t._asset, h: t => '<a class="lk" href="#" data-act="detail" data-dt="Asset" data-n="' + esc(t._asset) + '">' + esc(t._asset) + '</a>', x: t => t._asset },
-    { id: 'an', label: tr('c_name'), v: t => (M.sc.map[t._asset] || {}).asset_name, h: t => esc((M.sc.map[t._asset] || {}).asset_name) },
-    { id: 'maintenance_task', label: tr('c_task') }, { id: 'maintenance_type', label: tr('c_mtype') }, { id: 'periodicity', label: tr('c_freq') },
-    { id: 'last_completion_date', label: tr('c_last'), h: t => esc(dstr(t.last_completion_date)) }, { id: 'next_due_date', label: tr('c_next'), h: t => esc(dstr(t.next_due_date)) },
-    { id: 'tech', label: tr('c_tech'), v: t => t.assign_to_name || t.assign_to, h: t => esc(t.assign_to_name || t.assign_to || '') || '<span class="mut">' + esc(NONE()) + '</span>', x: t => t.assign_to_name || t.assign_to || '' },
-    { id: 'st', label: tr('c_status'), v: t => t._state, h: stc, x: t => t.maintenance_status + (t._state === 'overdue' ? ' (overdue)' : '') },
-    { id: 'a', label: tr('c_actions'), nosort: 1, noExport: 1, h: t => link('Asset Maintenance', t.parent, tr('open_erp')) }
-  ];
-  const prev = M.tasks.filter(t => t.maintenance_type === 'Preventive Maintenance');
-  h += '<div class="sec">' + esc(tr('t_schedule')) + '</div><div class="hint mut" style="margin:-4px 2px 6px">' + esc(tr('h_overdue_rule')) + '</div>' + table('mSched', cols, M.tasks, { name: 'maintenance_schedule', sort: 'next_due_date', emptyTitle: tr('no_maint_plans'), emptyMsg: tr('no_maint_plans_s') });
-  const soon = M.tasks.filter(t => t._state === 'planned' && t.next_due_date && dayDiff(dstr(t.next_due_date), TODAY) <= 30);
-  h += '<div class="grid g2" style="margin-top:12px">' + card(tr('t_calendar'), tr('h_calendar'), calendarHTML(M)) +
-    card(tr('t_alerts'), tr('h_alerts'), (M.overdue.length || soon.length) ? '<div class="bars">' + M.overdue.map(o => '<div class="bar" style="grid-template-columns:1fr auto"><span>' + chip(tr('overdue_c'), 'bad') + ' ' + esc(o.asset + ' · ' + o.task) + '</span><span class="bv">' + esc(o.due) + '</span></div>').join('') + soon.map(t => '<div class="bar" style="grid-template-columns:1fr auto"><span>' + chip(tr('due_soon'), 'warn') + ' ' + esc(t._asset + ' · ' + t.maintenance_task) + '</span><span class="bv">' + esc(dstr(t.next_due_date)) + '</span></div>').join('') + '</div>' : empty(tr('no_alerts'))) + '</div>';
-  const cat = grp(M.plans, p => (M.sc.map[p.asset_name] || {}).asset_category || p.asset_category || '—');
-  const rbyA = {}; M.repairs.filter(r => r.repair_status !== 'Cancelled').forEach(r => { rbyA[r.asset] = (rbyA[r.asset] || 0) + repCost(r); });
-  const tech = grp(M.tasks.filter(t => t._state !== 'cancelled'), t => t.assign_to_name || t.assign_to || '__none__');
-  h += '<div class="grid g3">' + card(tr('m_bycat'), tr('h_plans'), bars(Object.keys(cat).map(k => ({ label: k, value: cat[k] })))) +
-    card(tr('m_costasset'), tr('h_costasset'), bars(Object.keys(rbyA).map(k => ({ label: k, value: rbyA[k], disp: nf(rbyA[k], 2) })))) +
-    card(tr('m_tech'), tr('h_tech'), bars(Object.keys(tech).map(k => ({ label: k === '__none__' ? NONE() : k, value: tech[k] })))) + '</div>';
-  h += '<div class="sec">' + esc(tr('t_prev')) + '</div>' + (prev.length ? '<div class="banner ok">' + esc(tr('prev_count', nf(prev.length))) + '</div>' : empty(tr('no_prev')));
-  h += '<div class="sec">' + esc(tr('t_comp_hist')) + '</div>' + (done.length ? table('mDone', [{ id: 'asset_name', label: tr('c_id') }, { id: 'task_name', label: tr('c_task') }, { id: 'maintenance_type', label: tr('c_mtype') }, { id: 'due_date', label: tr('c_due'), h: r => esc(dstr(r.due_date)) }, { id: 'completion_date', label: tr('c_completed'), h: r => esc(dstr(r.completion_date)) }, { id: 'assign_to_name', label: tr('c_tech') }, { id: 'actions_performed', label: tr('c_actions_done'), h: r => esc(String(r.actions_performed || '').replace(/<[^>]+>/g, '').slice(0, 100)), x: r => String(r.actions_performed || '').replace(/<[^>]+>/g, '') }, { id: 'cert', label: tr('c_cert'), nosort: 1, noExport: 1, h: r => r.certificate_attachement ? '<a class="lk" target="_blank" rel="noopener" href="' + esc(r.certificate_attachement) + '">' + esc(tr('view_cert')) + '</a>' : '<span class="mut">' + esc(tr('no_cert')) + '</span>' }], done, { name: 'maintenance_completed' }) : empty(tr('no_logs')));
-  h += '<div class="sec">' + esc(tr('t_corrective')) + '</div>' + repairTable('mRep', M.repairs);
-  const sp = M.consumed;
-  h += '<div class="sec">' + esc(tr('t_spares')) + '</div>' + (sp.length ? table('mSpares', [{ id: 'parent', label: tr('c_ref'), h: r => link('Asset Repair', r.parent) }, { id: 'item_code', label: tr('c_item') }, { id: 'consumed_quantity', label: tr('c_qty'), n: 1 }, { id: 'total_value', label: tr('c_value'), n: 1, v: r => num(r.total_value), h: r => esc(nf(r.total_value, 2)) }], sp, { name: 'spare_parts' }) : empty(tr('no_spares'), tr('no_spares_s')));
-  if (M.M.repairsTotalAll != null && M.M.repairsTotalAll > M.M.repairs.length) h += banner(tr('repairs_other', nf(M.M.repairsTotalAll - M.M.repairs.length)), 'info');
-  return h;
-};
-
-/* ---------- INSPECTION ---------- */
-DRAW.inspection = async () => {
-  const M = await mScope(); const cal = M.tasks.filter(t => t.maintenance_type === 'Calibration' && t._state !== 'cancelled'), calLogs = M.logs.filter(l => l.maintenance_type === 'Calibration');
-  const calDone = calLogs.filter(l => l.maintenance_status === 'Completed'), calOd = cal.filter(t => t._state === 'overdue');
-  let h = banner(tr('insp_audit'), 'warn');
-  h += '<div class="kpis">' + ['i_sched', 'i_done', 'i_pass', 'i_fail', 'i_over', 'i_corr'].map(k => kpi({ l: tr(k), v: tr('not_configured'), na: true, s: tr('insp_no_src') })).join('') + '</div>';
-  h += '<div class="sec">' + esc(tr('insp_real')) + '</div><div class="kpis">' + kpi({ l: tr('cal_sched'), v: nf(cal.length), s: tr('s_cal_src') }) + kpi({ l: tr('cal_done'), v: nf(calDone.length), s: tr('s_cal_src') }) + kpi({ l: tr('cal_over'), v: nf(calOd.length), cls: calOd.length ? 'bad' : '' }) + '</div>';
-  const cats = [['insp_plant', 0], ['insp_elec', 0], ['insp_mech', 0], ['insp_safety', 0], ['insp_furn', 0], ['insp_cal', 1]];
-  h += '<div class="grid g3">' + cats.map(c => card(tr(c[0]), '', c[1] ? chip(tr('partial_src'), 'info') + '<div class="hint" style="margin-top:6px">' + esc(tr('cal_hint')) + '</div>' : chip(tr('not_configured'), '') + '<div class="hint" style="margin-top:6px">' + esc(tr('insp_no_src')) + '</div>')).join('') + '</div>';
-  h += '<div class="grid g2">' + card(tr('insp_check'), tr('insp_check_h'), '<ul style="margin:0;padding-inline-start:18px;color:var(--mut)">' + ['ck1', 'ck2', 'ck3', 'ck4', 'ck5', 'ck6', 'ck7', 'ck8', 'ck9', 'ck10'].map(k => '<li>' + esc(tr(k)) + ' — <i>' + esc(tr('not_configured')) + '</i></li>').join('') + '</ul>', '<button class="btn pri" disabled title="' + esc(tr('not_configured')) + '">' + esc(tr('create_insp')) + '</button>') +
-    card(tr('insp_sources'), tr('insp_sources_h'), '<div class="kv"><dt>Asset Maintenance Task / Log</dt><dd>' + chip(tr('partial_src'), 'info') + ' ' + esc(tr('src_cal')) + '</dd><dt>Vehicle Inspection</dt><dd>' + chip(tr('not_applicable'), '') + ' ' + esc(tr('src_vehicle')) + '</dd><dt>Quality Inspection</dt><dd>' + chip(tr('not_applicable'), '') + ' ' + esc(tr('src_qi')) + '</dd><dt>Asset Inspection</dt><dd>' + chip(tr('missing'), 'bad') + ' ' + esc(tr('src_none')) + '</dd></div>') + '</div>';
-  const cols = [
-    { id: 'a', label: tr('c_id'), v: t => t._asset, h: t => '<a class="lk" href="#" data-act="detail" data-dt="Asset" data-n="' + esc(t._asset) + '">' + esc(t._asset) + '</a>', x: t => t._asset }, { id: 'an', label: tr('c_name'), v: t => (M.sc.map[t._asset] || {}).asset_name, h: t => esc((M.sc.map[t._asset] || {}).asset_name) },
-    { id: 'type', label: tr('c_itype'), v: () => 'Calibration', h: () => esc('Calibration') }, { id: 'last_completion_date', label: tr('c_idate'), h: t => esc(dstr(t.last_completion_date)) }, { id: 'next_due_date', label: tr('c_next'), h: t => esc(dstr(t.next_due_date)) },
-    { id: 'insp', label: tr('c_inspector'), v: t => t.assign_to_name || t.assign_to, h: t => esc(t.assign_to_name || t.assign_to || '') }, { id: 'res', label: tr('c_result'), nosort: 1, h: () => '<span class="mut">' + esc(tr('not_recorded')) + '</span>', x: () => '' },
-    { id: 'rem', label: tr('c_remarks'), h: t => esc(String(t.description || '').replace(/<[^>]+>/g, '').slice(0, 80)), x: t => String(t.description || '').replace(/<[^>]+>/g, '') },
-    { id: 'cert', label: tr('c_cert'), nosort: 1, h: t => t.certificate_required ? chip(tr('cert_required'), 'info') : '<span class="mut">—</span>', x: t => t.certificate_required ? 'Required' : '' },
-    { id: 'act', label: tr('c_actions'), nosort: 1, noExport: 1, h: t => link('Asset Maintenance', t.parent, tr('open_erp')) }
-  ];
-  h += '<div class="sec">' + esc(tr('t_insp')) + '</div>' + table('inspTbl', cols, cal, { name: 'calibration_inspections', emptyTitle: tr('no_insp_rows'), emptyMsg: tr('no_insp_rows_s') });
-  return h;
-};
-
-/* ---------- EMPLOYEE ASSIGNMENTS ---------- */
-L.dmRaw = () => memo('dmRaw', async () => canRead('DM Assets') ? (await fetchAll('DM Assets', { fields: ['name', 'asset_id', 'category', 'description', 'employee', 'location', 'docstatus'], filters: [['docstatus', '<', 2]] })).rows : []);
-const segHTML = (key, a, b, la, lb) => '<span class="seg"><button class="' + (!S.opt[key] ? 'on' : '') + '" data-act="opt" data-k="' + key + '" data-v="0">' + esc(la) + '</button><button class="' + (S.opt[key] ? 'on' : '') + '" data-act="opt" data-k="' + key + '" data-v="1">' + esc(lb) + '</button></span>';
-DRAW.assign = async () => {
-  const [A, mv, dm, acq, raw] = await Promise.all([L.assets(), L.mv(), L.dm(S.opt.dmAll), L.acq(), L.dmRaw()]);
-  let h = banner(tr('note_assign'), 'info');
-  const cust = A.rows.filter(r => r.custodian && r.docstatus === 1);
-  const lastMv = {}; (mv.rows || []).forEach(m => { if (m._p.docstatus === 1 && m.asset && m.to_employee) { const k = m.asset + '|' + m.to_employee, d = dstr(m._p.transaction_date); if (!lastMv[k] || d > lastMv[k]) lastMv[k] = d; } });
-  const q = (S.f.q || '').toLowerCase(), f = S.f;
-  let ar = (acq.rows || []).filter(r => r._p.docstatus < 2);
-  if (!S.opt.acqAll) ar = ar.filter(r => ['chair', 'table'].indexOf(String(r.item_name || '').toLowerCase()) >= 0);
-  if (f.custodian) ar = ar.filter(r => f.custodian === '__none__' ? !(r.life_cercle_end || r._p.employee) : (r.life_cercle_end === f.custodian || r._p.employee === f.custodian));
-  if (f.from) ar = ar.filter(r => dstr(r._p.date) >= f.from); if (f.to) ar = ar.filter(r => dstr(r._p.date) <= f.to);
-  if (f.location) ar = ar.filter(r => (r.ids || r._p.custom_job_location || '') === f.location);
-  if (q) ar = ar.filter(r => [r.item_name, r.dmasset_no, r._p.name, r._p.employee, r.life_cercle_end].join(' ').toLowerCase().indexOf(q) >= 0);
-  const dmIds = new Set(raw.map(r => r.asset_id)), linked = (acq.rows || []).filter(r => r.dmasset_no && dmIds.has(r.dmasset_no)).length, withNo = (acq.rows || []).filter(r => r.dmasset_no).length;
-  const emps = uniq([].concat(cust.map(r => r.custodian), (dm.rows || []).map(r => r.employee), ar.map(r => r.life_cercle_end || r._p.employee)));
-  h += '<div class="kpis">' + kpi({ l: tr('as_asset'), v: nf(cust.length), s: 'Asset' }) + kpi({ l: tr('as_dm'), v: nf((dm.rows || []).length), s: 'DM Assets' }) + kpi({ l: tr('as_acq'), v: nf(ar.length), s: 'Asset Acquisition Records' }) + kpi({ l: tr('as_emps'), v: nf(emps.length), s: tr('s_distinct') }) + '</div>';
-  h += banner(tr('link_check', nf(linked), nf(withNo)), linked ? 'warn' : 'info');
-  const empH = e => e ? esc(e) : '<span class="mut">' + esc(NONE()) + '</span>';
-  h += '<div class="sec">' + esc(tr('as_t1')) + '</div>' + table('asA', [
-    { id: 'custodian', label: tr('c_employee'), h: r => empH(r.custodian) }, { id: 'name', label: tr('c_id'), h: r => '<a class="lk" href="#" data-act="detail" data-dt="Asset" data-n="' + esc(r.name) + '">' + esc(r.name) + '</a>' }, { id: 'asset_category', label: tr('c_category') },
-    { id: 'cl', label: tr('c_comploc'), v: r => r.company + ' / ' + r.location, h: r => esc(r.company) + ' / ' + esc(r.location || '—') },
-    { id: 'ad', label: tr('c_assigned'), v: r => lastMv[r.name + '|' + r.custodian] || '', h: r => lastMv[r.name + '|' + r.custodian] ? esc(lastMv[r.name + '|' + r.custodian]) + ' <span class="mut">(' + esc(tr('via_mv')) + ')</span>' : '<span class="mut">' + esc(tr('not_recorded')) + '</span>', x: r => lastMv[r.name + '|' + r.custodian] || '' },
-    { id: 'ret', label: tr('c_return'), nosort: 1, h: () => '<span class="mut">' + esc(tr('not_recorded')) + '</span>', x: () => '' }
-  ], cust, { name: 'asset_custodians', emptyTitle: tr('empty_cust') });
-  h += '<div class="sec">' + esc(tr('as_t2')) + ' ' + segHTML('dmAll', 0, 1, tr('furn_only'), tr('all_cats')) + '</div>' + table('asD', [
-    { id: 'employee', label: tr('c_employee') }, { id: 'asset_id', label: tr('c_id'), h: r => '<a class="lk" href="#" data-act="detail" data-dt="DM Assets" data-n="' + esc(r.name) + '">' + esc(r.asset_id || r.name) + '</a>', x: r => r.asset_id }, { id: 'category', label: tr('c_category') }, { id: 'location', label: tr('c_location') },
-    { id: 'date', label: tr('c_assigned'), h: r => esc(dstr(r.date)) }, { id: 'ret', label: tr('c_return'), nosort: 1, h: () => '<span class="mut">' + esc(tr('not_recorded')) + '</span>', x: () => '' }
-  ], dm.rows || [], { name: 'dm_assets_assignments', emptyTitle: tr('empty_dm') });
-  h += '<div class="sec">' + esc(tr('as_t3')) + ' ' + segHTML('acqAll', 0, 1, tr('furn_only'), tr('all_items')) + '</div>' + table('asR', [
-    { id: 'emp', label: tr('c_employee'), v: r => r.life_cercle_end || r._p.employee, h: r => empH(r.life_cercle_end || r._p.employee) }, { id: 'item_name', label: tr('c_item') }, { id: 'dmasset_no', label: tr('c_dmno') },
-    { id: 'rec', label: tr('c_ref'), v: r => r.parent, h: r => link('Asset Acquisition Records', r.parent), x: r => r.parent }, { id: 'loc', label: tr('c_location'), v: r => r.ids || r._p.custom_job_location, h: r => esc(r.ids || r._p.custom_job_location || '') },
-    { id: 'd', label: tr('c_assigned'), v: r => r._p.date, h: r => esc(dstr(r._p.date)) }, { id: 'ws', label: tr('c_wstate'), v: r => r._p.workflow_state, h: r => chip(r._p.workflow_state || '—', r._p.workflow_state === 'Assigned' ? 'ok' : '') },
-    { id: 'ret', label: tr('c_return'), v: r => r._p.satus, h: r => r._p.satus === 'Return' ? chip(tr('returned'), 'warn') : r._p.satus === 'Issue New' ? chip(tr('issued'), 'ok') : '<span class="mut">' + esc(tr('not_recorded')) + '</span>', x: r => r._p.satus || '' }
-  ], ar, { name: 'acquisition_assignments', sort: 'd', dir: -1, emptyTitle: tr('empty_acq') });
-  return h;
-};
-
-/* ---------- MOVEMENT ---------- */
-DRAW.movement = async () => {
-  const [mv, sc] = await Promise.all([L.mv(), L.scope()]); if (mv.denied) return nc(tr('no_access'), 'Asset Movement');
-  const f = S.f, q = (f.q || '').toLowerCase();
-  let rows = mv.rows.map(m => Object.assign({}, m, { _cat: (sc.map[m.asset] || {}).asset_category || '' }));
-  const total = rows.length; if (!S.opt.mvAll) rows = rows.filter(m => m._cat);
-  if (f.company) rows = rows.filter(m => (m.company || m._p.company) === f.company);
-  if (f.category) rows = rows.filter(m => m._cat === f.category);
-  if (f.location) rows = rows.filter(m => f.location === '__none__' ? !(m.source_location || m.target_location) : (m.source_location === f.location || m.target_location === f.location));
-  if (f.from) rows = rows.filter(m => dstr(m._p.transaction_date) >= f.from); if (f.to) rows = rows.filter(m => dstr(m._p.transaction_date) <= f.to);
-  if (q) rows = rows.filter(m => [m.asset, m.asset_name, m.parent, m._p.reference_name].join(' ').toLowerCase().indexOf(q) >= 0);
-  const can = rows.filter(m => m._p.docstatus === 2).length, inS = rows.filter(m => m._cat).length;
-  let h = banner(tr('note_move'), 'info') + '<div class="kpis">' + kpi({ l: tr('mv_lines'), v: nf(rows.length), s: tr('s_of_all', nf(total)) }) + kpi({ l: tr('mv_docs'), v: nf(uniq(rows.map(m => m.parent)).length) }) + kpi({ l: tr('mv_in'), v: nf(inS) }) + kpi({ l: tr('mv_out'), v: nf(rows.length - inS) }) + kpi({ l: tr('mv_can'), v: nf(can), cls: can ? 'warn' : '' }) + '</div>';
-  h += '<div style="margin:0 0 8px">' + segHTML('mvAll', 0, 1, tr('scope_only'), tr('all_cats')) + '</div>';
-  const cols = [
-    { id: 'd', label: tr('c_mdate'), v: m => m._p.transaction_date, h: m => esc(dstr(m._p.transaction_date)) }, { id: 'asset', label: tr('c_id'), h: m => m._cat ? '<a class="lk" href="#" data-act="detail" data-dt="Asset" data-n="' + esc(m.asset) + '">' + esc(m.asset) + '</a>' : link('Asset', m.asset), x: m => m.asset },
-    { id: 'asset_name', label: tr('c_name') }, { id: 'cat', label: tr('c_category'), v: m => m._cat, h: m => m._cat ? esc(m._cat) : '<span class="mut">' + esc(tr('outside_scope')) + '</span>', x: m => m._cat },
-    { id: 'purpose', label: tr('c_mtype2'), v: m => m._p.purpose, h: m => chip(m._p.purpose || '—', 'pri') }, { id: 'source_location', label: tr('c_src') }, { id: 'target_location', label: tr('c_dst') },
-    { id: 'from_employee', label: tr('c_from') }, { id: 'to_employee', label: tr('c_to') },
-    { id: 'doc', label: tr('c_doc'), v: m => m.parent, h: m => link('Asset Movement', m.parent), x: m => m.parent }, { id: 'ref', label: tr('c_refdoc'), v: m => m._p.reference_name, h: m => m._p.reference_doctype && m._p.reference_name ? link(m._p.reference_doctype, m._p.reference_name, m._p.reference_doctype + ' · ' + m._p.reference_name) : '', x: m => m._p.reference_name || '' },
-    { id: 'st', label: tr('c_status'), v: m => m._p.docstatus, h: m => m._p.docstatus === 1 ? chip(tr('submitted'), 'ok') : m._p.docstatus === 2 ? chip('Cancelled', 'bad') : chip('Draft', 'warn'), x: m => ['Draft', 'Submitted', 'Cancelled'][m._p.docstatus] }
-  ];
-  return h + table('mvTbl', cols, rows, { name: 'asset_movements', sort: 'd', dir: -1, emptyTitle: tr('empty_mv'), emptyMsg: S.opt.mvAll ? tr('empty_filter_s') : tr('empty_mv_s') });
-};
-
-/* ---------- EXCEPTIONS & AUDIT ---------- */
-DRAW.audit = async () => {
-  const [A, M, V, dmRaw, dmF, sc] = await Promise.all([L.assets({ status: 'all', noDate: true }), L.mnt(), L.val(), L.dmRaw(), L.dm(false), L.scope()]);
-  const X = []; const add = (sev, ref, issue, source, fix, dt, name) => X.push({ sev, ref, issue, source, fix, dt, name });
-  const live = A.rows.filter(a => a.docstatus < 2), dup = {};
-  live.forEach(a => { const k = [a.asset_name, a.company, dstr(a.purchase_date), num(a.total_asset_cost)].join('|'); (dup[k] = dup[k] || []).push(a); });
-  const planAssets = new Set(M.plans.map(p => p.asset_name));
-  A.rows.forEach(a => {
-    if (a.docstatus === 2) { add('info', a.name, tr('x_cancelled'), 'Asset', tr('f_cancelled'), 'Asset', a.name); return; }
-    if (a.docstatus === 0) add('medium', a.name, tr('x_draft'), 'Asset', tr('f_draft'), 'Asset', a.name);
-    if (!a.location) add('high', a.name, tr('x_noloc'), 'Asset', tr('f_noloc'), 'Asset', a.name);
-    if (!a.custodian) add('medium', a.name, tr('x_nocust'), 'Asset', tr('f_nocust'), 'Asset', a.name);
-    if (!a.purchase_date) add('medium', a.name, tr('x_nodate'), 'Asset', tr('f_nodate'), 'Asset', a.name);
-    if (!(num(a.total_asset_cost) > 0)) add('high', a.name, tr('x_nocost'), 'Asset', tr('f_nocost'), 'Asset', a.name);
-    if (a.status === 'Fully Depreciated' && !a.is_fully_depreciated) add('low', a.name, tr('x_fdflag'), 'Asset', tr('f_fdflag'), 'Asset', a.name);
-    if (a.maintenance_required && !planAssets.has(a.name) && !M.denied.plans) add('medium', a.name, tr('x_nomplan'), 'Asset / Asset Maintenance', tr('f_nomplan'), 'Asset', a.name);
-    if (DISPOSED.indexOf(a.status) >= 0) add('info', a.name, tr('x_disposed', a.status), 'Asset', tr('f_disposed'), 'Asset', a.name);
-  });
-  Object.keys(dup).forEach(k => { if (dup[k].length > 1) dup[k].forEach(a => add('high', a.name, tr('x_dup', dup[k].map(x => x.name).filter(n => n !== a.name).join(', ')), 'Asset', tr('f_dup'), 'Asset', a.name)); });
-  V.vals.forEach(v => { if (!v.verified && !v.disposed && v.reason) add(v.reason === 'mismatch' || v.reason === 'zero_unproven' ? 'high' : 'medium', v.name, tr('x_unver') + ': ' + tr('r_' + v.reason), 'Asset (finance books / schedules)', tr('f_unver'), 'Asset', v.name); });
-  const set = new Set(live.map(a => a.name));
-  const mset = new Set(A.rows.map(a => a.name));
-  const oset = new Map(); M.logs.forEach(l => { if (mset.has(l.asset_name) && ['Planned', 'Overdue'].indexOf(l.maintenance_status) >= 0 && l.due_date && dstr(l.due_date) < TODAY && l.docstatus !== 2) oset.set(l.task || l.name, [l.asset_name, l.task_name, dstr(l.due_date), 'Asset Maintenance Log', l.name]); });
-  const pm = {}; M.plans.forEach(p => pm[p.name] = p);
-  M.tasks.forEach(t => { const p = pm[t.parent]; if (p && mset.has(p.asset_name) && taskState(t) === 'overdue' && !oset.has(t.name)) oset.set(t.name, [p.asset_name, t.maintenance_task, dstr(t.next_due_date), 'Asset Maintenance', t.parent]); });
-  oset.forEach(o => add('high', o[0], tr('x_overdue', o[1], o[2]), o[3], tr('f_overdue'), o[3], o[4]));
-  const tmap = {}; M.tasks.forEach(t => tmap[t.name] = t);
-  M.logs.forEach(l => { if (mset.has(l.asset_name) && l.maintenance_status === 'Completed' && tmap[l.task] && tmap[l.task].certificate_required && !l.certificate_attachement) add('medium', l.asset_name, tr('x_nocert', l.task_name), 'Asset Maintenance Log', tr('f_nocert'), 'Asset Maintenance Log', l.name); });
-  const idCount = {}; dmRaw.forEach(r => { if (r.asset_id) idCount[r.asset_id] = (idCount[r.asset_id] || 0) + 1; });
-  dmRaw.filter(r => DM_FURN.indexOf(r.category) >= 0).forEach(r => {
-    if (!r.asset_id) add('high', r.name, tr('x_noid'), 'DM Assets', tr('f_noid'), 'DM Assets', r.name);
-    if (r.asset_id && idCount[r.asset_id] > 1) add('high', r.asset_id, tr('x_dmdup'), 'DM Assets', tr('f_dup'), 'DM Assets', r.name);
-    if (!String(r.description || '').trim()) add('low', r.asset_id || r.name, tr('x_furn_inc', tr('c_desc')), 'DM Assets', tr('f_furn_inc'), 'DM Assets', r.name);
-    if (!r.employee) add('medium', r.asset_id || r.name, tr('x_furn_inc', tr('c_employee')), 'DM Assets', tr('f_furn_inc'), 'DM Assets', r.name);
-    if (!r.location) add('medium', r.asset_id || r.name, tr('x_furn_inc', tr('c_location')), 'DM Assets', tr('f_furn_inc'), 'DM Assets', r.name);
-  });
-  const rank = { high: 0, medium: 1, low: 2, info: 3 }; X.sort((a, b) => rank[a.sev] - rank[b.sev] || String(a.ref).localeCompare(String(b.ref)));
-  const sevSel = S.sev || ''; const shown = sevSel ? X.filter(x => x.sev === sevSel) : X; const cnt = k => X.filter(x => x.sev === k).length;
-  const srcs = [['Asset', sc.rows.length], ['DM Assets', dmRaw.length], ['Asset Maintenance', M.plans.length], ['Asset Maintenance Log', M.logs.length], ['Asset Repair', M.repairs.length], ['Asset Movement', (await L.mv()).parents ? (await L.mv()).parents.length : 0], ['Asset Acquisition Records', (await L.acq()).parents ? (await L.acq()).parents.length : 0]];
-  let h = banner(tr('note_audit'), 'info') + '<div class="kpis">' + kpi({ l: tr('x_total'), v: nf(X.length) }) + ['high', 'medium', 'low', 'info'].map(k => kpi({ l: tr('sev_' + k), v: nf(cnt(k)), cls: k === 'high' && cnt(k) ? 'bad' : k === 'medium' && cnt(k) ? 'warn' : '' })).join('') + '</div>';
-  h += '<div style="margin:0 0 8px"><span class="seg">' + [['', tr('all')], ['high', tr('sev_high')], ['medium', tr('sev_medium')], ['low', tr('sev_low')], ['info', tr('sev_info')]].map(s => '<button class="' + (sevSel === s[0] ? 'on' : '') + '" data-act="sev" data-v="' + s[0] + '">' + esc(s[1]) + '</button>').join('') + '</span></div>';
-  h += table('exc', [
-    { id: 'sev', label: tr('c_severity'), v: x => rank[x.sev], h: x => sevChip(x.sev), x: x => x.sev }, { id: 'ref', label: tr('c_asset'), h: x => x.dt === 'Asset' ? '<a class="lk" href="#" data-act="detail" data-dt="Asset" data-n="' + esc(x.name) + '">' + esc(x.ref) + '</a>' : esc(x.ref), x: x => x.ref },
-    { id: 'issue', label: tr('c_issue') }, { id: 'source', label: tr('c_source') }, { id: 'fix', label: tr('c_fix') }, { id: 'view', label: tr('c_view'), nosort: 1, noExport: 1, h: x => link(x.dt, x.name, tr('open_erp')) }
-  ], shown, { name: 'exceptions', emptyTitle: tr('no_exceptions'), emptyMsg: tr('no_exceptions_s'), size: 25 });
-  h += '<div class="sec">' + esc(tr('t_sources')) + '</div><div class="tw"><table class="t"><thead><tr><th>' + esc(tr('c_source')) + '</th><th>' + esc(tr('c_access')) + '</th><th class="n">' + esc(tr('c_count')) + '</th></tr></thead><tbody>' + srcs.map(s => '<tr><td>' + esc(s[0]) + '</td><td>' + (canRead(s[0]) ? chip(tr('readable'), 'ok') : chip(tr('no_access'), 'bad')) + '</td><td class="n">' + nf(s[1]) + '</td></tr>').join('') + '<tr><td>Asset Category</td><td>' + chip(S.meta.catNames.indexOf(SC.plant) >= 0 ? SC.plant : SC.plant + ' ✗', S.meta.catNames.indexOf(SC.plant) >= 0 ? 'ok' : 'bad') + ' ' + chip(S.meta.catNames.indexOf(SC.furn) >= 0 ? SC.furn : SC.furn + ' ✗', S.meta.catNames.indexOf(SC.furn) >= 0 ? 'ok' : 'bad') + '</td><td class="n">—</td></tr></tbody></table></div>';
-  return h;
-};
-
-/* ---------- translations (labels only; ERP values are never translated) ---------- */
-I.en = {
+  'use strict';
+  var I = { en: {}, ar: {} };
+  I.en = {
 title: 'Plant & Furniture Asset Dashboard', subtitle: 'DM Group KSA · live ERP data (read-only)', asof: 'as of', refresh: 'Refresh', loading: 'Loading from ERP…', retry: 'Retry', close: 'Close',
 tab_overview: 'Overview', tab_register: 'Asset Register', tab_plant: 'Plant & Machinery', tab_furniture: 'Furniture & Fixtures', tab_valuation: 'Valuation & Depreciation', tab_maintenance: 'Maintenance', tab_inspection: 'Inspection', tab_assign: 'Employee Assignments', tab_movement: 'Transfers & Movement', tab_audit: 'Exceptions & Audit',
 all: 'All', f_company: 'Company', f_category: 'Asset category', f_location: 'Location / branch', f_dept: 'Department', f_custodian: 'Custodian / employee', f_status: 'Asset status', f_from: 'Date from', f_to: 'Date to', f_search: 'Search', f_search_ph: 'Asset name or ID', reset: 'Reset filters',
@@ -889,128 +113,1255 @@ x_unver: 'تعذر التحقق من القيمة الدفترية', f_unver: '�
 t_sources: 'مصادر بيانات النظام الموثقة والصلاحيات', c_access: 'الصلاحية',
 d_title: 'تفاصيل الأصل', d_identity: 'التعريف', d_operational: 'المعلومات التشغيلية', d_financial: 'المعلومات المالية', d_history: 'السجل', d_avail: 'تاريخ الجاهزية للاستخدام', d_qty: 'كمية الأصل', d_insend: 'انتهاء التأمين', d_disposal: 'تاريخ الاستبعاد', d_hist: 'التكلفة التاريخية (إجمالي تكلفة الأصل)', d_gross: 'إجمالي مبلغ الشراء', d_addl: 'تكلفة إضافية للأصل', d_field: 'القيمة بعد الإهلاك في النظام', d_calc: 'احتساب الإهلاك', d_fbooks: 'الدفاتر المالية', d_date: 'تاريخ الجدول', d_amount: 'المبلغ', d_posted: 'قيد اليومية', d_mv: 'الحركات', d_mnt: 'سجلات الصيانة', d_acqlink: 'سجلات اقتناء بنفس رقم أصل DM', d_cost: 'تكلفة الاقتناء', dm_nofin: 'لا يحتوي DM Assets على تكلفة أو إهلاك أو حالة موثقة؛ لذلك لا تُعرض ولا تُقدّر.'
 };
-['sev_high', 'sev_medium', 'sev_low', 'sev_info'].forEach(k => { });
+  var APP = {
+    key: '__dmsPlantFurniture',
+    period: false,
+    tabs: [['overview', 'tab_overview'], ['register', 'tab_register'], ['plant', 'tab_plant'], ['furniture', 'tab_furniture'], ['valuation', 'tab_valuation'], ['assign', 'tab_assign'], ['movement', 'tab_movement'], ['audit', 'tab_audit']].map(function (x) { return { id: x[0], en: I.en[x[1]], ar: I.ar[x[1]] }; }).concat([{ id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }]),
+    filters: [
+      { k: 'company', en: I.en.f_company, ar: I.ar.f_company, options: function () { return META ? META.companies.map(function (c) { return c.name; }) : []; } },
+      { k: 'category', en: I.en.f_category, ar: I.ar.f_category, options: function () { return SCOPE_CATS; } },
+      { k: 'location', en: I.en.f_location, ar: I.ar.f_location, options: function () { return optsOf('location', META ? META.dmLoc : []); } },
+      { k: 'department', en: I.en.f_dept, ar: I.ar.f_dept, options: function () { return optsOf('department', []); } },
+      { k: 'custodian', en: I.en.f_custodian, ar: I.ar.f_custodian, options: function () { return optsOf('custodian', META ? META.dmEmp : []); } },
+      { k: 'status', en: I.en.f_status, ar: I.ar.f_status, none: [I.en.st_active, I.ar.st_active], options: function () { return [['noncancelled', 'st_noncancelled'], ['all', 'st_all'], ['cancelled', 'st_cancelled'], ['draft', 'st_draft']].map(function (x) { return { v: x[0], l: t(x[1]) }; }).concat(STATUS_OPTS.map(function (s) { return { v: 'st:' + s, l: s }; })); } },
+      { k: 'from', en: I.en.f_from, ar: I.ar.f_from, type: 'date' },
+      { k: 'to', en: I.en.f_to, ar: I.ar.f_to, type: 'date' },
+      { k: 'q', en: I.en.f_search, ar: I.ar.f_search, type: 'text', ph: [I.en.f_search_ph, I.ar.f_search_ph] }
+    ],
+    sources: ['ov'],
+    dtLabels: { 'Asset': ['Asset', 'أصل'], 'DM Assets': ['DM asset', 'أصل DM'], 'Asset Maintenance': ['Maintenance plan', 'خطة صيانة'], 'Asset Maintenance Log': ['Maintenance log', 'سجل صيانة'] },
+    title: function () { return t('title'); },
+    stamp: function () { return t('subtitle'); },
+    filterNote: function () { return t('note_dm'); },
+    boot: function () { return loadMeta(); },
+    load: function () { MEMO = {}; run('ov', loadOverview); run('audit', loadAudit); loadTab(tab); },
+    onTab: function (id) { loadTab(id); },
+    actions: function () { return actModel(actSpecs(), 'act', actClient()); },
+    banner: function () { return META && META.missingCat.length ? alertBox('warn', esc(t('cat_missing', META.missingCat.join(', ')))) : ''; },
+    content: function (x, AM) { return ({ overview: vOverview, register: vRegister, plant: vPlant, furniture: vFurniture, valuation: vValuation, assign: vAssign, movement: vMovement, audit: vAudit, actions: vActions })[x](AM); },
+    drill: function (id) { return drill(id); },
+    onAct: function (a, v) { return onAct(a, v); }
+  };
+  /* ==== DMS kit v1 · generated from tools/erp/kit/dms-kit.js by build_kit.py — edit the kit, not this copy ==== */
+  /* Shared runtime for DM dashboards on the standard (toolbar, period, filters, tabs, tables, drill-downs, charts,
+     actions pending). Copied into each dashboard.js by tools/erp/kit/build_kit.py; the dashboard defines `APP` before
+     this block. Read-only helpers: frappe.client.get_list / frappe.desk.query_report.run under the viewer's permissions. */
+  var G = window;
+  var ROOT = (typeof root_element !== 'undefined' && root_element) ? root_element : document;
+  var HOST = ROOT.querySelector('[data-dms-root]');
+  if (!HOST) { return; }
+  if (G[APP.key] && typeof G[APP.key].destroy === 'function') { try { G[APP.key].destroy(); } catch (e) { /* ignore */ } }
+  var abort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  var SIG = abort ? { signal: abort.signal } : false;
+  var timers = [], destroyed = false, GEN = 0, BOOTED = false, LOADED = '';
+  G[APP.key] = { destroy: function () { destroyed = true; GEN++; if (abort) { abort.abort(); } timers.forEach(clearTimeout); timers = []; } };
+  var CFG = Object.assign({ conc: 6, pageSize: 25, modalPage: 15, weekStart: 0 }, APP.cfg || {});
+  var CUR = 'SAR';
+  try { CUR = (frappe.boot.sysdefaults && frappe.boot.sysdefaults.currency) || 'SAR'; } catch (e) { /* default */ }
+  var LANG = 'en';
+  try { var sv = G.localStorage.getItem('dms_lang'); if (sv === 'ar' || sv === 'en') { LANG = sv; } } catch (e) { /* storage unavailable */ }
+  function tr(en, ar) { return LANG === 'ar' ? ar : en; }
 
-/* ---------- detail drawer ---------- */
-const kv = rows => '<dl class="kv">' + rows.map(r => '<dt>' + esc(r[0]) + '</dt><dd>' + (r[2] ? r[1] : (r[1] === '' || r[1] == null ? '<span class="mut">' + esc(tr('not_recorded')) + '</span>' : esc(r[1]))) + '</dd>').join('') + '</dl>';
-const sub = (id, t, body) => '<h4 id="' + id + '">' + esc(t) + '</h4>' + body;
-const miniTbl = (heads, rows) => rows.length ? '<div class="tw"><table class="t"><thead><tr>' + heads.map(h => '<th>' + esc(h) + '</th>').join('') + '</tr></thead><tbody>' + rows.map(r => '<tr>' + r.map(c => '<td>' + c + '</td>').join('') + '</tr>').join('') + '</tbody></table></div>' : '<div class="mut">' + esc(tr('none_found')) + '</div>';
-async function assetDetail(name) {
-  const d = await getDoc('Asset', name), v = valuate(d); const [M, mv] = await Promise.all([L.mnt(), L.mv()]);
-  const cur = curOf(d.company), m = n => (cur ? cur + ' ' : '') + mf2(n);
-  let h = '<h2>' + esc(d.asset_name || d.name) + '</h2><div class="mut">' + esc(d.name) + ' · ' + stChip(d.docstatus === 2 ? 'Cancelled' : d.status, d.docstatus) + '</div>';
-  h += sub('d-id', tr('d_identity'), kv([[tr('c_category'), d.asset_category], [tr('c_company'), d.company], ['Item', d.item_name || d.item_code], [tr('c_pdate'), dstr(d.purchase_date)], [tr('d_avail'), dstr(d.available_for_use_date)], [tr('d_qty'), d.asset_quantity]]));
-  h += sub('d-op', tr('d_operational'), kv([[tr('c_status'), d.docstatus === 2 ? 'Cancelled' : d.status], [tr('c_location'), d.location], [tr('c_custodian'), d.custodian], [tr('c_dept'), d.department], [tr('c_mreq'), d.maintenance_required ? tr('yes') : tr('no')], [tr('d_insend'), dstr(d.insurance_end_date)], [tr('d_disposal'), dstr(d.disposal_date)]]));
-  h += sub('d-fin', tr('d_financial'), kv([[tr('d_hist'), m(d.total_asset_cost)], [tr('d_gross'), d.gross_purchase_amount != null ? m(d.gross_purchase_amount) : ''], [tr('d_addl'), d.additional_asset_cost != null ? m(d.additional_asset_cost) : ''], [tr('v_open'), m(d.opening_accumulated_depreciation)], [tr('v_posted'), m(v.posted)], [tr('d_field'), d.value_after_depreciation != null ? m(d.value_after_depreciation) : ''], [tr('v_derived'), v.derived != null ? m(v.derived) : ''],
-    [tr('c_nbv'), v.verified ? '<b>' + esc(m(v.nbv)) + '</b> ' + chip(tr('verified'), 'ok') : (v.disposed ? chip(tr('disposed'), '') : chip(tr('unverified'), 'warn') + ' <span class="mut">' + esc(tr('r_' + v.reason)) + '</span>'), 1], [tr('d_calc'), d.calculate_depreciation ? tr('yes') : tr('no')], [tr('d_fbooks'), (d.finance_books || []).map(f => (f.finance_book || '(default)') + ' · ' + (f.depreciation_method || '') + ' · ' + (f.total_number_of_depreciations || 0) + ' × ' + (f.frequency_of_depreciation || 0) + 'm').join('<br>'), 1]]));
-  if (d.docstatus === 1 && v.sched.length) h += miniTbl([tr('d_date'), tr('d_amount'), tr('d_posted')], v.sched.slice(0, 40).map(s => [esc(dstr(s.schedule_date)), esc(nf(s.depreciation_amount, 2)), s.journal_entry ? link('Journal Entry', s.journal_entry) : '<span class="mut">—</span>']));
-  const mvs = mv.rows ? mv.rows.filter(x => x.asset === name) : [], plans = M.plans.filter(p => p.asset_name === name), logs = M.logs.filter(l => l.asset_name === name), reps = M.repairs.filter(r => r.asset === name);
-  h += sub('d-hist', tr('d_history'), '<div class="mut" style="margin:4px 0">' + esc(tr('d_mv')) + '</div>' + miniTbl([tr('c_mdate'), tr('c_mtype2'), tr('c_src'), tr('c_dst'), tr('c_to'), tr('c_doc')], mvs.map(x => [esc(dstr(x._p.transaction_date)), esc(x._p.purpose || ''), esc(x.source_location || ''), esc(x.target_location || ''), esc(x.to_employee || ''), link('Asset Movement', x.parent)])) +
-    '<div class="mut" style="margin:8px 0 4px">' + esc(tr('d_mnt')) + '</div>' + miniTbl([tr('c_task'), tr('c_status'), tr('c_due'), tr('c_completed')], logs.map(l => [esc(l.task_name || ''), esc(l.maintenance_status), esc(dstr(l.due_date)), esc(dstr(l.completion_date))]).concat(plans.length && !logs.length ? [] : [])) +
-    '<div class="mut" style="margin:8px 0 4px">' + esc(tr('t_repairs')) + '</div>' + miniTbl([tr('c_ref'), tr('c_status'), tr('c_failure'), tr('c_repcost')], reps.map(r => [link('Asset Repair', r.name), esc(r.repair_status), esc(dstr(r.failure_date)), esc(nf(repCost(r), 2))])));
-  return { html: h, dt: 'Asset', name };
-}
-async function dmDetail(name) {
-  const d = await getDoc('DM Assets', name), acq = await L.acq();
-  const hits = (acq.rows || []).filter(r => r.dmasset_no && r.dmasset_no === d.asset_id);
-  let h = '<h2>' + esc(d.asset_id || d.name) + '</h2><div class="mut">' + esc(d.category) + ' · DM Assets</div>';
-  h += sub('d-id', tr('d_identity'), kv([[tr('c_id'), d.asset_id], [tr('c_category'), d.category], [tr('c_desc'), d.description], [tr('c_employee'), d.employee], [tr('c_location'), d.location], [tr('c_recdate'), dstr(d.date)], [tr('c_condition'), ''], [tr('d_cost'), '']]));
-  h += '<div class="banner info">' + esc(tr('dm_nofin')) + '</div>';
-  h += sub('d-hist', tr('d_history'), '<div class="mut" style="margin:4px 0">' + esc(tr('d_acqlink')) + '</div>' + miniTbl([tr('c_ref'), tr('c_assigned'), tr('c_return')], hits.map(r => [link('Asset Acquisition Records', r.parent), esc(dstr(r._p.date)), esc(r._p.satus || '')])));
-  return { html: h, dt: 'DM Assets', name };
-}
-async function openDetail(dt, name, hist) {
-  const dr = root.querySelector('#drawer'); const tok = ++S.dtok;
-  const head = '<div class="drawer" data-act="closebg"><div class="pnl" role="dialog" aria-modal="true" dir="' + (S.lang === 'ar' ? 'rtl' : 'ltr') + '"><div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:8px"><span class="chip pri">' + esc(tr('d_title')) + '</span><button class="btn sm" data-act="close">' + ic('x') + esc(tr('close')) + '</button></div>';
-  dr.innerHTML = head + '<div class="load"><div class="spin"></div><div>' + esc(tr('loading')) + '</div></div></div></div>';
-  try {
-    const r = dt === 'Asset' ? await assetDetail(name) : await dmDetail(name); if (tok !== S.dtok) return;
-    dr.innerHTML = head + r.html + '<div style="margin-top:14px"><a class="btn pri" target="_blank" rel="noopener" href="' + esc(formUrl(r.dt, r.name)) + '">' + ic('ext') + esc(tr('open_erp')) + '</a></div></div></div>';
-    if (hist) { const el = dr.querySelector('#d-hist'); if (el && el.scrollIntoView) el.scrollIntoView(); }
-  } catch (e) { if (tok !== S.dtok) return; dr.innerHTML = head + banner(errText(e), 'bad') + '</div></div>'; }
-}
+  /* ---------- helpers ---------- */
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function clean(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+  function plain(s, n) { return clean(String(s || '').replace(/<[^>]*>/g, ' ')).slice(0, n || 90); }
+  function $(sel) { return HOST.querySelector(sel); }
+  function later(fn, ms) { var id = setTimeout(function () { if (!destroyed) { fn(); } }, ms); timers.push(id); return id; }
+  function bdi(s) { return '<bdi>' + esc(s) + '</bdi>'; }
+  function num(n) { return (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString('en-US'); }
+  function money(v) {
+    if (v == null || isNaN(v)) { return '—'; }
+    var a = Math.abs(v), s = v < 0 ? '-' : '';
+    if (a >= 1e9) { return s + (a / 1e9).toFixed(2) + 'B'; }
+    if (a >= 1e6) { return s + (a / 1e6).toFixed(2) + 'M'; }
+    if (a >= 1e4) { return s + (a / 1e3).toFixed(1) + 'K'; }
+    return s + Math.round(a).toLocaleString('en-US');
+  }
+  function amt(v) { return (v == null || isNaN(v)) ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function moneyS(v, cur) { return (cur || CUR) + ' ' + money(v); }
+  function moneyB(v, cur) { return '<bdi>' + esc(moneyS(v, cur)) + '</bdi>'; }
+  function moneyFull(v, cur) { return (v == null || isNaN(v)) ? '' : (cur || CUR) + ' ' + amt(v); }
+  function cur$(v, cur) { return '<bdi>' + esc(money(v)) + '<small>' + esc(cur || CUR) + '</small></bdi>'; }
+  function pct(n, d, dp) { return (d > 0 && n != null) ? (n / d * 100).toFixed(dp == null ? 1 : dp) + '%' : tr('N/A', 'غير متاح'); }
+  function sum(arr, f) { var t = 0; for (var i = 0; i < arr.length; i++) { t += (f ? f(arr[i]) : arr[i]) || 0; } return t; }
+  function vals(o) { return Object.keys(o).map(function (k) { return o[k]; }); }
+  function uniq(a) { var m = {}; a.forEach(function (x) { if (x) { m[x] = 1; } }); return Object.keys(m).sort(function (x, y) { return x.localeCompare(y); }); }
+  function rep(s, n) { var o = ''; for (var i = 0; i < n; i++) { o += s; } return o; }
+  function one(r) { return (r && r[0]) || {}; }
+  function groupBy(rows, f) { var m = {}; rows.forEach(function (r) { var k = f(r); (m[k] || (m[k] = [])).push(r); }); return m; }
+  var NAtxt = function () { return tr('Not assigned', 'غير مُعيَّن'); };
 
-/* ---------- shell ---------- */
-S.dtok = 0;
-function paintShell() {
-  root.setAttribute('dir', S.lang === 'ar' ? 'rtl' : 'ltr'); root.setAttribute('lang', S.lang);
-  root.innerHTML = '<div class="hdr"><div><h1>' + esc(tr('title')) + '</h1><div class="sub">' + esc(tr('subtitle')) + ' · ' + esc(tr('asof')) + ' ' + TODAY + '</div></div><div class="acts"><button class="btn" data-act="refresh">' + ic('refresh') + esc(tr('refresh')) + '</button><div class="lang" role="group" aria-label="Language"><button data-act="lang" data-v="en" class="' + (S.lang === 'en' ? 'on' : '') + '">English</button><button data-act="lang" data-v="ar" class="' + (S.lang === 'ar' ? 'on' : '') + '">العربية</button></div></div></div>' +
-    '<nav class="tabs" role="tablist"></nav><div id="fbar"></div><div id="body"></div><div id="drawer"></div>';
-  paintTabs();
-}
-function paintTabs() {
-  root.querySelector('.tabs').innerHTML = TABS.map(t => '<button role="tab" data-act="tab" data-v="' + t[0] + '" class="' + (S.tab === t[0] ? 'on' : '') + '" aria-selected="' + (S.tab === t[0]) + '">' + ic(t[1]) + esc(tr('tab_' + t[0])) + '</button>').join('');
-}
-async function paintFilters() {
-  const sc = await L.scope(), m = S.meta;
-  const sel = (k, label, opts, none) => '<label>' + esc(label) + '<select data-f="' + k + '"><option value="">' + esc(tr('all')) + '</option>' + (none ? '<option value="__none__">' + esc(NONE()) + '</option>' : '') + opts.map(o => '<option value="' + esc(o[0]) + '">' + esc(o[1]) + '</option>').join('') + '</select></label>';
-  const loc = uniq(sc.rows.map(r => r.location).concat(m.dmLoc)).sort(), dep = uniq(sc.rows.map(r => r.department)).sort(), cus = uniq(sc.rows.map(r => r.custodian).concat(m.dmEmp)).sort();
-  const stO = [['active', tr('st_active')], ['noncancelled', tr('st_noncancelled')], ['all', tr('st_all')], ['cancelled', tr('st_cancelled')], ['draft', tr('st_draft')]].concat(STATUS_OPTS.map(s => ['st:' + s, s]));
-  root.querySelector('#fbar').innerHTML = '<div class="filters">' + sel('company', tr('f_company'), m.companies.map(c => [c.name, c.name])) + sel('category', tr('f_category'), SCOPE_CATS.map(c => [c, c])) + sel('location', tr('f_location'), loc.map(x => [x, x]), 1) +
-    sel('department', tr('f_dept'), dep.map(x => [x, x]), 1) + sel('custodian', tr('f_custodian'), cus.map(x => [x, x]), 1) + sel('status', tr('f_status'), stO).replace('<option value="">' + esc(tr('all')) + '</option>', '') +
-    '<label>' + esc(tr('f_from')) + '<input type="date" data-f="from"></label><label>' + esc(tr('f_to')) + '<input type="date" data-f="to"></label><label class="wide">' + esc(tr('f_search')) + '<input type="search" data-f="q" placeholder="' + esc(tr('f_search_ph')) + '"></label><div class="fa"><button class="btn" data-act="reset">' + esc(tr('reset')) + '</button></div></div>';
-  syncFilterInputs();
-}
-const LOADING = () => '<div class="load"><div class="spin"></div><div>' + esc(tr('loading')) + '</div></div>';
-async function show(tab, quiet) {
-  const body = root.querySelector('#body'); if (!body) return;
-  if (!quiet) { S.tab = tab; paintTabs(); body.innerHTML = LOADING(); }
-  const tok = ++S.tok;
-  try {
-    const html = await DRAW[S.tab](); if (tok !== S.tok) return; body.innerHTML = html;
-  } catch (e) { if (tok !== S.tok) return; body.innerHTML = banner(tr('err_load') + ' ' + errText(e), 'bad') + '<button class="btn" data-act="refresh">' + esc(tr('retry')) + '</button>'; }
-}
+  /* ---------- dates (ERP site time zone, calendar arithmetic) ---------- */
+  function siteTz() {
+    try {
+      if (G.frappe && frappe.boot) {
+        if (frappe.boot.time_zone && frappe.boot.time_zone.system) { return frappe.boot.time_zone.system; }
+        if (frappe.boot.sysdefaults && frappe.boot.sysdefaults.time_zone) { return frappe.boot.sysdefaults.time_zone; }
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+  function siteParts() {
+    var tz = siteTz(), o = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }, p;
+    if (tz) { o.timeZone = tz; }
+    try { p = new Intl.DateTimeFormat('en-CA', o).formatToParts(new Date()); } catch (e) { delete o.timeZone; p = new Intl.DateTimeFormat('en-CA', o).formatToParts(new Date()); }
+    var m = {}; p.forEach(function (x) { m[x.type] = x.value; }); if (m.hour === '24') { m.hour = '00'; } return m;
+  }
+  function parseISO(s) {
+    if (!s || typeof s !== 'string') { return null; }
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s); if (!m) { return null; }
+    var y = +m[1], mo = +m[2], d = +m[3], ms = Date.UTC(y, mo - 1, d), dt = new Date(ms);
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) { return null; }
+    return ms;
+  }
+  function isoOf(ms) { var d = new Date(ms); return d.getUTCFullYear() + '-' + ('0' + (d.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + d.getUTCDate()).slice(-2); }
+  function addDays(iso, n) { return isoOf(parseISO(iso) + n * 86400000); }
+  function diffDays(a, b) { return Math.round((parseISO(b) - parseISO(a)) / 86400000); }
+  var TODAY = '', STAMP = '';
+  function setToday() { var p = siteParts(); TODAY = p.year + '-' + p.month + '-' + p.day; STAMP = p.hour + ':' + p.minute; }
+  function monthStart(iso) { return iso.slice(0, 8) + '01'; }
+  function monthEnd(iso) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7); return isoOf(Date.UTC(y, m, 0)); }
+  function addMonths(iso, n) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n; return isoOf(Date.UTC(y, m, 1)); }
+  function weekStartOf(iso) { var dow = new Date(parseISO(iso)).getUTCDay(); return addDays(iso, -((dow - CFG.weekStart + 7) % 7)); }
+  function quarterStart(iso) { var m = +iso.slice(5, 7); return iso.slice(0, 5) + ('0' + (Math.floor((m - 1) / 3) * 3 + 1)).slice(-2) + '-01'; }
+  function shiftMonths(iso, n) {
+    var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n, d = +iso.slice(8, 10), last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    return isoOf(Date.UTC(y, m, Math.min(d, last)));
+  }
+  function periodRange(key, cf, ct) {
+    var t = TODAY, y = t.slice(0, 4), ws = weekStartOf(t), qs = quarterStart(t), lm = addMonths(monthStart(t), -1);
+    switch (key) {
+      case 'today': return [t, t];
+      case 'yesterday': return [addDays(t, -1), addDays(t, -1)];
+      case 'week': return [ws, addDays(ws, 6)];
+      case 'lastWeek': return [addDays(ws, -7), addDays(ws, -1)];
+      case 'month': return [monthStart(t), monthEnd(t)];
+      case 'lastMonth': return [lm, monthEnd(lm)];
+      case 'quarter': return [qs, monthEnd(addMonths(qs, 2))];
+      case 'year': return [y + '-01-01', y + '-12-31'];
+      case 'prevYear': return [(y - 1) + '-01-01', (y - 1) + '-12-31'];
+      case 'custom': return [cf, ct];
+      default: return [y + '-01-01', t];   // ytd
+    }
+  }
+  /* Comparison window: the same span one preset unit earlier; custom ranges compare with the equally long range before. */
+  function prevRange(key, from, to) {
+    switch (key) {
+      case 'today': case 'yesterday': return [addDays(from, -1), addDays(to, -1)];
+      case 'week': case 'lastWeek': return [addDays(from, -7), addDays(to, -7)];
+      case 'month': case 'lastMonth': return [shiftMonths(from, -1), shiftMonths(to, -1)];
+      case 'quarter': return [shiftMonths(from, -3), shiftMonths(to, -3)];
+      case 'ytd': case 'year': case 'prevYear': return [shiftMonths(from, -12), shiftMonths(to, -12)];
+      default: var n = diffDays(from, to) + 1; return [addDays(from, -n), addDays(from, -1)];
+    }
+  }
+  /* In-progress periods stop at today, so this month to date compares with the same days of last month. */
+  function clip(r) { return [r[0], r[1] > TODAY && r[0] <= TODAY ? TODAY : r[1]]; }
+  function cmpRanges() { var c = clip(PERIOD); return { cur: c, prev: prevRange(F.period, c[0], c[1]) }; }
+  function monthList(from, to) { var out = [], cur = monthStart(from); for (var i = 0; i < 72 && cur <= to; i++) { out.push(cur.slice(0, 7)); cur = addMonths(cur, 1); } return out; }
+  function locale() { return LANG === 'ar' ? 'ar-SA-u-nu-latn-ca-gregory' : 'en-GB'; }
+  function fmtDate(iso, yr) {
+    try { var o = { day: 'numeric', month: 'short', timeZone: 'UTC' }; if (yr) { o.year = 'numeric'; } return new Intl.DateTimeFormat(locale(), o).format(new Date(parseISO(String(iso).slice(0, 10)))); } catch (e) { return iso; }
+  }
+  function rangeLabel(r) {
+    if (!r || !r[0] || !r[1]) { return ''; }
+    return r[0] === r[1] ? fmtDate(r[0], true) : fmtDate(r[0], r[0].slice(0, 4) !== r[1].slice(0, 4)) + ' – ' + fmtDate(r[1], true);
+  }
+  var PLR = null;
+  function daysTxt(n) {
+    if (LANG !== 'ar') { return num(n) + (n === 1 ? ' day' : ' days'); }
+    var c = 'other'; try { c = (PLR || (PLR = new Intl.PluralRules('ar'))).select(n); } catch (e) { /* generic form */ }
+    return c === 'one' ? 'يوم واحد' : c === 'two' ? 'يومان' : c === 'few' ? n + ' أيام' : c === 'many' ? n + ' يومًا' : n + ' يوم';
+  }
+  function ageOf(iso) { var d = iso ? diffDays(String(iso).slice(0, 10), TODAY) : 0; return isNaN(d) ? 0 : Math.max(0, d); }
+  function lateTxt(iso) {
+    var d = diffDays(String(iso).slice(0, 10), TODAY); if (isNaN(d)) { return ''; }
+    return d > 0 ? tr(daysTxt(d) + ' overdue', 'متأخر ' + daysTxt(d)) : d === 0 ? tr('Due today', 'مستحق اليوم') : tr('Due in ' + daysTxt(-d), 'مستحق خلال ' + daysTxt(-d));
+  }
+  function agoTxt(iso, en, ar) { var a = ageOf(iso); return a ? tr((en || 'Waiting') + ' ' + daysTxt(a), (ar || 'منذ') + ' ' + daysTxt(a)) : tr('Today', 'اليوم'); }
 
-/* ---------- events (single delegated set, removed on re-run) ---------- */
-let qTimer = null;
-function onClick(e) {
-  const el = e.target.closest('[data-act]'); if (!el || !root.contains(el)) return; const a = el.dataset.act;
-  if (a === 'size') return;
-  if (a === 'closebg') { if (e.target === el) root.querySelector('#drawer').innerHTML = ''; return; }
-  if (el.tagName === 'A' && a === 'detail') e.preventDefault();
-  if (a === 'tab') show(el.dataset.v);
-  else if (a === 'lang') { S.lang = el.dataset.v === 'ar' ? 'ar' : 'en'; try { localStorage.setItem('pfad_lang', S.lang); } catch (x) {} paintShell(); paintFilters().then(() => show(S.tab)); }
-  else if (a === 'refresh') { MEMO.clear(); DOCS.clear(); S.T = {}; L.meta().then(m => { S.meta = m; return paintFilters(); }).then(() => show(S.tab)); }
-  else if (a === 'drill') { if (TABS.some(t => t[0] === el.dataset.go)) { let set = {}; try { set = JSON.parse(el.dataset.set || '{}'); } catch (x) {} drill(el.dataset.go, set); } }
-  else if (a === 'sort') { const st = S.T[el.dataset.t]; if (!st) return; if (st.sort === el.dataset.c) st.dir = -st.dir; else { st.sort = el.dataset.c; st.dir = 1; } st.page = 1; show(S.tab, true); }
-  else if (a === 'pg') { const st = S.T[el.dataset.t]; if (!st) return; st.page = Math.max(1, st.page + Number(el.dataset.d)); show(S.tab, true); }
-  else if (a === 'csv') exportCsv(el.dataset.t);
-  else if (a === 'detail') openDetail(el.dataset.dt, el.dataset.n, el.dataset.hist);
-  else if (a === 'close') { S.dtok++; root.querySelector('#drawer').innerHTML = ''; }
-  else if (a === 'calnav') { S.cal.m += Number(el.dataset.d); if (S.cal.m < 0) { S.cal.m = 11; S.cal.y--; } if (S.cal.m > 11) { S.cal.m = 0; S.cal.y++; } show(S.tab, true); }
-  else if (a === 'opt') { S.opt[el.dataset.k] = el.dataset.v === '1'; show(S.tab, true); }
-  else if (a === 'sev') { S.sev = el.dataset.v; if (S.T.exc) S.T.exc.page = 1; show(S.tab, true); }
-  else if (a === 'reset') { S.f = { company: '', category: '', location: '', department: '', custodian: '', status: 'active', from: '', to: '', q: '' }; S.T = {}; syncFilterInputs(); show(S.tab); }
-}
-async function exportCsv(id) {
-  const r = REG[id]; if (!r) return;
-  try { const rows = r.exportAll ? await r.exportAll() : r.rows; download(r.name, csvText(r.cols, rows)); } catch (e) { alert(errText(e)); }
-}
-function onChange(e) {
-  const el = e.target;
-  if (el.dataset.act === 'size') { const st = S.T[el.dataset.t]; if (st) { st.size = Number(el.value); st.page = 1; show(S.tab, true); } return; }
-  if (el.dataset.f && el.dataset.f !== 'q') { S.f[el.dataset.f] = el.value; S.T = {}; show(S.tab); }
-}
-function onInput(e) {
-  const el = e.target; if (el.dataset.f !== 'q') return;
-  clearTimeout(qTimer); qTimer = setTimeout(() => { S.f.q = el.value.trim(); S.T = {}; show(S.tab); }, 400);
-}
-function onKey(e) { if (e.key === 'Escape') { const d = root.querySelector('#drawer'); if (d && d.innerHTML) { S.dtok++; d.innerHTML = ''; } } }
-root.addEventListener('click', onClick, { signal: ac.signal });
-root.addEventListener('change', onChange, { signal: ac.signal });
-root.addEventListener('input', onInput, { signal: ac.signal });
-root.addEventListener('keydown', onKey, { signal: ac.signal });
-ac.signal.addEventListener('abort', () => clearTimeout(qTimer));
+  /* ---------- ERP read-only API layer (bounded concurrency, one retry, cancellation) ---------- */
+  var REQ_TIMEOUT = 90000;
+  function callP(method, args) {
+    return new Promise(function (resolve, reject) {
+      var done = false, ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var timer = setTimeout(function () { if (done) { return; } done = true; if (ctl) { try { ctl.abort(); } catch (x) { /* ignore */ } } var te = new Error('Request timed out'); te.timeout = true; reject(te); }, REQ_TIMEOUT);
+      var body = new URLSearchParams();
+      Object.keys(args || {}).forEach(function (k) { var v = args[k]; if (v === undefined || v === null) { return; } body.append(k, (typeof v === 'object') ? JSON.stringify(v) : String(v)); });
+      fetch('/api/method/' + method, { method: 'POST', credentials: 'same-origin', signal: ctl ? ctl.signal : undefined,
+        headers: { 'X-Frappe-CSRF-Token': (G.frappe && frappe.csrf_token) || '', 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' }, body: body.toString() })
+        .then(function (r) { return r.text().then(function (txt) { return { r: r, txt: txt }; }); })
+        .then(function (o) {
+          if (done) { return; } done = true; clearTimeout(timer);
+          var j = null; try { j = JSON.parse(o.txt); } catch (x) { /* ignore */ }
+          if (o.r.ok && j && !j.exc) { resolve(j.message === undefined ? null : j.message); return; }
+          var ex = String((j && (j.exception || j.exc_type)) || '');
+          var perm = o.r.status === 401 || o.r.status === 403 || /permission/i.test(ex);
+          var e = new Error((perm ? 'No access to ' + ((args && (args.doctype || args.report_name)) || method) : (ex.split(':').slice(-1)[0].trim() || ('HTTP ' + o.r.status))));
+          e.status = perm ? 403 : o.r.status; reject(e);
+        })
+        .catch(function (err) { if (done) { return; } done = true; clearTimeout(timer); reject(err || new Error('request failed')); });
+    });
+  }
+  var active = 0, queue = [];
+  function pump() {
+    while (active < CFG.conc && queue.length) {
+      var j = queue.shift(); active++;
+      j.fn().then(j.res, j.rej).then(function () { active--; pump(); });
+    }
+  }
+  function limited(fn) { return new Promise(function (res, rej) { queue.push({ fn: fn, res: res, rej: rej }); pump(); }); }
+  function guarded(chk, method, args) {
+    return limited(function () {
+      if (destroyed || (chk && !chk())) { return Promise.resolve(null); }
+      return callP(method, args).catch(function (e) { if (e && (e.status === 403 || e.timeout || e.status === 417)) { throw e; } return new Promise(function (r) { setTimeout(r, 400); }).then(function () { return callP(method, args); }); });
+    });
+  }
+  function errKind(e) {
+    var txt = ''; try { txt = (e && (e.responseText || e.statusText || e.message)) || ''; } catch (x) { /* ignore */ }
+    return (/PermissionError|not permitted|No access|403/i.test(String(txt)) || (e && e.status === 403)) ? 'perm' : 'tech';
+  }
+  function getList(args, chk) { return guarded(chk, 'frappe.client.get_list', args); }
+  function getCount(dt, filters, chk) { return getList({ doctype: dt, fields: ['count(name) as n'], filters: filters || [], limit_page_length: 1 }, chk).then(function (r) { return +one(r).n || 0; }); }
+  /* All rows of a bounded list (paged); rejects with e.tooLarge when the source exceeds `cap`. */
+  function fetchAll(args, chk, cap) {
+    cap = cap || 20000;
+    return getCount(args.doctype, args.filters, chk).then(function (n) {
+      if (n > cap) { var e = new Error('too large'); e.tooLarge = n; throw e; }
+      var jobs = []; for (var i = 0; i < Math.ceil(n / 500); i++) { jobs.push(getList(Object.assign({}, args, { order_by: args.order_by || 'name asc', limit_start: i * 500, limit_page_length: 500 }), chk)); }
+      return Promise.all(jobs).then(function (res) { var out = []; res.forEach(function (r) { if (r) { out = out.concat(r); } }); return out; });
+    });
+  }
+  function docUrl(dt, name) {
+    try { if (G.frappe && frappe.utils && frappe.utils.get_form_link) { return frappe.utils.get_form_link(dt, name); } } catch (e) { /* fall through */ }
+    return '/app/' + dt.toLowerCase().replace(/ /g, '-') + '/' + encodeURIComponent(name);
+  }
+  function docLink(dt, name, label) { return '<a class="dms-link" href="' + esc(docUrl(dt, name)) + '" target="_blank" rel="noopener noreferrer"><bdi>' + esc(label || name) + '</bdi> ↗</a>'; }
 
-/* ---------- boot ---------- */
-(async function boot() {
-  paintShell(); root.querySelector('#body').innerHTML = LOADING();
-  try {
-    if (!canRead('Asset')) { root.querySelector('#body').innerHTML = banner(tr('no_access') + ': Asset', 'bad'); return; }
-    S.meta = await L.meta(); await paintFilters();
-    const miss = SCOPE_CATS.filter(c => S.meta.catNames.indexOf(c) < 0);
-    await show('overview');
-    if (miss.length) root.querySelector('#body').insertAdjacentHTML('afterbegin', banner(tr('cat_missing', miss.join(', ')), 'warn'));
-  } catch (e) { root.querySelector('#body').innerHTML = banner(tr('err_load') + ' ' + errText(e), 'bad') + '<button class="btn" data-act="refresh">' + esc(tr('retry')) + '</button>'; }
+  /* ---------- data store: each source loads and renders independently; stale generations are dropped ---------- */
+  var D = {};
+  var softT = null;
+  function soon() { if (softT) { return; } softT = later(function () { softT = null; renderSoft(); }, 40); }
+  function run(key, fn) {
+    var g = GEN, chk = function () { return g === GEN && !destroyed; }, tok = {};
+    D[key] = null; D[key + 'Err'] = null; D[key + 'Tok'] = tok;
+    var mine = function () { return chk() && D[key + 'Tok'] === tok; };
+    fn(mine).then(function (v) { if (!mine()) { return; } D[key] = v; if (APP.afterLoad) { APP.afterLoad(key); } soon(); },
+      function (e) { if (!mine()) { return; } D[key + 'Err'] = e && e.tooLarge ? 'large:' + e.tooLarge : errKind(e); if (G.console && e && !e.status && !e.tooLarge) { console.error(APP.key, key, e); } soon(); });
+  }
+  function busy() { return !BOOTED || (APP.sources || []).some(function (k) { return D[k] == null && D[k + 'Err'] == null; }); }
+  function errText(kind) { return /^large:/.test(String(kind)) ? tr('too many records (' + num(+String(kind).slice(6)) + ') — narrow the filters or period', 'عدد كبير من السجلات (' + num(+String(kind).slice(6)) + ') — ضيّق المرشحات أو الفترة') : kind === 'perm' ? tr('permission denied for your user', 'لا تملك صلاحية القراءة') : tr('technical error while reading', 'خطأ تقني أثناء القراءة'); }
+
+  /* ---------- UI primitives ---------- */
+  var ICO = {
+    refresh: '<path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/>', filter: '<path d="M4 5h16l-6.2 7.6V19l-3.6 1.6v-8z"/>',
+    cal: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/>', down: '<path d="m6 9 6 6 6-6"/>',
+    prev: '<path d="m15 6-6 6 6 6"/>', next: '<path d="m9 6 6 6-6 6"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
+    up: '<path d="M12 19V6M6.5 11.5 12 6l5.5 5.5"/>', dn: '<path d="M12 5v13M6.5 12.5 12 18l5.5-5.5"/>', dl: '<path d="M12 4v11M7 10.5 12 15.5l5-5M5 20h14"/>'
+  };
+  function ico(n, cls) { return '<svg class="dms-ico' + (cls ? ' ' + cls : '') + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + ICO[n] + '</svg>'; }
+  function kpi(o) {
+    var inner = '<span class="dms-kpi-h"><span class="dms-kpi-l">' + (o.dot ? '<i class="dms-dot" style="--dms-c:' + o.dot + '"></i>' : '') + esc(o.label) + '</span>' + (o.top || '') + '</span>' +
+      '<span class="dms-kpi-n">' + o.val + '</span>' + (o.sub ? '<span class="dms-kpi-s">' + o.sub + '</span>' : '') + (o.foot != null ? '<span class="dms-kpi-f">' + o.foot + '</span>' : '');
+    var t = o.tip ? ' title="' + esc(o.tip) + '"' : '';
+    return o.act ? '<button type="button" class="dms-kpi" data-act="kpi" data-v="' + esc(o.act) + '"' + t + '>' + inner + '</button>' : '<div class="dms-kpi"' + t + '>' + inner + '</div>';
+  }
+  function kpis(list, ov) { return '<div class="dms-grid dms-kpis' + (ov ? ' dms-ov-kpis' : '') + '">' + list.join('') + '</div>'; }
+  function tagc(txt) { return '<span class="dms-tag">' + txt + '</span>'; }
+  function stat(k, txt) { return '<span class="dms-stat dms-stat-' + k + '">' + esc(txt) + '</span>'; }
+  function ctx(html) { return '<span class="dms-kpi-ctx">' + html + '</span>'; }
+  function badge(txt, color) { return '<span class="dms-badge" style="--dms-c:' + color + '">' + esc(txt) + '</span>'; }
+  function wait() { return '<span class="dms-sm">' + esc(tr('Calculating…', 'جارٍ الحساب…')) + '</span>'; }
+  function asOf() { return tagc(esc(tr('As of today', 'حتى اليوم'))); }
+  /* Value of a source-backed KPI: '…' while loading, '—' when the source failed (never a false zero). */
+  function kv(key, f) { return D[key + 'Err'] ? '—' : D[key] == null ? '…' : f(D[key]); }
+  function ks(key, f) { return D[key + 'Err'] ? esc(tr('Unavailable', 'غير متاح')) : D[key] == null ? wait() : f(D[key]); }
+  function spark(vs) {
+    var n = vs.length, real = vs.filter(function (v) { return v != null; }), pts = [];
+    if (n < 3 || real.length < 3 || !real.some(function (v) { return v > 0; })) { return ''; }
+    var max = Math.max.apply(null, real), min = Math.min(0, Math.min.apply(null, real)), rng = (max - min) || 1;
+    vs.forEach(function (v, i) { if (v != null) { pts.push([(i / (n - 1) * 100).toFixed(2), (26 - (v - min) / rng * 23).toFixed(2)]); } });
+    var line = pts.map(function (p) { return p.join(','); }).join(' L');
+    return '<svg class="dms-spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path class="dms-spark-a" d="M' + pts[0][0] + ',28 L' + line + ' L' + pts[pts.length - 1][0] + ',28 Z"/><path class="dms-spark-l" d="M' + line + '"/></svg>';
+  }
+  /* Change vs the comparison window. fmt formats values; small count bases show "was N" instead of a percentage. */
+  function deltaChip(cur, prev, R, fmt, isCount, lowerIsBetter) {
+    if (cur == null || prev == null || !R) { return ''; }
+    fmt = fmt || moneyS;
+    var tip = tr('This period', 'هذه الفترة') + ' (' + rangeLabel(R[0]) + '): ' + fmt(cur) + '\n' + tr('Previous', 'السابقة') + ' (' + rangeLabel(R[1]) + '): ' + fmt(prev);
+    var sr = '<span class="dms-sr"> ' + esc(tr('vs previous period', 'مقارنة بالفترة السابقة')) + '</span>';
+    if (prev === 0 || (isCount && prev < 5)) { return '<span class="dms-delta dms-flat" data-tip="' + esc(tip) + '">' + esc(tr('was', 'كان')) + ' <bdi>' + esc(fmt(prev)) + '</bdi>' + sr + '</span>'; }
+    var p = (cur - prev) / prev * 100, a = Math.abs(p), k = a < 0.05 ? 'flat' : p > 0 ? 'up' : 'down', tone = k === 'flat' ? 'flat' : ((k === 'up') !== !!lowerIsBetter ? 'up' : 'down');
+    var txt = a > 999 ? '10×+' : (a < 10 ? a.toFixed(1) : Math.round(a)) + '%';
+    return '<span class="dms-delta dms-' + tone + '" data-tip="' + esc(tip) + '">' + (k === 'flat' ? '' : ico(k === 'up' ? 'up' : 'dn')) + '<bdi>' + (k === 'down' ? '−' : '') + txt + '</bdi>' + sr + '</span>';
+  }
+  function panel(title, body, extra, meta) {
+    return '<section class="dms-panelbox ' + (extra || '') + '"><div class="dms-ph"><h3 class="dms-h3">' + esc(title) + '</h3>' + (meta ? '<span class="dms-ph-meta">' + meta + '</span>' : '') + '</div>' + body + '</section>';
+  }
+  function note(txt) { return '<p class="dms-note">' + txt + '</p>'; }
+  function alertBox(kind, html) { return '<div class="dms-alert dms-alert-' + kind + '" role="' + (kind === 'err' ? 'alert' : 'status') + '">' + html + '</div>'; }
+  function empty(txt) { return '<div class="dms-empty">' + esc(txt || tr('No data for the current filters.', 'لا توجد بيانات للمرشحات الحالية.')) + '</div>'; }
+  function srcErr(kind, what) { return alertBox('err', '<b>' + esc(tr('Source unavailable', 'المصدر غير متاح')) + ':</b> ' + esc(what) + ' — ' + esc(errText(kind))); }
+  function skel(n, cls) { return rep('<div class="dms-skel ' + (cls || '') + '"></div>', n); }
+  /* Body for a panel backed by source `key`: skeleton while loading, named error on failure, else f(data). */
+  function src(key, what, f) { return D[key + 'Err'] ? srcErr(D[key + 'Err'], what) : D[key] == null ? skel(1, 'dms-skel-panel') : f(D[key]); }
+
+  /* ---------- charts (HTML/CSS; hover details via the shared tooltip, data-tip) ---------- */
+  function niceMax(v) { if (!(v > 0)) { return 1; } var p = Math.pow(10, Math.floor(Math.log(v) / Math.LN10)), f = v / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
+  function axisFmt(v) { var a = Math.abs(v); return a >= 1e9 ? +(v / 1e9).toFixed(1) + 'B' : a >= 1e6 ? +(v / 1e6).toFixed(1) + 'M' : a >= 1e3 ? +(v / 1e3).toFixed(1) + 'K' : String(a < 10 ? +v.toFixed(2) : Math.round(v)); }
+  function bucketLabel(k, g, short) {
+    if (g === 'cat') { return String(k); }
+    if (g === 'week' && !short) { return tr('Week of ', 'أسبوع ') + fmtDate(k, true); }
+    if (g !== 'month') { return fmtDate(k, !short); }
+    try { return new Intl.DateTimeFormat(locale(), { month: 'short', year: '2-digit', timeZone: 'UTC' }).format(new Date(parseISO(k + '-01'))); } catch (e) { return k; }
+  }
+  /* Count charts get whole-number ticks (top is a multiple of 4), so small counts never show 0, 1, 1, 2, 2. */
+  function countTop(max, fmt) { var t = niceMax(max); return fmt === num ? Math.max(4, Math.ceil(t / 4) * 4) : t; }
+  function granName(g) { return g === 'day' ? tr('by day', 'يوميًا') : g === 'week' ? tr('by week', 'أسبوعيًا') : tr('by month', 'شهريًا'); }
+  /* Time buckets for a range: daily up to 45 days, weekly up to 120 days, monthly beyond; stops at today. */
+  function buckets(range) {
+    var from = range[0], to = clip(range)[1], span = diffDays(from, to) + 1, g = span <= 45 ? 'day' : span <= 120 ? 'week' : 'month', keys = [], cur, i;
+    function keyOf(iso) { iso = String(iso).slice(0, 10); return g === 'day' ? iso : g === 'week' ? weekStartOf(iso) : iso.slice(0, 7); }
+    if (to < from) { return { keys: [], gran: g, keyOf: keyOf }; }
+    if (g === 'month') { keys = monthList(from, to); } else { cur = keyOf(from); for (i = 0; i < 200 && cur <= to; i++) { keys.push(cur); cur = addDays(cur, g === 'day' ? 1 : 7); } }
+    return { keys: keys, gran: g, keyOf: keyOf };
+  }
+  /* Grouped rows (one per date) folded into buckets: rows[dateField], rows[valField]. */
+  function series(range, rows, dateF, valF) {
+    var B = buckets(range), d = {}; B.keys.forEach(function (k) { d[k] = { v: 0, n: 0 }; });
+    (rows || []).forEach(function (r) { var k = B.keyOf(r[dateF]); if (d[k]) { d[k].v += valF ? (+r[valF] || 0) : 1; d[k].n += +r.n || (valF ? 0 : 1); } });
+    B.d = d; return B;
+  }
+  function legend(series) { return '<div class="dms-legend">' + series.map(function (s) { return '<span><i style="--dms-c:' + s.color + '"></i>' + esc(s.label) + '</span>'; }).join('') + '</div>'; }
+  /* Column chart. ser = [{label, color, val: function (key) {}}]; fmt formats values (default money). */
+  function barChart(keys, gran, ser, fmt, extraTip, emptyTxt) {
+    if (!Array.isArray(ser)) { ser = [ser]; }
+    fmt = fmt || moneyFull; var max = 0;
+    keys.forEach(function (k) { ser.forEach(function (s) { max = Math.max(max, s.val(k) || 0); }); });
+    if (!keys.length || !max) { return empty(emptyTxt || tr('Nothing in this range.', 'لا شيء في هذا النطاق.')); }
+    var top = countTop(max, fmt), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, gran) + ser.map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k) || 0); }).join('') + (extraTip ? extraTip(k) : '');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '">' + ser.map(function (s) { var v = s.val(k) || 0; return '<i class="dms-bar' + (v ? '' : ' dms-bar-0') + '" style="height:' + (v / top * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i>'; }).join('') + '</div>';
+    }).join('');
+    var aria = ser.map(function (s) { return s.label + ': ' + keys.map(function (k) { return bucketLabel(k, gran, true) + ' ' + fmt(s.val(k) || 0); }).join(', '); }).join('; ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + (ser.length > 1 ? legend(ser) : '');
+  }
+  /* Line chart for balances (may go negative). ser = [{label, color, val(key), dash?}]; the first series is the main line. */
+  function lineChart(keys, gran, ser, fmt) {
+    fmt = fmt || moneyFull; var all = [];
+    keys.forEach(function (k) { ser.forEach(function (s) { var v = s.val(k); if (v != null) { all.push(v); } }); });
+    if (!keys.length || !all.length) { return empty(); }
+    var mx = Math.max.apply(null, all), mn = Math.min.apply(null, all), hi = mx > 0 ? niceMax(mx) : 0, lo = mn < 0 ? -niceMax(-mn) : 0;
+    if (hi === lo) { hi = lo + 1; }
+    var y = function (v) { return (100 - (v - lo) / (hi - lo) * 100).toFixed(2); }, x = function (i) { return (keys.length < 2 ? 50 : i / (keys.length - 1) * 100).toFixed(2); };
+    var ticks = [0, 0.25, 0.5, 0.75, 1].map(function (t) { return lo + (hi - lo) * t; });
+    var paths = ser.map(function (s) { var pts = keys.map(function (k, i) { var v = s.val(k); return v == null ? null : x(i) + ',' + y(v); }).filter(Boolean); return '<polyline class="dms-line' + (s.dash ? ' dms-line-ref' : '') + '" style="--dms-c:' + s.color + '" points="' + pts.join(' ') + '"/>'; }).join('');
+    var zero = lo < 0 ? '<i class="dms-gl dms-gl-0" style="bottom:' + ((0 - lo) / (hi - lo) * 100).toFixed(2) + '%"></i>' : '';
+    var hits = keys.map(function (k) { return '<div class="dms-col dms-col-hit" data-tip="' + esc(bucketLabel(k, gran) + ser.map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k)); }).join('')) + '"></div>'; }).join('');
+    var aria = ser[0].label + ': ' + keys.map(function (k) { return bucketLabel(k, gran, true) + ' ' + fmt(ser[0].val(k)); }).join(', ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (v, i) { return '<span style="bottom:' + i * 25 + '%">' + axisFmt(v) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + [0, 25, 50, 75, 100].map(function (b) { return '<i class="dms-gl" style="bottom:' + b + '%"></i>'; }).join('') + zero + '<svg class="dms-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">' + paths + '</svg><div class="dms-cols">' + hits + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + (ser.length > 1 ? legend(ser) : '');
+  }
+  /* Stacked columns (one bar per key, segments per series). */
+  function stackChart(keys, gran, ser, fmt) {
+    fmt = fmt || num; var tot = {}, max = 0;
+    keys.forEach(function (k) { tot[k] = sum(ser, function (s) { return s.val(k) || 0; }); max = Math.max(max, tot[k]); });
+    if (!keys.length || !max) { return empty(); }
+    var top = countTop(max, fmt), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, gran) + ser.filter(function (s) { return s.val(k); }).map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k)); }).join('');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '"><span class="dms-stackbar" style="height:' + (tot[k] / top * 100).toFixed(2) + '%">' + ser.map(function (s) { var v = s.val(k) || 0; return v ? '<i style="flex:' + v + ' 0 0;background:' + s.color + '"></i>' : ''; }).join('') + '</span></div>';
+    }).join('');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(ser.map(function (s) { return s.label; }).join(', ')) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + legend(ser);
+  }
+  function fitChartLabels() {
+    HOST.querySelectorAll('.dms-xaxis').forEach(function (axis) {
+      var labels = axis.querySelectorAll('span'), widest = 0;
+      labels.forEach(function (label) { var range = document.createRange(); range.selectNodeContents(label); widest = Math.max(widest, range.getBoundingClientRect().width); });
+      var slots = Math.max(1, Math.min(8, Math.floor(axis.clientWidth / (widest + 16)))), step = Math.max(1, Math.ceil(labels.length / slots));
+      labels.forEach(function (label, i) { label.style.visibility = i % step ? 'hidden' : 'visible'; });
+    });
+  }
+  /* Share rows: label · bar · value · %. items = [{label, value, color, act?, tip?}]; ordered=true keeps the given order. */
+  function shareList(items, head, fmt, ordered) {
+    fmt = fmt || num; var tot = sum(items, function (s) { return s.value; }), rows = items.filter(function (s) { return s.value; });
+    if (!ordered) { rows = rows.slice().sort(function (a, b) { return b.value - a.value; }); }
+    if (!tot) { return empty(); }
+    return (head ? '<div class="dms-share-t">' + head + '</div>' : '') + rows.map(function (s) {
+      var tip = s.tip || (s.label + ': ' + fmt(s.value) + ' (' + pct(s.value, tot) + ')');
+      var inner = '<span class="dms-share-l"><i class="dms-dot" style="--dms-c:' + s.color + '"></i>' + bdi(s.label) + '</span><span class="dms-share-b"><i style="width:' + (s.value / tot * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i></span>' +
+        '<span class="dms-num">' + esc(fmt(s.value)) + '</span><span class="dms-share-p dms-num">' + pct(s.value, tot, 0) + '</span>';
+      return s.act ? '<button type="button" class="dms-share dms-share-btn" data-act="kpi" data-v="' + esc(s.act) + '" data-tip="' + esc(tip) + '">' + inner + '</button>' : '<div class="dms-share" data-tip="' + esc(tip) + '">' + inner + '</div>';
+    }).join('');
+  }
+  /* Ranked horizontal bars: items = [{label, value, color?, act?}]. */
+  function hbars(items, fmt, color) {
+    if (!items.length) { return empty(); }
+    var max = Math.max.apply(null, items.map(function (i) { return Math.abs(i.value); }).concat([1])); fmt = fmt || num;
+    return items.map(function (i) {
+      var inner = '<span class="dms-split-l">' + bdi(i.label) + '</span><span class="dms-split"><i style="width:' + (Math.abs(i.value) / max * 100).toFixed(2) + '%;background:' + (i.color || color || 'var(--dms-royal)') + '"></i></span><span class="dms-num dms-split-v">' + esc(fmt(i.value)) + '</span>';
+      var tip = ' data-tip="' + esc(i.label + ': ' + fmt(i.value)) + '"';
+      return i.act ? '<button type="button" class="dms-stack-row dms-split-row" data-act="kpi" data-v="' + esc(i.act) + '"' + tip + '>' + inner + '</button>' : '<div class="dms-stack-row dms-split-row"' + tip + '>' + inner + '</div>';
+    }).join('');
+  }
+  /* Two-part bars ranked by total: items = [{label, total, part, act?}]; parts = [{label, color}] for part and remainder. */
+  function splitBars(items, parts, fmt) {
+    if (!items.length) { return empty(); }
+    fmt = fmt || money; var max = Math.max.apply(null, items.map(function (i) { return i.total; }).concat([1]));
+    return items.map(function (i) {
+      var tip = i.label + '\n' + parts[0].label + ': ' + fmt(i.part) + '\n' + parts[1].label + ': ' + fmt(i.total - i.part);
+      var bar = '<span class="dms-split"><i style="width:' + (i.part / max * 100).toFixed(2) + '%;background:' + parts[0].color + '"></i><i style="width:' + (Math.max(0, i.total - i.part) / max * 100).toFixed(2) + '%;background:' + parts[1].color + '"></i></span>';
+      var inner = '<span class="dms-split-l">' + bdi(i.label) + '</span>' + bar + '<span class="dms-num dms-split-v">' + esc(fmt(i.total)) + '</span>';
+      return i.act ? '<button type="button" class="dms-stack-row dms-split-row" data-act="kpi" data-v="' + esc(i.act) + '" data-tip="' + esc(tip) + '">' + inner + '</button>' : '<div class="dms-stack-row dms-split-row" data-tip="' + esc(tip) + '">' + inner + '</div>';
+    }).join('') + legend(parts);
+  }
+  function mixBar(segs) {
+    var tot = sum(segs, function (s) { return s.value; }); if (!tot) { return ''; }
+    return '<span class="dms-mix"><span class="dms-mix-b">' + segs.map(function (s) { return s.value ? '<i style="width:' + (s.value / tot * 100).toFixed(2) + '%;background:' + s.color + '" data-tip="' + esc(s.label + ': ' + (s.fmt || num)(s.value)) + '"></i>' : ''; }).join('') + '</span></span>';
+  }
+  var PAL = ['var(--dms-royal)', '#6b8be0', '#1f8a5b', '#d97a1e', '#8a97a8', '#a3b4ef', '#c2412d', '#d6a419', '#4b5a6e', '#b6bfca'];
+
+  /* ---------- tables: client-side (search / sort / pagination / CSV) and server-side (paginated, sortable, CSV) ---------- */
+  var TBL = {}, TS = {}, SS = {}, focusId = null;
+  function regTable(spec) { TBL[spec.id] = spec; return '<div class="dms-tbl" data-tbl="' + esc(spec.id) + '"></div>'; }
+  function fillTables(scope) { var els = (scope || HOST).querySelectorAll('[data-tbl]'); for (var i = 0; i < els.length; i++) { fillTable(els[i].getAttribute('data-tbl'), els[i]); } }
+  function clientRows(sp, st) {
+    var rows = sp.rows, q = st.q.trim().toLowerCase();
+    if (q) { rows = rows.filter(function (r) { return sp.text(r).toLowerCase().indexOf(q) >= 0; }); }
+    if (st.sk) { var col = sp.cols.filter(function (c) { return c.k === st.sk; })[0]; if (col && col.s) { rows = rows.slice().sort(function (a, b) { var x = col.s(a), y = col.s(b); return (x < y ? -1 : x > y ? 1 : 0) * st.dir; }); } }
+    return rows;
+  }
+  function thead(sp, sk, dir, act, id) {
+    return '<thead><tr>' + sp.cols.map(function (c) {
+      var key = act === 'ssort' ? c.sf : c.k, can = act === 'ssort' ? !!c.sf : !!c.s, on = can && sk === key;
+      return '<th class="' + (can ? 'dms-th-s' : '') + (c.num ? ' dms-th-n' : '') + '"' + (can ? ' data-act="' + act + '" data-id="' + esc(id) + '" data-v="' + esc(key) + '" tabindex="0" aria-sort="' + (on ? (dir > 0 ? 'ascending' : 'descending') : 'none') + '"' : '') + '>' + esc(c.h) + (on ? (dir > 0 ? ' ▲' : ' ▼') : '') + '</th>';
+    }).join('') + '</tr></thead>';
+  }
+  function tcells(sp, r) { return '<tr>' + sp.cols.map(function (c) { return '<td' + (c.num ? ' class="dms-td-n"' : '') + '>' + c.r(r) + '</td>'; }).join('') + '</tr>'; }
+  function fillTable(id, el) {
+    var sp = TBL[id]; el = el || HOST.querySelector('[data-tbl="' + id + '"]'); if (!sp || !el) { return; }
+    if (sp.server) { return fillServer(id, el); }
+    var st = TS[id] || (TS[id] = { q: '', page: 1, sk: sp.sk || '', dir: sp.dir || 1 }), rows = clientRows(sp, st);
+    var ps = sp.pageSize || CFG.pageSize, pages = Math.max(1, Math.ceil(rows.length / ps)); if (st.page > pages) { st.page = pages; }
+    var slice = rows.slice((st.page - 1) * ps, st.page * ps);
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(tr('Search this table…', 'ابحث في الجدول…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search this table', 'ابحث في الجدول')) + '"><span class="dms-tb-r"><span class="dms-sm">' + num(rows.length) + ' ' + esc(rows.length === 1 ? tr('row', 'سجل') : tr('rows', 'سجل')) + (st.q ? ' / ' + num(sp.rows.length) : '') + '</span>' +
+      (rows.length ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csv" data-id="' + esc(id) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    if (sp.notice) { h += sp.notice; }
+    if (!rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
+    h += '<div class="dms-tablewrap"><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'tsort', id) + '<tbody>' + slice.map(function (r) { return tcells(sp, r); }).join('') + '</tbody>' + (sp.foot ? '<tfoot>' + sp.foot(rows) + '</tfoot>' : '') + '</table></div>';
+    h += pager(id, 'tpage', st.page, pages, rows.length, ps);
+    el.innerHTML = h; restoreFocus(el, id);
+  }
+  function pager(id, act, pg, pages, total, ps) {
+    if (total <= ps) { return ''; }
+    return '<div class="dms-pager"><span>' + esc(tr('Showing', 'عرض')) + ' ' + num((pg - 1) * ps + 1) + '–' + num(Math.min(pg * ps, total)) + ' / ' + num(total) + '</span><span><button type="button" class="dms-btn" data-act="' + act + '" data-id="' + esc(id) + '" data-v="-1"' + (pg <= 1 ? ' disabled' : '') + '>‹ ' + esc(tr('Previous', 'السابق')) + '</button> ' +
+      esc(tr('Page', 'صفحة')) + ' ' + pg + ' ' + esc(tr('of', 'من')) + ' ' + pages + ' <button type="button" class="dms-btn" data-act="' + act + '" data-id="' + esc(id) + '" data-v="1"' + (pg >= pages ? ' disabled' : '') + '>' + esc(tr('Next', 'التالي')) + ' ›</button></span></div>';
+  }
+  function restoreFocus(el, id) { if (focusId === id) { var i = el.querySelector('[data-tq]'); if (i) { i.focus(); try { i.setSelectionRange(i.value.length, i.value.length); } catch (e) { /* ignore */ } } } }
+  function srvArgs(sp, st) {
+    var q = st.q.trim(), base = { doctype: sp.dt, filters: sp.filters };
+    if (sp.parent) { base.parent = sp.parent; }
+    if (q && sp.search) { base.or_filters = sp.search.map(function (f) { return [sp.dt, f, 'like', '%' + q + '%']; }); }
+    return base;
+  }
+  function srvOrder(sp, st) { return st.sk ? st.sk + (st.dir > 0 ? ' asc' : ' desc') : sp.order; }
+  function fillServer(id, el) {
+    var sp = TBL[id], st = SS[id] || (SS[id] = { q: '', page: 1, total: null, rows: null, loading: false, err: null, req: 0, sk: '', dir: 1 });
+    if (!st.dirty && st.rows && st.key === JSON.stringify(sp.filters)) { return paintServer(id, el); }
+    st.dirty = false; st.key = JSON.stringify(sp.filters);
+    var req = ++st.req; st.loading = true; st.err = null;
+    var ps = sp.pageSize || CFG.modalPage, base = srvArgs(sp, st);
+    paintServer(id, el);
+    var chk = function () { return !destroyed && SS[id] && SS[id].req === req; };
+    if (sp.loader) { sp.loader(st.page - 1, ps, st.q.trim(), srvOrder(sp, st)).then(function (res) { if (!chk()) { return; } st.total = res.total; st.rows = res.rows || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); }, function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } }); return; }
+    var cnt = getList(Object.assign({}, base, { fields: ['count(name) as n'], limit_page_length: 1 }), chk).then(function (r) { return r ? +one(r).n || 0 : null; });
+    var rows = getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: (st.page - 1) * ps, limit_page_length: ps }), chk);
+    Promise.all([cnt, rows]).then(function (res) {
+      if (!chk()) { return; } st.total = res[0]; st.rows = res[1] || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]'));
+    }).catch(function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } });
+  }
+  function paintServer(id, el) {
+    if (!el) { return; } var sp = TBL[id], st = SS[id], ps = sp.pageSize || CFG.modalPage;
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(sp.searchHint || tr('Search…', 'بحث…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search', 'بحث')) + '"><span class="dms-tb-r"><span class="dms-sm">' + (st.total == null ? '' : num(st.total) + ' ' + esc(st.total === 1 ? tr('record', 'سجل') : tr('records', 'سجل'))) + '</span>' +
+      (st.total ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csvall" data-id="' + esc(id) + '" title="' + esc(tr('Export up to 5,000 rows', 'تصدير حتى 5,000 سجل')) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    if (st.err) { el.innerHTML = h + alertBox('err', esc(st.err === 'perm' ? tr('Permission denied for your user.', 'لا تملك صلاحية القراءة.') : tr('Technical error while reading this list.', 'خطأ تقني أثناء قراءة القائمة.')) + ' <button type="button" class="dms-linkbtn" data-act="sretry" data-id="' + esc(id) + '">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>'); return restoreFocus(el, id); }
+    if (st.loading && !st.rows) { el.innerHTML = h + '<div class="dms-skel"></div>'; return restoreFocus(el, id); }
+    if (!st.rows || !st.rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
+    var pages = Math.max(1, Math.ceil((st.total || 0) / ps));
+    h += '<div class="dms-tablewrap" style="opacity:' + (st.loading ? .55 : 1) + '"' + (st.loading ? ' aria-busy="true"' : '') + '><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'ssort', id) + '<tbody>' + st.rows.map(function (r) { return tcells(sp, r); }).join('') + '</tbody></table></div>' + pager(id, 'spage', st.page, pages, st.total || 0, ps);
+    el.innerHTML = h; restoreFocus(el, id);
+  }
+  function csvCell(v) { v = v == null ? '' : String(v); if (/^[=+\-@\t\r]/.test(v) && !/^-?[\d.,]+$/.test(v)) { v = "'" + v; } return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  function download(name, sp, rows) {
+    var cols = sp.cols.filter(function (c) { return c.c; }), lines = [cols.map(function (c) { return csvCell(c.h); }).join(',')].concat(rows.map(function (r) { return cols.map(function (c) { return csvCell(c.c(r)); }).join(','); }));
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+    a.download = String(name).replace(/[^\w-]+/g, '_') + '_' + TODAY + '.csv'; HOST.appendChild(a); a.click(); later(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+  function exportServer(id) {
+    var sp = TBL[id], st = SS[id], out = [], step = 500, base = srvArgs(sp, st), g = GEN;
+    if (sp.loader) { toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…')); var acc = [], pg = function (p) { return sp.loader(p, 500, st.q.trim(), srvOrder(sp, st)).then(function (res) { acc = acc.concat(res.rows || []); return (res.rows || []).length === 500 && acc.length < 5000 ? pg(p + 1) : acc; }); }; pg(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); }); return; }
+    function next(s) {
+      return getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: s, limit_page_length: step }), function () { return g === GEN; }).then(function (r) {
+        out = out.concat(r || []); return (r && r.length === step && out.length < 5000) ? next(s + step) : out;
+      });
+    }
+    toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…'));
+    next(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); });
+  }
+  function toast(msg, bad) { var e = document.createElement('div'); e.className = 'dms-toast' + (bad ? ' dms-toast-err' : ''); e.setAttribute('role', 'status'); e.textContent = msg; HOST.appendChild(e); later(function () { e.remove(); }, 3500); }
+  /* common cells */
+  function dtc(v) { return v ? '<span class="dms-num">' + esc(String(v).slice(0, 10)) + '</span>' : '<span class="dms-sm">—</span>'; }
+  function who(v) { return v ? bdi(v) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>'; }
+  function txt(v) { return v ? bdi(v) : '<span class="dms-sm">—</span>'; }
+  function amc(v) { return v == null || v === '' ? '<span class="dms-sm">—</span>' : '<span class="dms-num">' + esc(amt(v)) + '</span>'; }
+  function overdueTag(due) { var d = diffDays(String(due || TODAY).slice(0, 10), TODAY); return d > 0 ? '<span class="dms-days ' + (d > 90 ? 'dms-days-bad' : 'dms-days-warn') + '">' + num(d) + '</span>' : '<span class="dms-sm">—</span>'; }
+  function col(h, f, o) { o = o || {}; return Object.assign({ h: h, sf: o.sort === false ? undefined : f, r: function (x) { return o.fmt ? o.fmt(x[f], x) : txt(x[f]); }, c: function (x) { return x[f]; } }, o); }
+  function linkCol(h, dt, f, labelF) { return { h: h, sf: f, r: function (x) { return docLink(typeof dt === 'function' ? dt(x) : dt, x[f], labelF ? x[labelF] || x[f] : x[f]); }, c: function (x) { return x[f]; } }; }
+
+  /* ---------- actions pending ---------- */
+  var PRIO = { high: ['High', 'عالية'], med: ['Medium', 'متوسطة'], low: ['Low', 'منخفضة'] };
+  function score(p, amount, age) { return { high: 300, med: 200, low: 100 }[p] + Math.min(40, Math.log(1 + Math.abs(amount || 0)) / Math.LN10 * 6) + Math.min(20, (age || 0) / 10); }
+  /* Server specs ({id, server:true, dt, filters, fields, order, it(row) → item}) load count + 6 most urgent rows each. */
+  function loadActions(specs, key) {
+    run(key || 'act', function (chk) {
+      return Promise.all(specs.filter(function (s) { return s.server; }).map(function (s) {
+        var c = getList({ doctype: s.dt, fields: ['count(name) as n'], filters: s.filters, limit_page_length: 1 }, chk).then(function (r) { return +one(r).n || 0; }, function (e) { return 'ERR:' + errKind(e); });
+        var l = (s.rank ? fetchAll({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order }, chk, 2000) : getList({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order, limit_page_length: 6 }, chk)).then(function (r) { return r || []; }, function (e) { return 'ERR:' + errKind(e); });
+        return Promise.all([c, l]).then(function (x) { return { id: s.id, count: typeof x[1] === 'string' ? x[1] : x[0], rows: Array.isArray(x[1]) ? x[1] : [] }; });
+      })).then(function (res) { var o = {}; res.forEach(function (x) { o[x.id] = x; }); return o; });
+    });
+  }
+  /* client: {id: {rows, item}} for client specs, null while their sources load, or 'ERR:kind'. */
+  function actModel(specs, key, client) {
+    var counts = {}, items = [], A = D[key || 'act'], AE = D[(key || 'act') + 'Err'];
+    specs.forEach(function (s) {
+      if (s.client) {
+        var c = client == null ? null : typeof client === 'string' ? client : client[s.id];
+        if (typeof c === 'string') { counts[s.id] = c; }
+        else if (c) { counts[s.id] = c.count != null ? c.count : c.rows.length; c.rows.slice(0, 6).forEach(function (r) { items.push(c.item(r)); }); }
+        return;
+      }
+      if (AE) { counts[s.id] = 'ERR:' + AE; return; }
+      var x = A && A[s.id]; if (!x) { return; }
+      counts[s.id] = x.count;
+      x.rows.forEach(function (r) { var it = s.it(r); it.dt = it.dt || s.dt; it.name = it.name || r.name; items.push(it); });
+    });
+    items.sort(function (a, b) { return b.score - a.score; });
+    var seen = {}; items = items.filter(function (it) { var k = it.dt + '|' + it.name; if (seen[k]) { return false; } seen[k] = 1; return true; });   /* one row per record, under its most urgent category */
+    return { specs: specs, counts: counts, items: items, ready: specs.every(function (s) { return counts[s.id] !== undefined; }) };
+  }
+  function pendingTotal(AM) {
+    if (!AM) { return null; }
+    var t = 0, any = false; Object.keys(AM.counts).forEach(function (k) { var c = AM.counts[k]; if (typeof c === 'number') { t += c; any = true; } });
+    return any ? t : null;
+  }
+  function dtLabel(dt) { var L = APP.dtLabels && APP.dtLabels[dt]; return L ? tr(L[0], L[1]) : dt; }
+  function arow(it) {
+    return '<a class="dms-arow" href="' + esc(it.href || docUrl(it.dt, it.name)) + '" target="_blank" rel="noopener noreferrer">' +
+      '<span class="dms-prio dms-prio-' + it.p + '">' + esc(tr(PRIO[it.p][0], PRIO[it.p][1])) + '</span>' +
+      '<span class="dms-arow-main"><span class="dms-arow-t"><bdi>' + esc(it.title || it.name) + '</bdi><span class="dms-arow-dt">' + esc(dtLabel(it.dt)) + '</span></span><span class="dms-arow-d">' + bdi(it.desc || '') + '</span></span>' +
+      '<span class="dms-arow-who">' + (it.who ? bdi(it.who) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>') + '</span>' +
+      '<span class="dms-arow-due dms-tone-' + (it.tone || 'n') + '">' + esc(it.due || '') + '</span><span class="dms-sr"> (' + esc(tr('opens in a new tab', 'يفتح في علامة تبويب جديدة')) + ')</span></a>';
+  }
+  function drillId(s) { return s.drill || ((s.client ? 'cli:' : 'srv:') + s.id); }
+  function catBtn(s, c) {
+    var err = typeof c === 'string', inner = '<span class="dms-acat-t">' + esc(s.short) + '</span><b class="dms-num">' + (err || c == null ? '—' : num(c)) + '</b>';
+    return (!err && c) ? '<button type="button" class="dms-acat" data-act="kpi" data-v="' + esc(drillId(s)) + '" title="' + esc(s.title + ' — ' + tr('view all', 'عرض الكل')) + '">' + inner + '</button>'
+      : '<div class="dms-acat dms-acat-off" title="' + esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.title) + '">' + inner + '</div>';
+  }
+  function actionsPanel(AM) {
+    var tot = pendingTotal(AM);
+    var h = '<section class="dms-panelbox dms-actpanel" id="dms-pending" tabindex="-1" aria-labelledby="dms-pending-h"><div class="dms-ph"><h3 class="dms-h3" id="dms-pending-h">' + esc(tr('Actions pending', 'الإجراءات المعلقة')) +
+      (tot != null ? ' <span class="dms-h3-n dms-num">' + num(tot) + '</span>' : '') + '</h3><span class="dms-ph-meta">' + esc(tr('As of today · most urgent first', 'حتى اليوم · الأكثر إلحاحًا أولًا')) + '</span>' +
+      (tab !== 'actions' && APP.tabs.some(function (x) { return x.id === 'actions'; }) ? '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="goto:actions">' + esc(tr('View all', 'عرض الكل')) + '</button>' : '') + '</div>';
+    if (!AM) { return h + '<div class="dms-arows" aria-busy="true">' + skel(6, 'dms-skel-row') + '</div></section>'; }
+    var known = AM.specs.filter(function (s) { return AM.counts[s.id] !== undefined; });
+    if (!known.length) { return h + '<div class="dms-arows" aria-busy="true">' + skel(6, 'dms-skel-row') + '</div></section>'; }
+    var errs = known.filter(function (s) { return typeof AM.counts[s.id] === 'string'; });
+    if (AM.ready && errs.length === AM.specs.length) { return h + alertBox('err', esc(tr('Pending actions could not be loaded.', 'تعذر تحميل الإجراءات المعلقة.')) + ' <button type="button" class="dms-linkbtn" data-act="refresh">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>') + '</section>'; }
+    var items = AM.items.slice(0, CFG.actRows || 7);
+    h += items.length ? '<div class="dms-arows">' + items.map(arow).join('') + '</div>' : (AM.ready ? '<div class="dms-empty dms-empty-sm">' + esc(tr('Nothing pending for this selection.', 'لا توجد إجراءات معلقة لهذا الاختيار.')) + '</div>' : '<div class="dms-arows" aria-busy="true">' + skel(4, 'dms-skel-row') + '</div>');
+    h += '<div class="dms-acats">' + AM.specs.map(function (s) { return catBtn(s, AM.counts[s.id]); }).join('') + '</div>';
+    if (errs.length) { h += note(esc(tr('Could not load: ', 'تعذر التحميل: ') + errs.map(function (s) { return s.short; }).join(', '))); }
+    return h + '</section>';
+  }
+  function actionsTab(AM, info) {
+    var h = alertBox('info', esc(info || tr('Action lists are as of today and not filtered by the period. They follow the filters where the source supports them.', 'قوائم الإجراءات حتى اليوم وغير مرتبطة بالفترة، وتتبع المرشحات حيثما يدعمها المصدر.')));
+    h += kpis((AM ? AM.specs : []).map(function (s) {
+      var c = AM.counts[s.id], err = typeof c === 'string';
+      return kpi({ label: s.title, val: c === undefined ? '…' : err ? '—' : num(c), sub: esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.why), act: (!err && c) ? drillId(s) : null });
+    }));
+    return h + actionsPanel(AM);
+  }
+
+  /* ---------- drill-downs (overlay) ---------- */
+  var OVL = null;
+  function openDrill(id) {
+    if (id.indexOf('goto:') === 0) { goTab(id.slice(5)); return; }
+    var r = null;
+    if (id.indexOf('srv:') === 0 && APP.actSpecs) {
+      var s = APP.actSpecs().filter(function (x) { return x.id === id.slice(4); })[0];
+      if (s && s.table) { delete SS.drill; r = { title: s.title, sub: s.why, spec: Object.assign({ id: 'drill', server: true, dt: s.dt, filters: s.filters, order: s.order, file: s.id }, s.table()) }; }
+    }
+    if (!r && APP.drill) { r = APP.drill(id); }
+    if (!r || (!r.spec && r.body == null)) { return; }
+    if (r.spec) { r.spec.id = 'drill'; if (!r.spec.server && !r.spec.pageSize) { r.spec.pageSize = CFG.modalPage; } }
+    delete SS.drill; delete TS.drill;
+    var opener = OVL ? OVL.opener : activeEl();
+    OVL = Object.assign(r, { id: id, prev: OVL && r.stack !== false ? OVL : null, opener: opener, openerKey: OVL ? OVL.openerKey : opener && opener.getAttribute && opener.getAttribute('data-v') }); renderOverlay();
+  }
+  function overlayHTML() {
+    if (!OVL) { return ''; }
+    var link = OVL.link ? ' ' + docLink(OVL.link[0], OVL.link[1], OVL.link[2]) : '';
+    return '<div class="dms-overlay" data-act="ovbg"><div class="dms-modal" role="dialog" aria-modal="true" aria-labelledby="dms-dialog-title"><div class="dms-dhead"><div>' + (OVL.prev ? '<button type="button" class="dms-linkbtn" data-act="ovback">‹ ' + esc(tr('Back', 'رجوع')) + '</button>' : '') + '<h3 id="dms-dialog-title">' + esc(OVL.title) + '</h3>' + (OVL.sub || link ? '<p class="dms-sm">' + esc(OVL.sub || '') + link + '</p>' : '') + '</div><button type="button" class="dms-x" data-act="closeov" aria-label="' + esc(tr('Close', 'إغلاق')) + '">×</button></div>' + (OVL.body || '') + (OVL.spec ? regTable(OVL.spec) : '') + '</div></div>';
+  }
+  function renderOverlay() { var el = $('[data-ref="overlay"]'); if (!el) { return; } var app = $('.dms-app'); if (app) { app.inert = !!OVL; } if (!OVL) { Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { delete TBL[k]; } }); } else { delete TBL.drill; } el.innerHTML = overlayHTML(); fillTables(el); var x = el.querySelector('.dms-x'); if (x) { x.focus(); } }
+  function closeOverlay() {
+    var previous = OVL; OVL = null; renderOverlay(); delete SS.drill; delete TS.drill;
+    if (!previous) { return; }
+    var opener = previous.opener;
+    if (!opener || !opener.isConnected) { opener = Array.prototype.find.call(HOST.querySelectorAll('[data-act="kpi"]'), function (el) { return el.getAttribute('data-v') === previous.openerKey; }); }
+    if (opener) { opener.focus({ preventScroll: true }); }
+  }
+
+  /* ---------- filters, period, toolbar, tabs ---------- */
+  var F = { period: APP.period || 'month', from: '', to: '' }, PERIOD = [];
+  (APP.filters || []).forEach(function (f) { F[f.k] = ''; });
+  var tab = APP.tabs[0].id, POP = null, FD = null, FS = {}, CAL = null, ANIM = false, built = false, AMC = null;
+  var PERIODS = [['today', 'Today', 'اليوم'], ['yesterday', 'Yesterday', 'أمس'], ['week', 'This week', 'هذا الأسبوع'], ['lastWeek', 'Last week', 'الأسبوع الماضي'],
+    ['month', 'This month', 'هذا الشهر'], ['lastMonth', 'Last month', 'الشهر الماضي'], ['quarter', 'This quarter', 'هذا الربع'], ['ytd', 'Year to date', 'السنة حتى اليوم'],
+    ['year', 'This year', 'هذه السنة'], ['prevYear', 'Previous year', 'السنة الماضية'], ['custom', 'Custom range', 'نطاق مخصص']];
+  var PGROUPS = [['today', 'yesterday'], ['week', 'lastWeek'], ['month', 'lastMonth'], ['quarter', 'ytd', 'year', 'prevYear'], ['custom']];
+  function curPeriod() { return periodRange(F.period, F.from, F.to); }
+  function periodName(k) { var p = PERIODS.filter(function (x) { return x[0] === k; })[0]; return p ? tr(p[1], p[2]) : k; }
+  function filterCount() { return (APP.filters || []).filter(function (f) { return F[f.k]; }).length; }
+  function optList(f, draft) { var l = f.options ? f.options(draft || F) : []; return (l || []).map(function (x) { return typeof x === 'string' ? { v: x, l: x } : x; }); }
+  function optLabel(f, v) { var o = optList(f).filter(function (x) { return x.v === v; })[0]; return o ? o.l : (f.label ? f.label(v) : v); }
+  function pendingBtnHTML() {
+    var n = pendingTotal(AMC), lbl = n == null ? (AMC && AMC.ready ? '—' : '…') : num(n);
+    return '<button type="button" class="dms-pend' + (n ? ' dms-pend-on' : '') + '" data-act="pending" data-fk="pending" title="' + esc(tr('Pending actions as of today — show the list', 'الإجراءات المعلقة حتى اليوم — عرض القائمة')) + '">' +
+      '<i class="dms-pend-dot" aria-hidden="true"></i><b class="dms-num">' + lbl + '</b><span class="dms-pend-l">' + esc(tr('pending', 'معلّقة')) + '</span></button>';
+  }
+  function opt(v, label, cur) { return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(label) + '</option>'; }
+  function ffield(f) {
+    if (f.type === 'text' || f.type === 'date') { return '<div class="dms-ff"><label for="dms-fd-' + f.k + '">' + esc(tr(f.en, f.ar)) + '</label><input type="' + (f.type === 'date' ? 'date' : 'search') + '" id="dms-fd-' + f.k + '" class="dms-input" data-fd="' + f.k + '" data-fk="fd:' + f.k + '" value="' + esc(FD[f.k] || '') + '" placeholder="' + esc(f.ph ? tr(f.ph[0], f.ph[1]) : '') + '" autocomplete="off"></div>'; }
+    var list = optList(f, FD), label = tr(f.en, f.ar), k = f.k;
+    var q = clean(FS[k]).toLowerCase(), cur = FD[k], shown = list.filter(function (x) { return !q || String(x.l).toLowerCase().indexOf(q) >= 0 || String(x.v).toLowerCase().indexOf(q) >= 0; }), more = shown.length > 200;
+    shown = shown.slice(0, 200);
+    if (cur && !shown.some(function (x) { return x.v === cur; })) { shown.unshift({ v: cur, l: optLabel(f, cur) }); }
+    var h = '<div class="dms-ff"><label for="dms-fd-' + k + '">' + esc(label) + '</label>';
+    if (list.length > 8) { h += '<input type="search" class="dms-input" data-fs="' + k + '" data-fk="fs:' + k + '" value="' + esc(FS[k] || '') + '" placeholder="' + esc(tr('Search ' + num(list.length) + ' options', 'ابحث في ' + num(list.length) + ' خيار')) + '" aria-label="' + esc(tr('Search', 'بحث') + ' — ' + label) + '" autocomplete="off">'; }
+    h += '<select id="dms-fd-' + k + '" class="dms-input" data-fd="' + k + '" data-fk="fd:' + k + '">' + opt('', f.none ? tr(f.none[0], f.none[1]) : tr('All', 'الكل'), cur) + shown.map(function (x) { return opt(x.v, x.l, cur); }).join('') + '</select>';
+    if (q && !shown.length) { h += '<span class="dms-ff-hint">' + esc(tr('No matches', 'لا نتائج')) + '</span>'; }
+    else if (more) { h += '<span class="dms-ff-hint">' + esc(tr('First 200 matches — type to narrow', 'أول 200 نتيجة — اكتب للتضييق')) + '</span>'; }
+    return h + '</div>';
+  }
+  function filtersPopHTML() {
+    var n = APP.filterNote ? APP.filterNote() : '';
+    return '<div class="dms-pop dms-pop-filters" role="dialog" aria-label="' + esc(tr('Filters', 'المرشحات')) + '"><div class="dms-pop-b">' + APP.filters.map(ffield).join('') + '</div>' +
+      (n ? '<p class="dms-pop-note">' + esc(n) + '</p>' : '') +
+      '<div class="dms-pop-f"><button type="button" class="dms-btn" data-act="fclear" data-fk="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button><button type="button" class="dms-btn dms-btn-primary" data-act="fapply" data-fk="fapply">' + esc(tr('Apply', 'تطبيق')) + '</button></div></div>';
+  }
+  function calendarHTML() {
+    var v = CAL.view, first = weekStartOf(v), mon = v.slice(0, 7), fdy = CAL.focus && CAL.focus.slice(0, 7) === mon ? CAL.focus : (CAL.from && CAL.from.slice(0, 7) === mon ? CAL.from : v), wd = '', rows = '', r, c, d;
+    for (c = 0; c < 7; c++) { try { wd += '<span role="columnheader">' + esc(new Intl.DateTimeFormat(locale(), { weekday: 'narrow', timeZone: 'UTC' }).format(new Date(parseISO(addDays(first, c))))) + '</span>'; } catch (e) { wd += '<span></span>'; } }
+    for (r = 0; r < 6; r++) {
+      rows += '<div role="row" class="dms-cal-row">';
+      for (c = 0; c < 7; c++) {
+        d = addDays(first, r * 7 + c);
+        var end = d === CAL.from || d === CAL.to, inR = CAL.from && CAL.to && d > CAL.from && d < CAL.to;
+        rows += '<button type="button" role="gridcell" class="dms-day' + (d.slice(0, 7) !== mon ? ' dms-out' : '') + (d === TODAY ? ' dms-today' : '') + (inR ? ' dms-in' : '') + (end ? ' dms-end' : '') +
+          (CAL.from && CAL.to && d === CAL.from && d !== CAL.to ? ' dms-s' : '') + (CAL.from && CAL.to && d === CAL.to && d !== CAL.from ? ' dms-e' : '') + '" data-act="calday" data-v="' + d + '" data-fk="day:' + d + '" tabindex="' + (d === fdy ? 0 : -1) +
+          '" aria-pressed="' + end + '" aria-label="' + esc(fmtDate(d, true)) + '"><bdi>' + (+d.slice(8, 10)) + '</bdi></button>';
+      }
+      rows += '</div>';
+    }
+    var ok = CAL.from && CAL.to, msg = ok ? '<bdi>' + esc(rangeLabel([CAL.from, CAL.to])) + '</bdi> · ' + esc(daysTxt(diffDays(CAL.from, CAL.to) + 1)) : esc(CAL.from ? tr('Select an end date', 'اختر تاريخ النهاية') : tr('Select a start date', 'اختر تاريخ البداية'));
+    var title = v; try { title = new Intl.DateTimeFormat(locale(), { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(parseISO(v))); } catch (e) { /* ISO fallback */ }
+    return '<div class="dms-cal"><div class="dms-cal-h"><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="-1" data-fk="calprev" aria-label="' + esc(tr('Previous month', 'الشهر السابق')) + '">' + ico('prev', 'dms-flip') + '</button>' +
+      '<b aria-live="polite">' + esc(title) + '</b><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="1" data-fk="calnext" aria-label="' + esc(tr('Next month', 'الشهر التالي')) + '">' + ico('next', 'dms-flip') + '</button></div>' +
+      '<div class="dms-cal-g" role="grid" aria-label="' + esc(title) + '"><div class="dms-cal-wd" role="row">' + wd + '</div>' + rows + '</div>' +
+      '<div class="dms-cal-f"><span class="dms-cal-msg" aria-live="polite">' + msg + '</span><span class="dms-cal-btns"><button type="button" class="dms-btn" data-act="popclose" data-fk="calcancel">' + esc(tr('Cancel', 'إلغاء')) + '</button>' +
+      '<button type="button" class="dms-btn dms-btn-primary" data-act="calapply" data-fk="calapply"' + (ok ? '' : ' disabled') + '>' + esc(tr('Apply', 'تطبيق')) + '</button></span></div></div>';
+  }
+  function periodPopHTML() {
+    var n = APP.periodNote ? APP.periodNote() : '';
+    return '<div class="dms-pop dms-pop-period' + (CAL ? ' dms-has-cal' : '') + '" role="dialog" aria-label="' + esc(tr('Select period', 'اختر الفترة')) + '"><div class="dms-presets">' +
+      PGROUPS.map(function (g) {
+        return '<div class="dms-pgroup">' + g.map(function (k) {
+          var on = CAL ? k === 'custom' : F.period === k;
+          return '<button type="button" class="dms-preset' + (on ? ' dms-on' : '') + '" aria-pressed="' + on + '" data-act="preset" data-v="' + k + '" data-fk="preset:' + k + '"><span>' + esc(periodName(k)) + '</span>' +
+            (k !== 'custom' ? '<small><bdi>' + esc(rangeLabel(periodRange(k))) + '</bdi></small>' : '') + '</button>';
+        }).join('') + '</div>';
+      }).join('') + '</div>' + (CAL ? calendarHTML() : '') + (n ? '<p class="dms-pop-note dms-pop-note-p">' + esc(n) + '</p>' : '') + '</div>';
+  }
+  function toolbarHTML() {
+    var ac = filterCount(), R = PERIOD, hasF = APP.filters && APP.filters.length;
+    return '<div class="dms-topbar"><div class="dms-tb-title"><h2 class="dms-title">' + esc(APP.title()) + '</h2><p class="dms-sub" data-ref="stamp"></p></div>' +
+      '<div class="dms-tb-ctrls"><div class="dms-pendwrap" data-ref="pendwrap">' + pendingBtnHTML() + '</div>' +
+      (APP.period === false ? '' : '<div class="dms-anchor"><button type="button" class="dms-btn dms-period" data-act="pop" data-v="period" data-fk="pop:period" aria-haspopup="dialog" aria-expanded="' + (POP === 'period') + '" aria-label="' + esc(tr('Period', 'الفترة') + ': ' + periodName(F.period) + ' ' + rangeLabel(R)) + '">' + ico('cal') +
+        '<span class="dms-period-t"><b>' + esc(periodName(F.period)) + '</b><span class="dms-period-r"><bdi>' + esc(rangeLabel(R)) + '</bdi></span></span>' + ico('down', 'dms-chev') + '</button>' + (POP === 'period' ? periodPopHTML() : '') + '</div>') +
+      (hasF ? '<div class="dms-anchor"><button type="button" class="dms-btn' + (ac ? ' dms-btn-on' : '') + '" data-act="pop" data-v="filters" data-fk="pop:filters" aria-haspopup="dialog" aria-expanded="' + (POP === 'filters') + '">' + ico('filter') +
+        '<span class="dms-btn-t">' + esc(tr('Filters', 'المرشحات')) + '</span>' + (ac ? '<span class="dms-count" aria-label="' + esc(ac + ' ' + tr('active', 'نشط')) + '">' + ac + '</span>' : '') + '</button>' + (POP === 'filters' ? filtersPopHTML() : '') + '</div>' : '') +
+      '<button type="button" class="dms-btn dms-icobtn" data-act="refresh" data-ref="refresh" data-fk="refresh" aria-label="' + esc(tr('Refresh data', 'تحديث البيانات')) + '" title="' + esc(tr('Refresh data (keeps filters)', 'تحديث البيانات (مع الإبقاء على المرشحات)')) + '">' + ico('refresh') + '</button></div>' +
+      '<div class="dms-lang" role="group" aria-label="Language / اللغة"><button type="button" data-act="lang" data-v="en" data-fk="lang:en" lang="en" aria-pressed="' + (LANG === 'en') + '"' + (LANG === 'en' ? ' class="dms-on"' : '') + '>English</button>' +
+        '<button type="button" data-act="lang" data-v="ar" data-fk="lang:ar" lang="ar" aria-pressed="' + (LANG === 'ar') + '"' + (LANG === 'ar' ? ' class="dms-on"' : '') + '>العربية</button></div></div>';
+  }
+  function chipsHTML() {
+    var a = (APP.filters || []).filter(function (f) { return F[f.k]; }); if (!a.length) { return ''; }
+    return '<div class="dms-chips">' + a.map(function (f) {
+      var v = optLabel(f, F[f.k]), lab = tr(f.en, f.ar);
+      return '<span class="dms-chip"><span class="dms-chip-k">' + esc(lab) + '</span><bdi>' + esc(v) + '</bdi><button type="button" class="dms-chip-x" data-act="rmf" data-v="' + f.k + '" data-fk="rmf:' + f.k + '" aria-label="' + esc(tr('Remove filter', 'إزالة المرشح') + ' ' + lab + ': ' + v) + '">' + ico('x') + '</button></span>';
+    }).join('') + (a.length > 1 ? '<button type="button" class="dms-linkbtn" data-act="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button>' : '') + '</div>';
+  }
+  function tabsHTML() {
+    var pend = pendingTotal(AMC);
+    return '<div class="dms-tabs" role="tablist" aria-label="' + esc(tr('Sections', 'الأقسام')) + '">' + APP.tabs.map(function (x) {
+      var on = x.id === tab, lbl = tr(x.en, x.ar), b = x.id === 'actions' && pend ? '<span class="dms-tab-n dms-num" title="' + esc(tr('Pending actions as of today', 'الإجراءات المعلقة حتى اليوم')) + '">' + num(pend) + '</span>' : '';
+      return '<button class="dms-tab' + (on ? ' dms-on' : '') + '" role="tab" id="dms-tab-' + x.id + '" aria-selected="' + on + '" aria-controls="dms-panel" tabindex="' + (on ? 0 : -1) + '" data-act="tab" data-v="' + x.id + '" data-fk="tab:' + x.id + '" title="' + esc(lbl) + '" type="button"><span>' + esc(lbl) + '</span>' + b + '</button>';
+    }).join('') + '</div>';
+  }
+
+  /* ---------- rendering: a fixed skeleton whose regions repaint independently (focus kept via data-fk) ---------- */
+  function activeEl() { try { return ROOT.activeElement || null; } catch (e) { return null; } }
+  function paint(el, html) {
+    if (!el) { return; }
+    var a = activeEl(), fk = a && el.contains(a) && a.getAttribute ? a.getAttribute('data-fk') : null, ss = null;
+    if (fk && typeof a.selectionStart === 'number') { try { ss = [a.selectionStart, a.selectionEnd]; } catch (e) { /* not a text input */ } }
+    el.innerHTML = html;
+    if (fk) { focusFk(fk); if (ss) { var n = activeEl(); try { n.setSelectionRange(ss[0], ss[1]); } catch (e) { /* ignore */ } } }
+  }
+  function focusFk(k) { var n = HOST.querySelector('[data-fk="' + k + '"]'); if (n) { try { n.focus({ preventScroll: true }); } catch (e) { n.focus(); } } }
+  function skeleton() {
+    HOST.innerHTML = '<div class="dms-app"><div data-ref="tb"></div><div data-ref="chips"></div><div data-ref="tabs"></div><div class="dms-sheet" role="tabpanel" id="dms-panel" data-ref="sheet"><div data-ref="banner"></div><div class="dms-content" data-ref="content"></div></div>' +
+      '<div class="dms-tip" data-ref="tip" role="tooltip" hidden></div></div><div data-ref="overlay"></div>';
+    built = true;
+  }
+  function renderHeaderState() {
+    var b = $('[data-ref="refresh"]'), s = $('[data-ref="stamp"]'), bz = busy();
+    if (b) { b.classList.toggle('dms-busy', bz); b.setAttribute('aria-busy', String(bz)); }
+    if (s) { s.textContent = (APP.stamp ? APP.stamp() : tr('Read-only', 'للقراءة فقط')) + (LOADED ? ' · ' + tr('Updated ', 'آخر تحديث ') + LOADED : '') + (bz ? ' · ' + tr('loading…', 'جارٍ التحميل…') : ''); }
+    paint($('[data-ref="pendwrap"]'), pendingBtnHTML());
+    paint($('[data-ref="tabs"]'), tabsHTML());
+  }
+  function renderToolbar() { paint($('[data-ref="tb"]'), toolbarHTML()); paint($('[data-ref="chips"]'), chipsHTML()); renderHeaderState(); }
+  function contentHTML() {
+    if (!BOOTED) {
+      return '<div class="dms-grid dms-kpis dms-ov-kpis" aria-busy="true">' + skel(CFG.kpiCount || 6, 'dms-skel-kpi') + '</div><div class="dms-main2"><div class="dms-skel dms-skel-panel"></div><div class="dms-skel dms-skel-panel"></div></div>' +
+        note(esc(tr('Loading from ERPNext…', 'جارٍ التحميل من ERPNext…')));
+    }
+    if (APP.period !== false && (!PERIOD[0] || PERIOD[0] > PERIOD[1])) { return alertBox('err', esc(tr('Choose a valid date range.', 'اختر نطاق تاريخ صحيحًا.'))); }
+    return APP.content(tab, AMC);
+  }
+  function renderSoft() {
+    PERIOD = curPeriod(); AMC = APP.actions ? APP.actions() : null;
+    var keep = {}; Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { keep[k] = TBL[k]; } }); TBL = keep;
+    var b = $('[data-ref="banner"]'), c = $('[data-ref="content"]'), sh = $('[data-ref="sheet"]');
+    if (b) { b.innerHTML = BOOTED && APP.banner ? APP.banner() : ''; }
+    if (c) { paint(c, contentHTML()); c.classList.remove('dms-enter'); if (ANIM) { void c.offsetWidth; c.classList.add('dms-enter'); } ANIM = false; fillTables(c); fitChartLabels(); if (APP.afterRender) { APP.afterRender(c); } }
+    if (sh) { sh.setAttribute('aria-labelledby', 'dms-tab-' + tab); }
+    renderHeaderState();
+  }
+  function renderAll() {
+    HOST.setAttribute('dir', LANG === 'ar' ? 'rtl' : 'ltr'); HOST.setAttribute('lang', LANG);
+    if (!built) { skeleton(); }
+    PERIOD = curPeriod(); renderToolbar(); renderSoft();
+  }
+  /* Full reload (filters, refresh): new generation, empty store, tables back to page 1. */
+  function reload() {
+    setToday(); PERIOD = curPeriod(); GEN++; D = {}; LOADED = STAMP;
+    Object.keys(SS).forEach(function (k) { SS[k].dirty = true; SS[k].page = 1; }); Object.keys(TS).forEach(function (k) { TS[k].page = 1; });
+    APP.load(); ANIM = true; renderAll();
+  }
+
+  /* ---------- navigation and popovers ---------- */
+  function goTab(id, focusTab, force) {
+    if (tab !== id || force) { tab = id; ANIM = true; if (APP.onTab) { APP.onTab(id); } renderAll(); }
+    var t = $('#dms-tab-' + id); if (!t) { return; }
+    try { t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) { /* ignore */ }
+    if (focusTab) { t.focus(); }
+  }
+  function openPop(w) {
+    POP = w; CAL = null;
+    if (w === 'filters') { FD = {}; APP.filters.forEach(function (f) { FD[f.k] = F[f.k]; }); FS = {}; }
+    else if (F.period === 'custom' && F.from && F.to) { CAL = { from: F.from, to: F.to, view: monthStart(F.from), focus: F.from }; }
+    renderToolbar(); focusFk(w === 'filters' ? 'fd:' + APP.filters[0].k : CAL ? 'day:' + CAL.focus : 'preset:' + F.period);
+  }
+  function closePop(restore) { var w = POP; if (!w) { return; } POP = null; CAL = null; renderToolbar(); if (restore) { focusFk('pop:' + w); } }
+  function applyFilters(next) {
+    var prev = {}; APP.filters.forEach(function (f) { prev[f.k] = F[f.k]; F[f.k] = (next && next[f.k]) || ''; }); POP = null;
+    if (APP.onFilters) { APP.onFilters(prev); }
+    reload();
+  }
+  function applyPeriod(key, from, to) {
+    F.period = key; if (key === 'custom') { F.from = from; F.to = to; }
+    POP = null; CAL = null; setToday(); PERIOD = curPeriod();
+    Object.keys(SS).forEach(function (k) { if (TBL[k] && TBL[k].period) { SS[k].dirty = true; SS[k].page = 1; } });
+    if (APP.onPeriod) { APP.onPeriod(); } else { reload(); return; }
+    ANIM = true; renderAll(); focusFk('pop:period');
+  }
+  function calPick(d) {
+    if (!CAL.from || CAL.to) { CAL.from = d; CAL.to = null; } else if (d < CAL.from) { CAL.to = CAL.from; CAL.from = d; } else { CAL.to = d; }
+    CAL.focus = d;
+  }
+  function calMove(d) { CAL.focus = d; if (d.slice(0, 7) !== CAL.view.slice(0, 7)) { CAL.view = monthStart(d); } renderToolbar(); focusFk('day:' + d); }
+
+  /* ---------- tooltip (one shared element; positioned against the dashboard, clamped to its width) ---------- */
+  function showTip(n) {
+    var tip = $('[data-ref="tip"]'), app = $('.dms-app'); if (!tip || !app) { return; }
+    tip.textContent = n.getAttribute('data-tip'); tip.hidden = false;
+    var a = app.getBoundingClientRect(), r = n.getBoundingClientRect(), w = tip.offsetWidth, hgt = tip.offsetHeight;
+    var x = Math.max(4, Math.min(r.left - a.left + r.width / 2 - w / 2, a.width - w - 4)), y = r.top - a.top - hgt - 8;
+    if (y < 0) { y = r.bottom - a.top + 8; }
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  }
+  function hideTip() { var tip = $('[data-ref="tip"]'); if (tip) { tip.hidden = true; } }
+  function onOver(ev) { var n = ev.target.closest ? ev.target.closest('[data-tip]') : null; if (n && HOST.contains(n)) { showTip(n); } else { hideTip(); } }
+
+  /* ---------- events (single delegated set, removed on destroy) ---------- */
+  function onClick(ev) {
+    var n = ev.target.closest ? ev.target.closest('[data-act]') : null;
+    if (POP && !(ev.target.closest && ev.target.closest('.dms-anchor'))) { closePop(false); }
+    if (!n || !HOST.contains(n)) { return; }
+    var a = n.getAttribute('data-act'), v = n.getAttribute('data-v'), id = n.getAttribute('data-id');
+    if (APP.onAct && APP.onAct(a, v, n, id) === true) { return; }
+    if (a === 'ovbg') { if (ev.target === n) { closeOverlay(); } return; }
+    if (a === 'closeov') { closeOverlay(); return; }
+    if (a === 'ovback' && OVL && OVL.prev) { var pv = OVL.prev; delete SS.drill; delete TS.drill; OVL = pv; if (OVL.spec) { regTable(OVL.spec); } renderOverlay(); return; }
+    if (a === 'tab') { goTab(v); return; }
+    if (a === 'lang') { if (LANG !== v) { LANG = v; try { G.localStorage.setItem('dms_lang', LANG); } catch (e) { /* ignore */ } POP = null; CAL = null; renderAll(); if (OVL) { var o = OVL; OVL = null; renderOverlay(); openDrill(o.id); } focusFk('lang:' + v); } return; }
+    if (a === 'refresh') { if (APP.onRefresh) { APP.onRefresh(); } reload(); return; }
+    if (a === 'pop') { if (POP === v) { closePop(true); } else { openPop(v); } return; }
+    if (a === 'popclose') { closePop(true); return; }
+    if (a === 'preset') {
+      if (v !== 'custom') { applyPeriod(v); return; }
+      var r0 = PERIOD[0] || TODAY, r1 = PERIOD[1] || TODAY; CAL = { from: r0, to: r1, view: monthStart(r1 > TODAY ? TODAY : r1), focus: r1 > TODAY ? TODAY : r1 };
+      renderToolbar(); focusFk('day:' + CAL.focus); return;
+    }
+    if (a === 'calnav' && CAL) { CAL.view = addMonths(CAL.view, +v); CAL.focus = CAL.view; renderToolbar(); return; }
+    if (a === 'calday' && CAL) { calPick(v); renderToolbar(); focusFk('day:' + v); return; }
+    if (a === 'calapply' && CAL && CAL.from && CAL.to) { applyPeriod('custom', CAL.from, CAL.to); return; }
+    if (a === 'fapply') { applyFilters(FD); focusFk('pop:filters'); return; }
+    if (a === 'fclear') { applyFilters(null); focusFk('pop:filters'); return; }
+    if (a === 'rmf') { var nf = {}; APP.filters.forEach(function (f) { nf[f.k] = F[f.k]; }); nf[v] = ''; applyFilters(nf); focusFk('pop:filters'); return; }
+    if (a === 'pending') {
+      goTab(APP.tabs[0].id); var p = $('#dms-pending');
+      if (p) { var still = G.matchMedia && G.matchMedia('(prefers-reduced-motion: reduce)').matches; try { p.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' }); } catch (e) { p.scrollIntoView(); } p.focus({ preventScroll: true }); }
+      return;
+    }
+    if (a === 'kpi') { openDrill(v); return; }
+    if (a === 'tpage') { TS[id].page = Math.max(1, TS[id].page + (+v)); fillTable(id); return; }
+    if (a === 'tsort') { var st = TS[id]; if (st.sk === v) { st.dir = -st.dir; } else { st.sk = v; st.dir = 1; } st.page = 1; fillTable(id); focusHead(id, v); return; }
+    if (a === 'spage') { var ss = SS[id]; ss.page = Math.max(1, ss.page + (+v)); ss.dirty = true; fillTable(id); return; }
+    if (a === 'ssort') { var s2 = SS[id]; if (s2.sk === v) { s2.dir = -s2.dir; } else { s2.sk = v; s2.dir = 1; } s2.page = 1; s2.dirty = true; fillTable(id); focusHead(id, v); return; }
+    if (a === 'sretry') { SS[id].dirty = true; fillTable(id); return; }
+    if (a === 'csv') { var sp = TBL[id]; download(sp.file || id, sp, clientRows(sp, TS[id])); return; }
+    if (a === 'csvall') { exportServer(id); return; }
+  }
+  function focusHead(id, v) { var th = HOST.querySelector('[data-tbl="' + id + '"] th[data-v="' + v + '"]'); if (th) { th.focus(); } }
+  function onInput(ev) {
+    var n = ev.target; if (!n || !n.getAttribute || !HOST.contains(n)) { return; }
+    var fs = n.getAttribute('data-fs'), fd = n.getAttribute('data-fd'), tq = n.getAttribute('data-tq');
+    if (APP.onInput && APP.onInput(n, ev) === true) { return; }
+    if (fs) { if (FS[fs] === n.value) { return; } FS[fs] = n.value; renderToolbar(); return; }
+    if (fd) { if (!FD || FD[fd] === n.value) { return; } FD[fd] = n.value; if (n.type === 'search') { return; } if (APP.filters.some(function (f) { return f.dependsOn === fd; })) { APP.filters.forEach(function (f) { if (f.dependsOn === fd && FD[f.k] && !optList(f, FD).some(function (x) { return x.v === FD[f.k]; })) { FD[f.k] = ''; } }); renderToolbar(); } return; }
+    if (tq) {
+      focusId = tq; var spx = TBL[tq]; if (!spx) { return; }
+      if (spx.server) { var s2 = SS[tq]; if (s2.q === n.value) { return; } s2.q = n.value; s2.page = 1; clearTimeout(onInput.t); onInput.t = later(function () { s2.dirty = true; fillTable(tq); }, 350); }
+      else { var s1 = TS[tq] || (TS[tq] = { q: '', page: 1, sk: spx.sk || '', dir: spx.dir || 1 }); if (s1.q === n.value) { return; } s1.q = n.value; s1.page = 1; fillTable(tq); }
+    }
+  }
+  function onKey(ev) {
+    var t = ev.target, act = t && t.getAttribute ? t.getAttribute('data-act') : null, rtl = LANG === 'ar', k = ev.key;
+    if (k === 'Escape') {
+      if (POP) { ev.preventDefault(); closePop(true); return; }
+      if (OVL) { closeOverlay(); }
+      return;
+    }
+    if ((k === 'Enter' || k === ' ') && (act === 'tsort' || act === 'ssort')) { ev.preventDefault(); t.click(); return; }
+    if (k === 'Tab' && OVL) {
+      var modal = $('.dms-modal'), controls = Array.prototype.filter.call(modal.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), [tabindex="0"]'), function (el) { return el.getClientRects().length; });
+      var first = controls[0], last = controls[controls.length - 1];
+      if (ev.shiftKey && t === first) { ev.preventDefault(); last.focus(); }
+      else if (!ev.shiftKey && t === last) { ev.preventDefault(); first.focus(); }
+    }
+    if (act === 'tab' && /^(ArrowLeft|ArrowRight|Home|End)$/.test(k)) {
+      var ids = APP.tabs.map(function (x) { return x.id; }), i = ids.indexOf(t.getAttribute('data-v')), L = ids.length;
+      var d = k === 'Home' ? -i : k === 'End' ? L - 1 - i : ((k === 'ArrowRight') !== rtl ? 1 : -1);
+      ev.preventDefault(); goTab(ids[(i + d + L) % L], true); return;
+    }
+    if (act === 'calday' && CAL) {
+      var cur = t.getAttribute('data-v'), step = { ArrowRight: rtl ? -1 : 1, ArrowLeft: rtl ? 1 : -1, ArrowUp: -7, ArrowDown: 7 }[k];
+      if (step) { ev.preventDefault(); calMove(addDays(cur, step)); return; }
+      if (k === 'PageUp' || k === 'PageDown') { ev.preventDefault(); calMove(shiftMonths(cur, k === 'PageUp' ? -1 : 1)); return; }
+      if (k === 'Home' || k === 'End') { ev.preventDefault(); calMove(k === 'Home' ? weekStartOf(cur) : addDays(weekStartOf(cur), 6)); }
+    }
+  }
+  /* Start: wire events, render the skeleton, run APP.boot (reference lists), then the first load. */
+  function start() {
+    HOST.addEventListener('click', onClick, SIG);
+    HOST.addEventListener('input', onInput, SIG);
+    HOST.addEventListener('change', onInput, SIG);
+    HOST.addEventListener('keydown', onKey, SIG);
+    HOST.addEventListener('pointerover', onOver, SIG);
+    HOST.addEventListener('pointerleave', hideTip, SIG);
+    HOST.addEventListener('focusin', function (ev) { var n = ev.target.closest && ev.target.closest('[data-tip]'); if (n) { showTip(n); } }, SIG);
+    HOST.addEventListener('focusout', hideTip, SIG);
+    document.addEventListener('pointerdown', function (ev) {
+      if (!POP) { return; } var p = ev.composedPath ? ev.composedPath() : [];
+      for (var i = 0; i < p.length; i++) { if (p[i] === HOST) { return; } }
+      closePop(false);
+    }, SIG);
+    if (!G.frappe || !frappe.call) { HOST.innerHTML = '<div class="dms-empty">Frappe client API not available.</div>'; return; }
+    setToday(); PERIOD = curPeriod();
+    var chartResize = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fitChartLabels) : null;
+    if (chartResize) { chartResize.observe(HOST); if (abort) { abort.signal.addEventListener('abort', function () { chartResize.disconnect(); }); } }
+    if (document.fonts) { document.fonts.ready.then(function () { if (!destroyed) { fitChartLabels(); } }); }
+    renderAll();
+    var g = GEN, chk = function () { return g === GEN && !destroyed; };
+    Promise.resolve(APP.boot ? APP.boot(chk) : null).catch(function (e) { if (G.console) { console.error(APP.key, 'boot', e); } }).then(function () { if (destroyed) { return; } BOOTED = true; reload(); });
+  }
+  /* ==== end DMS kit ==== */
+
+  /* ============================================================ v1 constants and helpers (unchanged rules) */
+  var SC = { plant: 'Plant and Machinery Direct', furn: 'Fixtures & Fittings-Indirect' }, SCOPE_CATS = [SC.plant, SC.furn], DM_FURN = ['Chair', 'Table'], DISPOSED = ['Sold', 'Scrapped', 'Decapitalized'], CAP = 5000;
+  var STATUS_OPTS = ['Submitted', 'Partially Depreciated', 'Fully Depreciated', 'Sold', 'Scrapped', 'In Maintenance', 'Out of Order', 'Issue', 'Receipt', 'Capitalized', 'Decapitalized'];
+  var ASSET_F = ['name', 'asset_name', 'asset_category', 'company', 'location', 'custodian', 'department', 'status', 'docstatus', 'purchase_date', 'available_for_use_date', 'total_asset_cost', 'gross_purchase_amount', 'additional_asset_cost', 'value_after_depreciation', 'opening_accumulated_depreciation', 'is_fully_depreciated', 'calculate_depreciation', 'maintenance_required', 'asset_quantity', 'disposal_date', 'insurance_end_date', 'default_finance_book'];
+  var TL = null;
+  function lx(o) { return o && typeof o === 'object' ? (o[LANG] || o.en) : o; }
+  function t(k) { var a = Array.prototype.slice.call(arguments, 1), d = I[TL || LANG] || I.en, s = d[k] != null ? d[k] : (I.en[k] != null ? I.en[k] : k); return a.length ? s.replace(/[{]([0-9]+)[}]/g, function (m, i) { return a[+i]; }) : s; }
+  function isN(v) { return v !== null && v !== undefined && v !== '' && !isNaN(Number(v)); }
+  function n0(v) { return isN(v) ? Number(v) : 0; }
+  function d10(v) { return v ? String(v).slice(0, 10) : ''; }
+  function u(a) { var m = {}, o = []; a.forEach(function (x) { if (x !== null && x !== undefined && x !== '' && !m[x]) { m[x] = 1; o.push(x); } }); return o; }
+  function sumBy(a, f) { return a.reduce(function (s, x) { return s + n0(f(x)); }, 0); }
+  function cnt(rows, f) { var o = {}; rows.forEach(function (r) { var k = f(r); o[k] = (o[k] || 0) + 1; }); return o; }
+  function dayDiff(a, b) { return Math.round((new Date(a) - new Date(b)) / 864e5); }
+  function canRead(dt) { try { return frappe.model.can_read(dt); } catch (e) { return true; } }
+  function NONE() { return t('none_set'); }
+  var MEMO = {};
+  function memo(key, fn) { if (!MEMO[key]) { var p = Promise.resolve().then(fn); MEMO[key] = p; p.catch(function () { delete MEMO[key]; }); } return MEMO[key]; }
+  function pool(items, n, fn) { var i = 0, out = new Array(items.length); var w = function () { if (i >= items.length) { return Promise.resolve(); } var k = i++; return Promise.resolve(fn(items[k], k)).then(function (r) { out[k] = r; }, function (e) { out[k] = { __err: e }; }).then(w); }; var ws = []; for (var j = 0; j < Math.min(n, items.length); j++) { ws.push(w()); } return Promise.all(ws).then(function () { return out; }); }
+  function list(dt, o) { o = o || {}; var a = { doctype: dt, fields: o.fields || ['name'], filters: o.filters || [], limit_start: o.start || 0, limit_page_length: o.limit || 500 }; if (o.or) { a.or_filters = o.or; } if (o.order) { a.order_by = o.order; } if (o.parent) { a.parent = o.parent; } return getList(a, null).then(function (r) { return r || []; }); }
+  function fAll(dt, o, cap) { cap = cap || CAP; var out = []; var step = function (start) { return list(dt, Object.assign({}, o, { start: start, limit: 500 })).then(function (page) { out = out.concat(page); if (page.length < 500 || out.length >= cap) { return { rows: out.slice(0, cap), capped: out.length >= cap }; } return step(start + 500); }); }; return step(0); }
+  function countOf(dt, o) { return list(dt, { fields: ['count(name) as n'], filters: o.filters, or: o.or, limit: 1 }).then(function (r) { return r && r[0] ? n0(r[0].n) : 0; }); }
+  var DOCS = {};
+  function getDoc(dt, name) { var k = dt + '|' + name; if (!DOCS[k]) { DOCS[k] = callP('frappe.client.get', { doctype: dt, name: name }); DOCS[k].catch(function () { delete DOCS[k]; }); } return DOCS[k]; }
+
+  /* filters (v1 rules) */
+  function aFilters(o) {
+    o = o || {}; var Fx = [];
+    Fx.push(['asset_category', 'in', F.category ? [F.category] : SCOPE_CATS]); if (F.company) { Fx.push(['company', '=', F.company]); }
+    var nz = function (fld, v) { Fx.push(v === '__none__' ? [fld, 'is', 'not set'] : [fld, '=', v]); };
+    if (F.location) { nz('location', F.location); } if (F.department) { nz('department', F.department); } if (F.custodian) { nz('custodian', F.custodian); }
+    var st = o.status || F.status || 'active';
+    if (st === 'active') { Fx.push(['docstatus', '=', 1]); Fx.push(['status', 'not in', DISPOSED]); } else if (st === 'cancelled') { Fx.push(['docstatus', '=', 2]); } else if (st === 'draft') { Fx.push(['docstatus', '=', 0]); } else if (st === 'noncancelled') { Fx.push(['docstatus', '<', 2]); } else if (st.indexOf('st:') === 0) { Fx.push(['docstatus', '=', 1]); Fx.push(['status', '=', st.slice(3)]); }
+    if (!o.noDate) { if (F.from) { Fx.push(['purchase_date', '>=', F.from]); } if (F.to) { Fx.push(['purchase_date', '<=', F.to]); } }
+    return Fx;
+  }
+  function aOr() { return F.q ? [['name', 'like', '%' + F.q + '%'], ['asset_name', 'like', '%' + F.q + '%']] : null; }
+  function dmFilters(all) { var Fx = [['docstatus', '<', 2]]; if (!all) { Fx.push(['category', 'in', DM_FURN]); } if (F.location) { Fx.push(F.location === '__none__' ? ['location', 'is', 'not set'] : ['location', '=', F.location]); } if (F.custodian) { Fx.push(F.custodian === '__none__' ? ['employee', 'is', 'not set'] : ['employee', '=', F.custodian]); } if (F.from) { Fx.push(['date', '>=', F.from]); } if (F.to) { Fx.push(['date', '<=', F.to]); } if (F.category === SC.plant) { Fx.push(['name', '=', '__none__']); } return Fx; }
+  function dmOr() { return F.q ? [['name', 'like', '%' + F.q + '%'], ['asset_id', 'like', '%' + F.q + '%'], ['description', 'like', '%' + F.q + '%']] : null; }
+  function optsOf(f, extra) { var vals = u(((SCOPE || {}).rows || []).map(function (r) { return r[f]; }).concat(extra || [])).sort(); return [{ v: '__none__', l: NONE() }].concat(vals); }
+
+  /* ============================================================ loaders (v1, adapted to the kit transport) */
+  var META = null, SCOPE = null, OPT = { dmAll: false, acqAll: false, mvAll: false }, SEV = '';
+  function loadMeta() {
+    return Promise.all([list('Company', { fields: ['name', 'default_currency'], limit: 200 }).catch(function () { return []; }), list('Asset Category', { fields: ['name'], limit: 200 }).catch(function () { return []; })]).then(function (r) {
+      var cur = {}; r[0].forEach(function (c) { cur[c.name] = c.default_currency; }); var cats = r[1].map(function (c) { return c.name; });
+      var perms = {}; ['Asset', 'DM Assets', 'Asset Maintenance', 'Asset Maintenance Log', 'Asset Repair', 'Asset Movement', 'Asset Acquisition Records'].forEach(function (d) { perms[d] = canRead(d); });
+      return Promise.all([perms['DM Assets'] ? fAll('DM Assets', { fields: ['location', 'employee'], filters: [['docstatus', '<', 2]] }).then(function (x) { return x.rows; }, function () { return []; }) : Promise.resolve([]), fAll('Asset', { fields: ASSET_F, filters: [['asset_category', 'in', SCOPE_CATS]], order: 'modified desc' }).catch(function () { return { rows: [], capped: false }; })]).then(function (x) {
+        META = { companies: r[0], cur: cur, catNames: cats, perms: perms, dmLoc: u(x[0].map(function (y) { return y.location; })), dmEmp: u(x[0].map(function (y) { return y.employee; })), missingCat: cats.length ? SCOPE_CATS.filter(function (c) { return cats.indexOf(c) < 0; }) : [] };
+        var map = {}; x[1].rows.forEach(function (a) { map[a.name] = a; }); SCOPE = { rows: x[1].rows, map: map, capped: x[1].capped };
+      });
+    });
+  }
+  function Lassets(o) { return memo('assets|' + JSON.stringify(o || {}), function () { return fAll('Asset', { fields: ASSET_F, filters: aFilters(o), or: aOr(), order: 'purchase_date desc, modified desc' }); }); }
+  function Lmnt() {
+    return memo('mnt', function () {
+      var sc = SCOPE.map, out = { denied: {}, plans: [], tasks: [], logs: [], repairs: [], consumed: [] };
+      var ld = function (key, dt, fn) { if (!canRead(dt)) { out.denied[key] = true; return Promise.resolve(); } return fn().catch(function () { out.denied[key] = true; }); };
+      return Promise.all([
+        ld('plans', 'Asset Maintenance', function () { return fAll('Asset Maintenance', { fields: ['name', 'asset_name', 'asset_category', 'company', 'maintenance_team', 'maintenance_manager', 'maintenance_manager_name'] }).then(function (p) { out.plans = p.rows.filter(function (x) { return sc[x.asset_name]; }); var names = {}; out.plans.forEach(function (x) { names[x.name] = 1; }); return fAll('Asset Maintenance Task', { parent: 'Asset Maintenance', fields: ['name', 'parent', 'maintenance_task', 'maintenance_type', 'maintenance_status', 'start_date', 'end_date', 'periodicity', 'next_due_date', 'last_completion_date', 'certificate_required', 'assign_to', 'assign_to_name', 'description'] }).then(function (tk) { out.tasks = tk.rows.filter(function (x) { return names[x.parent]; }); }); }); }),
+        ld('logs', 'Asset Maintenance Log', function () { return fAll('Asset Maintenance Log', { fields: ['name', 'asset_maintenance', 'asset_name', 'task', 'task_name', 'maintenance_type', 'maintenance_status', 'due_date', 'completion_date', 'actions_performed', 'has_certificate', 'certificate_attachement', 'assign_to_name', 'docstatus'] }).then(function (l) { out.logs = l.rows.filter(function (x) { return sc[x.asset_name]; }); }); }),
+        ld('repairs', 'Asset Repair', function () { return fAll('Asset Repair', { fields: ['name', 'asset', 'company', 'repair_status', 'failure_date', 'completion_date', 'repair_cost', 'total_repair_cost', 'capitalize_repair_cost', 'downtime', 'description', 'docstatus'] }).then(function (rp) { out.repairs = rp.rows.filter(function (x) { return sc[x.asset]; }); }); })
+      ]).then(function () { return out; });
+    });
+  }
+  function Ldm(all) { return memo('dm|' + !!all, function () { if (!canRead('DM Assets')) { return { denied: true, rows: [] }; } return fAll('DM Assets', { fields: ['name', 'asset_id', 'date', 'employee', 'location', 'category', 'description', 'docstatus'], filters: dmFilters(all), or: dmOr(), order: 'date desc' }); }); }
+  function LdmRaw() { return memo('dmRaw', function () { return canRead('DM Assets') ? fAll('DM Assets', { fields: ['name', 'asset_id', 'category', 'description', 'employee', 'location', 'docstatus'], filters: [['docstatus', '<', 2]] }).then(function (x) { return x.rows; }) : []; }); }
+  function Lmv() { return memo('mv', function () { if (!canRead('Asset Movement')) { return { denied: true, rows: [] }; } return fAll('Asset Movement', { fields: ['name', 'company', 'purpose', 'transaction_date', 'reference_doctype', 'reference_name', 'docstatus'] }).then(function (p) { var pm = {}; p.rows.forEach(function (x) { pm[x.name] = x; }); return fAll('Asset Movement Item', { parent: 'Asset Movement', fields: ['name', 'parent', 'asset', 'asset_name', 'source_location', 'target_location', 'from_employee', 'to_employee', 'company'] }).then(function (it) { return { rows: it.rows.filter(function (x) { return pm[x.parent]; }).map(function (x) { return Object.assign({}, x, { _p: pm[x.parent] }); }), parents: p.rows }; }); }); }); }
+  function Lacq() { return memo('acq', function () { if (!canRead('Asset Acquisition Records')) { return { denied: true, rows: [] }; } return fAll('Asset Acquisition Records', { fields: ['name', 'date', 'employee', 'branch', 'custom_job_location', 'workflow_state', 'satus', 'docstatus'] }).then(function (p) { var pm = {}; p.rows.forEach(function (x) { pm[x.name] = x; }); return fAll('Asset Acquisition Table', { parent: 'Asset Acquisition Records', fields: ['name', 'parent', 'item_name', 'dmasset_no', 'quanity', 'life_cercle_end', 'ids'] }).then(function (it) { return { rows: it.rows.filter(function (x) { return pm[x.parent]; }).map(function (x) { return Object.assign({}, x, { _p: pm[x.parent] }); }), parents: p.rows }; }); }); }); }
+
+  /* valuation (v1, unchanged) */
+  function valuate(d) {
+    var r = { name: d.name, status: d.status, cost: n0(d.total_asset_cost), company: d.company, verified: false, nbv: null, acc: null, reason: '', disposed: false, multiFB: false, sched: [], fb: null, posted: 0 };
+    if (d.docstatus !== 1) { r.reason = 'not_submitted'; return r; } if (DISPOSED.indexOf(d.status) >= 0) { r.disposed = true; r.reason = 'disposed'; return r; }
+    var fbs = d.finance_books || []; r.multiFB = fbs.length > 1;
+    var fb = fbs.filter(function (x) { return x.finance_book && x.finance_book === d.default_finance_book; })[0] || fbs[0] || null; r.fb = fb ? (fb.finance_book || '(default)') : null;
+    var sched = d.schedules || []; if (fbs.length > 1 && fb) { sched = sched.filter(function (s) { return (s.finance_book || null) === (fb.finance_book || null); }); } r.sched = sched;
+    r.posted = sumBy(sched.filter(function (s) { return s.journal_entry; }), function (s) { return s.depreciation_amount; }); r.acc = n0(d.opening_accumulated_depreciation) + r.posted;
+    var field = fb && isN(fb.value_after_depreciation) ? n0(fb.value_after_depreciation) : n0(d.value_after_depreciation), derived = r.cost - r.acc; r.field = field; r.derived = derived;
+    if (!(r.cost > 0)) { r.reason = 'no_cost'; return r; } if (!d.calculate_depreciation && !n0(d.opening_accumulated_depreciation) && !sched.length) { r.reason = 'no_dep_calc'; return r; }
+    if (Math.abs(field - derived) <= 1) { r.verified = true; r.nbv = Math.max(0, derived); return r; }
+    r.reason = field <= 0.5 ? 'zero_unproven' : 'mismatch'; return r;
+  }
+  function Lval() { return memo('val', function () { return Lassets().then(function (A) { var a = A.rows.filter(function (x) { return x.docstatus === 1; }), sel = a.slice(0, 150); return pool(sel, 5, function (x) { return getDoc('Asset', x.name); }).then(function (docs) { var vals = docs.map(function (d, i) { return d && !d.__err ? valuate(d) : { name: sel[i].name, verified: false, reason: 'load_failed', cost: n0(sel[i].total_asset_cost), company: sel[i].company, status: sel[i].status, sched: [] }; }); return { vals: vals, partial: a.length > sel.length, total: a.length, docs: docs.filter(function (d) { return d && !d.__err; }) }; }); }); }); }
+  function curOf(co) { return (META && META.cur[co]) || ''; }
+  function byCur(rows, f) { var o = {}; rows.forEach(function (r) { var c = curOf(r.company) || '—'; o[c] = (o[c] || 0) + n0(f(r)); }); return o; }
+  /* one line per currency (never summed across currencies); several currencies stack in a smaller size so none is cut off */
+  function moneyMap(o) { var k = Object.keys(o); if (!k.length) { return '0'; } var h = k.map(function (c) { return '<bdi class="pf-mm-i">' + esc(money(o[c])) + (c === '—' ? '' : '<small>' + esc(c) + '</small>') + '</bdi>'; }); return k.length > 1 ? '<span class="pf-mm">' + h.join('') + '</span>' : h[0]; }
+  function moneyTxt(o) { return Object.keys(o).map(function (c) { return money(o[c]) + (c === '—' ? '' : ' ' + c); }).join(' · ') || '0'; }
+  function m2(n, co) { return (curOf(co) ? curOf(co) + ' ' : '') + amt(n); }
+  function taskState(x) { if (x.maintenance_status === 'Cancelled') { return 'cancelled'; } if (x.end_date && x.end_date < TODAY) { return 'ended'; } if (x.next_due_date && x.next_due_date < TODAY) { return 'overdue'; } if (x.maintenance_status === 'Overdue') { return 'overdue'; } return 'planned'; }
+  function inRange(d) { if (!d) { return !(F.from || F.to); } var x = d10(d); return (!F.from || x >= F.from) && (!F.to || x <= F.to); }
+  function mScope() {
+    return Promise.all([Lmnt(), Lassets({ noDate: true })]).then(function (r) {
+      var M = r[0], A = r[1], set = {}; A.rows.forEach(function (a) { set[a.name] = 1; });
+      var plans = M.plans.filter(function (p) { return set[p.asset_name]; }), pmap = {}; plans.forEach(function (p) { pmap[p.name] = p; }); var dr = !!(F.from || F.to);
+      var tasks = M.tasks.filter(function (x) { return pmap[x.parent] && (!dr || inRange(x.next_due_date)); }).map(function (x) { return Object.assign({}, x, { _asset: pmap[x.parent].asset_name, _state: taskState(x) }); });
+      var logs = M.logs.filter(function (l) { return set[l.asset_name] && l.docstatus !== 2 && (!dr || inRange(l.due_date || l.completion_date)); }), repairs = M.repairs.filter(function (x) { return set[x.asset] && x.docstatus !== 2 && (!dr || inRange(x.failure_date)); });
+      var od = {}; logs.forEach(function (l) { if (['Planned', 'Overdue'].indexOf(l.maintenance_status) >= 0 && l.due_date && d10(l.due_date) < TODAY) { od[l.task || l.name] = { asset: l.asset_name, task: l.task_name, due: d10(l.due_date), dt: 'Asset Maintenance Log', ref: l.name }; } });
+      tasks.forEach(function (x) { if (x._state === 'overdue' && !od[x.name]) { od[x.name] = { asset: x._asset, task: x.maintenance_task, due: d10(x.next_due_date), dt: 'Asset Maintenance', ref: x.parent }; } });
+      return { M: M, A: A, plans: plans, tasks: tasks, logs: logs, repairs: repairs, overdue: vals(od), denied: M.denied };
+    });
+  }
+  function repCost(r) { return n0(r.total_repair_cost) || n0(r.repair_cost); }
+
+  /* ============================================================ per-tab data (memoised per filter set; kit reload clears it) */
+  function loadOverview() { return Promise.all([Lassets(), mScope(), Lval(), Ldm(false), countOf('Asset', { filters: aFilters(), or: aOr() })]).then(function (r) { return { A: r[0], MS: r[1], V: r[2], dm: r[3], total: r[4] }; }); }
+  function ensure(key, fn) { if (!((key + 'Tok') in D)) { run(key, fn); } }
+  function loadTab(id) {
+    if (id === 'plant') { ensure('plant', function () { return Promise.all([Lassets({ status: 'noncancelled' }), mScope()]).then(function (r) { return { A: r[0], MS: r[1] }; }); }); }
+    if (id === 'furniture') { ensure('furn', function () { return Promise.all([Ldm(false), Lassets({ status: 'noncancelled' })]).then(function (r) { return { dm: r[0], A: r[1] }; }); }); }
+    if (id === 'valuation') { ensure('val', function () { return Promise.all([Lassets(), Lval(), Lassets({ status: 'all' })]).then(function (r) { return { A: r[0], V: r[1], all: r[2] }; }); }); }
+    if (id === 'assign') { ensure('assign', function () { return Promise.all([Lassets(), Lmv(), Ldm(OPT.dmAll), Lacq(), LdmRaw()]).then(function (r) { return { A: r[0], mv: r[1], dm: r[2], acq: r[3], raw: r[4] }; }); }); }
+    if (id === 'movement') { ensure('mv', function () { return Lmv(); }); }
+  }
+  function loadAudit() {
+    return Promise.all([Lassets({ status: 'all', noDate: true }), Lmnt(), Lval(), LdmRaw()]).then(function (r) {
+      var A = r[0], M = r[1], V = r[2], dmRaw = r[3]; var rules = function () { var X = [], add = function (sev, ref, issue, source, fix, dt, name, k) { X.push({ sev: sev, ref: ref, issue: issue, source: source, fix: fix, dt: dt, name: name, k: k }); };
+      var live = A.rows.filter(function (a) { return a.docstatus < 2; }), dup = {}; live.forEach(function (a) { var k = [a.asset_name, a.company, d10(a.purchase_date), n0(a.total_asset_cost)].join('|'); (dup[k] = dup[k] || []).push(a); });
+      var planAssets = {}; M.plans.forEach(function (p) { planAssets[p.asset_name] = 1; });
+      A.rows.forEach(function (a) {
+        if (a.docstatus === 2) { add('info', a.name, t('x_cancelled'), 'Asset', t('f_cancelled'), 'Asset', a.name, 'cancelled'); return; }
+        if (a.docstatus === 0) { add('medium', a.name, t('x_draft'), 'Asset', t('f_draft'), 'Asset', a.name, 'draft'); }
+        if (!a.location) { add('high', a.name, t('x_noloc'), 'Asset', t('f_noloc'), 'Asset', a.name, 'noloc'); }
+        if (!a.custodian) { add('medium', a.name, t('x_nocust'), 'Asset', t('f_nocust'), 'Asset', a.name, 'nocust'); }
+        if (!a.purchase_date) { add('medium', a.name, t('x_nodate'), 'Asset', t('f_nodate'), 'Asset', a.name, 'nodate'); }
+        if (!(n0(a.total_asset_cost) > 0)) { add('high', a.name, t('x_nocost'), 'Asset', t('f_nocost'), 'Asset', a.name, 'nocost'); }
+        if (a.status === 'Fully Depreciated' && !a.is_fully_depreciated) { add('low', a.name, t('x_fdflag'), 'Asset', t('f_fdflag'), 'Asset', a.name, 'fdflag'); }
+        if (a.maintenance_required && !planAssets[a.name] && !M.denied.plans) { add('medium', a.name, t('x_nomplan'), 'Asset / Asset Maintenance', t('f_nomplan'), 'Asset', a.name, 'nomplan'); }
+        if (DISPOSED.indexOf(a.status) >= 0) { add('info', a.name, t('x_disposed', a.status), 'Asset', t('f_disposed'), 'Asset', a.name, 'disposed'); }
+      });
+      Object.keys(dup).forEach(function (k) { if (dup[k].length > 1) { dup[k].forEach(function (a) { add('high', a.name, t('x_dup', dup[k].map(function (x) { return x.name; }).filter(function (n) { return n !== a.name; }).join(', ')), 'Asset', t('f_dup'), 'Asset', a.name, 'dup'); }); } });
+      V.vals.forEach(function (v) { if (!v.verified && !v.disposed && v.reason) { add(v.reason === 'mismatch' || v.reason === 'zero_unproven' ? 'high' : 'medium', v.name, t('x_unver') + ': ' + t('r_' + v.reason), 'Asset (finance books / schedules)', t('f_unver'), 'Asset', v.name, 'unver'); } });
+      var mset = {}, oset = {}; A.rows.forEach(function (a) { mset[a.name] = 1; });
+      M.logs.forEach(function (l) { if (mset[l.asset_name] && ['Planned', 'Overdue'].indexOf(l.maintenance_status) >= 0 && l.due_date && d10(l.due_date) < TODAY && l.docstatus !== 2) { oset[l.task || l.name] = [l.asset_name, l.task_name, d10(l.due_date), 'Asset Maintenance Log', l.name]; } });
+      var pm = {}; M.plans.forEach(function (p) { pm[p.name] = p; });
+      M.tasks.forEach(function (x) { var p = pm[x.parent]; if (p && mset[p.asset_name] && taskState(x) === 'overdue' && !oset[x.name]) { oset[x.name] = [p.asset_name, x.maintenance_task, d10(x.next_due_date), 'Asset Maintenance', x.parent]; } });
+      vals(oset).forEach(function (o) { add('high', o[0], t('x_overdue', o[1], o[2]), o[3], t('f_overdue'), o[3], o[4], 'overdue'); });
+      var tmap = {}; M.tasks.forEach(function (x) { tmap[x.name] = x; });
+      M.logs.forEach(function (l) { if (mset[l.asset_name] && l.maintenance_status === 'Completed' && tmap[l.task] && tmap[l.task].certificate_required && !l.certificate_attachement) { add('medium', l.asset_name, t('x_nocert', l.task_name), 'Asset Maintenance Log', t('f_nocert'), 'Asset Maintenance Log', l.name, 'nocert'); } });
+      var idCount = {}; dmRaw.forEach(function (x) { if (x.asset_id) { idCount[x.asset_id] = (idCount[x.asset_id] || 0) + 1; } });
+      dmRaw.filter(function (x) { return DM_FURN.indexOf(x.category) >= 0; }).forEach(function (x) {
+        if (!x.asset_id) { add('high', x.name, t('x_noid'), 'DM Assets', t('f_noid'), 'DM Assets', x.name, 'noid'); }
+        if (x.asset_id && idCount[x.asset_id] > 1) { add('high', x.asset_id, t('x_dmdup'), 'DM Assets', t('f_dup'), 'DM Assets', x.name, 'dmdup'); }
+        if (!String(x.description || '').trim()) { add('low', x.asset_id || x.name, t('x_furn_inc', t('c_desc')), 'DM Assets', t('f_furn_inc'), 'DM Assets', x.name, 'furninc'); }
+        if (!x.employee) { add('medium', x.asset_id || x.name, t('x_furn_inc', t('c_employee')), 'DM Assets', t('f_furn_inc'), 'DM Assets', x.name, 'furninc'); }
+        if (!x.location) { add('medium', x.asset_id || x.name, t('x_furn_inc', t('c_location')), 'DM Assets', t('f_furn_inc'), 'DM Assets', x.name, 'furninc'); }
+      });
+      return X; };
+      /* findings are built once per language so switching language never shows stale text */
+      var X, XA; try { TL = 'en'; X = rules(); TL = 'ar'; XA = rules(); } finally { TL = null; }
+      X.forEach(function (x, i) { x.issue = { en: x.issue, ar: XA[i].issue }; x.fix = { en: x.fix, ar: XA[i].fix }; });
+      var rank = { high: 0, medium: 1, low: 2, info: 3 }; X.sort(function (a, b) { return rank[a.sev] - rank[b.sev] || String(a.ref).localeCompare(String(b.ref)); });
+      return { X: X, counts: { Asset: SCOPE.rows.length, 'DM Assets': dmRaw.length, 'Asset Maintenance': M.plans.length, 'Asset Maintenance Log': M.logs.length, 'Asset Repair': M.repairs.length } };
+    });
+  }
+
+  /* ============================================================ actions pending (v1 exception checks, high and medium) */
+  var ACT = [['a_noloc', 'high', ['noloc'], 'x_noloc', 'f_noloc'], ['a_nocost', 'high', ['nocost'], 'x_nocost', 'f_nocost'], ['a_dup', 'high', ['dup', 'dmdup'], 'x_dup_s', 'f_dup'], ['a_overdue', 'high', ['overdue'], 'k_od', 'f_overdue'], ['a_unver', 'high', ['unver'], 'x_unver', 'f_unver'], ['a_noid', 'high', ['noid'], 'x_noid', 'f_noid'],
+    ['a_nocust', 'med', ['nocust'], 'x_nocust', 'f_nocust'], ['a_draft', 'med', ['draft'], 'x_draft', 'f_draft'], ['a_nomplan', 'med', ['nomplan'], 'x_nomplan', 'f_nomplan'], ['a_nocert', 'med', ['nocert'], 'x_nocert_s', 'f_nocert'], ['a_nodate', 'med', ['nodate'], 'x_nodate', 'f_nodate'], ['a_furninc', 'low', ['furninc'], 'f_incomplete', 'f_furn_inc'], ['a_fdflag', 'low', ['fdflag'], 'x_fdflag', 'f_fdflag']];
+  I.en.x_dup_s = 'Possible duplicate records'; I.ar.x_dup_s = 'سجلات مكررة محتملة'; I.en.x_nocert_s = 'Completed maintenance without a required certificate'; I.ar.x_nocert_s = 'صيانة مكتملة بدون الشهادة المطلوبة';
+  function actSpecs() { return ACT.map(function (a) { return { id: a[0], client: true, short: t(a[3]), title: t(a[3]), why: t(a[4]) }; }); }
+  function actClient() {
+    if (D.auditErr) { return 'ERR:' + D.auditErr; } if (!D.audit) { return null; }
+    var o = {}; ACT.forEach(function (a) { var rows = D.audit.X.filter(function (x) { return a[2].indexOf(x.k) > -1; }); o[a[0]] = { rows: rows, item: function (x) { return { p: a[1], score: score(a[1], 0, 0), dt: x.dt, name: x.name, title: x.ref, desc: lx(x.issue), who: x.source, due: '', fix: lx(x.fix), tone: a[1] === 'high' ? 'bad' : a[1] === 'med' ? 'warn' : 'n' }; } }; });
+    return o;
+  }
+
+  /* ============================================================ shared view pieces */
+  function two(a, b) { return '<div class="dms-cols-2 dms-grid">' + a + b + '</div>'; }
+  function need(key, what, f) { if (D[key + 'Err']) { return srcErr(D[key + 'Err'], what); } if (D[key] == null) { return '<div class="dms-grid dms-kpis" aria-busy="true">' + skel(4, 'dms-skel-kpi') + '</div><div class="dms-skel dms-skel-panel"></div>'; } return f(D[key]); }
+  function stChip(s, ds) { if (ds === 2 || s === 'Cancelled') { return stat('bad', s || 'Cancelled'); } var m = { 'Fully Depreciated': 'warn', 'In Maintenance': 'n', 'Out of Order': 'bad', Submitted: 'ok', 'Partially Depreciated': 'ok', Draft: 'warn', Completed: 'ok', Planned: 'n', Overdue: 'bad', Pending: 'warn' }; return stat(m[s] || 'n', s || '—'); }
+  function aLink(name) { return '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="asset:' + esc(name) + '">' + esc(name) + '</button>'; }
+  function dLink(name, label) { return '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="dm:' + esc(name) + '">' + esc(label || name) + '</button>'; }
+  function mut(x) { return '<span class="dms-sm">' + esc(x) + '</span>'; }
+  function hb(o, lab, n) { var it = Object.keys(o).map(function (k) { return { label: lab ? lab(k) : k, value: o[k] }; }).sort(function (a, b) { return b.value - a.value; }); return it.length ? hbars(it.slice(0, n || 12), num) : empty(t('empty')); }
+  function noneLbl(k) { return k === '__none__' ? NONE() : k; }
+  function col2(k, h, get, o) { o = o || {}; return { k: k, h: h, num: o.num, s: o.s || get, r: o.r || function (r) { var v = get(r); return o.num ? '<span class="dms-num">' + esc(num(v)) + '</span>' : v === '' || v == null ? mut('—') : bdi(v); }, c: o.c || get }; }
+  function tbl(id, rows, cols, o) { o = o || {}; return regTable(Object.assign({ id: id, rows: rows, cols: cols, pageSize: o.pageSize || 15, file: o.file || id, text: function (r) { return cols.map(function (c) { return c.c ? c.c(r) : ''; }).join(' '); }, empty: o.empty || t('empty') }, o.x || {})); }
+  function costCell(r) { return '<span class="dms-num">' + esc(m2(r.total_asset_cost, r.company)) + '</span>'; }
+  function repairTable(id, rep) {
+    return rep.length ? tbl(id, rep, [col2('n', t('c_ref'), function (r) { return r.name; }, { r: function (r) { return docLink('Asset Repair', r.name); } }), col2('a', t('c_id'), function (r) { return r.asset; }, { r: function (r) { return aLink(r.asset); } }), col2('s', t('c_status'), function (r) { return r.repair_status; }, { r: function (r) { return stChip(r.repair_status); } }), col2('f', t('c_failure'), function (r) { return d10(r.failure_date); }), col2('d', t('c_completed'), function (r) { return d10(r.completion_date); }), col2('c', t('c_repcost'), function (r) { return repCost(r); }, { num: 1, r: function (r) { return '<span class="dms-num">' + esc(m2(repCost(r), r.company)) + '</span>' + (r.capitalize_repair_cost ? ' ' + stat('n', t('capitalized')) : ''); } }), col2('dt', t('c_downtime'), function (r) { return r.downtime || ''; })], { file: 'asset_repairs', x: { sk: 'f', dir: -1 } }) : empty(t('no_repairs') + '. ' + t('no_repairs_s'));
+  }
+
+  /* ============================================================ views */
+  function vOverview(AM) {
+    if (D.ovErr) { return srcErr(D.ovErr, 'Asset') + actionsPanel(AM); }
+    if (!D.ov) { return '<div class="dms-grid dms-kpis dms-ov-kpis" aria-busy="true">' + skel(6, 'dms-skel-kpi') + '</div><div class="dms-main2">' + actionsPanel(AM) + '<div class="dms-skel dms-skel-panel"></div></div>'; }
+    var O = D.ov, rows = O.A.rows, plant = rows.filter(function (r) { return r.asset_category === SC.plant; }), furn = rows.filter(function (r) { return r.asset_category === SC.furn; });
+    var cost = byCur(rows.filter(function (r) { return r.docstatus === 1; }), function (r) { return r.total_asset_cost; }), ver = O.V.vals.filter(function (v) { return v.verified; }), nbv = byCur(ver, function (v) { return v.nbv; });
+    var nocust = rows.filter(function (r) { return !r.custodian; }), nofin = rows.filter(function (r) { return !r.location || !(n0(r.total_asset_cost) > 0); }), recOk = O.total === rows.length && !O.A.capped;
+    var h = kpis([
+      kpi({ label: t('k_plant'), dot: 'var(--dms-royal)', val: num(plant.length), sub: esc(t('s_qty', num(sumBy(plant, function (r) { return r.asset_quantity; })), num(plant.length))), act: 'goto:plant' }),
+      kpi({ label: t('k_furn'), dot: 'var(--dms-royal)', val: num(furn.length + O.dm.rows.length), sub: esc(t('s_furn', num(furn.length), num(O.dm.rows.length))), act: 'goto:furniture' }),
+      kpi({ label: t('k_cost'), val: moneyMap(cost), sub: esc(t('s_hist')), act: 'goto:valuation' }),
+      kpi({ label: t('k_nbv'), dot: 'var(--dms-ok)', val: ver.length ? moneyMap(nbv) : '—', sub: esc(t('s_nbv', num(ver.length), num(O.V.vals.length)) + (O.V.partial ? ' · ' + t('partial') : '')), act: 'goto:valuation' }),
+      kpi({ label: t('k_nocust'), dot: nocust.length ? 'var(--dms-age3)' : null, val: num(nocust.length), sub: esc(t('s_of', num(rows.length))), act: 'goto:audit' }),
+      kpi({ label: t('k_od'), dot: O.MS.overdue.length ? 'var(--dms-bad)' : null, val: num(O.MS.overdue.length), sub: esc(t('s_od')) })
+    ], true);
+    h += '<div class="dms-main2">' + actionsPanel(AM) + '<div class="dms-stackcol">' + panel(t('ch_status'), hb(cnt(rows, function (r) { return r.docstatus === 2 ? 'Cancelled' : r.status || '—'; }))) +
+      panel(t('c_cat'), hbars([{ label: SC.plant, value: plant.length }, { label: SC.furn, value: furn.length }, { label: t('dm_furn_lbl'), value: O.dm.rows.length }].filter(function (x) { return x.value; }), num) || empty(t('empty')), '', esc(t('h_records'))) + '</div></div>';
+    h += alertBox(recOk ? 'info' : 'warn', esc(recOk ? t('recon_ok', num(O.total), num(rows.length)) : t('recon_bad', num(O.total), num(rows.length)))) + note(esc(t('measures_note')));
+    var mo = {}, nodate = 0; rows.forEach(function (r) { if (!r.purchase_date) { nodate++; return; } var k = d10(r.purchase_date).slice(0, 7); mo[k] = (mo[k] || 0) + 1; }); var mk = Object.keys(mo).sort();
+    h += two(panel(t('c_loc'), hb(cnt(rows, function (r) { return r.location || '__none__'; }), noneLbl, 12), '', esc(t('h_records'))), panel(t('c_trend'), mk.length ? barChart(monthList(mk[0], mk[mk.length - 1]), 'month', [{ label: t('records'), color: 'var(--dms-royal)', val: function (k) { return mo[k] || 0; } }], num) : empty(t('empty')), '', esc(nodate ? t('n_nodate', num(nodate)) : t('h_trend').split(';')[0])));
+    var ms = cnt(O.MS.tasks, function (x) { return t('ts_' + x._state); });
+    return h + two(panel(t('c_costcat'), hb((function () { var o = {}; rows.filter(function (r) { return r.docstatus === 1; }).forEach(function (r) { var k = r.asset_category + (Object.keys(cost).length > 1 ? ' (' + (curOf(r.company) || '—') + ')' : ''); o[k] = (o[k] || 0) + n0(r.total_asset_cost); }); return o; })()), '', esc(t('h_hist'))), panel(t('c_mstatus'), O.MS.denied.plans ? alertBox('warn', esc(t('no_access') + ': Asset Maintenance')) : hb(ms)));
+  }
+  function vRegister() {
+    var Fx = aFilters(), OR = aOr(), SORT = { id: 'name', an: 'asset_name', cat: 'asset_category', co: 'company', loc: 'location', cus: 'custodian', pd: 'purchase_date', cost: 'total_asset_cost', st: 'status' };
+    return panel(t('t_register'), regTable({ id: 't_reg', server: true, dt: 'Asset', fields: ASSET_F, filters: Fx, pageSize: 25, file: 'asset_register', order: 'purchase_date desc', searchHint: t('f_search_ph'),
+      loader: function (p, size, q, order) { var orf = q ? [['name', 'like', '%' + q + '%'], ['asset_name', 'like', '%' + q + '%']] : OR; return Promise.all([countOf('Asset', { filters: Fx, or: orf }), list('Asset', { fields: ASSET_F, filters: Fx, or: orf, order: (order || 'purchase_date desc') + ', name asc', start: p * size, limit: size })]).then(function (r) { return pool(r[1].filter(function (x) { return x.docstatus === 1; }), 5, function (x) { return getDoc('Asset', x.name); }).then(function (docs) { var vm = {}; docs.forEach(function (d) { if (d && !d.__err) { vm[d.name] = valuate(d); } }); return { total: r[0], rows: r[1].map(function (x) { return Object.assign({}, x, { _v: vm[x.name] }); }) }; }); }); },
+      cols: [{ k: 'id', h: t('c_id'), sf: SORT.id, r: function (r) { return aLink(r.name); }, c: function (r) { return r.name; } }, { k: 'an', h: t('c_name'), sf: SORT.an, r: function (r) { return bdi(r.asset_name || ''); }, c: function (r) { return r.asset_name; } }, { k: 'cat', h: t('c_category'), sf: SORT.cat, r: function (r) { return bdi(r.asset_category || ''); }, c: function (r) { return r.asset_category; } }, { k: 'loc', h: t('c_location'), sf: SORT.loc, r: function (r) { return r.location ? bdi(r.location) : mut(NONE()); }, c: function (r) { return r.location; } }, { k: 'cus', h: t('c_custodian'), sf: SORT.cus, r: function (r) { return r.custodian ? bdi(r.custodian) : mut(NONE()); }, c: function (r) { return r.custodian; } }, { k: 'pd', h: t('c_pdate'), sf: SORT.pd, r: function (r) { return dtc(r.purchase_date); }, c: function (r) { return d10(r.purchase_date); } }, { k: 'cost', h: t('c_cost'), sf: SORT.cost, num: 1, r: costCell, c: function (r) { return n0(r.total_asset_cost); } },
+        { k: 'nbv', h: t('c_nbv'), num: 1, r: function (r) { var v = r._v; return r.docstatus !== 1 || !v ? mut('—') : v.disposed ? stat('n', t('disposed')) : v.verified ? '<span class="dms-num" title="' + esc(t('nbv_rule')) + '">' + esc(m2(v.nbv, v.company)) + '</span>' : '<span title="' + esc(t('r_' + v.reason)) + '">' + stat('warn', t('unverified')) + '</span>'; }, c: function (r) { return r._v && r._v.verified ? r._v.nbv : ''; } }, { k: 'st', h: t('c_status'), sf: SORT.st, r: function (r) { return stChip(r.docstatus === 2 ? 'Cancelled' : r.status, r.docstatus); }, c: function (r) { return r.status; } }] }), '', esc(t('h_register')));
+  }
+  function vPlant() {
+    return need('plant', 'Asset', function (P) {
+      var rows = P.A.rows.filter(function (r) { return r.asset_category === SC.plant; }), act = rows.filter(function (r) { return r.docstatus === 1 && DISPOSED.indexOf(r.status) < 0; }), set = {}; rows.forEach(function (r) { set[r.name] = 1; });
+      var M = P.MS, logs = M.logs.filter(function (l) { return set[l.asset_name]; }), rep = M.repairs.filter(function (r) { return set[r.asset]; }), sc = function (s) { return rows.filter(function (r) { return r.status === s; }).length; }, hasPlan = function (n) { return M.plans.some(function (p) { return p.asset_name === n; }); };
+      var h = note(esc(t('note_nostatus'))) + kpis([kpi({ label: t('p_total'), val: num(rows.length), sub: esc(t('s_nodisp', num(rows.length - act.length))) }), kpi({ label: t('p_active'), dot: 'var(--dms-ok)', val: num(act.length), sub: esc(t('s_active_def')) }), kpi({ label: t('k_im'), val: num(sc('In Maintenance')) }), kpi({ label: t('p_ooo'), dot: sc('Out of Order') ? 'var(--dms-bad)' : null, val: num(sc('Out of Order')) }), kpi({ label: t('k_fd'), val: num(sc('Fully Depreciated')) }), kpi({ label: t('p_cost'), val: moneyMap(byCur(act, function (r) { return r.total_asset_cost; })), sub: esc(t('s_hist')) })]);
+      if (!rows.length) { return h + empty(t('empty_plant')); }
+      h += two(panel(t('c_loc'), hb(cnt(rows, function (r) { return r.location || '__none__'; }), noneLbl)), panel(t('ch_status'), hb(cnt(rows, function (r) { return r.docstatus === 1 ? r.status : 'Cancelled'; }))));
+      h += panel(t('t_inventory'), tbl('t_pinv', rows, [col2('id', t('c_id'), function (r) { return r.name; }, { r: function (r) { return aLink(r.name); } }), col2('an', t('c_name'), function (r) { return r.asset_name; }), col2('loc', t('c_location'), function (r) { return r.location || ''; }), col2('cus', t('c_custodian'), function (r) { return r.custodian || ''; }, { r: function (r) { return r.custodian ? bdi(r.custodian) : mut(NONE()); } }), col2('st', t('c_status'), function (r) { return r.status; }, { r: function (r) { return stChip(r.status, r.docstatus); } }), col2('pd', t('c_pdate'), function (r) { return d10(r.purchase_date); }), col2('c', t('c_cost'), function (r) { return n0(r.total_asset_cost); }, { num: 1, r: costCell }), col2('m', t('c_mreq'), function (r) { return r.maintenance_required ? 1 : 0; }, { r: function (r) { return (r.maintenance_required ? stat('warn', t('yes')) : stat('n', t('no'))) + (hasPlan(r.name) ? ' ' + stat('ok', t('has_plan')) : ''); } })], { file: 'plant_inventory', x: { sk: 'pd', dir: -1 } }));
+      h += two(panel(t('t_mreq'), M.denied.plans ? alertBox('warn', esc(t('no_access') + ': Asset Maintenance')) : '<div class="dms-facts"><div><span class="dms-sm">' + esc(t('mreq_flag')) + '</span><b class="dms-num">' + num(rows.filter(function (r) { return r.maintenance_required; }).length) + '</b></div><div><span class="dms-sm">' + esc(t('k_plans')) + '</span><b class="dms-num">' + num(M.plans.filter(function (p) { return set[p.asset_name]; }).length) + '</b></div><div><span class="dms-sm">' + esc(t('mreq_noplan')) + '</span><b class="dms-num">' + num(rows.filter(function (r) { return r.maintenance_required && !hasPlan(r.name); }).length) + '</b></div></div>'),
+        panel(t('c_avail'), note(esc(t('avail_msg', rep.filter(function (r) { return r.downtime; }).length ? rep.filter(function (r) { return r.downtime; }).map(function (r) { return r.asset + ': ' + r.downtime; }).join('; ') : t('no_downtime'))))));
+      h += panel(t('t_mhist'), logs.length ? tbl('t_plogs', logs, [col2('a', t('c_id'), function (r) { return r.asset_name; }), col2('tk', t('c_task'), function (r) { return r.task_name || ''; }), col2('ty', t('c_mtype'), function (r) { return r.maintenance_type || ''; }), col2('st', t('c_status'), function (r) { return r.maintenance_status; }, { r: function (r) { return stChip(r.maintenance_status); } }), col2('du', t('c_due'), function (r) { return d10(r.due_date); }), col2('co', t('c_completed'), function (r) { return d10(r.completion_date); })], { file: 'plant_maintenance_history' }) : empty(t('no_logs')));
+      return h + panel(t('t_repairs'), repairTable('t_prep', rep));
+    });
+  }
+  function vFurniture() {
+    return need('furn', 'DM Assets', function (P) {
+      var h = note(esc(t('note_dm'))); if (P.dm.denied) { return h + alertBox('warn', esc(t('no_access') + ': DM Assets')); }
+      var R = P.dm.rows, fx = P.A.rows.filter(function (r) { return r.asset_category === SC.furn; }), assigned = R.filter(function (r) { return r.employee; }).length, nodesc = R.filter(function (r) { return !String(r.description || '').trim(); }).length;
+      h += kpis([kpi({ label: t('f_chairs'), dot: 'var(--dms-royal)', val: num(R.filter(function (r) { return r.category === 'Chair'; }).length), sub: esc(t('s_records_only')) }), kpi({ label: t('f_tables'), dot: 'var(--dms-royal)', val: num(R.filter(function (r) { return r.category === 'Table'; }).length), sub: esc(t('s_records_only')) }), kpi({ label: t('f_other'), val: num(fx.length), sub: esc(t('s_other', SC.furn)) }), kpi({ label: t('f_assigned'), val: num(assigned) }), kpi({ label: t('f_unassigned'), dot: R.length - assigned ? 'var(--dms-age3)' : null, val: num(R.length - assigned) }), kpi({ label: t('f_incomplete'), dot: nodesc ? 'var(--dms-age3)' : null, val: num(nodesc), sub: esc(t('s_nodesc')) })]);
+      h += two(panel(t('f_byloc'), hb(cnt(R, function (r) { return r.location || '__none__'; }), noneLbl)), panel(t('f_byemp'), hb(cnt(R, function (r) { return r.employee || '__none__'; }), noneLbl)));
+      h += panel(t('t_furn_reg'), tbl('t_furn', R, [col2('id', t('c_id'), function (r) { return r.asset_id || r.name; }, { r: function (r) { return dLink(r.name, r.asset_id || r.name); } }), col2('ca', t('c_category'), function (r) { return r.category; }), col2('de', t('c_desc'), function (r) { return String(r.description || '').slice(0, 120); }), col2('em', t('c_employee'), function (r) { return r.employee || ''; }), col2('lo', t('c_location'), function (r) { return r.location || ''; }), col2('d', t('c_recdate'), function (r) { return d10(r.date); })], { file: 'furniture_register', empty: t('empty_furn'), x: { sk: 'd', dir: -1 } }));
+      return h + panel(t('t_fx'), fx.length ? tbl('t_fx', fx, [col2('id', t('c_id'), function (r) { return r.name; }, { r: function (r) { return aLink(r.name); } }), col2('an', t('c_name'), function (r) { return r.asset_name; }), col2('lo', t('c_location'), function (r) { return r.location || ''; }), col2('cu', t('c_custodian'), function (r) { return r.custodian || ''; }), col2('st', t('c_status'), function (r) { return r.status; }, { r: function (r) { return stChip(r.status, r.docstatus); } }), col2('c', t('c_cost'), function (r) { return n0(r.total_asset_cost); }, { num: 1, r: costCell })], { file: 'fixtures_assets' }) : empty(t('empty_fx_s', SC.furn)));
+    });
+  }
+  var AGE = [['<1', 0, 1], ['1-3', 1, 3], ['3-5', 3, 5], ['5-10', 5, 10], ['10+', 10, 1e9]];
+  function vValuation() {
+    return need('val', 'Asset', function (P) {
+      var rows = P.A.rows.filter(function (r) { return r.docstatus === 1; }), V = P.V, ver = V.vals.filter(function (v) { return v.verified; }), unv = V.vals.filter(function (v) { return !v.verified && !v.disposed; }), disp = P.all.rows.filter(function (r) { return DISPOSED.indexOf(r.status) >= 0 || r.docstatus === 2; });
+      var h = note(esc(t('val_rule'))) + (V.partial ? alertBox('warn', esc(t('val_partial', num(V.total)))) : '');
+      h += kpis([kpi({ label: t('v_cost'), val: moneyMap(byCur(rows, function (r) { return r.total_asset_cost; })), sub: esc(t('s_hist') + ' · ' + t('s_excl_cancel')) }), kpi({ label: t('v_acc'), val: ver.length ? moneyMap(byCur(ver, function (v) { return v.acc; })) : '—', sub: esc(t('s_verified_only', num(ver.length))) }), kpi({ label: t('k_nbv'), dot: 'var(--dms-ok)', val: ver.length ? moneyMap(byCur(ver, function (v) { return v.nbv; })) : '—', sub: esc(t('s_nbv', num(ver.length), num(V.vals.length))) }), kpi({ label: t('v_unver'), dot: unv.length ? 'var(--dms-age3)' : null, val: num(unv.length), sub: esc(t('s_unver_cost', moneyTxt(byCur(unv, function (v) { return v.cost; })))), act: 'goto:audit' }), kpi({ label: t('k_fd'), val: num(P.A.rows.filter(function (r) { return r.status === 'Fully Depreciated'; }).length) }), kpi({ label: t('v_disp'), val: num(disp.length), sub: esc(t('s_disp')) })]);
+      if (!rows.length) { return h + empty(t('empty_scope')); }
+      var yr = {}; V.vals.forEach(function (v) { (v.sched || []).forEach(function (s) { var y = String(s.schedule_date || '').slice(0, 4); if (!y) { return; } var o = yr[y] || (yr[y] = { p: 0, s: 0 }); if (s.journal_entry) { o.p += n0(s.depreciation_amount); } else { o.s += n0(s.depreciation_amount); } }); });
+      var ages = AGE.map(function (a) { return { label: a[0] + ' ' + t('yrs'), value: 0 }; }), noAge = 0; rows.forEach(function (r) { var d = r.available_for_use_date || r.purchase_date; if (!d) { noAge++; return; } var y = dayDiff(TODAY, d10(d)) / 365.25, i = -1; AGE.forEach(function (a, j) { if (y >= a[1] && y < a[2]) { i = j; } }); if (i >= 0) { ages[i].value++; } });
+      var ys = Object.keys(yr).sort();
+      h += two(panel(t('v_depyear'), ys.length ? splitBars(ys.map(function (y) { return { label: y, part: yr[y].p, total: yr[y].p + yr[y].s }; }), [{ label: t('posted'), color: 'var(--dms-royal)' }, { label: t('scheduled'), color: '#a3b4ef' }], function (v) { return money(v); }) : empty(t('no_sched')), '', esc(t('h_depyear'))), panel(t('v_age'), hbars(ages, num), '', esc(noAge ? t('n_nodate', num(noAge)) : t('h_age'))));
+      var dm = {}; V.docs.forEach(function (d) { dm[d.name] = d; });
+      h += panel(t('t_valuation'), tbl('t_val', V.vals.map(function (v) { return Object.assign({}, v, { open: n0((dm[v.name] || {}).opening_accumulated_depreciation) }); }), [col2('id', t('c_id'), function (r) { return r.name; }, { r: function (r) { return aLink(r.name); } }), col2('c', t('c_cost'), function (r) { return r.cost; }, { num: 1, r: function (r) { return '<span class="dms-num">' + esc(m2(r.cost, r.company)) + '</span>'; } }), col2('o', t('v_open'), function (r) { return r.open; }, { num: 1, r: function (r) { return '<span class="dms-num">' + esc(amt(r.open)) + '</span>'; } }), col2('p', t('v_posted'), function (r) { return r.posted; }, { num: 1, r: function (r) { return '<span class="dms-num">' + esc(amt(r.posted)) + '</span>'; } }), col2('de', t('v_derived'), function (r) { return r.derived; }, { num: 1, r: function (r) { return r.derived == null ? '—' : '<span class="dms-num">' + esc(amt(r.derived)) + '</span>'; } }), col2('fi', t('v_field'), function (r) { return r.field; }, { num: 1, r: function (r) { return r.field == null ? '—' : '<span class="dms-num">' + esc(amt(r.field)) + '</span>'; } }), col2('fb', t('v_fb'), function (r) { return r.fb || ''; }, { r: function (r) { return bdi(r.fb || '—') + (r.multiFB ? ' ' + stat('n', t('multi_fb')) : ''); } }), col2('re', t('v_result'), function (r) { return r.verified ? 1 : 0; }, { r: function (r) { return r.verified ? stat('ok', t('verified')) : stat(r.disposed ? 'n' : 'warn', t('unverified')) + ' ' + mut(r.reason ? t('r_' + r.reason) : ''); }, c: function (r) { return r.verified ? 'Verified' : 'Unverified: ' + (r.reason ? t('r_' + r.reason) : ''); } })], { file: 'valuation' }));
+      return h + panel(t('t_disposed'), disp.length ? tbl('t_disp', disp, [col2('id', t('c_id'), function (r) { return r.name; }, { r: function (r) { return aLink(r.name); } }), col2('an', t('c_name'), function (r) { return r.asset_name; }), col2('st', t('c_status'), function (r) { return r.status; }, { r: function (r) { return stChip(r.docstatus === 2 ? 'Cancelled' : r.status, r.docstatus); } }), col2('dd', t('c_disposal'), function (r) { return d10(r.disposal_date); }), col2('c', t('c_cost'), function (r) { return n0(r.total_asset_cost); }, { num: 1, r: function (r) { return costCell(r) + ' ' + stat('n', t('excluded')); } })], { file: 'disposed_cancelled' }) : empty(t('no_disposed')));
+    });
+  }
+  function seg(key, a, b) { return '<span class="pf-seg" role="group"><button type="button" class="dms-btn dms-btn-sm' + (!OPT[key] ? ' dms-btn-primary' : '') + '" data-act="opt" data-v="' + key + ':0" aria-pressed="' + !OPT[key] + '">' + esc(a) + '</button><button type="button" class="dms-btn dms-btn-sm' + (OPT[key] ? ' dms-btn-primary' : '') + '" data-act="opt" data-v="' + key + ':1" aria-pressed="' + !!OPT[key] + '">' + esc(b) + '</button></span>'; }
+  function vAssign() {
+    return need('assign', 'Asset', function (P) {
+      var cust = P.A.rows.filter(function (r) { return r.custodian && r.docstatus === 1; }), last = {}; (P.mv.rows || []).forEach(function (m) { if (m._p.docstatus === 1 && m.asset && m.to_employee) { var k = m.asset + '|' + m.to_employee, d = d10(m._p.transaction_date); if (!last[k] || d > last[k]) { last[k] = d; } } });
+      var q = String(F.q || '').toLowerCase(), ar = (P.acq.rows || []).filter(function (r) { return r._p.docstatus < 2; });
+      if (!OPT.acqAll) { ar = ar.filter(function (r) { return ['chair', 'table'].indexOf(String(r.item_name || '').toLowerCase()) >= 0; }); }
+      if (F.custodian) { ar = ar.filter(function (r) { return F.custodian === '__none__' ? !(r.life_cercle_end || r._p.employee) : (r.life_cercle_end === F.custodian || r._p.employee === F.custodian); }); }
+      if (F.from) { ar = ar.filter(function (r) { return d10(r._p.date) >= F.from; }); } if (F.to) { ar = ar.filter(function (r) { return d10(r._p.date) <= F.to; }); }
+      if (F.location) { ar = ar.filter(function (r) { return (r.ids || r._p.custom_job_location || '') === F.location; }); } if (q) { ar = ar.filter(function (r) { return [r.item_name, r.dmasset_no, r._p.name, r._p.employee, r.life_cercle_end].join(' ').toLowerCase().indexOf(q) >= 0; }); }
+      var ids = {}; P.raw.forEach(function (r) { ids[r.asset_id] = 1; }); var withNo = (P.acq.rows || []).filter(function (r) { return r.dmasset_no; }), linked = withNo.filter(function (r) { return ids[r.dmasset_no]; }).length;
+      var emps = u([].concat(cust.map(function (r) { return r.custodian; }), (P.dm.rows || []).map(function (r) { return r.employee; }), ar.map(function (r) { return r.life_cercle_end || r._p.employee; })));
+      var h = note(esc(t('note_assign'))) + kpis([kpi({ label: t('as_asset'), val: num(cust.length), sub: 'Asset' }), kpi({ label: t('as_dm'), val: num((P.dm.rows || []).length), sub: 'DM Assets' }), kpi({ label: t('as_acq'), val: num(ar.length), sub: 'Asset Acquisition Records' }), kpi({ label: t('as_emps'), val: num(emps.length), sub: esc(t('s_distinct')) })]) + alertBox(linked ? 'warn' : 'info', esc(t('link_check', num(linked), num(withNo.length))));
+      var ret = function () { return mut(t('not_recorded')); };
+      h += panel(t('as_t1'), tbl('t_as1', cust, [col2('cu', t('c_employee'), function (r) { return r.custodian; }), col2('id', t('c_id'), function (r) { return r.name; }, { r: function (r) { return aLink(r.name); } }), col2('ca', t('c_category'), function (r) { return r.asset_category; }), col2('cl', t('c_comploc'), function (r) { return r.company + ' / ' + (r.location || '—'); }), col2('ad', t('c_assigned'), function (r) { return last[r.name + '|' + r.custodian] || ''; }, { r: function (r) { var d = last[r.name + '|' + r.custodian]; return d ? dtc(d) + ' ' + mut('(' + t('via_mv') + ')') : mut(t('not_recorded')); } }), { k: 'rt', h: t('c_return'), r: ret, c: function () { return ''; } }], { file: 'asset_custodians', empty: t('empty_cust') }));
+      h += panel(t('as_t2'), tbl('t_as2', P.dm.rows || [], [col2('em', t('c_employee'), function (r) { return r.employee || ''; }), col2('id', t('c_id'), function (r) { return r.asset_id || r.name; }, { r: function (r) { return dLink(r.name, r.asset_id || r.name); } }), col2('ca', t('c_category'), function (r) { return r.category; }), col2('lo', t('c_location'), function (r) { return r.location || ''; }), col2('d', t('c_assigned'), function (r) { return d10(r.date); }), { k: 'rt', h: t('c_return'), r: ret, c: function () { return ''; } }], { file: 'dm_assets_assignments', empty: t('empty_dm') }), '', seg('dmAll', t('furn_only'), t('all_cats')));
+      return h + panel(t('as_t3'), tbl('t_as3', ar, [col2('em', t('c_employee'), function (r) { return r.life_cercle_end || r._p.employee || ''; }), col2('it', t('c_item'), function (r) { return r.item_name || ''; }), col2('no', t('c_dmno'), function (r) { return r.dmasset_no || ''; }), col2('rf', t('c_ref'), function (r) { return r.parent; }, { r: function (r) { return docLink('Asset Acquisition Records', r.parent); } }), col2('d', t('c_assigned'), function (r) { return d10(r._p.date); }), col2('ws', t('c_wstate'), function (r) { return r._p.workflow_state || ''; }, { r: function (r) { return stat(r._p.workflow_state === 'Assigned' ? 'ok' : 'n', r._p.workflow_state || '—'); } }), col2('rt', t('c_return'), function (r) { return r._p.satus || ''; }, { r: function (r) { return r._p.satus === 'Return' ? stat('warn', t('returned')) : r._p.satus === 'Issue New' ? stat('ok', t('issued')) : mut(t('not_recorded')); } })], { file: 'acquisition_assignments', empty: t('empty_acq'), x: { sk: 'd', dir: -1 } }), '', seg('acqAll', t('furn_only'), t('all_items')));
+    });
+  }
+  function vMovement() {
+    return need('mv', 'Asset Movement', function (mv) {
+      if (mv.denied) { return alertBox('warn', esc(t('no_access') + ': Asset Movement')); }
+      var q = String(F.q || '').toLowerCase(), rows = mv.rows.map(function (m) { return Object.assign({}, m, { _cat: (SCOPE.map[m.asset] || {}).asset_category || '' }); }), total = rows.length;
+      if (!OPT.mvAll) { rows = rows.filter(function (m) { return m._cat; }); } if (F.company) { rows = rows.filter(function (m) { return (m.company || m._p.company) === F.company; }); } if (F.category) { rows = rows.filter(function (m) { return m._cat === F.category; }); }
+      if (F.location) { rows = rows.filter(function (m) { return F.location === '__none__' ? !(m.source_location || m.target_location) : (m.source_location === F.location || m.target_location === F.location); }); }
+      if (F.from) { rows = rows.filter(function (m) { return d10(m._p.transaction_date) >= F.from; }); } if (F.to) { rows = rows.filter(function (m) { return d10(m._p.transaction_date) <= F.to; }); } if (q) { rows = rows.filter(function (m) { return [m.asset, m.asset_name, m.parent, m._p.reference_name].join(' ').toLowerCase().indexOf(q) >= 0; }); }
+      var can = rows.filter(function (m) { return m._p.docstatus === 2; }).length, inS = rows.filter(function (m) { return m._cat; }).length;
+      return note(esc(t('note_move'))) + kpis([kpi({ label: t('mv_lines'), val: num(rows.length), sub: esc(t('s_of_all', num(total))) }), kpi({ label: t('mv_docs'), val: num(u(rows.map(function (m) { return m.parent; })).length) }), kpi({ label: t('mv_in'), val: num(inS) }), kpi({ label: t('mv_out'), val: num(rows.length - inS) }), kpi({ label: t('mv_can'), dot: can ? 'var(--dms-age3)' : null, val: num(can) })]) +
+        panel(t('tab_movement'), tbl('t_mv', rows, [col2('d', t('c_mdate'), function (m) { return d10(m._p.transaction_date); }), col2('a', t('c_id'), function (m) { return m.asset; }, { r: function (m) { return m._cat ? aLink(m.asset) : docLink('Asset', m.asset); } }), col2('an', t('c_name'), function (m) { return m.asset_name || ''; }), col2('ca', t('c_category'), function (m) { return m._cat; }, { r: function (m) { return m._cat ? bdi(m._cat) : mut(t('outside_scope')); } }), col2('pu', t('c_mtype2'), function (m) { return m._p.purpose || ''; }), col2('fr', t('c_src') + ' → ' + t('c_dst'), function (m) { return (m.source_location || '—') + ' → ' + (m.target_location || '—'); }), col2('to', t('c_to'), function (m) { return m.to_employee || ''; }), col2('doc', t('c_doc'), function (m) { return m.parent; }, { r: function (m) { return docLink('Asset Movement', m.parent); } }), col2('st', t('c_status'), function (m) { return m._p.docstatus; }, { r: function (m) { return m._p.docstatus === 1 ? stat('ok', t('submitted')) : m._p.docstatus === 2 ? stat('bad', 'Cancelled') : stat('warn', 'Draft'); }, c: function (m) { return ['Draft', 'Submitted', 'Cancelled'][m._p.docstatus]; } })], { file: 'asset_movements', empty: OPT.mvAll ? t('empty_mv') : t('empty_mv_s'), x: { sk: 'd', dir: -1 } }), '', seg('mvAll', t('scope_only'), t('all_cats')));
+    });
+  }
+  function vAudit() {
+    return need('audit', 'Asset', function (A) {
+      var X = A.X, c = function (k) { return X.filter(function (x) { return x.sev === k; }).length; }, shown = SEV ? X.filter(function (x) { return x.sev === SEV; }) : X, rank = { high: 0, medium: 1, low: 2, info: 3 };
+      var h = note(esc(t('note_audit'))) + kpis([kpi({ label: t('x_total'), val: num(X.length) })].concat(['high', 'medium', 'low', 'info'].map(function (k) { return kpi({ label: t('sev_' + k), dot: k === 'high' && c(k) ? 'var(--dms-bad)' : k === 'medium' && c(k) ? 'var(--dms-age3)' : null, val: num(c(k)), act: 'sev:' + k }); })));
+      h += '<div class="pf-qf" role="group">' + [['', t('all')], ['high', t('sev_high')], ['medium', t('sev_medium')], ['low', t('sev_low')], ['info', t('sev_info')]].map(function (s) { return '<button type="button" class="dms-btn dms-btn-sm' + (SEV === s[0] ? ' dms-btn-primary' : '') + '" data-act="sev" data-v="' + s[0] + '" aria-pressed="' + (SEV === s[0]) + '">' + esc(s[1]) + '</button>'; }).join('') + '</div>';
+      h += panel(t('tab_audit'), tbl('t_exc', shown, [col2('sev', t('c_severity'), function (x) { return rank[x.sev]; }, { r: function (x) { return stat(x.sev === 'high' ? 'bad' : x.sev === 'medium' ? 'warn' : 'n', t('sev_' + x.sev)); }, c: function (x) { return x.sev; } }), col2('ref', t('c_asset'), function (x) { return x.ref; }, { r: function (x) { return x.dt === 'Asset' ? aLink(x.name) : docLink(x.dt, x.name, x.ref); } }), col2('is', t('c_issue'), function (x) { return lx(x.issue); }), col2('so', t('c_source'), function (x) { return x.source; }), col2('fx', t('c_fix'), function (x) { return lx(x.fix); }, { r: function (x) { return '<span class="dms-sm">' + esc(lx(x.fix)) + '</span>'; } })], { file: 'exceptions', empty: t('no_exceptions') + '. ' + t('no_exceptions_s'), pageSize: 25 }));
+      var srcs = Object.keys(A.counts);
+      return h + panel(t('t_sources'), '<div class="dms-tablewrap"><table class="dms-table dms-table-sm"><thead><tr><th scope="col">' + esc(t('c_source')) + '</th><th scope="col">' + esc(t('c_access')) + '</th><th scope="col" class="dms-num">' + esc(t('c_count')) + '</th></tr></thead><tbody>' + srcs.map(function (s) { return '<tr><td>' + esc(s) + '</td><td>' + (canRead(s) ? stat('ok', t('readable')) : stat('bad', t('no_access'))) + '</td><td class="dms-num">' + num(A.counts[s]) + '</td></tr>'; }).join('') + '</tbody></table></div>');
+    });
+  }
+  function vActions(AM) { return actionsTab(AM, t('note_audit')); }
+
+  /* ============================================================ details and events */
+  var DET = null;
+  function kvTbl(rows) { return '<div class="dms-facts pf-facts">' + rows.map(function (r) { return '<div><span class="dms-sm">' + esc(r[0]) + '</span><b>' + (r[2] ? r[1] : (r[1] === '' || r[1] == null ? '<span class="dms-sm">' + esc(t('not_recorded')) + '</span>' : esc(r[1]))) + '</b></div>'; }).join('') + '</div>'; }
+  function detailBody() {
+    if (!DET) { return ''; } if (DET.err) { return alertBox('err', esc(DET.err)); } var d = DET.doc; if (!d) { return skel(1, 'dms-skel-panel'); }
+    if (DET.dt === 'DM Assets') { return kvTbl([[t('c_id'), d.asset_id], [t('c_category'), d.category], [t('c_desc'), d.description], [t('c_employee'), d.employee], [t('c_location'), d.location], [t('c_recdate'), d10(d.date)]]) + note(esc(t('dm_nofin'))); }
+    var v = valuate(d), m = function (n) { return m2(n, d.company); };
+    return '<div class="dms-actions-row">' + stChip(d.docstatus === 2 ? 'Cancelled' : d.status, d.docstatus) + '</div><h4 class="pf-h">' + esc(t('d_identity')) + '</h4>' + kvTbl([[t('c_category'), d.asset_category], [t('c_company'), d.company], ['Item', d.item_name || d.item_code], [t('c_pdate'), d10(d.purchase_date)], [t('d_avail'), d10(d.available_for_use_date)], [t('d_qty'), d.asset_quantity]]) +
+      '<h4 class="pf-h">' + esc(t('d_operational')) + '</h4>' + kvTbl([[t('c_location'), d.location], [t('c_custodian'), d.custodian], [t('c_dept'), d.department], [t('c_mreq'), d.maintenance_required ? t('yes') : t('no')], [t('d_insend'), d10(d.insurance_end_date)], [t('d_disposal'), d10(d.disposal_date)]]) +
+      '<h4 class="pf-h">' + esc(t('d_financial')) + '</h4>' + kvTbl([[t('d_hist'), m(d.total_asset_cost)], [t('v_open'), m(d.opening_accumulated_depreciation)], [t('v_posted'), m(v.posted)], [t('d_field'), d.value_after_depreciation != null ? m(d.value_after_depreciation) : ''], [t('v_derived'), v.derived != null ? m(v.derived) : ''], [t('c_nbv'), v.verified ? esc(m(v.nbv)) + ' ' + stat('ok', t('verified')) : v.disposed ? stat('n', t('disposed')) : stat('warn', t('unverified')) + ' ' + mut(t('r_' + v.reason)), 1]]) +
+      (d.docstatus === 1 && v.sched.length ? '<div class="dms-tablewrap"><table class="dms-table dms-table-sm"><thead><tr><th scope="col">' + esc(t('d_date')) + '</th><th scope="col" class="dms-num">' + esc(t('d_amount')) + '</th><th scope="col">' + esc(t('d_posted')) + '</th></tr></thead><tbody>' + v.sched.slice(0, 40).map(function (s) { return '<tr><td>' + esc(d10(s.schedule_date)) + '</td><td class="dms-num">' + esc(amt(s.depreciation_amount)) + '</td><td>' + (s.journal_entry ? docLink('Journal Entry', s.journal_entry) : mut('—')) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '');
+  }
+  function drill(id) {
+    var m = id.match(/^(asset|dm):(.+)$/); if (m && DET) { return { title: DET.name, sub: DET.dt === 'Asset' ? t('d_title') : 'DM Assets', link: [DET.dt, DET.name, DET.name], body: detailBody(), pf: 'det' }; }
+    if (id.indexOf('cli:') === 0) {
+      var k = id.slice(4), cc = actClient(), x = cc && typeof cc === 'object' && cc[k], s = actSpecs().filter(function (y) { return y.id === k; })[0]; if (!x || !s) { return null; }
+      return { title: s.title, sub: s.why, spec: { rows: x.rows.map(x.item), file: k, text: function (it) { return [it.title, it.desc].join(' '); }, cols: [{ h: t('c_asset'), r: function (it) { return docLink(it.dt, it.name, it.title); }, c: function (it) { return it.name; } }, { h: t('c_issue'), r: function (it) { return '<span class="dms-sm">' + bdi(it.desc) + '</span>'; }, c: function (it) { return it.desc; } }, { h: t('c_source'), r: function (it) { return bdi(it.who); }, c: function (it) { return it.who; } }, { h: t('c_fix'), r: function (it) { return '<span class="dms-sm">' + esc(it.fix) + '</span>'; }, c: function (it) { return it.fix; } }] } };
+    }
+    return null;
+  }
+  function onAct(a, v) {
+    if (a === 'kpi' && v.indexOf('goto:') === 0) { goTab(v.slice(5), false, true); return true; }
+    if (a === 'kpi' && /^(asset|dm):/.test(v)) { var dt = v.indexOf('asset:') === 0 ? 'Asset' : 'DM Assets', nm = v.replace(/^(asset|dm):/, ''); DET = { dt: dt, name: nm, doc: null }; openDrill(v); getDoc(dt, nm).then(function (d) { if (DET && DET.name === nm) { DET.doc = d; if (OVL && OVL.pf === 'det') { OVL.body = detailBody(); renderOverlay(); } } }, function (e) { if (DET && DET.name === nm) { DET.err = errKind(e) === 'perm' ? t('no_access') : t('err_generic'); if (OVL && OVL.pf === 'det') { OVL.body = detailBody(); renderOverlay(); } } }); return true; }
+    if (a === 'kpi' && v.indexOf('sev:') === 0) { SEV = v.slice(4); renderSoft(); return true; }
+    if (a === 'sev') { SEV = v; renderSoft(); return true; }
+    if (a === 'opt') { var p = v.split(':'); OPT[p[0]] = p[1] === '1'; delete D.assign; delete D.assignTok; delete D.assignErr; delete D.mv; delete D.mvTok; delete D.mvErr; delete MEMO['dm|true']; delete MEMO['dm|false']; loadTab(tab); renderSoft(); return true; }
+    return false;
+  }
+
+  start();
 })();
+
+/* ==== DM theme sync (same as tools/erp/shell/dark_theme.py output; maintained here since this block is built on the standard) ==== */
+;(function () {
+  var r = typeof root_element !== 'undefined' ? root_element : null, h = r && r.host;
+  if (!h || h.__dmsTheme) return; h.__dmsTheme = 1;
+  var s = function () { h.setAttribute('data-dms-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'); };
+  s(); new MutationObserver(s).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 })();

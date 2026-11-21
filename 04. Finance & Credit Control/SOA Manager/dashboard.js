@@ -1,15 +1,934 @@
-/* DM SOA Manager dashboard v5 — Azrah: review every request, request and file logs, and the Collections page (assign, approve daily lists, see results).
- * Custom HTML Block > Script field. Paste the matching .css into the Style field; leave HTML empty.
- * Needs the backend from SOA_SETUP.md: DocType "SOA Request" and Server Script "SOA API" (method soa_api).
- * English / Arabic switch in the blue bar (remembered in this browser). Run soaMissing() in the console to list untranslated text.
- */
+/* ===== DM Group KSA — SOA Manager — SCRIPT field · v2 =====
+   Azrah's workspace: review every statement request, request and file logs, collections (assign, approve daily lists,
+   see results), customer transfers, finance report requests and employee access.
+   Backend unchanged: Server Script "SOA API" (method soa_api; DocTypes SOA Request, Collection List, Collection
+   Assignment) and "soa_workflow_api" (SOA Workflow Request, SOA Transfer Access, SOA Finance Access). Every write
+   (approve, reject, re-check, list approval, list edits, assignments, collectors, access) goes through those scripts as
+   before. Built on the DM dashboard standard; the shared runtime between the "DMS kit" markers is generated from
+   tools/erp/kit/dms-kit.js (edit the kit and run build_kit.py, not the copy). */
 (function () {
-	'use strict';
-	// ------------------------------------------------------------ shared: language, helpers, icons, API
-	const ROOT = root_element;
-	const LANG_KEY = 'soa_lang';
-	let LANG = 'en';
-	try { LANG = localStorage.getItem(LANG_KEY) === 'ar' ? 'ar' : 'en'; } catch (_) { /* ignore */ }
+  'use strict';
+  var APP = {
+    key: '__dmsSoaManager',
+    period: 'month',
+    tabs: [
+      { id: 'overview', en: 'Overview', ar: 'نظرة عامة' }, { id: 'queue', en: 'Review queue', ar: 'قائمة المراجعة' },
+      { id: 'all', en: 'All requests', ar: 'كل الطلبات' }, { id: 'files', en: 'Files emailed', ar: 'الملفات المرسلة' },
+      { id: 'coll', en: 'Collections', ar: 'التحصيل' }, { id: 'transfers', en: 'Transfers', ar: 'نقل العملاء' },
+      { id: 'finance', en: 'Finance requests', ar: 'طلبات المالية' }, { id: 'access', en: 'Access', ar: 'الصلاحيات' },
+      { id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }
+    ],
+    filters: [
+      { k: 'sp', en: 'Salesperson', ar: 'مندوب المبيعات', none: ['All salespeople', 'كل المندوبين'], options: function () { return spOpts(); } },
+      { k: 'doc', en: 'Document', ar: 'المستند', none: ['All documents', 'كل المستندات'], options: function () { return Object.keys(DOC_INFO).map(function (k) { return { v: k, l: T(DOC_INFO[k].label) }; }); } },
+      { k: 'st', en: 'Status', ar: 'الحالة', none: ['All statuses', 'كل الحالات'], options: function () { return Object.keys(STATUS).map(function (s) { return { v: s, l: T(STATUS[s][1]) }; }); } }
+    ],
+    sources: ['reqs', 'coll', 'wf'],
+    dtLabels: { 'SOA Request': ['SOA request', 'طلب كشف حساب'], 'SOA Workflow Request': ['Workflow request', 'طلب سير عمل'], 'Collection List': ['Collection list', 'قائمة تحصيل'] },
+    title: function () { return tr('SOA Manager', 'إدارة كشوف الحساب'); },
+    stamp: function () { var b = D.boot; return (b && (b.full_name || b.user) ? (b.full_name || b.user) + ' · ' : '') + tr('Statement requests and collections', 'طلبات كشوف الحساب والتحصيل'); },
+    filterNote: function () { return tr('Filters apply to the request log, the files log and the overview charts. The review queue and collections always show everything waiting.', 'المرشحات تنطبق على سجل الطلبات وسجل الملفات ومخططات النظرة العامة. قائمة المراجعة والتحصيل تعرض دائمًا كل ما ينتظر.'); },
+    periodNote: function () { return tr('Requests by request date and files by sent date, within the latest 800 requests. The review queue, workflow requests and collections are not limited by the period.', 'الطلبات حسب تاريخ الطلب والملفات حسب تاريخ الإرسال، ضمن أحدث 800 طلب. قائمة المراجعة وطلبات سير العمل والتحصيل غير مقيدة بالفترة.'); },
+    load: function () { loadAll(false); },
+    onPeriod: function () { /* client-side: the kit re-renders */ },
+    onTab: function (id) { if (id === 'coll' && !D.coll && !D.collErr) { loadColl(false); } },
+    actions: function () { return actModel(actSpecs(), 'act', actClient()); },
+    banner: function () { return banner(); },
+    content: function (t, AM) { return ({ overview: tabOverview, queue: tabQueue, all: tabAll, files: tabFiles, coll: tabColl, transfers: function () { return tabWf('transfers'); }, finance: function () { return tabWf('finance'); }, access: tabAccess, actions: tabActions })[t](AM); },
+    drill: function (id) { return drill(id); },
+    onAct: function (a, v, n, id) { return onAct(a, v, n, id); },
+    onInput: function (n) { return onInputApp(n); }
+  };
+
+  /* ==== DMS kit v1 · generated from tools/erp/kit/dms-kit.js by build_kit.py — edit the kit, not this copy ==== */
+  /* Shared runtime for DM dashboards on the standard (toolbar, period, filters, tabs, tables, drill-downs, charts,
+     actions pending). Copied into each dashboard.js by tools/erp/kit/build_kit.py; the dashboard defines `APP` before
+     this block. Read-only helpers: frappe.client.get_list / frappe.desk.query_report.run under the viewer's permissions. */
+  var G = window;
+  var ROOT = (typeof root_element !== 'undefined' && root_element) ? root_element : document;
+  var HOST = ROOT.querySelector('[data-dms-root]');
+  if (!HOST) { return; }
+  if (G[APP.key] && typeof G[APP.key].destroy === 'function') { try { G[APP.key].destroy(); } catch (e) { /* ignore */ } }
+  var abort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  var SIG = abort ? { signal: abort.signal } : false;
+  var timers = [], destroyed = false, GEN = 0, BOOTED = false, LOADED = '';
+  G[APP.key] = { destroy: function () { destroyed = true; GEN++; if (abort) { abort.abort(); } timers.forEach(clearTimeout); timers = []; } };
+  var CFG = Object.assign({ conc: 6, pageSize: 25, modalPage: 15, weekStart: 0 }, APP.cfg || {});
+  var CUR = 'SAR';
+  try { CUR = (frappe.boot.sysdefaults && frappe.boot.sysdefaults.currency) || 'SAR'; } catch (e) { /* default */ }
+  var LANG = 'en';
+  try { var sv = G.localStorage.getItem('dms_lang'); if (sv === 'ar' || sv === 'en') { LANG = sv; } } catch (e) { /* storage unavailable */ }
+  function tr(en, ar) { return LANG === 'ar' ? ar : en; }
+
+  /* ---------- helpers ---------- */
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function clean(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+  function plain(s, n) { return clean(String(s || '').replace(/<[^>]*>/g, ' ')).slice(0, n || 90); }
+  function $(sel) { return HOST.querySelector(sel); }
+  function later(fn, ms) { var id = setTimeout(function () { if (!destroyed) { fn(); } }, ms); timers.push(id); return id; }
+  function bdi(s) { return '<bdi>' + esc(s) + '</bdi>'; }
+  function num(n) { return (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString('en-US'); }
+  function money(v) {
+    if (v == null || isNaN(v)) { return '—'; }
+    var a = Math.abs(v), s = v < 0 ? '-' : '';
+    if (a >= 1e9) { return s + (a / 1e9).toFixed(2) + 'B'; }
+    if (a >= 1e6) { return s + (a / 1e6).toFixed(2) + 'M'; }
+    if (a >= 1e4) { return s + (a / 1e3).toFixed(1) + 'K'; }
+    return s + Math.round(a).toLocaleString('en-US');
+  }
+  function amt(v) { return (v == null || isNaN(v)) ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function moneyS(v, cur) { return (cur || CUR) + ' ' + money(v); }
+  function moneyB(v, cur) { return '<bdi>' + esc(moneyS(v, cur)) + '</bdi>'; }
+  function moneyFull(v, cur) { return (v == null || isNaN(v)) ? '' : (cur || CUR) + ' ' + amt(v); }
+  function cur$(v, cur) { return '<bdi>' + esc(money(v)) + '<small>' + esc(cur || CUR) + '</small></bdi>'; }
+  function pct(n, d, dp) { return (d > 0 && n != null) ? (n / d * 100).toFixed(dp == null ? 1 : dp) + '%' : tr('N/A', 'غير متاح'); }
+  function sum(arr, f) { var t = 0; for (var i = 0; i < arr.length; i++) { t += (f ? f(arr[i]) : arr[i]) || 0; } return t; }
+  function vals(o) { return Object.keys(o).map(function (k) { return o[k]; }); }
+  function uniq(a) { var m = {}; a.forEach(function (x) { if (x) { m[x] = 1; } }); return Object.keys(m).sort(function (x, y) { return x.localeCompare(y); }); }
+  function rep(s, n) { var o = ''; for (var i = 0; i < n; i++) { o += s; } return o; }
+  function one(r) { return (r && r[0]) || {}; }
+  function groupBy(rows, f) { var m = {}; rows.forEach(function (r) { var k = f(r); (m[k] || (m[k] = [])).push(r); }); return m; }
+  var NAtxt = function () { return tr('Not assigned', 'غير مُعيَّن'); };
+
+  /* ---------- dates (ERP site time zone, calendar arithmetic) ---------- */
+  function siteTz() {
+    try {
+      if (G.frappe && frappe.boot) {
+        if (frappe.boot.time_zone && frappe.boot.time_zone.system) { return frappe.boot.time_zone.system; }
+        if (frappe.boot.sysdefaults && frappe.boot.sysdefaults.time_zone) { return frappe.boot.sysdefaults.time_zone; }
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+  function siteParts() {
+    var tz = siteTz(), o = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }, p;
+    if (tz) { o.timeZone = tz; }
+    try { p = new Intl.DateTimeFormat('en-CA', o).formatToParts(new Date()); } catch (e) { delete o.timeZone; p = new Intl.DateTimeFormat('en-CA', o).formatToParts(new Date()); }
+    var m = {}; p.forEach(function (x) { m[x.type] = x.value; }); if (m.hour === '24') { m.hour = '00'; } return m;
+  }
+  function parseISO(s) {
+    if (!s || typeof s !== 'string') { return null; }
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s); if (!m) { return null; }
+    var y = +m[1], mo = +m[2], d = +m[3], ms = Date.UTC(y, mo - 1, d), dt = new Date(ms);
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) { return null; }
+    return ms;
+  }
+  function isoOf(ms) { var d = new Date(ms); return d.getUTCFullYear() + '-' + ('0' + (d.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + d.getUTCDate()).slice(-2); }
+  function addDays(iso, n) { return isoOf(parseISO(iso) + n * 86400000); }
+  function diffDays(a, b) { return Math.round((parseISO(b) - parseISO(a)) / 86400000); }
+  var TODAY = '', STAMP = '';
+  function setToday() { var p = siteParts(); TODAY = p.year + '-' + p.month + '-' + p.day; STAMP = p.hour + ':' + p.minute; }
+  function monthStart(iso) { return iso.slice(0, 8) + '01'; }
+  function monthEnd(iso) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7); return isoOf(Date.UTC(y, m, 0)); }
+  function addMonths(iso, n) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n; return isoOf(Date.UTC(y, m, 1)); }
+  function weekStartOf(iso) { var dow = new Date(parseISO(iso)).getUTCDay(); return addDays(iso, -((dow - CFG.weekStart + 7) % 7)); }
+  function quarterStart(iso) { var m = +iso.slice(5, 7); return iso.slice(0, 5) + ('0' + (Math.floor((m - 1) / 3) * 3 + 1)).slice(-2) + '-01'; }
+  function shiftMonths(iso, n) {
+    var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n, d = +iso.slice(8, 10), last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    return isoOf(Date.UTC(y, m, Math.min(d, last)));
+  }
+  function periodRange(key, cf, ct) {
+    var t = TODAY, y = t.slice(0, 4), ws = weekStartOf(t), qs = quarterStart(t), lm = addMonths(monthStart(t), -1);
+    switch (key) {
+      case 'today': return [t, t];
+      case 'yesterday': return [addDays(t, -1), addDays(t, -1)];
+      case 'week': return [ws, addDays(ws, 6)];
+      case 'lastWeek': return [addDays(ws, -7), addDays(ws, -1)];
+      case 'month': return [monthStart(t), monthEnd(t)];
+      case 'lastMonth': return [lm, monthEnd(lm)];
+      case 'quarter': return [qs, monthEnd(addMonths(qs, 2))];
+      case 'year': return [y + '-01-01', y + '-12-31'];
+      case 'prevYear': return [(y - 1) + '-01-01', (y - 1) + '-12-31'];
+      case 'custom': return [cf, ct];
+      default: return [y + '-01-01', t];   // ytd
+    }
+  }
+  /* Comparison window: the same span one preset unit earlier; custom ranges compare with the equally long range before. */
+  function prevRange(key, from, to) {
+    switch (key) {
+      case 'today': case 'yesterday': return [addDays(from, -1), addDays(to, -1)];
+      case 'week': case 'lastWeek': return [addDays(from, -7), addDays(to, -7)];
+      case 'month': case 'lastMonth': return [shiftMonths(from, -1), shiftMonths(to, -1)];
+      case 'quarter': return [shiftMonths(from, -3), shiftMonths(to, -3)];
+      case 'ytd': case 'year': case 'prevYear': return [shiftMonths(from, -12), shiftMonths(to, -12)];
+      default: var n = diffDays(from, to) + 1; return [addDays(from, -n), addDays(from, -1)];
+    }
+  }
+  /* In-progress periods stop at today, so this month to date compares with the same days of last month. */
+  function clip(r) { return [r[0], r[1] > TODAY && r[0] <= TODAY ? TODAY : r[1]]; }
+  function cmpRanges() { var c = clip(PERIOD); return { cur: c, prev: prevRange(F.period, c[0], c[1]) }; }
+  function monthList(from, to) { var out = [], cur = monthStart(from); for (var i = 0; i < 72 && cur <= to; i++) { out.push(cur.slice(0, 7)); cur = addMonths(cur, 1); } return out; }
+  function locale() { return LANG === 'ar' ? 'ar-SA-u-nu-latn-ca-gregory' : 'en-GB'; }
+  function fmtDate(iso, yr) {
+    try { var o = { day: 'numeric', month: 'short', timeZone: 'UTC' }; if (yr) { o.year = 'numeric'; } return new Intl.DateTimeFormat(locale(), o).format(new Date(parseISO(String(iso).slice(0, 10)))); } catch (e) { return iso; }
+  }
+  function rangeLabel(r) {
+    if (!r || !r[0] || !r[1]) { return ''; }
+    return r[0] === r[1] ? fmtDate(r[0], true) : fmtDate(r[0], r[0].slice(0, 4) !== r[1].slice(0, 4)) + ' – ' + fmtDate(r[1], true);
+  }
+  var PLR = null;
+  function daysTxt(n) {
+    if (LANG !== 'ar') { return num(n) + (n === 1 ? ' day' : ' days'); }
+    var c = 'other'; try { c = (PLR || (PLR = new Intl.PluralRules('ar'))).select(n); } catch (e) { /* generic form */ }
+    return c === 'one' ? 'يوم واحد' : c === 'two' ? 'يومان' : c === 'few' ? n + ' أيام' : c === 'many' ? n + ' يومًا' : n + ' يوم';
+  }
+  function ageOf(iso) { var d = iso ? diffDays(String(iso).slice(0, 10), TODAY) : 0; return isNaN(d) ? 0 : Math.max(0, d); }
+  function lateTxt(iso) {
+    var d = diffDays(String(iso).slice(0, 10), TODAY); if (isNaN(d)) { return ''; }
+    return d > 0 ? tr(daysTxt(d) + ' overdue', 'متأخر ' + daysTxt(d)) : d === 0 ? tr('Due today', 'مستحق اليوم') : tr('Due in ' + daysTxt(-d), 'مستحق خلال ' + daysTxt(-d));
+  }
+  function agoTxt(iso, en, ar) { var a = ageOf(iso); return a ? tr((en || 'Waiting') + ' ' + daysTxt(a), (ar || 'منذ') + ' ' + daysTxt(a)) : tr('Today', 'اليوم'); }
+
+  /* ---------- ERP read-only API layer (bounded concurrency, one retry, cancellation) ---------- */
+  var REQ_TIMEOUT = 90000;
+  function callP(method, args) {
+    return new Promise(function (resolve, reject) {
+      var done = false, ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var timer = setTimeout(function () { if (done) { return; } done = true; if (ctl) { try { ctl.abort(); } catch (x) { /* ignore */ } } var te = new Error('Request timed out'); te.timeout = true; reject(te); }, REQ_TIMEOUT);
+      var body = new URLSearchParams();
+      Object.keys(args || {}).forEach(function (k) { var v = args[k]; if (v === undefined || v === null) { return; } body.append(k, (typeof v === 'object') ? JSON.stringify(v) : String(v)); });
+      fetch('/api/method/' + method, { method: 'POST', credentials: 'same-origin', signal: ctl ? ctl.signal : undefined,
+        headers: { 'X-Frappe-CSRF-Token': (G.frappe && frappe.csrf_token) || '', 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' }, body: body.toString() })
+        .then(function (r) { return r.text().then(function (txt) { return { r: r, txt: txt }; }); })
+        .then(function (o) {
+          if (done) { return; } done = true; clearTimeout(timer);
+          var j = null; try { j = JSON.parse(o.txt); } catch (x) { /* ignore */ }
+          if (o.r.ok && j && !j.exc) { resolve(j.message === undefined ? null : j.message); return; }
+          var ex = String((j && (j.exception || j.exc_type)) || '');
+          var perm = o.r.status === 401 || o.r.status === 403 || /permission/i.test(ex);
+          var e = new Error((perm ? 'No access to ' + ((args && (args.doctype || args.report_name)) || method) : (ex.split(':').slice(-1)[0].trim() || ('HTTP ' + o.r.status))));
+          e.status = perm ? 403 : o.r.status; reject(e);
+        })
+        .catch(function (err) { if (done) { return; } done = true; clearTimeout(timer); reject(err || new Error('request failed')); });
+    });
+  }
+  var active = 0, queue = [];
+  function pump() {
+    while (active < CFG.conc && queue.length) {
+      var j = queue.shift(); active++;
+      j.fn().then(j.res, j.rej).then(function () { active--; pump(); });
+    }
+  }
+  function limited(fn) { return new Promise(function (res, rej) { queue.push({ fn: fn, res: res, rej: rej }); pump(); }); }
+  function guarded(chk, method, args) {
+    return limited(function () {
+      if (destroyed || (chk && !chk())) { return Promise.resolve(null); }
+      return callP(method, args).catch(function (e) { if (e && (e.status === 403 || e.timeout || e.status === 417)) { throw e; } return new Promise(function (r) { setTimeout(r, 400); }).then(function () { return callP(method, args); }); });
+    });
+  }
+  function errKind(e) {
+    var txt = ''; try { txt = (e && (e.responseText || e.statusText || e.message)) || ''; } catch (x) { /* ignore */ }
+    return (/PermissionError|not permitted|No access|403/i.test(String(txt)) || (e && e.status === 403)) ? 'perm' : 'tech';
+  }
+  function getList(args, chk) { return guarded(chk, 'frappe.client.get_list', args); }
+  function getCount(dt, filters, chk) { return getList({ doctype: dt, fields: ['count(name) as n'], filters: filters || [], limit_page_length: 1 }, chk).then(function (r) { return +one(r).n || 0; }); }
+  /* All rows of a bounded list (paged); rejects with e.tooLarge when the source exceeds `cap`. */
+  function fetchAll(args, chk, cap) {
+    cap = cap || 20000;
+    return getCount(args.doctype, args.filters, chk).then(function (n) {
+      if (n > cap) { var e = new Error('too large'); e.tooLarge = n; throw e; }
+      var jobs = []; for (var i = 0; i < Math.ceil(n / 500); i++) { jobs.push(getList(Object.assign({}, args, { order_by: args.order_by || 'name asc', limit_start: i * 500, limit_page_length: 500 }), chk)); }
+      return Promise.all(jobs).then(function (res) { var out = []; res.forEach(function (r) { if (r) { out = out.concat(r); } }); return out; });
+    });
+  }
+  function docUrl(dt, name) {
+    try { if (G.frappe && frappe.utils && frappe.utils.get_form_link) { return frappe.utils.get_form_link(dt, name); } } catch (e) { /* fall through */ }
+    return '/app/' + dt.toLowerCase().replace(/ /g, '-') + '/' + encodeURIComponent(name);
+  }
+  function docLink(dt, name, label) { return '<a class="dms-link" href="' + esc(docUrl(dt, name)) + '" target="_blank" rel="noopener noreferrer"><bdi>' + esc(label || name) + '</bdi> ↗</a>'; }
+
+  /* ---------- data store: each source loads and renders independently; stale generations are dropped ---------- */
+  var D = {};
+  var softT = null;
+  function soon() { if (softT) { return; } softT = later(function () { softT = null; renderSoft(); }, 40); }
+  function run(key, fn) {
+    var g = GEN, chk = function () { return g === GEN && !destroyed; }, tok = {};
+    D[key] = null; D[key + 'Err'] = null; D[key + 'Tok'] = tok;
+    var mine = function () { return chk() && D[key + 'Tok'] === tok; };
+    fn(mine).then(function (v) { if (!mine()) { return; } D[key] = v; if (APP.afterLoad) { APP.afterLoad(key); } soon(); },
+      function (e) { if (!mine()) { return; } D[key + 'Err'] = e && e.tooLarge ? 'large:' + e.tooLarge : errKind(e); if (G.console && e && !e.status && !e.tooLarge) { console.error(APP.key, key, e); } soon(); });
+  }
+  function busy() { return !BOOTED || (APP.sources || []).some(function (k) { return D[k] == null && D[k + 'Err'] == null; }); }
+  function errText(kind) { return /^large:/.test(String(kind)) ? tr('too many records (' + num(+String(kind).slice(6)) + ') — narrow the filters or period', 'عدد كبير من السجلات (' + num(+String(kind).slice(6)) + ') — ضيّق المرشحات أو الفترة') : kind === 'perm' ? tr('permission denied for your user', 'لا تملك صلاحية القراءة') : tr('technical error while reading', 'خطأ تقني أثناء القراءة'); }
+
+  /* ---------- UI primitives ---------- */
+  var ICO = {
+    refresh: '<path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/>', filter: '<path d="M4 5h16l-6.2 7.6V19l-3.6 1.6v-8z"/>',
+    cal: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/>', down: '<path d="m6 9 6 6 6-6"/>',
+    prev: '<path d="m15 6-6 6 6 6"/>', next: '<path d="m9 6 6 6-6 6"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
+    up: '<path d="M12 19V6M6.5 11.5 12 6l5.5 5.5"/>', dn: '<path d="M12 5v13M6.5 12.5 12 18l5.5-5.5"/>', dl: '<path d="M12 4v11M7 10.5 12 15.5l5-5M5 20h14"/>'
+  };
+  function ico(n, cls) { return '<svg class="dms-ico' + (cls ? ' ' + cls : '') + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + ICO[n] + '</svg>'; }
+  function kpi(o) {
+    var inner = '<span class="dms-kpi-h"><span class="dms-kpi-l">' + (o.dot ? '<i class="dms-dot" style="--dms-c:' + o.dot + '"></i>' : '') + esc(o.label) + '</span>' + (o.top || '') + '</span>' +
+      '<span class="dms-kpi-n">' + o.val + '</span>' + (o.sub ? '<span class="dms-kpi-s">' + o.sub + '</span>' : '') + (o.foot != null ? '<span class="dms-kpi-f">' + o.foot + '</span>' : '');
+    var t = o.tip ? ' title="' + esc(o.tip) + '"' : '';
+    return o.act ? '<button type="button" class="dms-kpi" data-act="kpi" data-v="' + esc(o.act) + '"' + t + '>' + inner + '</button>' : '<div class="dms-kpi"' + t + '>' + inner + '</div>';
+  }
+  function kpis(list, ov) { return '<div class="dms-grid dms-kpis' + (ov ? ' dms-ov-kpis' : '') + '">' + list.join('') + '</div>'; }
+  function tagc(txt) { return '<span class="dms-tag">' + txt + '</span>'; }
+  function stat(k, txt) { return '<span class="dms-stat dms-stat-' + k + '">' + esc(txt) + '</span>'; }
+  function ctx(html) { return '<span class="dms-kpi-ctx">' + html + '</span>'; }
+  function badge(txt, color) { return '<span class="dms-badge" style="--dms-c:' + color + '">' + esc(txt) + '</span>'; }
+  function wait() { return '<span class="dms-sm">' + esc(tr('Calculating…', 'جارٍ الحساب…')) + '</span>'; }
+  function asOf() { return tagc(esc(tr('As of today', 'حتى اليوم'))); }
+  /* Value of a source-backed KPI: '…' while loading, '—' when the source failed (never a false zero). */
+  function kv(key, f) { return D[key + 'Err'] ? '—' : D[key] == null ? '…' : f(D[key]); }
+  function ks(key, f) { return D[key + 'Err'] ? esc(tr('Unavailable', 'غير متاح')) : D[key] == null ? wait() : f(D[key]); }
+  function spark(vs) {
+    var n = vs.length, real = vs.filter(function (v) { return v != null; }), pts = [];
+    if (n < 3 || real.length < 3 || !real.some(function (v) { return v > 0; })) { return ''; }
+    var max = Math.max.apply(null, real), min = Math.min(0, Math.min.apply(null, real)), rng = (max - min) || 1;
+    vs.forEach(function (v, i) { if (v != null) { pts.push([(i / (n - 1) * 100).toFixed(2), (26 - (v - min) / rng * 23).toFixed(2)]); } });
+    var line = pts.map(function (p) { return p.join(','); }).join(' L');
+    return '<svg class="dms-spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path class="dms-spark-a" d="M' + pts[0][0] + ',28 L' + line + ' L' + pts[pts.length - 1][0] + ',28 Z"/><path class="dms-spark-l" d="M' + line + '"/></svg>';
+  }
+  /* Change vs the comparison window. fmt formats values; small count bases show "was N" instead of a percentage. */
+  function deltaChip(cur, prev, R, fmt, isCount, lowerIsBetter) {
+    if (cur == null || prev == null || !R) { return ''; }
+    fmt = fmt || moneyS;
+    var tip = tr('This period', 'هذه الفترة') + ' (' + rangeLabel(R[0]) + '): ' + fmt(cur) + '\n' + tr('Previous', 'السابقة') + ' (' + rangeLabel(R[1]) + '): ' + fmt(prev);
+    var sr = '<span class="dms-sr"> ' + esc(tr('vs previous period', 'مقارنة بالفترة السابقة')) + '</span>';
+    if (prev === 0 || (isCount && prev < 5)) { return '<span class="dms-delta dms-flat" data-tip="' + esc(tip) + '">' + esc(tr('was', 'كان')) + ' <bdi>' + esc(fmt(prev)) + '</bdi>' + sr + '</span>'; }
+    var p = (cur - prev) / prev * 100, a = Math.abs(p), k = a < 0.05 ? 'flat' : p > 0 ? 'up' : 'down', tone = k === 'flat' ? 'flat' : ((k === 'up') !== !!lowerIsBetter ? 'up' : 'down');
+    var txt = a > 999 ? '10×+' : (a < 10 ? a.toFixed(1) : Math.round(a)) + '%';
+    return '<span class="dms-delta dms-' + tone + '" data-tip="' + esc(tip) + '">' + (k === 'flat' ? '' : ico(k === 'up' ? 'up' : 'dn')) + '<bdi>' + (k === 'down' ? '−' : '') + txt + '</bdi>' + sr + '</span>';
+  }
+  function panel(title, body, extra, meta) {
+    return '<section class="dms-panelbox ' + (extra || '') + '"><div class="dms-ph"><h3 class="dms-h3">' + esc(title) + '</h3>' + (meta ? '<span class="dms-ph-meta">' + meta + '</span>' : '') + '</div>' + body + '</section>';
+  }
+  function note(txt) { return '<p class="dms-note">' + txt + '</p>'; }
+  function alertBox(kind, html) { return '<div class="dms-alert dms-alert-' + kind + '" role="' + (kind === 'err' ? 'alert' : 'status') + '">' + html + '</div>'; }
+  function empty(txt) { return '<div class="dms-empty">' + esc(txt || tr('No data for the current filters.', 'لا توجد بيانات للمرشحات الحالية.')) + '</div>'; }
+  function srcErr(kind, what) { return alertBox('err', '<b>' + esc(tr('Source unavailable', 'المصدر غير متاح')) + ':</b> ' + esc(what) + ' — ' + esc(errText(kind))); }
+  function skel(n, cls) { return rep('<div class="dms-skel ' + (cls || '') + '"></div>', n); }
+  /* Body for a panel backed by source `key`: skeleton while loading, named error on failure, else f(data). */
+  function src(key, what, f) { return D[key + 'Err'] ? srcErr(D[key + 'Err'], what) : D[key] == null ? skel(1, 'dms-skel-panel') : f(D[key]); }
+
+  /* ---------- charts (HTML/CSS; hover details via the shared tooltip, data-tip) ---------- */
+  function niceMax(v) { if (!(v > 0)) { return 1; } var p = Math.pow(10, Math.floor(Math.log(v) / Math.LN10)), f = v / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
+  function axisFmt(v) { var a = Math.abs(v); return a >= 1e9 ? +(v / 1e9).toFixed(1) + 'B' : a >= 1e6 ? +(v / 1e6).toFixed(1) + 'M' : a >= 1e3 ? +(v / 1e3).toFixed(1) + 'K' : String(a < 10 ? +v.toFixed(2) : Math.round(v)); }
+  function bucketLabel(k, g, short) {
+    if (g === 'cat') { return String(k); }
+    if (g === 'week' && !short) { return tr('Week of ', 'أسبوع ') + fmtDate(k, true); }
+    if (g !== 'month') { return fmtDate(k, !short); }
+    try { return new Intl.DateTimeFormat(locale(), { month: 'short', year: '2-digit', timeZone: 'UTC' }).format(new Date(parseISO(k + '-01'))); } catch (e) { return k; }
+  }
+  /* Count charts get whole-number ticks (top is a multiple of 4), so small counts never show 0, 1, 1, 2, 2. */
+  function countTop(max, fmt) { var t = niceMax(max); return fmt === num ? Math.max(4, Math.ceil(t / 4) * 4) : t; }
+  function granName(g) { return g === 'day' ? tr('by day', 'يوميًا') : g === 'week' ? tr('by week', 'أسبوعيًا') : tr('by month', 'شهريًا'); }
+  /* Time buckets for a range: daily up to 45 days, weekly up to 120 days, monthly beyond; stops at today. */
+  function buckets(range) {
+    var from = range[0], to = clip(range)[1], span = diffDays(from, to) + 1, g = span <= 45 ? 'day' : span <= 120 ? 'week' : 'month', keys = [], cur, i;
+    function keyOf(iso) { iso = String(iso).slice(0, 10); return g === 'day' ? iso : g === 'week' ? weekStartOf(iso) : iso.slice(0, 7); }
+    if (to < from) { return { keys: [], gran: g, keyOf: keyOf }; }
+    if (g === 'month') { keys = monthList(from, to); } else { cur = keyOf(from); for (i = 0; i < 200 && cur <= to; i++) { keys.push(cur); cur = addDays(cur, g === 'day' ? 1 : 7); } }
+    return { keys: keys, gran: g, keyOf: keyOf };
+  }
+  /* Grouped rows (one per date) folded into buckets: rows[dateField], rows[valField]. */
+  function series(range, rows, dateF, valF) {
+    var B = buckets(range), d = {}; B.keys.forEach(function (k) { d[k] = { v: 0, n: 0 }; });
+    (rows || []).forEach(function (r) { var k = B.keyOf(r[dateF]); if (d[k]) { d[k].v += valF ? (+r[valF] || 0) : 1; d[k].n += +r.n || (valF ? 0 : 1); } });
+    B.d = d; return B;
+  }
+  function legend(series) { return '<div class="dms-legend">' + series.map(function (s) { return '<span><i style="--dms-c:' + s.color + '"></i>' + esc(s.label) + '</span>'; }).join('') + '</div>'; }
+  /* Column chart. ser = [{label, color, val: function (key) {}}]; fmt formats values (default money). */
+  function barChart(keys, gran, ser, fmt, extraTip, emptyTxt) {
+    if (!Array.isArray(ser)) { ser = [ser]; }
+    fmt = fmt || moneyFull; var max = 0;
+    keys.forEach(function (k) { ser.forEach(function (s) { max = Math.max(max, s.val(k) || 0); }); });
+    if (!keys.length || !max) { return empty(emptyTxt || tr('Nothing in this range.', 'لا شيء في هذا النطاق.')); }
+    var top = countTop(max, fmt), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, gran) + ser.map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k) || 0); }).join('') + (extraTip ? extraTip(k) : '');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '">' + ser.map(function (s) { var v = s.val(k) || 0; return '<i class="dms-bar' + (v ? '' : ' dms-bar-0') + '" style="height:' + (v / top * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i>'; }).join('') + '</div>';
+    }).join('');
+    var aria = ser.map(function (s) { return s.label + ': ' + keys.map(function (k) { return bucketLabel(k, gran, true) + ' ' + fmt(s.val(k) || 0); }).join(', '); }).join('; ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + (ser.length > 1 ? legend(ser) : '');
+  }
+  /* Line chart for balances (may go negative). ser = [{label, color, val(key), dash?}]; the first series is the main line. */
+  function lineChart(keys, gran, ser, fmt) {
+    fmt = fmt || moneyFull; var all = [];
+    keys.forEach(function (k) { ser.forEach(function (s) { var v = s.val(k); if (v != null) { all.push(v); } }); });
+    if (!keys.length || !all.length) { return empty(); }
+    var mx = Math.max.apply(null, all), mn = Math.min.apply(null, all), hi = mx > 0 ? niceMax(mx) : 0, lo = mn < 0 ? -niceMax(-mn) : 0;
+    if (hi === lo) { hi = lo + 1; }
+    var y = function (v) { return (100 - (v - lo) / (hi - lo) * 100).toFixed(2); }, x = function (i) { return (keys.length < 2 ? 50 : i / (keys.length - 1) * 100).toFixed(2); };
+    var ticks = [0, 0.25, 0.5, 0.75, 1].map(function (t) { return lo + (hi - lo) * t; });
+    var paths = ser.map(function (s) { var pts = keys.map(function (k, i) { var v = s.val(k); return v == null ? null : x(i) + ',' + y(v); }).filter(Boolean); return '<polyline class="dms-line' + (s.dash ? ' dms-line-ref' : '') + '" style="--dms-c:' + s.color + '" points="' + pts.join(' ') + '"/>'; }).join('');
+    var zero = lo < 0 ? '<i class="dms-gl dms-gl-0" style="bottom:' + ((0 - lo) / (hi - lo) * 100).toFixed(2) + '%"></i>' : '';
+    var hits = keys.map(function (k) { return '<div class="dms-col dms-col-hit" data-tip="' + esc(bucketLabel(k, gran) + ser.map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k)); }).join('')) + '"></div>'; }).join('');
+    var aria = ser[0].label + ': ' + keys.map(function (k) { return bucketLabel(k, gran, true) + ' ' + fmt(ser[0].val(k)); }).join(', ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (v, i) { return '<span style="bottom:' + i * 25 + '%">' + axisFmt(v) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + [0, 25, 50, 75, 100].map(function (b) { return '<i class="dms-gl" style="bottom:' + b + '%"></i>'; }).join('') + zero + '<svg class="dms-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">' + paths + '</svg><div class="dms-cols">' + hits + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + (ser.length > 1 ? legend(ser) : '');
+  }
+  /* Stacked columns (one bar per key, segments per series). */
+  function stackChart(keys, gran, ser, fmt) {
+    fmt = fmt || num; var tot = {}, max = 0;
+    keys.forEach(function (k) { tot[k] = sum(ser, function (s) { return s.val(k) || 0; }); max = Math.max(max, tot[k]); });
+    if (!keys.length || !max) { return empty(); }
+    var top = countTop(max, fmt), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, gran) + ser.filter(function (s) { return s.val(k); }).map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k)); }).join('');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '"><span class="dms-stackbar" style="height:' + (tot[k] / top * 100).toFixed(2) + '%">' + ser.map(function (s) { var v = s.val(k) || 0; return v ? '<i style="flex:' + v + ' 0 0;background:' + s.color + '"></i>' : ''; }).join('') + '</span></div>';
+    }).join('');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(ser.map(function (s) { return s.label; }).join(', ')) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + legend(ser);
+  }
+  function fitChartLabels() {
+    HOST.querySelectorAll('.dms-xaxis').forEach(function (axis) {
+      var labels = axis.querySelectorAll('span'), widest = 0;
+      labels.forEach(function (label) { var range = document.createRange(); range.selectNodeContents(label); widest = Math.max(widest, range.getBoundingClientRect().width); });
+      var slots = Math.max(1, Math.min(8, Math.floor(axis.clientWidth / (widest + 16)))), step = Math.max(1, Math.ceil(labels.length / slots));
+      labels.forEach(function (label, i) { label.style.visibility = i % step ? 'hidden' : 'visible'; });
+    });
+  }
+  /* Share rows: label · bar · value · %. items = [{label, value, color, act?, tip?}]; ordered=true keeps the given order. */
+  function shareList(items, head, fmt, ordered) {
+    fmt = fmt || num; var tot = sum(items, function (s) { return s.value; }), rows = items.filter(function (s) { return s.value; });
+    if (!ordered) { rows = rows.slice().sort(function (a, b) { return b.value - a.value; }); }
+    if (!tot) { return empty(); }
+    return (head ? '<div class="dms-share-t">' + head + '</div>' : '') + rows.map(function (s) {
+      var tip = s.tip || (s.label + ': ' + fmt(s.value) + ' (' + pct(s.value, tot) + ')');
+      var inner = '<span class="dms-share-l"><i class="dms-dot" style="--dms-c:' + s.color + '"></i>' + bdi(s.label) + '</span><span class="dms-share-b"><i style="width:' + (s.value / tot * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i></span>' +
+        '<span class="dms-num">' + esc(fmt(s.value)) + '</span><span class="dms-share-p dms-num">' + pct(s.value, tot, 0) + '</span>';
+      return s.act ? '<button type="button" class="dms-share dms-share-btn" data-act="kpi" data-v="' + esc(s.act) + '" data-tip="' + esc(tip) + '">' + inner + '</button>' : '<div class="dms-share" data-tip="' + esc(tip) + '">' + inner + '</div>';
+    }).join('');
+  }
+  /* Ranked horizontal bars: items = [{label, value, color?, act?}]. */
+  function hbars(items, fmt, color) {
+    if (!items.length) { return empty(); }
+    var max = Math.max.apply(null, items.map(function (i) { return Math.abs(i.value); }).concat([1])); fmt = fmt || num;
+    return items.map(function (i) {
+      var inner = '<span class="dms-split-l">' + bdi(i.label) + '</span><span class="dms-split"><i style="width:' + (Math.abs(i.value) / max * 100).toFixed(2) + '%;background:' + (i.color || color || 'var(--dms-royal)') + '"></i></span><span class="dms-num dms-split-v">' + esc(fmt(i.value)) + '</span>';
+      var tip = ' data-tip="' + esc(i.label + ': ' + fmt(i.value)) + '"';
+      return i.act ? '<button type="button" class="dms-stack-row dms-split-row" data-act="kpi" data-v="' + esc(i.act) + '"' + tip + '>' + inner + '</button>' : '<div class="dms-stack-row dms-split-row"' + tip + '>' + inner + '</div>';
+    }).join('');
+  }
+  /* Two-part bars ranked by total: items = [{label, total, part, act?}]; parts = [{label, color}] for part and remainder. */
+  function splitBars(items, parts, fmt) {
+    if (!items.length) { return empty(); }
+    fmt = fmt || money; var max = Math.max.apply(null, items.map(function (i) { return i.total; }).concat([1]));
+    return items.map(function (i) {
+      var tip = i.label + '\n' + parts[0].label + ': ' + fmt(i.part) + '\n' + parts[1].label + ': ' + fmt(i.total - i.part);
+      var bar = '<span class="dms-split"><i style="width:' + (i.part / max * 100).toFixed(2) + '%;background:' + parts[0].color + '"></i><i style="width:' + (Math.max(0, i.total - i.part) / max * 100).toFixed(2) + '%;background:' + parts[1].color + '"></i></span>';
+      var inner = '<span class="dms-split-l">' + bdi(i.label) + '</span>' + bar + '<span class="dms-num dms-split-v">' + esc(fmt(i.total)) + '</span>';
+      return i.act ? '<button type="button" class="dms-stack-row dms-split-row" data-act="kpi" data-v="' + esc(i.act) + '" data-tip="' + esc(tip) + '">' + inner + '</button>' : '<div class="dms-stack-row dms-split-row" data-tip="' + esc(tip) + '">' + inner + '</div>';
+    }).join('') + legend(parts);
+  }
+  function mixBar(segs) {
+    var tot = sum(segs, function (s) { return s.value; }); if (!tot) { return ''; }
+    return '<span class="dms-mix"><span class="dms-mix-b">' + segs.map(function (s) { return s.value ? '<i style="width:' + (s.value / tot * 100).toFixed(2) + '%;background:' + s.color + '" data-tip="' + esc(s.label + ': ' + (s.fmt || num)(s.value)) + '"></i>' : ''; }).join('') + '</span></span>';
+  }
+  var PAL = ['var(--dms-royal)', '#6b8be0', '#1f8a5b', '#d97a1e', '#8a97a8', '#a3b4ef', '#c2412d', '#d6a419', '#4b5a6e', '#b6bfca'];
+
+  /* ---------- tables: client-side (search / sort / pagination / CSV) and server-side (paginated, sortable, CSV) ---------- */
+  var TBL = {}, TS = {}, SS = {}, focusId = null;
+  function regTable(spec) { TBL[spec.id] = spec; return '<div class="dms-tbl" data-tbl="' + esc(spec.id) + '"></div>'; }
+  function fillTables(scope) { var els = (scope || HOST).querySelectorAll('[data-tbl]'); for (var i = 0; i < els.length; i++) { fillTable(els[i].getAttribute('data-tbl'), els[i]); } }
+  function clientRows(sp, st) {
+    var rows = sp.rows, q = st.q.trim().toLowerCase();
+    if (q) { rows = rows.filter(function (r) { return sp.text(r).toLowerCase().indexOf(q) >= 0; }); }
+    if (st.sk) { var col = sp.cols.filter(function (c) { return c.k === st.sk; })[0]; if (col && col.s) { rows = rows.slice().sort(function (a, b) { var x = col.s(a), y = col.s(b); return (x < y ? -1 : x > y ? 1 : 0) * st.dir; }); } }
+    return rows;
+  }
+  function thead(sp, sk, dir, act, id) {
+    return '<thead><tr>' + sp.cols.map(function (c) {
+      var key = act === 'ssort' ? c.sf : c.k, can = act === 'ssort' ? !!c.sf : !!c.s, on = can && sk === key;
+      return '<th class="' + (can ? 'dms-th-s' : '') + (c.num ? ' dms-th-n' : '') + '"' + (can ? ' data-act="' + act + '" data-id="' + esc(id) + '" data-v="' + esc(key) + '" tabindex="0" aria-sort="' + (on ? (dir > 0 ? 'ascending' : 'descending') : 'none') + '"' : '') + '>' + esc(c.h) + (on ? (dir > 0 ? ' ▲' : ' ▼') : '') + '</th>';
+    }).join('') + '</tr></thead>';
+  }
+  function tcells(sp, r) { return '<tr>' + sp.cols.map(function (c) { return '<td' + (c.num ? ' class="dms-td-n"' : '') + '>' + c.r(r) + '</td>'; }).join('') + '</tr>'; }
+  function fillTable(id, el) {
+    var sp = TBL[id]; el = el || HOST.querySelector('[data-tbl="' + id + '"]'); if (!sp || !el) { return; }
+    if (sp.server) { return fillServer(id, el); }
+    var st = TS[id] || (TS[id] = { q: '', page: 1, sk: sp.sk || '', dir: sp.dir || 1 }), rows = clientRows(sp, st);
+    var ps = sp.pageSize || CFG.pageSize, pages = Math.max(1, Math.ceil(rows.length / ps)); if (st.page > pages) { st.page = pages; }
+    var slice = rows.slice((st.page - 1) * ps, st.page * ps);
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(tr('Search this table…', 'ابحث في الجدول…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search this table', 'ابحث في الجدول')) + '"><span class="dms-tb-r"><span class="dms-sm">' + num(rows.length) + ' ' + esc(rows.length === 1 ? tr('row', 'سجل') : tr('rows', 'سجل')) + (st.q ? ' / ' + num(sp.rows.length) : '') + '</span>' +
+      (rows.length ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csv" data-id="' + esc(id) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    if (sp.notice) { h += sp.notice; }
+    if (!rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
+    h += '<div class="dms-tablewrap"><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'tsort', id) + '<tbody>' + slice.map(function (r) { return tcells(sp, r); }).join('') + '</tbody>' + (sp.foot ? '<tfoot>' + sp.foot(rows) + '</tfoot>' : '') + '</table></div>';
+    h += pager(id, 'tpage', st.page, pages, rows.length, ps);
+    el.innerHTML = h; restoreFocus(el, id);
+  }
+  function pager(id, act, pg, pages, total, ps) {
+    if (total <= ps) { return ''; }
+    return '<div class="dms-pager"><span>' + esc(tr('Showing', 'عرض')) + ' ' + num((pg - 1) * ps + 1) + '–' + num(Math.min(pg * ps, total)) + ' / ' + num(total) + '</span><span><button type="button" class="dms-btn" data-act="' + act + '" data-id="' + esc(id) + '" data-v="-1"' + (pg <= 1 ? ' disabled' : '') + '>‹ ' + esc(tr('Previous', 'السابق')) + '</button> ' +
+      esc(tr('Page', 'صفحة')) + ' ' + pg + ' ' + esc(tr('of', 'من')) + ' ' + pages + ' <button type="button" class="dms-btn" data-act="' + act + '" data-id="' + esc(id) + '" data-v="1"' + (pg >= pages ? ' disabled' : '') + '>' + esc(tr('Next', 'التالي')) + ' ›</button></span></div>';
+  }
+  function restoreFocus(el, id) { if (focusId === id) { var i = el.querySelector('[data-tq]'); if (i) { i.focus(); try { i.setSelectionRange(i.value.length, i.value.length); } catch (e) { /* ignore */ } } } }
+  function srvArgs(sp, st) {
+    var q = st.q.trim(), base = { doctype: sp.dt, filters: sp.filters };
+    if (sp.parent) { base.parent = sp.parent; }
+    if (q && sp.search) { base.or_filters = sp.search.map(function (f) { return [sp.dt, f, 'like', '%' + q + '%']; }); }
+    return base;
+  }
+  function srvOrder(sp, st) { return st.sk ? st.sk + (st.dir > 0 ? ' asc' : ' desc') : sp.order; }
+  function fillServer(id, el) {
+    var sp = TBL[id], st = SS[id] || (SS[id] = { q: '', page: 1, total: null, rows: null, loading: false, err: null, req: 0, sk: '', dir: 1 });
+    if (!st.dirty && st.rows && st.key === JSON.stringify(sp.filters)) { return paintServer(id, el); }
+    st.dirty = false; st.key = JSON.stringify(sp.filters);
+    var req = ++st.req; st.loading = true; st.err = null;
+    var ps = sp.pageSize || CFG.modalPage, base = srvArgs(sp, st);
+    paintServer(id, el);
+    var chk = function () { return !destroyed && SS[id] && SS[id].req === req; };
+    if (sp.loader) { sp.loader(st.page - 1, ps, st.q.trim(), srvOrder(sp, st)).then(function (res) { if (!chk()) { return; } st.total = res.total; st.rows = res.rows || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); }, function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } }); return; }
+    var cnt = getList(Object.assign({}, base, { fields: ['count(name) as n'], limit_page_length: 1 }), chk).then(function (r) { return r ? +one(r).n || 0 : null; });
+    var rows = getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: (st.page - 1) * ps, limit_page_length: ps }), chk);
+    Promise.all([cnt, rows]).then(function (res) {
+      if (!chk()) { return; } st.total = res[0]; st.rows = res[1] || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]'));
+    }).catch(function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } });
+  }
+  function paintServer(id, el) {
+    if (!el) { return; } var sp = TBL[id], st = SS[id], ps = sp.pageSize || CFG.modalPage;
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(sp.searchHint || tr('Search…', 'بحث…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search', 'بحث')) + '"><span class="dms-tb-r"><span class="dms-sm">' + (st.total == null ? '' : num(st.total) + ' ' + esc(st.total === 1 ? tr('record', 'سجل') : tr('records', 'سجل'))) + '</span>' +
+      (st.total ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csvall" data-id="' + esc(id) + '" title="' + esc(tr('Export up to 5,000 rows', 'تصدير حتى 5,000 سجل')) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    if (st.err) { el.innerHTML = h + alertBox('err', esc(st.err === 'perm' ? tr('Permission denied for your user.', 'لا تملك صلاحية القراءة.') : tr('Technical error while reading this list.', 'خطأ تقني أثناء قراءة القائمة.')) + ' <button type="button" class="dms-linkbtn" data-act="sretry" data-id="' + esc(id) + '">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>'); return restoreFocus(el, id); }
+    if (st.loading && !st.rows) { el.innerHTML = h + '<div class="dms-skel"></div>'; return restoreFocus(el, id); }
+    if (!st.rows || !st.rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
+    var pages = Math.max(1, Math.ceil((st.total || 0) / ps));
+    h += '<div class="dms-tablewrap" style="opacity:' + (st.loading ? .55 : 1) + '"' + (st.loading ? ' aria-busy="true"' : '') + '><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'ssort', id) + '<tbody>' + st.rows.map(function (r) { return tcells(sp, r); }).join('') + '</tbody></table></div>' + pager(id, 'spage', st.page, pages, st.total || 0, ps);
+    el.innerHTML = h; restoreFocus(el, id);
+  }
+  function csvCell(v) { v = v == null ? '' : String(v); if (/^[=+\-@\t\r]/.test(v) && !/^-?[\d.,]+$/.test(v)) { v = "'" + v; } return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  function download(name, sp, rows) {
+    var cols = sp.cols.filter(function (c) { return c.c; }), lines = [cols.map(function (c) { return csvCell(c.h); }).join(',')].concat(rows.map(function (r) { return cols.map(function (c) { return csvCell(c.c(r)); }).join(','); }));
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+    a.download = String(name).replace(/[^\w-]+/g, '_') + '_' + TODAY + '.csv'; HOST.appendChild(a); a.click(); later(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+  function exportServer(id) {
+    var sp = TBL[id], st = SS[id], out = [], step = 500, base = srvArgs(sp, st), g = GEN;
+    if (sp.loader) { toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…')); var acc = [], pg = function (p) { return sp.loader(p, 500, st.q.trim(), srvOrder(sp, st)).then(function (res) { acc = acc.concat(res.rows || []); return (res.rows || []).length === 500 && acc.length < 5000 ? pg(p + 1) : acc; }); }; pg(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); }); return; }
+    function next(s) {
+      return getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: s, limit_page_length: step }), function () { return g === GEN; }).then(function (r) {
+        out = out.concat(r || []); return (r && r.length === step && out.length < 5000) ? next(s + step) : out;
+      });
+    }
+    toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…'));
+    next(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); });
+  }
+  function toast(msg, bad) { var e = document.createElement('div'); e.className = 'dms-toast' + (bad ? ' dms-toast-err' : ''); e.setAttribute('role', 'status'); e.textContent = msg; HOST.appendChild(e); later(function () { e.remove(); }, 3500); }
+  /* common cells */
+  function dtc(v) { return v ? '<span class="dms-num">' + esc(String(v).slice(0, 10)) + '</span>' : '<span class="dms-sm">—</span>'; }
+  function who(v) { return v ? bdi(v) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>'; }
+  function txt(v) { return v ? bdi(v) : '<span class="dms-sm">—</span>'; }
+  function amc(v) { return v == null || v === '' ? '<span class="dms-sm">—</span>' : '<span class="dms-num">' + esc(amt(v)) + '</span>'; }
+  function overdueTag(due) { var d = diffDays(String(due || TODAY).slice(0, 10), TODAY); return d > 0 ? '<span class="dms-days ' + (d > 90 ? 'dms-days-bad' : 'dms-days-warn') + '">' + num(d) + '</span>' : '<span class="dms-sm">—</span>'; }
+  function col(h, f, o) { o = o || {}; return Object.assign({ h: h, sf: o.sort === false ? undefined : f, r: function (x) { return o.fmt ? o.fmt(x[f], x) : txt(x[f]); }, c: function (x) { return x[f]; } }, o); }
+  function linkCol(h, dt, f, labelF) { return { h: h, sf: f, r: function (x) { return docLink(typeof dt === 'function' ? dt(x) : dt, x[f], labelF ? x[labelF] || x[f] : x[f]); }, c: function (x) { return x[f]; } }; }
+
+  /* ---------- actions pending ---------- */
+  var PRIO = { high: ['High', 'عالية'], med: ['Medium', 'متوسطة'], low: ['Low', 'منخفضة'] };
+  function score(p, amount, age) { return { high: 300, med: 200, low: 100 }[p] + Math.min(40, Math.log(1 + Math.abs(amount || 0)) / Math.LN10 * 6) + Math.min(20, (age || 0) / 10); }
+  /* Server specs ({id, server:true, dt, filters, fields, order, it(row) → item}) load count + 6 most urgent rows each. */
+  function loadActions(specs, key) {
+    run(key || 'act', function (chk) {
+      return Promise.all(specs.filter(function (s) { return s.server; }).map(function (s) {
+        var c = getList({ doctype: s.dt, fields: ['count(name) as n'], filters: s.filters, limit_page_length: 1 }, chk).then(function (r) { return +one(r).n || 0; }, function (e) { return 'ERR:' + errKind(e); });
+        var l = (s.rank ? fetchAll({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order }, chk, 2000) : getList({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order, limit_page_length: 6 }, chk)).then(function (r) { return r || []; }, function (e) { return 'ERR:' + errKind(e); });
+        return Promise.all([c, l]).then(function (x) { return { id: s.id, count: typeof x[1] === 'string' ? x[1] : x[0], rows: Array.isArray(x[1]) ? x[1] : [] }; });
+      })).then(function (res) { var o = {}; res.forEach(function (x) { o[x.id] = x; }); return o; });
+    });
+  }
+  /* client: {id: {rows, item}} for client specs, null while their sources load, or 'ERR:kind'. */
+  function actModel(specs, key, client) {
+    var counts = {}, items = [], A = D[key || 'act'], AE = D[(key || 'act') + 'Err'];
+    specs.forEach(function (s) {
+      if (s.client) {
+        var c = client == null ? null : typeof client === 'string' ? client : client[s.id];
+        if (typeof c === 'string') { counts[s.id] = c; }
+        else if (c) { counts[s.id] = c.count != null ? c.count : c.rows.length; c.rows.slice(0, 6).forEach(function (r) { items.push(c.item(r)); }); }
+        return;
+      }
+      if (AE) { counts[s.id] = 'ERR:' + AE; return; }
+      var x = A && A[s.id]; if (!x) { return; }
+      counts[s.id] = x.count;
+      x.rows.forEach(function (r) { var it = s.it(r); it.dt = it.dt || s.dt; it.name = it.name || r.name; items.push(it); });
+    });
+    items.sort(function (a, b) { return b.score - a.score; });
+    var seen = {}; items = items.filter(function (it) { var k = it.dt + '|' + it.name; if (seen[k]) { return false; } seen[k] = 1; return true; });   /* one row per record, under its most urgent category */
+    return { specs: specs, counts: counts, items: items, ready: specs.every(function (s) { return counts[s.id] !== undefined; }) };
+  }
+  function pendingTotal(AM) {
+    if (!AM) { return null; }
+    var t = 0, any = false; Object.keys(AM.counts).forEach(function (k) { var c = AM.counts[k]; if (typeof c === 'number') { t += c; any = true; } });
+    return any ? t : null;
+  }
+  function dtLabel(dt) { var L = APP.dtLabels && APP.dtLabels[dt]; return L ? tr(L[0], L[1]) : dt; }
+  function arow(it) {
+    return '<a class="dms-arow" href="' + esc(it.href || docUrl(it.dt, it.name)) + '" target="_blank" rel="noopener noreferrer">' +
+      '<span class="dms-prio dms-prio-' + it.p + '">' + esc(tr(PRIO[it.p][0], PRIO[it.p][1])) + '</span>' +
+      '<span class="dms-arow-main"><span class="dms-arow-t"><bdi>' + esc(it.title || it.name) + '</bdi><span class="dms-arow-dt">' + esc(dtLabel(it.dt)) + '</span></span><span class="dms-arow-d">' + bdi(it.desc || '') + '</span></span>' +
+      '<span class="dms-arow-who">' + (it.who ? bdi(it.who) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>') + '</span>' +
+      '<span class="dms-arow-due dms-tone-' + (it.tone || 'n') + '">' + esc(it.due || '') + '</span><span class="dms-sr"> (' + esc(tr('opens in a new tab', 'يفتح في علامة تبويب جديدة')) + ')</span></a>';
+  }
+  function drillId(s) { return s.drill || ((s.client ? 'cli:' : 'srv:') + s.id); }
+  function catBtn(s, c) {
+    var err = typeof c === 'string', inner = '<span class="dms-acat-t">' + esc(s.short) + '</span><b class="dms-num">' + (err || c == null ? '—' : num(c)) + '</b>';
+    return (!err && c) ? '<button type="button" class="dms-acat" data-act="kpi" data-v="' + esc(drillId(s)) + '" title="' + esc(s.title + ' — ' + tr('view all', 'عرض الكل')) + '">' + inner + '</button>'
+      : '<div class="dms-acat dms-acat-off" title="' + esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.title) + '">' + inner + '</div>';
+  }
+  function actionsPanel(AM) {
+    var tot = pendingTotal(AM);
+    var h = '<section class="dms-panelbox dms-actpanel" id="dms-pending" tabindex="-1" aria-labelledby="dms-pending-h"><div class="dms-ph"><h3 class="dms-h3" id="dms-pending-h">' + esc(tr('Actions pending', 'الإجراءات المعلقة')) +
+      (tot != null ? ' <span class="dms-h3-n dms-num">' + num(tot) + '</span>' : '') + '</h3><span class="dms-ph-meta">' + esc(tr('As of today · most urgent first', 'حتى اليوم · الأكثر إلحاحًا أولًا')) + '</span>' +
+      (tab !== 'actions' && APP.tabs.some(function (x) { return x.id === 'actions'; }) ? '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="goto:actions">' + esc(tr('View all', 'عرض الكل')) + '</button>' : '') + '</div>';
+    if (!AM) { return h + '<div class="dms-arows" aria-busy="true">' + skel(6, 'dms-skel-row') + '</div></section>'; }
+    var known = AM.specs.filter(function (s) { return AM.counts[s.id] !== undefined; });
+    if (!known.length) { return h + '<div class="dms-arows" aria-busy="true">' + skel(6, 'dms-skel-row') + '</div></section>'; }
+    var errs = known.filter(function (s) { return typeof AM.counts[s.id] === 'string'; });
+    if (AM.ready && errs.length === AM.specs.length) { return h + alertBox('err', esc(tr('Pending actions could not be loaded.', 'تعذر تحميل الإجراءات المعلقة.')) + ' <button type="button" class="dms-linkbtn" data-act="refresh">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>') + '</section>'; }
+    var items = AM.items.slice(0, CFG.actRows || 7);
+    h += items.length ? '<div class="dms-arows">' + items.map(arow).join('') + '</div>' : (AM.ready ? '<div class="dms-empty dms-empty-sm">' + esc(tr('Nothing pending for this selection.', 'لا توجد إجراءات معلقة لهذا الاختيار.')) + '</div>' : '<div class="dms-arows" aria-busy="true">' + skel(4, 'dms-skel-row') + '</div>');
+    h += '<div class="dms-acats">' + AM.specs.map(function (s) { return catBtn(s, AM.counts[s.id]); }).join('') + '</div>';
+    if (errs.length) { h += note(esc(tr('Could not load: ', 'تعذر التحميل: ') + errs.map(function (s) { return s.short; }).join(', '))); }
+    return h + '</section>';
+  }
+  function actionsTab(AM, info) {
+    var h = alertBox('info', esc(info || tr('Action lists are as of today and not filtered by the period. They follow the filters where the source supports them.', 'قوائم الإجراءات حتى اليوم وغير مرتبطة بالفترة، وتتبع المرشحات حيثما يدعمها المصدر.')));
+    h += kpis((AM ? AM.specs : []).map(function (s) {
+      var c = AM.counts[s.id], err = typeof c === 'string';
+      return kpi({ label: s.title, val: c === undefined ? '…' : err ? '—' : num(c), sub: esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.why), act: (!err && c) ? drillId(s) : null });
+    }));
+    return h + actionsPanel(AM);
+  }
+
+  /* ---------- drill-downs (overlay) ---------- */
+  var OVL = null;
+  function openDrill(id) {
+    if (id.indexOf('goto:') === 0) { goTab(id.slice(5)); return; }
+    var r = null;
+    if (id.indexOf('srv:') === 0 && APP.actSpecs) {
+      var s = APP.actSpecs().filter(function (x) { return x.id === id.slice(4); })[0];
+      if (s && s.table) { delete SS.drill; r = { title: s.title, sub: s.why, spec: Object.assign({ id: 'drill', server: true, dt: s.dt, filters: s.filters, order: s.order, file: s.id }, s.table()) }; }
+    }
+    if (!r && APP.drill) { r = APP.drill(id); }
+    if (!r || (!r.spec && r.body == null)) { return; }
+    if (r.spec) { r.spec.id = 'drill'; if (!r.spec.server && !r.spec.pageSize) { r.spec.pageSize = CFG.modalPage; } }
+    delete SS.drill; delete TS.drill;
+    var opener = OVL ? OVL.opener : activeEl();
+    OVL = Object.assign(r, { id: id, prev: OVL && r.stack !== false ? OVL : null, opener: opener, openerKey: OVL ? OVL.openerKey : opener && opener.getAttribute && opener.getAttribute('data-v') }); renderOverlay();
+  }
+  function overlayHTML() {
+    if (!OVL) { return ''; }
+    var link = OVL.link ? ' ' + docLink(OVL.link[0], OVL.link[1], OVL.link[2]) : '';
+    return '<div class="dms-overlay" data-act="ovbg"><div class="dms-modal" role="dialog" aria-modal="true" aria-labelledby="dms-dialog-title"><div class="dms-dhead"><div>' + (OVL.prev ? '<button type="button" class="dms-linkbtn" data-act="ovback">‹ ' + esc(tr('Back', 'رجوع')) + '</button>' : '') + '<h3 id="dms-dialog-title">' + esc(OVL.title) + '</h3>' + (OVL.sub || link ? '<p class="dms-sm">' + esc(OVL.sub || '') + link + '</p>' : '') + '</div><button type="button" class="dms-x" data-act="closeov" aria-label="' + esc(tr('Close', 'إغلاق')) + '">×</button></div>' + (OVL.body || '') + (OVL.spec ? regTable(OVL.spec) : '') + '</div></div>';
+  }
+  function renderOverlay() { var el = $('[data-ref="overlay"]'); if (!el) { return; } var app = $('.dms-app'); if (app) { app.inert = !!OVL; } if (!OVL) { Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { delete TBL[k]; } }); } else { delete TBL.drill; } el.innerHTML = overlayHTML(); fillTables(el); var x = el.querySelector('.dms-x'); if (x) { x.focus(); } }
+  function closeOverlay() {
+    var previous = OVL; OVL = null; renderOverlay(); delete SS.drill; delete TS.drill;
+    if (!previous) { return; }
+    var opener = previous.opener;
+    if (!opener || !opener.isConnected) { opener = Array.prototype.find.call(HOST.querySelectorAll('[data-act="kpi"]'), function (el) { return el.getAttribute('data-v') === previous.openerKey; }); }
+    if (opener) { opener.focus({ preventScroll: true }); }
+  }
+
+  /* ---------- filters, period, toolbar, tabs ---------- */
+  var F = { period: APP.period || 'month', from: '', to: '' }, PERIOD = [];
+  (APP.filters || []).forEach(function (f) { F[f.k] = ''; });
+  var tab = APP.tabs[0].id, POP = null, FD = null, FS = {}, CAL = null, ANIM = false, built = false, AMC = null;
+  var PERIODS = [['today', 'Today', 'اليوم'], ['yesterday', 'Yesterday', 'أمس'], ['week', 'This week', 'هذا الأسبوع'], ['lastWeek', 'Last week', 'الأسبوع الماضي'],
+    ['month', 'This month', 'هذا الشهر'], ['lastMonth', 'Last month', 'الشهر الماضي'], ['quarter', 'This quarter', 'هذا الربع'], ['ytd', 'Year to date', 'السنة حتى اليوم'],
+    ['year', 'This year', 'هذه السنة'], ['prevYear', 'Previous year', 'السنة الماضية'], ['custom', 'Custom range', 'نطاق مخصص']];
+  var PGROUPS = [['today', 'yesterday'], ['week', 'lastWeek'], ['month', 'lastMonth'], ['quarter', 'ytd', 'year', 'prevYear'], ['custom']];
+  function curPeriod() { return periodRange(F.period, F.from, F.to); }
+  function periodName(k) { var p = PERIODS.filter(function (x) { return x[0] === k; })[0]; return p ? tr(p[1], p[2]) : k; }
+  function filterCount() { return (APP.filters || []).filter(function (f) { return F[f.k]; }).length; }
+  function optList(f, draft) { var l = f.options ? f.options(draft || F) : []; return (l || []).map(function (x) { return typeof x === 'string' ? { v: x, l: x } : x; }); }
+  function optLabel(f, v) { var o = optList(f).filter(function (x) { return x.v === v; })[0]; return o ? o.l : (f.label ? f.label(v) : v); }
+  function pendingBtnHTML() {
+    var n = pendingTotal(AMC), lbl = n == null ? (AMC && AMC.ready ? '—' : '…') : num(n);
+    return '<button type="button" class="dms-pend' + (n ? ' dms-pend-on' : '') + '" data-act="pending" data-fk="pending" title="' + esc(tr('Pending actions as of today — show the list', 'الإجراءات المعلقة حتى اليوم — عرض القائمة')) + '">' +
+      '<i class="dms-pend-dot" aria-hidden="true"></i><b class="dms-num">' + lbl + '</b><span class="dms-pend-l">' + esc(tr('pending', 'معلّقة')) + '</span></button>';
+  }
+  function opt(v, label, cur) { return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(label) + '</option>'; }
+  function ffield(f) {
+    if (f.type === 'text' || f.type === 'date') { return '<div class="dms-ff"><label for="dms-fd-' + f.k + '">' + esc(tr(f.en, f.ar)) + '</label><input type="' + (f.type === 'date' ? 'date' : 'search') + '" id="dms-fd-' + f.k + '" class="dms-input" data-fd="' + f.k + '" data-fk="fd:' + f.k + '" value="' + esc(FD[f.k] || '') + '" placeholder="' + esc(f.ph ? tr(f.ph[0], f.ph[1]) : '') + '" autocomplete="off"></div>'; }
+    var list = optList(f, FD), label = tr(f.en, f.ar), k = f.k;
+    var q = clean(FS[k]).toLowerCase(), cur = FD[k], shown = list.filter(function (x) { return !q || String(x.l).toLowerCase().indexOf(q) >= 0 || String(x.v).toLowerCase().indexOf(q) >= 0; }), more = shown.length > 200;
+    shown = shown.slice(0, 200);
+    if (cur && !shown.some(function (x) { return x.v === cur; })) { shown.unshift({ v: cur, l: optLabel(f, cur) }); }
+    var h = '<div class="dms-ff"><label for="dms-fd-' + k + '">' + esc(label) + '</label>';
+    if (list.length > 8) { h += '<input type="search" class="dms-input" data-fs="' + k + '" data-fk="fs:' + k + '" value="' + esc(FS[k] || '') + '" placeholder="' + esc(tr('Search ' + num(list.length) + ' options', 'ابحث في ' + num(list.length) + ' خيار')) + '" aria-label="' + esc(tr('Search', 'بحث') + ' — ' + label) + '" autocomplete="off">'; }
+    h += '<select id="dms-fd-' + k + '" class="dms-input" data-fd="' + k + '" data-fk="fd:' + k + '">' + opt('', f.none ? tr(f.none[0], f.none[1]) : tr('All', 'الكل'), cur) + shown.map(function (x) { return opt(x.v, x.l, cur); }).join('') + '</select>';
+    if (q && !shown.length) { h += '<span class="dms-ff-hint">' + esc(tr('No matches', 'لا نتائج')) + '</span>'; }
+    else if (more) { h += '<span class="dms-ff-hint">' + esc(tr('First 200 matches — type to narrow', 'أول 200 نتيجة — اكتب للتضييق')) + '</span>'; }
+    return h + '</div>';
+  }
+  function filtersPopHTML() {
+    var n = APP.filterNote ? APP.filterNote() : '';
+    return '<div class="dms-pop dms-pop-filters" role="dialog" aria-label="' + esc(tr('Filters', 'المرشحات')) + '"><div class="dms-pop-b">' + APP.filters.map(ffield).join('') + '</div>' +
+      (n ? '<p class="dms-pop-note">' + esc(n) + '</p>' : '') +
+      '<div class="dms-pop-f"><button type="button" class="dms-btn" data-act="fclear" data-fk="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button><button type="button" class="dms-btn dms-btn-primary" data-act="fapply" data-fk="fapply">' + esc(tr('Apply', 'تطبيق')) + '</button></div></div>';
+  }
+  function calendarHTML() {
+    var v = CAL.view, first = weekStartOf(v), mon = v.slice(0, 7), fdy = CAL.focus && CAL.focus.slice(0, 7) === mon ? CAL.focus : (CAL.from && CAL.from.slice(0, 7) === mon ? CAL.from : v), wd = '', rows = '', r, c, d;
+    for (c = 0; c < 7; c++) { try { wd += '<span role="columnheader">' + esc(new Intl.DateTimeFormat(locale(), { weekday: 'narrow', timeZone: 'UTC' }).format(new Date(parseISO(addDays(first, c))))) + '</span>'; } catch (e) { wd += '<span></span>'; } }
+    for (r = 0; r < 6; r++) {
+      rows += '<div role="row" class="dms-cal-row">';
+      for (c = 0; c < 7; c++) {
+        d = addDays(first, r * 7 + c);
+        var end = d === CAL.from || d === CAL.to, inR = CAL.from && CAL.to && d > CAL.from && d < CAL.to;
+        rows += '<button type="button" role="gridcell" class="dms-day' + (d.slice(0, 7) !== mon ? ' dms-out' : '') + (d === TODAY ? ' dms-today' : '') + (inR ? ' dms-in' : '') + (end ? ' dms-end' : '') +
+          (CAL.from && CAL.to && d === CAL.from && d !== CAL.to ? ' dms-s' : '') + (CAL.from && CAL.to && d === CAL.to && d !== CAL.from ? ' dms-e' : '') + '" data-act="calday" data-v="' + d + '" data-fk="day:' + d + '" tabindex="' + (d === fdy ? 0 : -1) +
+          '" aria-pressed="' + end + '" aria-label="' + esc(fmtDate(d, true)) + '"><bdi>' + (+d.slice(8, 10)) + '</bdi></button>';
+      }
+      rows += '</div>';
+    }
+    var ok = CAL.from && CAL.to, msg = ok ? '<bdi>' + esc(rangeLabel([CAL.from, CAL.to])) + '</bdi> · ' + esc(daysTxt(diffDays(CAL.from, CAL.to) + 1)) : esc(CAL.from ? tr('Select an end date', 'اختر تاريخ النهاية') : tr('Select a start date', 'اختر تاريخ البداية'));
+    var title = v; try { title = new Intl.DateTimeFormat(locale(), { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(parseISO(v))); } catch (e) { /* ISO fallback */ }
+    return '<div class="dms-cal"><div class="dms-cal-h"><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="-1" data-fk="calprev" aria-label="' + esc(tr('Previous month', 'الشهر السابق')) + '">' + ico('prev', 'dms-flip') + '</button>' +
+      '<b aria-live="polite">' + esc(title) + '</b><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="1" data-fk="calnext" aria-label="' + esc(tr('Next month', 'الشهر التالي')) + '">' + ico('next', 'dms-flip') + '</button></div>' +
+      '<div class="dms-cal-g" role="grid" aria-label="' + esc(title) + '"><div class="dms-cal-wd" role="row">' + wd + '</div>' + rows + '</div>' +
+      '<div class="dms-cal-f"><span class="dms-cal-msg" aria-live="polite">' + msg + '</span><span class="dms-cal-btns"><button type="button" class="dms-btn" data-act="popclose" data-fk="calcancel">' + esc(tr('Cancel', 'إلغاء')) + '</button>' +
+      '<button type="button" class="dms-btn dms-btn-primary" data-act="calapply" data-fk="calapply"' + (ok ? '' : ' disabled') + '>' + esc(tr('Apply', 'تطبيق')) + '</button></span></div></div>';
+  }
+  function periodPopHTML() {
+    var n = APP.periodNote ? APP.periodNote() : '';
+    return '<div class="dms-pop dms-pop-period' + (CAL ? ' dms-has-cal' : '') + '" role="dialog" aria-label="' + esc(tr('Select period', 'اختر الفترة')) + '"><div class="dms-presets">' +
+      PGROUPS.map(function (g) {
+        return '<div class="dms-pgroup">' + g.map(function (k) {
+          var on = CAL ? k === 'custom' : F.period === k;
+          return '<button type="button" class="dms-preset' + (on ? ' dms-on' : '') + '" aria-pressed="' + on + '" data-act="preset" data-v="' + k + '" data-fk="preset:' + k + '"><span>' + esc(periodName(k)) + '</span>' +
+            (k !== 'custom' ? '<small><bdi>' + esc(rangeLabel(periodRange(k))) + '</bdi></small>' : '') + '</button>';
+        }).join('') + '</div>';
+      }).join('') + '</div>' + (CAL ? calendarHTML() : '') + (n ? '<p class="dms-pop-note dms-pop-note-p">' + esc(n) + '</p>' : '') + '</div>';
+  }
+  function toolbarHTML() {
+    var ac = filterCount(), R = PERIOD, hasF = APP.filters && APP.filters.length;
+    return '<div class="dms-topbar"><div class="dms-tb-title"><h2 class="dms-title">' + esc(APP.title()) + '</h2><p class="dms-sub" data-ref="stamp"></p></div>' +
+      '<div class="dms-tb-ctrls"><div class="dms-pendwrap" data-ref="pendwrap">' + pendingBtnHTML() + '</div>' +
+      (APP.period === false ? '' : '<div class="dms-anchor"><button type="button" class="dms-btn dms-period" data-act="pop" data-v="period" data-fk="pop:period" aria-haspopup="dialog" aria-expanded="' + (POP === 'period') + '" aria-label="' + esc(tr('Period', 'الفترة') + ': ' + periodName(F.period) + ' ' + rangeLabel(R)) + '">' + ico('cal') +
+        '<span class="dms-period-t"><b>' + esc(periodName(F.period)) + '</b><span class="dms-period-r"><bdi>' + esc(rangeLabel(R)) + '</bdi></span></span>' + ico('down', 'dms-chev') + '</button>' + (POP === 'period' ? periodPopHTML() : '') + '</div>') +
+      (hasF ? '<div class="dms-anchor"><button type="button" class="dms-btn' + (ac ? ' dms-btn-on' : '') + '" data-act="pop" data-v="filters" data-fk="pop:filters" aria-haspopup="dialog" aria-expanded="' + (POP === 'filters') + '">' + ico('filter') +
+        '<span class="dms-btn-t">' + esc(tr('Filters', 'المرشحات')) + '</span>' + (ac ? '<span class="dms-count" aria-label="' + esc(ac + ' ' + tr('active', 'نشط')) + '">' + ac + '</span>' : '') + '</button>' + (POP === 'filters' ? filtersPopHTML() : '') + '</div>' : '') +
+      '<button type="button" class="dms-btn dms-icobtn" data-act="refresh" data-ref="refresh" data-fk="refresh" aria-label="' + esc(tr('Refresh data', 'تحديث البيانات')) + '" title="' + esc(tr('Refresh data (keeps filters)', 'تحديث البيانات (مع الإبقاء على المرشحات)')) + '">' + ico('refresh') + '</button></div>' +
+      '<div class="dms-lang" role="group" aria-label="Language / اللغة"><button type="button" data-act="lang" data-v="en" data-fk="lang:en" lang="en" aria-pressed="' + (LANG === 'en') + '"' + (LANG === 'en' ? ' class="dms-on"' : '') + '>English</button>' +
+        '<button type="button" data-act="lang" data-v="ar" data-fk="lang:ar" lang="ar" aria-pressed="' + (LANG === 'ar') + '"' + (LANG === 'ar' ? ' class="dms-on"' : '') + '>العربية</button></div></div>';
+  }
+  function chipsHTML() {
+    var a = (APP.filters || []).filter(function (f) { return F[f.k]; }); if (!a.length) { return ''; }
+    return '<div class="dms-chips">' + a.map(function (f) {
+      var v = optLabel(f, F[f.k]), lab = tr(f.en, f.ar);
+      return '<span class="dms-chip"><span class="dms-chip-k">' + esc(lab) + '</span><bdi>' + esc(v) + '</bdi><button type="button" class="dms-chip-x" data-act="rmf" data-v="' + f.k + '" data-fk="rmf:' + f.k + '" aria-label="' + esc(tr('Remove filter', 'إزالة المرشح') + ' ' + lab + ': ' + v) + '">' + ico('x') + '</button></span>';
+    }).join('') + (a.length > 1 ? '<button type="button" class="dms-linkbtn" data-act="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button>' : '') + '</div>';
+  }
+  function tabsHTML() {
+    var pend = pendingTotal(AMC);
+    return '<div class="dms-tabs" role="tablist" aria-label="' + esc(tr('Sections', 'الأقسام')) + '">' + APP.tabs.map(function (x) {
+      var on = x.id === tab, lbl = tr(x.en, x.ar), b = x.id === 'actions' && pend ? '<span class="dms-tab-n dms-num" title="' + esc(tr('Pending actions as of today', 'الإجراءات المعلقة حتى اليوم')) + '">' + num(pend) + '</span>' : '';
+      return '<button class="dms-tab' + (on ? ' dms-on' : '') + '" role="tab" id="dms-tab-' + x.id + '" aria-selected="' + on + '" aria-controls="dms-panel" tabindex="' + (on ? 0 : -1) + '" data-act="tab" data-v="' + x.id + '" data-fk="tab:' + x.id + '" title="' + esc(lbl) + '" type="button"><span>' + esc(lbl) + '</span>' + b + '</button>';
+    }).join('') + '</div>';
+  }
+
+  /* ---------- rendering: a fixed skeleton whose regions repaint independently (focus kept via data-fk) ---------- */
+  function activeEl() { try { return ROOT.activeElement || null; } catch (e) { return null; } }
+  function paint(el, html) {
+    if (!el) { return; }
+    var a = activeEl(), fk = a && el.contains(a) && a.getAttribute ? a.getAttribute('data-fk') : null, ss = null;
+    if (fk && typeof a.selectionStart === 'number') { try { ss = [a.selectionStart, a.selectionEnd]; } catch (e) { /* not a text input */ } }
+    el.innerHTML = html;
+    if (fk) { focusFk(fk); if (ss) { var n = activeEl(); try { n.setSelectionRange(ss[0], ss[1]); } catch (e) { /* ignore */ } } }
+  }
+  function focusFk(k) { var n = HOST.querySelector('[data-fk="' + k + '"]'); if (n) { try { n.focus({ preventScroll: true }); } catch (e) { n.focus(); } } }
+  function skeleton() {
+    HOST.innerHTML = '<div class="dms-app"><div data-ref="tb"></div><div data-ref="chips"></div><div data-ref="tabs"></div><div class="dms-sheet" role="tabpanel" id="dms-panel" data-ref="sheet"><div data-ref="banner"></div><div class="dms-content" data-ref="content"></div></div>' +
+      '<div class="dms-tip" data-ref="tip" role="tooltip" hidden></div></div><div data-ref="overlay"></div>';
+    built = true;
+  }
+  function renderHeaderState() {
+    var b = $('[data-ref="refresh"]'), s = $('[data-ref="stamp"]'), bz = busy();
+    if (b) { b.classList.toggle('dms-busy', bz); b.setAttribute('aria-busy', String(bz)); }
+    if (s) { s.textContent = (APP.stamp ? APP.stamp() : tr('Read-only', 'للقراءة فقط')) + (LOADED ? ' · ' + tr('Updated ', 'آخر تحديث ') + LOADED : '') + (bz ? ' · ' + tr('loading…', 'جارٍ التحميل…') : ''); }
+    paint($('[data-ref="pendwrap"]'), pendingBtnHTML());
+    paint($('[data-ref="tabs"]'), tabsHTML());
+  }
+  function renderToolbar() { paint($('[data-ref="tb"]'), toolbarHTML()); paint($('[data-ref="chips"]'), chipsHTML()); renderHeaderState(); }
+  function contentHTML() {
+    if (!BOOTED) {
+      return '<div class="dms-grid dms-kpis dms-ov-kpis" aria-busy="true">' + skel(CFG.kpiCount || 6, 'dms-skel-kpi') + '</div><div class="dms-main2"><div class="dms-skel dms-skel-panel"></div><div class="dms-skel dms-skel-panel"></div></div>' +
+        note(esc(tr('Loading from ERPNext…', 'جارٍ التحميل من ERPNext…')));
+    }
+    if (APP.period !== false && (!PERIOD[0] || PERIOD[0] > PERIOD[1])) { return alertBox('err', esc(tr('Choose a valid date range.', 'اختر نطاق تاريخ صحيحًا.'))); }
+    return APP.content(tab, AMC);
+  }
+  function renderSoft() {
+    PERIOD = curPeriod(); AMC = APP.actions ? APP.actions() : null;
+    var keep = {}; Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { keep[k] = TBL[k]; } }); TBL = keep;
+    var b = $('[data-ref="banner"]'), c = $('[data-ref="content"]'), sh = $('[data-ref="sheet"]');
+    if (b) { b.innerHTML = BOOTED && APP.banner ? APP.banner() : ''; }
+    if (c) { paint(c, contentHTML()); c.classList.remove('dms-enter'); if (ANIM) { void c.offsetWidth; c.classList.add('dms-enter'); } ANIM = false; fillTables(c); fitChartLabels(); if (APP.afterRender) { APP.afterRender(c); } }
+    if (sh) { sh.setAttribute('aria-labelledby', 'dms-tab-' + tab); }
+    renderHeaderState();
+  }
+  function renderAll() {
+    HOST.setAttribute('dir', LANG === 'ar' ? 'rtl' : 'ltr'); HOST.setAttribute('lang', LANG);
+    if (!built) { skeleton(); }
+    PERIOD = curPeriod(); renderToolbar(); renderSoft();
+  }
+  /* Full reload (filters, refresh): new generation, empty store, tables back to page 1. */
+  function reload() {
+    setToday(); PERIOD = curPeriod(); GEN++; D = {}; LOADED = STAMP;
+    Object.keys(SS).forEach(function (k) { SS[k].dirty = true; SS[k].page = 1; }); Object.keys(TS).forEach(function (k) { TS[k].page = 1; });
+    APP.load(); ANIM = true; renderAll();
+  }
+
+  /* ---------- navigation and popovers ---------- */
+  function goTab(id, focusTab, force) {
+    if (tab !== id || force) { tab = id; ANIM = true; if (APP.onTab) { APP.onTab(id); } renderAll(); }
+    var t = $('#dms-tab-' + id); if (!t) { return; }
+    try { t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) { /* ignore */ }
+    if (focusTab) { t.focus(); }
+  }
+  function openPop(w) {
+    POP = w; CAL = null;
+    if (w === 'filters') { FD = {}; APP.filters.forEach(function (f) { FD[f.k] = F[f.k]; }); FS = {}; }
+    else if (F.period === 'custom' && F.from && F.to) { CAL = { from: F.from, to: F.to, view: monthStart(F.from), focus: F.from }; }
+    renderToolbar(); focusFk(w === 'filters' ? 'fd:' + APP.filters[0].k : CAL ? 'day:' + CAL.focus : 'preset:' + F.period);
+  }
+  function closePop(restore) { var w = POP; if (!w) { return; } POP = null; CAL = null; renderToolbar(); if (restore) { focusFk('pop:' + w); } }
+  function applyFilters(next) {
+    var prev = {}; APP.filters.forEach(function (f) { prev[f.k] = F[f.k]; F[f.k] = (next && next[f.k]) || ''; }); POP = null;
+    if (APP.onFilters) { APP.onFilters(prev); }
+    reload();
+  }
+  function applyPeriod(key, from, to) {
+    F.period = key; if (key === 'custom') { F.from = from; F.to = to; }
+    POP = null; CAL = null; setToday(); PERIOD = curPeriod();
+    Object.keys(SS).forEach(function (k) { if (TBL[k] && TBL[k].period) { SS[k].dirty = true; SS[k].page = 1; } });
+    if (APP.onPeriod) { APP.onPeriod(); } else { reload(); return; }
+    ANIM = true; renderAll(); focusFk('pop:period');
+  }
+  function calPick(d) {
+    if (!CAL.from || CAL.to) { CAL.from = d; CAL.to = null; } else if (d < CAL.from) { CAL.to = CAL.from; CAL.from = d; } else { CAL.to = d; }
+    CAL.focus = d;
+  }
+  function calMove(d) { CAL.focus = d; if (d.slice(0, 7) !== CAL.view.slice(0, 7)) { CAL.view = monthStart(d); } renderToolbar(); focusFk('day:' + d); }
+
+  /* ---------- tooltip (one shared element; positioned against the dashboard, clamped to its width) ---------- */
+  function showTip(n) {
+    var tip = $('[data-ref="tip"]'), app = $('.dms-app'); if (!tip || !app) { return; }
+    tip.textContent = n.getAttribute('data-tip'); tip.hidden = false;
+    var a = app.getBoundingClientRect(), r = n.getBoundingClientRect(), w = tip.offsetWidth, hgt = tip.offsetHeight;
+    var x = Math.max(4, Math.min(r.left - a.left + r.width / 2 - w / 2, a.width - w - 4)), y = r.top - a.top - hgt - 8;
+    if (y < 0) { y = r.bottom - a.top + 8; }
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  }
+  function hideTip() { var tip = $('[data-ref="tip"]'); if (tip) { tip.hidden = true; } }
+  function onOver(ev) { var n = ev.target.closest ? ev.target.closest('[data-tip]') : null; if (n && HOST.contains(n)) { showTip(n); } else { hideTip(); } }
+
+  /* ---------- events (single delegated set, removed on destroy) ---------- */
+  function onClick(ev) {
+    var n = ev.target.closest ? ev.target.closest('[data-act]') : null;
+    if (POP && !(ev.target.closest && ev.target.closest('.dms-anchor'))) { closePop(false); }
+    if (!n || !HOST.contains(n)) { return; }
+    var a = n.getAttribute('data-act'), v = n.getAttribute('data-v'), id = n.getAttribute('data-id');
+    if (APP.onAct && APP.onAct(a, v, n, id) === true) { return; }
+    if (a === 'ovbg') { if (ev.target === n) { closeOverlay(); } return; }
+    if (a === 'closeov') { closeOverlay(); return; }
+    if (a === 'ovback' && OVL && OVL.prev) { var pv = OVL.prev; delete SS.drill; delete TS.drill; OVL = pv; if (OVL.spec) { regTable(OVL.spec); } renderOverlay(); return; }
+    if (a === 'tab') { goTab(v); return; }
+    if (a === 'lang') { if (LANG !== v) { LANG = v; try { G.localStorage.setItem('dms_lang', LANG); } catch (e) { /* ignore */ } POP = null; CAL = null; renderAll(); if (OVL) { var o = OVL; OVL = null; renderOverlay(); openDrill(o.id); } focusFk('lang:' + v); } return; }
+    if (a === 'refresh') { if (APP.onRefresh) { APP.onRefresh(); } reload(); return; }
+    if (a === 'pop') { if (POP === v) { closePop(true); } else { openPop(v); } return; }
+    if (a === 'popclose') { closePop(true); return; }
+    if (a === 'preset') {
+      if (v !== 'custom') { applyPeriod(v); return; }
+      var r0 = PERIOD[0] || TODAY, r1 = PERIOD[1] || TODAY; CAL = { from: r0, to: r1, view: monthStart(r1 > TODAY ? TODAY : r1), focus: r1 > TODAY ? TODAY : r1 };
+      renderToolbar(); focusFk('day:' + CAL.focus); return;
+    }
+    if (a === 'calnav' && CAL) { CAL.view = addMonths(CAL.view, +v); CAL.focus = CAL.view; renderToolbar(); return; }
+    if (a === 'calday' && CAL) { calPick(v); renderToolbar(); focusFk('day:' + v); return; }
+    if (a === 'calapply' && CAL && CAL.from && CAL.to) { applyPeriod('custom', CAL.from, CAL.to); return; }
+    if (a === 'fapply') { applyFilters(FD); focusFk('pop:filters'); return; }
+    if (a === 'fclear') { applyFilters(null); focusFk('pop:filters'); return; }
+    if (a === 'rmf') { var nf = {}; APP.filters.forEach(function (f) { nf[f.k] = F[f.k]; }); nf[v] = ''; applyFilters(nf); focusFk('pop:filters'); return; }
+    if (a === 'pending') {
+      goTab(APP.tabs[0].id); var p = $('#dms-pending');
+      if (p) { var still = G.matchMedia && G.matchMedia('(prefers-reduced-motion: reduce)').matches; try { p.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' }); } catch (e) { p.scrollIntoView(); } p.focus({ preventScroll: true }); }
+      return;
+    }
+    if (a === 'kpi') { openDrill(v); return; }
+    if (a === 'tpage') { TS[id].page = Math.max(1, TS[id].page + (+v)); fillTable(id); return; }
+    if (a === 'tsort') { var st = TS[id]; if (st.sk === v) { st.dir = -st.dir; } else { st.sk = v; st.dir = 1; } st.page = 1; fillTable(id); focusHead(id, v); return; }
+    if (a === 'spage') { var ss = SS[id]; ss.page = Math.max(1, ss.page + (+v)); ss.dirty = true; fillTable(id); return; }
+    if (a === 'ssort') { var s2 = SS[id]; if (s2.sk === v) { s2.dir = -s2.dir; } else { s2.sk = v; s2.dir = 1; } s2.page = 1; s2.dirty = true; fillTable(id); focusHead(id, v); return; }
+    if (a === 'sretry') { SS[id].dirty = true; fillTable(id); return; }
+    if (a === 'csv') { var sp = TBL[id]; download(sp.file || id, sp, clientRows(sp, TS[id])); return; }
+    if (a === 'csvall') { exportServer(id); return; }
+  }
+  function focusHead(id, v) { var th = HOST.querySelector('[data-tbl="' + id + '"] th[data-v="' + v + '"]'); if (th) { th.focus(); } }
+  function onInput(ev) {
+    var n = ev.target; if (!n || !n.getAttribute || !HOST.contains(n)) { return; }
+    var fs = n.getAttribute('data-fs'), fd = n.getAttribute('data-fd'), tq = n.getAttribute('data-tq');
+    if (APP.onInput && APP.onInput(n, ev) === true) { return; }
+    if (fs) { if (FS[fs] === n.value) { return; } FS[fs] = n.value; renderToolbar(); return; }
+    if (fd) { if (!FD || FD[fd] === n.value) { return; } FD[fd] = n.value; if (n.type === 'search') { return; } if (APP.filters.some(function (f) { return f.dependsOn === fd; })) { APP.filters.forEach(function (f) { if (f.dependsOn === fd && FD[f.k] && !optList(f, FD).some(function (x) { return x.v === FD[f.k]; })) { FD[f.k] = ''; } }); renderToolbar(); } return; }
+    if (tq) {
+      focusId = tq; var spx = TBL[tq]; if (!spx) { return; }
+      if (spx.server) { var s2 = SS[tq]; if (s2.q === n.value) { return; } s2.q = n.value; s2.page = 1; clearTimeout(onInput.t); onInput.t = later(function () { s2.dirty = true; fillTable(tq); }, 350); }
+      else { var s1 = TS[tq] || (TS[tq] = { q: '', page: 1, sk: spx.sk || '', dir: spx.dir || 1 }); if (s1.q === n.value) { return; } s1.q = n.value; s1.page = 1; fillTable(tq); }
+    }
+  }
+  function onKey(ev) {
+    var t = ev.target, act = t && t.getAttribute ? t.getAttribute('data-act') : null, rtl = LANG === 'ar', k = ev.key;
+    if (k === 'Escape') {
+      if (POP) { ev.preventDefault(); closePop(true); return; }
+      if (OVL) { closeOverlay(); }
+      return;
+    }
+    if ((k === 'Enter' || k === ' ') && (act === 'tsort' || act === 'ssort')) { ev.preventDefault(); t.click(); return; }
+    if (k === 'Tab' && OVL) {
+      var modal = $('.dms-modal'), controls = Array.prototype.filter.call(modal.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), [tabindex="0"]'), function (el) { return el.getClientRects().length; });
+      var first = controls[0], last = controls[controls.length - 1];
+      if (ev.shiftKey && t === first) { ev.preventDefault(); last.focus(); }
+      else if (!ev.shiftKey && t === last) { ev.preventDefault(); first.focus(); }
+    }
+    if (act === 'tab' && /^(ArrowLeft|ArrowRight|Home|End)$/.test(k)) {
+      var ids = APP.tabs.map(function (x) { return x.id; }), i = ids.indexOf(t.getAttribute('data-v')), L = ids.length;
+      var d = k === 'Home' ? -i : k === 'End' ? L - 1 - i : ((k === 'ArrowRight') !== rtl ? 1 : -1);
+      ev.preventDefault(); goTab(ids[(i + d + L) % L], true); return;
+    }
+    if (act === 'calday' && CAL) {
+      var cur = t.getAttribute('data-v'), step = { ArrowRight: rtl ? -1 : 1, ArrowLeft: rtl ? 1 : -1, ArrowUp: -7, ArrowDown: 7 }[k];
+      if (step) { ev.preventDefault(); calMove(addDays(cur, step)); return; }
+      if (k === 'PageUp' || k === 'PageDown') { ev.preventDefault(); calMove(shiftMonths(cur, k === 'PageUp' ? -1 : 1)); return; }
+      if (k === 'Home' || k === 'End') { ev.preventDefault(); calMove(k === 'Home' ? weekStartOf(cur) : addDays(weekStartOf(cur), 6)); }
+    }
+  }
+  /* Start: wire events, render the skeleton, run APP.boot (reference lists), then the first load. */
+  function start() {
+    HOST.addEventListener('click', onClick, SIG);
+    HOST.addEventListener('input', onInput, SIG);
+    HOST.addEventListener('change', onInput, SIG);
+    HOST.addEventListener('keydown', onKey, SIG);
+    HOST.addEventListener('pointerover', onOver, SIG);
+    HOST.addEventListener('pointerleave', hideTip, SIG);
+    HOST.addEventListener('focusin', function (ev) { var n = ev.target.closest && ev.target.closest('[data-tip]'); if (n) { showTip(n); } }, SIG);
+    HOST.addEventListener('focusout', hideTip, SIG);
+    document.addEventListener('pointerdown', function (ev) {
+      if (!POP) { return; } var p = ev.composedPath ? ev.composedPath() : [];
+      for (var i = 0; i < p.length; i++) { if (p[i] === HOST) { return; } }
+      closePop(false);
+    }, SIG);
+    if (!G.frappe || !frappe.call) { HOST.innerHTML = '<div class="dms-empty">Frappe client API not available.</div>'; return; }
+    setToday(); PERIOD = curPeriod();
+    var chartResize = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fitChartLabels) : null;
+    if (chartResize) { chartResize.observe(HOST); if (abort) { abort.signal.addEventListener('abort', function () { chartResize.disconnect(); }); } }
+    if (document.fonts) { document.fonts.ready.then(function () { if (!destroyed) { fitChartLabels(); } }); }
+    renderAll();
+    var g = GEN, chk = function () { return g === GEN && !destroyed; };
+    Promise.resolve(APP.boot ? APP.boot(chk) : null).catch(function (e) { if (G.console) { console.error(APP.key, 'boot', e); } }).then(function () { if (destroyed) { return; } BOOTED = true; reload(); });
+  }
+  /* ==== end DMS kit ==== */
+
+  /* ================================================================== v1 translations (unchanged) */
 	const MISSING = new Set();
 	const AR = {
         "Customer Outstanding Report": "تقرير مستحقات العملاء",
@@ -373,671 +1292,448 @@
 	}
 	window.soaMissing = () => Array.from(MISSING);
 
-	const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-	const money = (v) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-	const money0 = (v) => Number(v || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
-	const iso = (d) => d.toISOString().slice(0, 10);
-	const pd = (s) => new Date(String(s).slice(0, 10) + 'T12:00:00Z');
-	const fdate = (s) => {
-		if (!s) return '';
-		const d = String(s).slice(0, 10);
-		try { return frappe.datetime.str_to_user(d); } catch (_) { return d; }
-	};
-	const ftime = (s) => (s ? String(s).slice(11, 16) : '');
-	const initials = (n) => String(n || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((x) => x[0].toUpperCase()).join('');
-	const slug = (dt) => String(dt || '').toLowerCase().replace(/ /g, '-');
-	function ago(ts) {
-		if (!ts) return '';
-		const ms = Date.now() - new Date(String(ts).replace(' ', 'T')).getTime();
-		const m = Math.round(ms / 60000);
-		if (!isFinite(m)) return '';
-		if (m < 1) return T('just now');
-		if (m < 60) return T('{0} min ago', m);
-		const h = Math.round(m / 60);
-		if (h < 24) return T('{0} h ago', h);
-		return T('{0} d ago', Math.round(h / 24));
-	}
-	const BRAND_CLS = { Najd: 'najd', DMCC: 'dmcc' };
-	const brandChip = (b, extra) => `<span class="soa-brand ${BRAND_CLS[b] || ''}">${esc(b)}${extra ? ' · ' + esc(extra) : ''}</span>`;
+  /* ================================================================== v1 helpers */
+  var money2 = function (v) { return Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+  var money0 = function (v) { return Number(v || 0).toLocaleString('en-US', { maximumFractionDigits: 0 }); };
+  var fdate = function (s) { if (!s) { return ''; } var d = String(s).slice(0, 10); try { return frappe.datetime.str_to_user(d); } catch (_) { return d; } };
+  var ftime = function (s) { return s ? String(s).slice(11, 16) : ''; };
+  var initials = function (n) { return String(n || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(function (x) { return x[0].toUpperCase(); }).join(''); };
+  var slug = function (dt) { return String(dt || '').toLowerCase().replace(/ /g, '-'); };
+  var BRAND_CLS = { Najd: 'najd', DMCC: 'dmcc' };
+  var brandChip = function (b) { return '<span class="sm-brand ' + (BRAND_CLS[b] || '') + '">' + esc(b) + '</span>'; };
+  var DOC_INFO = {
+    'Outstanding SOA': { label: 'Outstanding SOA', desc: 'Open invoices as of a date, with days overdue' },
+    'Customer Ledger': { label: 'Customer Ledger', desc: 'Every transaction with running balance' },
+    'Customer Outstanding': { label: 'Customer Balance Confirmation', desc: 'Balance confirmation PDF with ageing as of a date' }
+  };
+  var STATUS = { 'Sent': ['ok', 'Emailed'], 'Approved': ['ok', 'Emailed'], 'Needs Review': ['warn', 'With Azrah'], 'Rejected': ['bad', 'Rejected'], 'Failed': ['bad', 'Failed'], 'Processing': ['n', 'Processing'] };
+  var badgeS = function (s) { var x = STATUS[s] || ['n', s]; return stat(x[0], T(x[1])); };
+  var period = function (r) { return r.document_type === 'Customer Ledger' ? fdate(r.from_date) + ' – ' + fdate(r.to_date) : T('as of {0}', fdate(r.to_date)); };
+  var docLabel = function (dt) { return T((DOC_INFO[dt] || {}).label || dt); };
+  var KIND_TONE = { 'Outstanding SOA': '#2b4fc1', 'Customer Ledger': '#7a5bd0', 'Customer Outstanding': '#0f8a7a', 'Customer Outstanding Report': '#d97a1e', 'Advance Report': '#c2417a', 'Sales vs Target Report': '#4b55c9', 'Customer Transfer': '#4b5a6e' };
+  var typePill = function (kind) { return '<span class="sm-type" style="--sm-c:' + (KIND_TONE[kind] || '#2b4fc1') + '">' + esc(T(kind === 'Customer Outstanding' ? 'Customer Balance Confirmation' : kind)) + '</span>'; };
+  /* Server messages (frappe.throw) are the useful text; fall back to the kit's message. */
+  function errMsg(e) {
+    try { var m = JSON.parse((e && e._server_messages) || '[]'); if (m.length) { return String(JSON.parse(m[0]).message).replace(/<[^>]*>/g, ''); } } catch (_) { /* ignore */ }
+    return (e && (e.message || e.exc_type)) || T('Something went wrong. Try again.');
+  }
 
-	const ICONS = {
-		ledger: '<path d="M4 4h12a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z"/><path d="M8 9h7M8 13h7M8 17h4"/>',
-		open: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 14h3M8 17h6"/><circle cx="17" cy="15.5" r="1.5"/>',
-		soa: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
-		dl: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
-		ok: '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
-		warn: '<path d="M12 3 2 20h20z"/><path d="M12 10v5M12 18h.01"/>',
-		clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-		x: '<circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/>',
-		stack: '<path d="M12 3 2 8l10 5 10-5zM2 13l10 5 10-5"/>',
-		send: '<path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/>',
-		coin: '<circle cx="12" cy="12" r="9"/><path d="M12 6.5v11M15 9.3c0-1.3-1.3-2.3-3-2.3s-3 1-3 2.2c0 2.9 6 1.6 6 4.6 0 1.3-1.3 2.4-3 2.4s-3-1-3-2.4"/>',
-		phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/>',
-		route: '<circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h8.5a3.5 3.5 0 0 0 0-7h-9a3.5 3.5 0 0 1 0-7H16"/>',
-		users: '<circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-4 3-6 7-6s7 2 7 6M16 4.5a3.5 3.5 0 0 1 0 7M18 14c2.5.6 4 2.4 4 6"/>',
-	};
-	const ico = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[k] || ICONS.soa}</svg>`;
+  /* ================================================================== backend (unchanged scripts) */
+  var DOC_ROUTE = '/app/soa-request/';
+  var LH_HINT = 'Print format not found: {0}. Fix print_formats in the SOA API server script.';
+  function api(action, args) { return callP('soa_api', Object.assign({ action: action }, args || {})); }
+  function wfApi(action, args) { return callP('soa_workflow_api', Object.assign({ action: action }, args || {})).then(function (m) { if (m == null) { throw new Error('No workflow response. Check soa_workflow_api setup.'); } return m; }); }
 
-	const DOC_INFO = {
-		'Outstanding SOA': { icon: 'open', label: 'Outstanding SOA', desc: 'Open invoices as of a date, with days overdue' },
-		'Customer Ledger': { icon: 'ledger', label: 'Customer Ledger', desc: 'Every transaction with running balance' },
-		'Customer Outstanding': { icon: 'coin', label: 'Customer Balance Confirmation', desc: 'Balance confirmation PDF with ageing as of a date' },
-	};
-	const STATUS = {
-		'Sent': ['green', 'Emailed'], 'Approved': ['green', 'Emailed'], 'Needs Review': ['amber', 'With Azrah'],
-		'Rejected': ['red', 'Rejected'], 'Failed': ['red', 'Failed'], 'Processing': ['blue', 'Processing'],
-	};
-	const badge = (s) => { const x = STATUS[s] || ['grey', s]; return `<span class="soa-b ${x[0]}">${esc(T(x[1]))}</span>`; };
-	const fileLinks = (files, label) => (files || []).map((f) => `<a class="soa-file" href="${esc(f.file_url)}" target="_blank" rel="noopener" title="${esc(f.file_name)}">${ico('dl')}${esc(label || f.brand)}</a>`).join('');
-	// table cell that becomes a "label  value" row on phones
-	const td = (label, html, cls) => `<td class="${cls || ''}" data-l="${esc(label)}"><div>${html}</div></td>`;
-	const period = (r) => (r.document_type === 'Customer Ledger' ? fdate(r.from_date) + ' – ' + fdate(r.to_date) : T('as of {0}', fdate(r.to_date)));
-	// outstanding total + ageing buckets
-	// compact version for table cells: one line per bucket that has an amount
-	const agLine = (ag) => (!ag ? '' : `<div class="soa-agl"><div><b>${money(ag.total)}</b> <small>SAR</small></div>${(ag.buckets || []).filter((b) => b.amount > 0.005).map((b) => `<span><small>${esc(T('{0} days', b.label))}</small><b>${money0(b.amount)}</b></span>`).join('')}</div>`);
-	const agHtml = (ag) => (!ag ? '' : `<div class="soa-ag"><div class="soa-ag-t"><b>${money(ag.total)}</b> <small>SAR</small></div><div class="soa-ag-b">${(ag.buckets || []).map((b) => `<span class="${b.amount > 0.005 ? '' : 'z'}"><small>${esc(T('{0} days', b.label))}</small><b>${money0(b.amount)}</b></span>`).join('')}</div></div>`);
+  var M = { notes: {}, wfNotes: {}, busy: {}, wfBusy: false, accessQ: '', empQ: '', coll: { date: '', assign: false, busy: {}, sel: {}, max: {}, emp: '', rm: '' }, open: {}, repl: null };
+  /* Loads: run() on a full reload (skeletons); quiet refreshes swap data in place so typing and open panels are kept. */
+  function fetchInto(key, fn, quiet) {
+    if (!quiet) { run(key, function () { return fn(); }); return; }
+    var g = GEN; fn().then(function (v) { if (g !== GEN) { return; } D[key] = v; D[key + 'Err'] = null; soon(); }, function () { /* keep what is shown */ });
+  }
+  function loadAll(quiet) {
+    fetchInto('boot', function () { return api('bootstrap'); }, quiet);
+    fetchInto('reqs', function () { return api('list', { scope: 'all', limit: 800 }).then(function (r) { return (r && r.requests) || []; }); }, quiet);
+    fetchInto('files', function () { return api('files').then(function (r) { return (r && r.files) || []; }); }, quiet);
+    fetchInto('wf', function () { return wfApi('admin'); }, quiet);
+    loadColl(quiet);
+    if (!quiet) { schedule(); }
+  }
+  function loadColl(quiet) {
+    var C = M.coll;
+    fetchInto('coll', function () {
+      return Promise.all([quiet && D.coll ? Promise.resolve(D.coll.admin) : api('coll_admin'), api('coll_lists', C.date ? { date: C.date } : {})]).then(function (r) { if (!C.date) { C.date = r[1].date; } return { admin: r[0], data: r[1] }; });
+    }, quiet);
+  }
+  /* Auto-refresh every 15 s, as v1 did, unless the tab is hidden, something is saving, the user is typing or a panel is open. */
+  var POLL = 0;
+  function schedule() {
+    var me = ++POLL;
+    later(function tick() {
+      if (me !== POLL) { return; }
+      var a = HOST.getRootNode && HOST.getRootNode().activeElement, typing = a && HOST.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName);
+      var idle = !document.hidden && !M.wfBusy && !Object.keys(M.busy).length && !M.coll.busy.all && !typing && !HOST.querySelector('.dms-modal') && tab !== 'access';
+      if (idle && D.reqs) { loadAll(true); }
+      later(tick, 15000);
+    }, 15000);
+  }
 
-	const errText = (e) => {
-		try {
-			const m = JSON.parse((e && e._server_messages) || '[]');
-			if (m.length) return String(JSON.parse(m[0]).message).replace(/<[^>]*>/g, '');
-		} catch (_) { /* ignore */ }
-		return (e && (e.message || e.exc_type)) || T('Something went wrong. Try again.');
-	};
+  /* ================================================================== derived data */
+  function reqs() { return D.reqs || []; }
+  function inPeriod(iso) { var d = String(iso || '').slice(0, 10); return d >= PERIOD[0] && d <= PERIOD[1]; }
+  function filtered(rows, dateF) { return rows.filter(function (r) { return inPeriod(r[dateF]) && (!F.sp || r.requested_by === F.sp) && (!F.doc || r.document_type === F.doc) && (!F.st || r.status === F.st); }); }
+  function spOpts() { var m = {}; reqs().forEach(function (r) { if (r.requested_by) { m[r.requested_by] = String(r.requested_by_name || r.requested_by); } }); return Object.keys(m).sort(function (a, b) { return m[a].localeCompare(m[b]); }).map(function (u) { return { v: u, l: m[u] }; }); }
+  function waiting() { return reqs().filter(function (x) { return x.status === 'Needs Review' || x.status === 'Failed'; }).sort(function (a, b) { return String(a.creation).localeCompare(String(b.creation)); }); }
+  function wfReqs() { return (D.wf && D.wf.requests) || []; }
+  function wfPending(kind) { return wfReqs().filter(function (r) { return r.status === 'Pending' && (kind === 'report' ? r.kind === 'Customer Outstanding Report' : kind === 'transfer' ? r.kind === 'Customer Transfer' : ['Advance Report', 'Sales vs Target Report'].indexOf(r.kind) >= 0); }); }
+  function collLists() { return D.coll && D.coll.data ? D.coll.data.lists || [] : []; }
+  function drafts() { return collLists().filter(function (l) { return l.status === 'Draft'; }); }
 
-	function toast(msg, kind) {
-		const el = document.createElement('div');
-		el.className = 'soa-toast ' + (kind || '');
-		el.textContent = msg;
-		(ROOT.querySelector('.soa') || ROOT).appendChild(el);
-		setTimeout(() => el.remove(), 3800);
-	}
-	function themeWatch(el) {
-		const apply = () => el.classList.toggle('soa-dark', document.documentElement.getAttribute('data-theme') === 'dark');
-		apply();
-		const mo = new MutationObserver(apply);
-		mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-		return mo;
-	}
-	function setLang(l, rebuild) {
-		try { localStorage.setItem(LANG_KEY, l); } catch (_) { /* ignore */ }
-		LANG = l;
-		rebuild();
-	}
-	const store = {
-		get: (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch (_) { return d; } },
-		set: (k, v) => { try { localStorage.setItem(k, v); } catch (_) { /* ignore */ } },
-	};
-
-	// ------------------------------------------------------------ backend: Server Script "SOA API" (method soa_api) + DocType "SOA Request"
-	const DOC_ROUTE = '/app/soa-request/';
-	const LH_HINT = 'Print format not found: {0}. Fix print_formats in the SOA API server script.';
-	const api = (action, args) => new Promise((resolve, reject) => {
-		frappe.call({
-			method: 'soa_api', args: Object.assign({ action: action }, args || {}), freeze: false,
-			callback: (r) => resolve(r.message),
-			error: (e) => reject(e),
-		});
-	});
-
-    const workflowApi = (action, args) => new Promise((resolve, reject) => frappe.call({
-        method: 'soa_workflow_api', args: Object.assign({ action }, args || {}),
-        callback: r => r && r.message != null ? resolve(r.message) : reject(new Error('No workflow response. Check soa_workflow_api setup.')),
-        error: reject
-    }));
-
-    let workflowData = null, workflowBusy = false, accessQuery = '', workflowNotes = {}, employeeQuery = '';
-    const requestTone = kind => ({'Outstanding SOA':'blue','Customer Ledger':'violet','Customer Outstanding':'teal','Customer Outstanding Report':'amber','Advance Report':'rose','Sales vs Target Report':'indigo','Customer Transfer':'slate'}[kind] || 'blue');
-    const typePill = kind => `<span class="soa-type soa-type-${requestTone(kind)}">${esc(T(kind === 'Customer Outstanding' ? 'Customer Balance Confirmation' : kind))}</span>`;
-    function workflowCard(request) {
-        const pending = request.status === 'Pending';
-        return `<article class="soa-review-card" data-wf-card="${esc(request.name)}">${typePill(request.kind)}<div class="soa-review-heading"><h3>${esc(request.kind === 'Customer Transfer' ? request.from_sales_person + ' → ' + request.to_sales_person : request.kind)}</h3><span class="soa-b ${pending?'amber':'grey'}">${esc(T(request.status))}</span></div>
-            <p class="soa-review-meta">${esc(request.requested_by)} · ${esc(request.report_date || '')}${request.to_date && request.kind==='Sales vs Target Report'?' → '+esc(request.to_date):''} ${esc(request.company || '')}</p>
-            ${request.kind === 'Customer Transfer' ? `<p>${request.customers.length} ${esc(T('Customers'))}</p>` : ''}
-            ${pending || request.file_url ? `<div class="soa-review-preview"><button type="button" class="soa-btn" data-wf-preview="${esc(request.name)}">${esc(T(request.file_url ? 'Open PDF' : 'Generate PDF preview'))}</button><span data-wf-preview-result></span></div>` : ''}
-            <details><summary>${esc(T('Request details'))}</summary><p>${esc(request.note || '')}</p><p>${esc((request.customers || []).join(', '))}</p><p>${esc(request.review_note || '')}</p></details>
-            ${pending ? `<label class="soa-review-note">${esc(T('Review note'))}<textarea class="soa-ta" data-wf-review-note data-name="${esc(request.name)}" maxlength="500" rows="1" placeholder="${esc(T('Optional unless rejecting'))}">${esc(workflowNotes[request.name] || '')}</textarea></label><div class="soa-review-actions"><button class="soa-btn pri" type="button" data-wf-review="approve" data-name="${esc(request.name)}">${esc(T(request.kind==='Customer Transfer'?'Approve transfer':'Approve & email'))}</button><button class="soa-btn" type="button" data-wf-review="reject" data-name="${esc(request.name)}">${esc(T('Reject'))}</button></div>`:''}</article>`;
+  /* ================================================================== actions pending */
+  function actSpecs() {
+    return [
+      { id: 'a_rev', client: true, short: tr('Statements to review', 'كشوف للمراجعة'), title: tr('Statement requests waiting for your review', 'طلبات كشوف حساب بانتظار مراجعتك'), why: tr('Needs Review or Failed. Oldest first. Approve to email the salesperson, or reject with a reason.', 'بانتظار المراجعة أو فشلت. الأقدم أولًا. اعتمد لإرسالها للمندوب أو ارفض مع ذكر السبب.') },
+      { id: 'a_cl', client: true, short: tr('Collection lists to approve', 'قوائم تحصيل للاعتماد'), title: tr('Collection lists waiting for approval', 'قوائم تحصيل بانتظار الاعتماد'), why: tr('Draft lists for the chosen day; collectors are notified on approval.', 'قوائم مسودة لليوم المحدد؛ يُبلَّغ المحصلون عند الاعتماد.') },
+      { id: 'a_rep', client: true, short: tr('Outstanding reports to review', 'تقارير مستحقات للمراجعة'), title: tr('Customer outstanding reports waiting for review', 'تقارير مستحقات العملاء بانتظار المراجعة'), why: tr('Workflow requests from salespeople.', 'طلبات سير عمل من المندوبين.') },
+      { id: 'a_tr', client: true, short: tr('Customer transfers', 'نقل عملاء'), title: tr('Customer transfers waiting for approval', 'طلبات نقل عملاء بانتظار الاعتماد'), why: tr('Approve or reject the move between salespeople.', 'اعتمد أو ارفض النقل بين المندوبين.') },
+      { id: 'a_fin', client: true, short: tr('Finance report requests', 'طلبات تقارير مالية'), title: tr('Finance report requests waiting', 'طلبات تقارير مالية بانتظار المراجعة'), why: tr('Advance and sales-vs-target reports.', 'تقارير السلف والمبيعات مقابل المستهدف.') }
+    ];
+  }
+  function actClient() {
+    var o = {};
+    if (D.reqsErr) { o.a_rev = 'ERR:' + D.reqsErr; } else if (D.reqs) {
+      o.a_rev = { rows: waiting(), item: function (r) { var bad = r.status === 'Failed' || Math.abs(+r.difference || 0) > 1; return { p: 'high', score: score('high', r.invoice_outstanding, ageOf(r.creation)) + (bad ? 5 : 0), dt: 'SOA Request', name: r.name, title: r.customer_name || r.customer, desc: docLabel(r.document_type) + ' · ' + period(r) + (r.error ? ' · ' + T('Failed') : Math.abs(+r.difference || 0) > 1 ? ' · ' + T('Balance difference') + ' ' + money2(r.difference) : ''), who: r.requested_by_name || r.requested_by, due: agoTxt(r.creation, 'Waiting', 'منذ'), tone: bad ? 'bad' : 'warn' }; } };
     }
-    function loadWorkflows(quiet) {
-        if (workflowBusy) return Promise.resolve();
-        return workflowApi('admin').then(data => { workflowData = data; renderWorkflows(); }).catch(error => {
-            if (!quiet) { const target=$root.querySelector('[data-pane="'+(['finance','transfers','access'].includes(M.tab)?M.tab:'queue')+'"] .soa-workflow-content'); if(target)target.innerHTML=errBox('Could not load requests',errText(error)); }
-        });
+    if (D.collErr) { o.a_cl = 'ERR:' + D.collErr; } else if (D.coll) {
+      o.a_cl = { rows: drafts(), item: function (l) { return { p: 'high', score: score('high', l.total_due, 0) - 5, dt: 'Collection List', name: l.name, title: l.collector_name, desc: T('{0} customers', l.customers) + ' · ' + T('To collect') + ' ' + money0(l.total_due), who: l.collector_name, due: fdate(D.coll.data.date), tone: 'warn' }; } };
     }
-    function renderAccess() {
-        if (!workflowData) return;
-        const target=$root.querySelector('[data-access-list]'); if(!target)return;
-        const scroll=target.scrollTop;
-        const q=accessQuery.trim().toLowerCase();
-        target.innerHTML=(workflowData.users || []).filter(user=>((user.full_name||'')+' '+user.name).toLowerCase().includes(q)).map(user=>`<div class="soa-access-row"><div><b>${esc(user.full_name || user.name)}</b><small>${esc(user.name)}</small></div><label><input type="checkbox" data-wf-access="${esc(user.name)}" ${(workflowData.access||[]).includes(user.name)?'checked':''}> ${esc(T('Customer transfers'))}</label><label><input type="checkbox" data-wf-finance-access="${esc(user.name)}" ${(workflowData.finance_access||[]).includes(user.name)?'checked':''}> ${esc(T('Finance reports'))}</label></div>`).join('') || `<p>${esc(T('No matching employees'))}</p>`;
-        target.scrollTop=scroll;
+    if (D.wfErr) { ['a_rep', 'a_tr', 'a_fin'].forEach(function (k) { o[k] = 'ERR:' + D.wfErr; }); } else if (D.wf) {
+      var wi = function (p, tone) { return function (r) { return { p: p, score: score(p, 0, ageOf(r.creation || r.report_date)), dt: 'SOA Workflow Request', name: r.name, title: r.kind === 'Customer Transfer' ? r.from_sales_person + ' → ' + r.to_sales_person : T(r.kind), desc: (r.company || '') + (r.report_date ? ' · ' + fdate(r.report_date) : ''), who: r.requested_by, due: agoTxt(r.creation || r.report_date, 'Waiting', 'منذ'), tone: tone }; }; };
+      o.a_rep = { rows: wfPending('report'), item: wi('high', 'warn') }; o.a_tr = { rows: wfPending('transfer'), item: wi('med', 'warn') }; o.a_fin = { rows: wfPending('finance'), item: wi('med', 'n') };
     }
-    function renderWorkflows() {
-        if (!workflowData) return;
-        const requests=workflowData.requests||[];
-        const reports=requests.filter(r=>r.kind==='Customer Outstanding Report' && r.status==='Pending');
-        const badge=$root.querySelector('[data-c="queue"]'); if(badge)badge.textContent=reports.length+(M.reqs||[]).filter(r=>['Needs Review','Failed'].includes(r.status)).length;
-        const queue=$root.querySelector('.soa-workflow-queue');
-        if(queue)queue.innerHTML=reports.map(workflowCard).join('');
-        if(reports.length && !(M.reqs||[]).some(r=>['Needs Review','Failed'].includes(r.status)))$root.querySelector('.soa-queue').innerHTML='';
-        for(const [tab,kind] of [['transfers','Customer Transfer'],['finance',null]]) {
-            const target=$root.querySelector('[data-pane="'+tab+'"] .soa-workflow-content');
-            if(target) {const items=requests.filter(r=>kind?r.kind===kind:['Advance Report','Sales vs Target Report'].includes(r.kind));target.innerHTML=items.length?items.map(workflowCard).join(''):errBox('Nothing to review','');}
-        }
-        // Access is a stable view. Polling never replaces its DOM or resets its scroll.
-        if(M.tab==='access' && !$root.querySelector('[data-access-list]').children.length)renderAccess();
+    return Object.keys(o).length ? o : null;
+  }
+
+  /* ================================================================== banner */
+  function banner() {
+    var b = D.boot, msgs = [];
+    if (D.bootErr) { return alertBox('err', esc(tr('Could not load your SOA settings (soa_api bootstrap): ', 'تعذر تحميل إعدادات كشوف الحساب (soa_api bootstrap): ') + errText(D.bootErr))); }
+    if (!b) { return ''; }
+    if (b.is_manager === false) { msgs.push(T('A configured manager role is required to review requests.')); }
+    if (b.no_manager) { msgs.push(T('Azrah’s login is not set in the dashboard settings (manager_user), so requests that need review stay with the salesperson.')); }
+    if (b.missing_letterheads && b.missing_letterheads.length) { msgs.push(T(LH_HINT, b.missing_letterheads.join(', '))); }
+    return msgs.length ? alertBox('warn', esc(msgs.join(' '))) : '';
+  }
+
+  /* ================================================================== overview */
+  function tabOverview(AM) {
+    var r = reqs(), le = D.reqsErr, ll = !D.reqs && !le, month = TODAY.slice(0, 7);
+    var mreq = r.filter(function (x) { return String(x.creation).slice(0, 7) === month && x.status !== 'Processing'; }), auto = mreq.filter(function (x) { return x.matched === true; }).length, w = waiting();
+    var oldest = w.length ? w[0].creation : '', sentToday = r.filter(function (x) { return String(x.sent_on).slice(0, 10) === TODAY; }).length;
+    var rv = function (n) { return le ? '—' : ll ? '…' : num(n); };
+    var cl = collLists(), ce = D.collErr, cv = function (f) { return ce ? '—' : !D.coll ? '…' : f(); }, dr = drafts();
+    var h = kpis([
+      kpi({ label: T('Waiting for you'), dot: w.length ? 'var(--dms-age3)' : 'var(--dms-ok)', val: rv(w.length), sub: esc(le ? errText(le) : oldest ? T('oldest {0}', daysTxt(ageOf(oldest))) : T('queue is clear')), act: 'goto:queue' }),
+      kpi({ label: T('Approved today'), dot: 'var(--dms-ok)', val: rv(sentToday), sub: esc(T('sent to salespeople')) }),
+      kpi({ label: T('Matched this month'), val: le ? '—' : ll ? '…' : mreq.length ? Math.round(auto / mreq.length * 100) + '%' : '—', sub: esc(T('{0} of {1} requests', auto, mreq.length)), tip: tr('Requests whose statement agreed with the General Ledger without manual changes.', 'طلبات تطابق كشفها مع دفتر الأستاذ العام دون تعديل.') }),
+      kpi({ label: T('Rejected this month'), dot: 'var(--dms-bad)', val: rv(mreq.filter(function (x) { return x.status === 'Rejected'; }).length), sub: esc(T('returned to salespeople')) }),
+      kpi({ label: tr('Lists to approve', 'قوائم للاعتماد'), dot: dr.length ? 'var(--dms-age3)' : null, val: cv(function () { return num(dr.length); }), sub: esc(D.coll ? T('{0} lists', cl.length) + ' · ' + fdate(D.coll.data.date) : ''), act: 'goto:coll' }),
+      kpi({ label: T('Collected'), dot: 'var(--dms-ok)', val: cv(function () { return cur$(sum(cl, function (l) { return l.total_collected; })); }), sub: esc(D.coll ? T('To collect') + ' ' + money0(sum(cl, function (l) { return l.total_due; })) : ''), act: 'goto:coll' })
+    ], true);
+    h += '<div class="dms-main2">' + actionsPanel(AM) + '<div class="dms-stackcol">' + panel(tr('Requests by status', 'الطلبات حسب الحالة'), src('reqs', T('Request log'), statusChart), '', esc(rangeLabel(PERIOD))) + '</div></div>';
+    h += '<div class="dms-cols-2 dms-grid">' + panel(tr('Requests by salesperson', 'الطلبات حسب المندوب'), src('reqs', T('Request log'), bySalesperson), '', esc(rangeLabel(PERIOD))) +
+      panel(tr('Collections by collector', 'التحصيل حسب المحصل'), src('coll', T('Collections'), byCollector), '', esc(D.coll ? fdate(D.coll.data.date) : '')) + '</div>';
+    return h;
+  }
+  var ST_COLOR = { 'Sent': 'var(--dms-ok)', 'Approved': '#6fbf95', 'Needs Review': 'var(--dms-age3)', 'Rejected': 'var(--dms-bad)', 'Failed': '#8f2415', 'Processing': '#8a97a8' };
+  function statusChart(all) {
+    var rows = filtered(all, 'creation'), B = buckets(PERIOD), by = {};
+    rows.forEach(function (r) { var k = B.keyOf(String(r.creation).slice(0, 10)), s = r.status; (by[k] = by[k] || {})[s] = (by[k][s] || 0) + 1; });
+    var sts = Object.keys(ST_COLOR).filter(function (s) { return rows.some(function (r) { return r.status === s; }); });
+    return stackChart(B.keys, B.gran, sts.map(function (s) { return { label: T(STATUS[s][1]) + (s === 'Approved' ? ' (' + tr('reviewed', 'بعد المراجعة') + ')' : s === 'Sent' ? ' (' + tr('auto', 'تلقائي') + ')' : ''), color: ST_COLOR[s], val: function (k) { return by[k] ? by[k][s] || 0 : 0; } }; }), num) +
+      note(esc(num(rows.length) + ' ' + tr('requests in this period', 'طلبًا في هذه الفترة')));
+  }
+  function bySalesperson(all) {
+    var g = groupBy(filtered(all, 'creation'), function (r) { return r.requested_by_name || r.requested_by || '—'; });
+    return splitBars(Object.keys(g).map(function (k) { var rs = g[k]; return { label: k, total: rs.length, part: rs.filter(function (r) { return r.status === 'Sent' || r.status === 'Approved'; }).length }; }).sort(function (a, b) { return b.total - a.total; }).slice(0, 10),
+      [{ label: T('Emailed'), color: 'var(--dms-royal)' }, { label: tr('Other', 'أخرى'), color: '#a3b4ef' }], num);
+  }
+  function byCollector(c) {
+    var ls = c.data.lists || [];
+    if (!ls.length) { return empty(T('No lists for this day')); }
+    return splitBars(ls.map(function (l) { return { label: l.collector_name, total: l.total_due || 0, part: Math.min(l.total_due || 0, l.total_collected || 0), act: 'goto:coll' }; }).sort(function (a, b) { return b.total - a.total; }),
+      [{ label: T('Collected'), color: 'var(--dms-ok)' }, { label: tr('Still to collect', 'المتبقي للتحصيل'), color: '#cfe3d8' }], money);
+  }
+
+  /* ================================================================== review queue */
+  function tabQueue() {
+    if (D.reqsErr) { return srcErr(D.reqsErr, 'soa_api · list'); }
+    if (!D.reqs) { return skel(2, 'dms-skel-panel'); }
+    var q = waiting(), rep = D.wf ? wfPending('report') : [];
+    var h = '';
+    if (!q.length && !rep.length) { h += '<div class="dms-empty sm-clear"><b>' + esc(T('Nothing to review')) + '</b> ' + esc(T('New requests from salespeople show here.')) + '</div>'; }
+    else { h += '<div class="sm-cards">' + q.map(card).join('') + rep.map(wfCard).join('') + '</div>'; }
+    if (D.wfErr) { h += srcErr(D.wfErr, 'soa_workflow_api · admin'); }
+    return h;
+  }
+  function card(r) {
+    var dis = M.busy[r.name] ? ' disabled' : '', mismatch = Math.abs(Number(r.difference) || 0) > 1 || (r.gl && r.gl.matched === false);
+    return '<article class="sm-card" data-card="' + esc(r.name) + '">' + typePill(r.document_type) +
+      '<div class="sm-card-h"><h3>' + bdi(r.customer_name || r.customer) + '</h3><b class="dms-num">' + esc(money2(r.invoice_outstanding)) + ' <small>' + esc(CUR) + '</small></b></div>' +
+      '<p class="dms-sm">' + bdi(r.requested_by_name || r.requested_by || T('Unknown requester')) + ' · ' + esc(period(r)) + ' · <a class="dms-link" href="' + DOC_ROUTE + encodeURIComponent(r.name) + '" target="_blank" rel="noopener noreferrer">' + esc(r.name) + ' ↗</a> · ' + esc(agoTxt(r.creation, 'Waiting', 'منذ')) + '</p>' +
+      (r.error ? alertBox('err', esc(r.error)) : mismatch ? alertBox('warn', esc(T('Balance difference')) + ': <b class="dms-num">' + esc(money2(r.difference)) + '</b>') : '<p class="sm-ok">' + esc(T('Balances match')) + '</p>') +
+      '<div class="sm-row"><button class="dms-btn dms-btn-sm" type="button" data-act="mprev" data-v="' + esc(r.name) + '"' + dis + '>' + esc(T('Open PDF preview')) + '</button>' + (r.files || []).map(function (f) { return '<a class="dms-link" target="_blank" rel="noopener noreferrer" href="/api/method/soa_api?action=manager_file&name=' + encodeURIComponent(r.name) + '&file=' + encodeURIComponent(f.file_url) + '">' + esc(f.file_name || 'PDF') + ' ↗</a>'; }).join('') + '</div>' +
+      '<details class="sm-det"' + (M.open['d:' + r.name] ? ' open' : '') + ' data-open="d:' + esc(r.name) + '"><summary>' + esc(T('Checks & details')) + '</summary>' + glBlock(r) + (r.details || []).map(function (d) { return '<p class="dms-sm">' + esc(d.kind) + ' · ' + esc(d.voucher || '') + ' · ' + esc(money2(d.amount)) + '</p>'; }).join('') +
+      '<button type="button" class="dms-btn dms-btn-sm" data-act="op" data-v="recheck" data-id="' + esc(r.name) + '"' + dis + '>' + esc(T('Re-check')) + '</button></details>' +
+      '<label class="sm-note"><span>' + esc(T('Review note')) + '</span><textarea class="dms-input dms-ta" data-note="' + esc(r.name) + '" rows="2" maxlength="500" placeholder="' + esc(T('Optional unless rejecting')) + '">' + esc(M.notes[r.name] || '') + '</textarea></label>' +
+      '<div class="sm-row"><button type="button" class="dms-btn dms-btn-primary" data-act="op" data-v="approve" data-id="' + esc(r.name) + '"' + dis + '>' + esc(T('Approve & email')) + '</button><button type="button" class="dms-btn" data-act="op" data-v="reject" data-id="' + esc(r.name) + '"' + dis + '>' + esc(T('Reject')) + '</button></div></article>';
+  }
+  var GL_LINES = { opening: 'Opening balance', debit: 'Debit total', credit: 'Credit total', closing: 'Closing balance' };
+  function vlink(d) { return d.voucher_type ? '<a class="dms-link" href="/app/' + slug(d.voucher_type) + '/' + encodeURIComponent(d.voucher) + '" target="_blank" rel="noopener noreferrer">' + esc(d.voucher) + '</a>' : esc(d.voucher || '—'); }
+  function glBlock(r) {
+    var g = r.gl; if (!g || !g.lines) { return ''; }
+    var glUrl = '/app/query-report/General Ledger?party_type=Customer&party=' + encodeURIComponent(r.customer) + '&from_date=' + encodeURIComponent(r.from_date) + '&to_date=' + encodeURIComponent(r.to_date);
+    var rows = g.lines.map(function (l) { var bad = Math.abs(l.difference) > 0.005; return '<tr><th scope="row">' + esc(T(GL_LINES[l.key] || l.key)) + '</th><td class="dms-td-n">' + esc(money2(l.statement)) + '</td><td class="dms-td-n">' + esc(money2(l.gl)) + '</td><td class="dms-td-n' + (bad ? ' dms-tone-bad' : '') + '">' + esc(money2(l.difference)) + '</td></tr>'; }).join('');
+    var v = (g.vouchers || []).length ? '<ul class="dms-list">' + g.vouchers.map(function (d) { return '<li>' + esc(T(d.kind)) + ' · ' + vlink(d) + ' · <b class="dms-num">' + esc(money2(d.difference)) + '</b> <span class="dms-sm">' + esc(T('Statement {0} / {1} · General Ledger {2} / {3}', money2(d.st_debit), money2(d.st_credit), money2(d.gl_debit), money2(d.gl_credit))) + '</span></li>'; }).join('') + '</ul>' : '';
+    return '<p class="dms-sm"><b>' + esc(T(g.matched ? 'Agrees with the General Ledger' : 'Customer ledger vs General Ledger')) + '</b> · <a class="dms-link" href="' + esc(glUrl) + '" target="_blank" rel="noopener noreferrer">' + esc(T('Open General Ledger')) + ' ↗</a></p>' +
+      '<div class="dms-tablewrap"><table class="dms-table"><thead><tr><th></th><th class="dms-th-n">' + esc(T('Statement')) + '</th><th class="dms-th-n">' + esc(T('General Ledger')) + '</th><th class="dms-th-n">' + esc(T('Difference')) + '</th></tr></thead><tbody>' + rows + '</tbody></table></div>' + v;
+  }
+  function act(name, op) {
+    var note = (M.notes[name] || '').trim();
+    if (op === 'reject' && !note) { toast(T('Write a reason so the salesperson knows what to fix.'), true); var ta = HOST.querySelector('textarea[data-note="' + name.replace(/"/g, '\\"') + '"]'); if (ta) { ta.focus(); } return; }
+    M.busy[name] = true; renderSoft();
+    api('review', { name: name, op: op, note: note }).then(function (r) {
+      delete M.busy[name]; delete M.notes[name];
+      var list = reqs(), i = list.findIndex(function (x) { return x.name === name; }); if (i >= 0 && r) { list[i] = r; }
+      var msg = r.status === 'Approved' ? T('Approved and emailed to {0}', r.requested_by_name || r.requested_by) : r.status === 'Rejected' ? T('Rejected — the salesperson was notified')
+        : r.status === 'Needs Review' ? (r.matched ? T('Checked again — it matches now') : T('Still different by {0} SAR', money2(r.difference))) : T('Status: {0}', T((STATUS[r.status] || [0, r.status])[1]));
+      toast(msg, r.status === 'Failed'); renderSoft(); loadAll(true);
+    }, function (e) { delete M.busy[name]; renderSoft(); toast(errMsg(e), true); });
+  }
+  function preview(name, wf) {
+    var popup = G.open('about:blank', '_blank');
+    var p = wf ? (function () { var rq = wfReqs().filter(function (x) { return x.name === name; })[0]; return rq && rq.file_url ? Promise.resolve() : wfApi('preview', { name: name }).then(function (pv) { if (rq) { rq.file_url = pv.file_url; } }); })().then(function () { return '/api/method/soa_workflow_api?action=open_pdf&name=' + encodeURIComponent(name); })
+      : api('manager_preview', { name: name }).then(function (data) { var f = ((data && data.files) || [])[0]; if (!f) { throw new Error('No PDF generated. Check request details.'); } return '/api/method/soa_api?action=manager_file&name=' + encodeURIComponent(name) + '&file=' + encodeURIComponent(f.file_url); });
+    p.then(function (url) { if (popup) { popup.location.href = url; } else { toast(T('Allow pop-ups to view PDF previews.'), true); } }, function (e) { if (popup) { popup.close(); } toast(errMsg(e), true); });
+  }
+
+  /* ================================================================== request and file logs */
+  function tabAll() {
+    return src('reqs', 'soa_api · list', function (all) {
+      var rows = filtered(all, 'creation');
+      return panel(T('Request log'), regTable({ id: 't_all', rows: rows, file: 'soa_requests', sk: 'creation', dir: -1, text: function (r) { return [r.customer_name, r.customer, r.name, r.requested_by_name, r.requested_by].join(' '); }, empty: T(all.length ? 'Nothing matches these filters' : 'No requests yet'), cols: [
+        { k: 'cust', h: T('Customer'), s: function (r) { return r.customer_name; }, r: function (r) { return '<b>' + bdi(r.customer_name) + '</b><span class="dms-sm"> ' + esc(r.customer) + '</span>'; }, c: function (r) { return r.customer_name; } },
+        { k: 'creation', h: T('Requested'), s: function (r) { return r.creation; }, r: function (r) { return esc(fdate(r.creation)) + ' <span class="dms-sm">' + esc(ftime(r.creation)) + '</span><br>' + docLink('SOA Request', r.name); }, c: function (r) { return r.creation; } },
+        { k: 'sp', h: T('Salesperson'), s: function (r) { return r.requested_by_name || r.requested_by; }, r: function (r) { return bdi(r.requested_by_name || r.requested_by); }, c: function (r) { return r.requested_by_name || r.requested_by; } },
+        { k: 'doc', h: T('Document'), s: function (r) { return r.document_type; }, r: function (r) { return esc(docLabel(r.document_type)) + (r.letterheads ? '<span class="dms-sm"> · ' + esc(r.letterheads) + '</span>' : ''); }, c: function (r) { return r.document_type; } },
+        { h: T('Period'), r: function (r) { return esc(period(r)); }, c: function (r) { return period(r); } },
+        { k: 'st', h: T('Status'), s: function (r) { return r.status; }, r: function (r) { return badgeS(r.status); }, c: function (r) { return r.status; } },
+        { k: 'diff', h: T('Difference'), num: 1, s: function (r) { return Math.abs(+r.difference || 0); }, r: function (r) { return '<span class="dms-num' + (Math.abs(+r.difference || 0) > 1 ? ' dms-tone-bad' : '') + '">' + esc(money2(r.difference)) + '</span>'; }, c: function (r) { return r.difference; } },
+        { h: T('Reviewed'), r: function (r) { return (r.reviewed_by ? bdi(String(r.reviewed_by).split('@')[0]) + ' <span class="dms-sm">' + esc(fdate(r.reviewed_on)) + '</span>' : '<span class="dms-sm">' + esc(r.status === 'Sent' ? T('auto') : '—') + '</span>') + (r.review_note ? '<br><span class="dms-sm">' + esc(r.review_note) + '</span>' : ''); }, c: function (r) { return (r.reviewed_by || '') + ' ' + (r.review_note || ''); } },
+        { h: T('Files'), r: function (r) { return r.document_type === 'Customer Outstanding' ? (r.status === 'Approved' ? '<b class="dms-num">' + esc(money2(r.invoice_outstanding)) + '</b>' : '<span class="dms-sm">—</span>') : ((r.files || []).map(function (f) { return '<a class="dms-link" href="' + esc(f.file_url) + '" target="_blank" rel="noopener noreferrer">' + esc(f.brand || f.file_name) + ' ↗</a>'; }).join(' ') || '<span class="dms-sm">—</span>'); }, c: function (r) { return (r.files || []).map(function (f) { return f.file_url; }).join(' '); } }] }), '', esc(T('{0} of {1}', num(rows.length), num(all.length)) + ' · ' + rangeLabel(PERIOD)));
+    });
+  }
+  function tabFiles() {
+    return src('files', 'soa_api · files', function (all) {
+      var rows = all.filter(function (f) { return inPeriod(f.sent_on) && (!F.sp || f.requested_by === F.sp) && (!F.doc || f.document_type === F.doc) && (!F.st || f.status === F.st); });
+      return panel(T('Files emailed to salespeople'), regTable({ id: 't_files', rows: rows, file: 'soa_files', sk: 'sent', dir: -1, text: function (f) { return [f.customer_name, f.customer, f.file_name, f.requested_by, f.request].join(' '); }, empty: T(all.length ? 'Nothing matches this search' : 'No files sent yet'), cols: [
+        { k: 'cust', h: T('Customer'), s: function (f) { return f.customer_name; }, r: function (f) { return '<b>' + bdi(f.customer_name) + '</b><span class="dms-sm"> ' + esc(f.customer) + '</span>'; }, c: function (f) { return f.customer_name; } },
+        { k: 'sent', h: T('Sent'), s: function (f) { return f.sent_on; }, r: function (f) { return esc(fdate(f.sent_on)) + ' <span class="dms-sm">' + esc(ftime(f.sent_on)) + '</span>'; }, c: function (f) { return f.sent_on; } },
+        { h: T('File'), r: function (f) { return '<a class="dms-link" href="' + esc(f.file_url) + '" target="_blank" rel="noopener noreferrer">' + esc(f.file_name) + ' ↗</a>'; }, c: function (f) { return f.file_name; } },
+        { h: T('Letterhead'), r: function (f) { return brandChip(f.brand) + ' <span class="dms-sm">' + esc(f.letter_head || '') + '</span>'; }, c: function (f) { return f.brand; } },
+        { h: T('Document'), r: function (f) { return esc(docLabel(f.document_type)); }, c: function (f) { return f.document_type; } },
+        { h: T('Period'), r: function (f) { return esc(period(f)); }, c: function (f) { return period(f); } },
+        { k: 'to', h: T('Sent to'), s: function (f) { return f.requested_by; }, r: function (f) { return bdi(f.requested_by); }, c: function (f) { return f.requested_by; } },
+        { k: 'amt', h: T('Amount'), num: 1, s: function (f) { return +f.amount || 0; }, r: function (f) { return '<span class="dms-num">' + esc(money2(f.amount)) + '</span>'; }, c: function (f) { return f.amount; } },
+        { h: T('How'), r: function (f) { return f.status === 'Sent' ? stat('ok', T('auto-matched')) : stat('n', T('approved')); }, c: function (f) { return f.status; } }] }), '', esc(T('{0} files', num(rows.length)) + ' · ' + rangeLabel(PERIOD)));
+    });
+  }
+
+  /* ================================================================== collections */
+  var RESULT = { 'Collected': 'ok', 'Part collected': 'ok', 'Promised': 'warn', 'Not reachable': 'n', 'Refused': 'bad' };
+  function tabColl() {
+    if (D.collErr) { return srcErr(D.collErr, T('Collections')); }
+    if (!D.coll) { return skel(2, 'dms-skel-panel'); }
+    var C = M.coll, d = D.coll.data, ad = D.coll.admin, lists = d.lists || [], dr = lists.filter(function (l) { return l.status === 'Draft'; }), isToday = d.date === d.today, busy = C.busy.all ? ' disabled' : '';
+    var h = '<div class="sm-bar"><div class="dms-ff vz-ff"><label for="sm-cdate">' + esc(T('Day')) + '</label><input id="sm-cdate" class="dms-input" type="date" data-cdate="1" value="' + esc(d.date) + '" max="' + esc(d.today) + '"></div>' +
+      '<div class="dms-chips dms-bchips" role="group" aria-label="' + esc(tr('Recent days', 'الأيام الأخيرة')) + '">' + (d.history || []).slice(0, 7).map(function (x) { var on = x.date === d.date; return '<button type="button" class="dms-bchip' + (on ? ' dms-on' : '') + '" aria-pressed="' + on + '" data-act="cday" data-v="' + esc(x.date) + '"><span>' + esc(fdate(x.date)) + '</span><b class="dms-num">' + esc(money(x.collected)) + '</b></button>'; }).join('') + '</div>' +
+      '<div class="sm-row"><button type="button" class="dms-btn dms-btn-sm" data-act="cassign" aria-expanded="' + !!C.assign + '">' + esc(T(C.assign ? 'Hide assignments' : 'Assign salespeople')) + '</button>' +
+      (isToday ? '<button type="button" class="dms-btn dms-btn-sm" data-act="cbuild"' + busy + ' title="' + esc(T('Rebuild the lists that are not approved yet, from today’s Accounts Receivable')) + '">↻ ' + esc(T('Rebuild today’s lists')) + '</button>' : '') +
+      (dr.length ? '<button type="button" class="dms-btn dms-btn-sm dms-btn-primary" data-act="capproveall"' + busy + '>' + esc(T('Approve all ({0})', dr.length)) + '</button>' : '') + '</div></div>';
+    h += kpis([
+      kpi({ label: T('Waiting for approval'), dot: dr.length ? 'var(--dms-age3)' : null, val: num(dr.length), sub: esc(T('{0} lists', lists.length)) }),
+      kpi({ label: T('To collect ({0}+ days)', ad.collect_after_days), val: cur$(sum(lists, function (l) { return l.total_due; })), sub: esc(T('{0} customers', sum(lists, function (l) { return l.customers; }))) }),
+      kpi({ label: T('Collected'), dot: 'var(--dms-ok)', val: cur$(sum(lists, function (l) { return l.total_collected; })), sub: esc(T('logged by collectors')) }),
+      kpi({ label: T('Customers visited'), val: num(sum(lists, function (l) { return l.done; })), sub: esc(T('with a result logged')) })
+    ]);
+    if (!(ad.collectors || []).length) { C.assign = true; }
+    if (C.assign) { h += assignHtml(ad); }
+    if (!(ad.collectors || []).length) { return h; }
+    if (!lists.length) { return h + empty(T(isToday ? 'No lists for today' : 'No lists for this day') + ' — ' + T(Object.keys(ad.assignments || {}).length ? 'No assigned customer has a balance older than {0} days.' : 'Assign salespeople to the collectors first.', ad.collect_after_days)); }
+    return h + lists.map(listCard).join('');
+  }
+  function listCard(l) {
+    var draft = l.status === 'Draft', busy = M.coll.busy.all ? ' disabled' : '', key = 'cl:' + l.name, open = M.open[key] != null ? M.open[key] : draft;
+    var rows = (l.items || []).map(function (it) { return Object.assign({ _list: l.name, _draft: draft }, it); });
+    var spec = regTable({ id: 'cl_' + l.name.replace(/[^\w-]/g, '_'), rows: rows, file: 'collection_' + l.name, pageSize: 50, text: function (it) { return [it.customer_name, it.customer, it.sales_person].join(' '); }, empty: T('Nothing to collect'), cols: [
+      { k: 'cust', h: T('Customer'), s: function (it) { return it.customer_name; }, r: function (it) { return '<b>' + bdi(it.customer_name) + '</b><span class="dms-sm"> ' + docLink('Customer', it.customer) + ' · ' + esc(it.sales_person || '') + '</span>' + (it.removed ? '<br><span class="dms-sm dms-tone-bad">' + esc(T('removed from this list')) + '</span>' : ''); }, c: function (it) { return it.customer_name; } },
+      { k: 'due', h: T('To collect'), num: 1, s: function (it) { return +it.due_amount || 0; }, r: function (it) { return '<b class="dms-num">' + esc(money2(it.due_amount)) + '</b><br><span class="dms-sm">' + esc(T('since {0}', fdate(it.oldest_date))) + '</span>'; }, c: function (it) { return it.due_amount; } },
+      { h: T('Total outstanding'), num: 1, r: function (it) { return '<span class="dms-num">' + esc(money2(it.total_outstanding)) + '</span>'; }, c: function (it) { return it.total_outstanding; } },
+      { h: T('Invoices'), r: function (it) { var iv = it.invoices || []; return '<span class="dms-sm">' + iv.slice(0, 6).map(function (v) { return esc(v.voucher) + ' · ' + esc(money0(v.amount)) + ' · ' + esc(T('{0} d', v.days)); }).join('<br>') + (iv.length > 6 ? '<br>' + esc(T('+{0} more', iv.length - 6)) : '') + '</span>'; }, c: function (it) { return (it.invoices || []).map(function (v) { return v.voucher; }).join(' '); } },
+      { h: T('Last update'), r: function (it) { return '<span class="dms-sm">' + esc(it.last_update || '—') + '</span>'; }, c: function (it) { return it.last_update; } },
+      { h: T('Result'), r: function (it) { return it.result ? stat(RESULT[it.result] || 'n', T(it.result)) + (it.collected_amount ? ' <b class="dms-num">' + esc(money2(it.collected_amount)) + '</b>' : '') + (it.promise_date ? '<br><span class="dms-sm">' + esc(T('promised {0}', fdate(it.promise_date))) + '</span>' : '') + (it.payment_mode ? '<br><span class="dms-sm">' + esc(T(it.payment_mode)) + '</span>' : '') + (it.note ? '<br><span class="dms-sm">' + esc(it.note) + '</span>' : '') : '<span class="dms-sm">' + esc(it.note || '—') + '</span>'; }, c: function (it) { return (it.result || '') + ' ' + (it.collected_amount || ''); } }
+    ].concat(draft ? [{ h: '', r: function (it) { return '<button type="button" class="dms-btn dms-btn-sm' + (it.removed ? '' : ' sm-bad') + '" data-act="cremove" data-v="' + esc(l.name) + '" data-id="' + esc(it.name) + '" data-removed="' + (it.removed ? 0 : 1) + '"' + busy + '>' + esc(T(it.removed ? 'Put back' : 'Remove')) + '</button>' + (it.removed ? ' <button type="button" class="dms-btn dms-btn-sm" data-act="creplace" data-v="' + esc(l.name) + '" data-id="' + esc(it.name) + '"' + busy + '>' + esc(T('Assign another')) + '</button>' : ''); }, c: function () { return ''; } }] : []) });
+    return '<details class="dms-panelbox sm-cl" data-open="' + esc(key) + '"' + (open ? ' open' : '') + '><summary class="sm-cl-h"><span class="sm-who"><i>' + esc(initials(l.collector_name)) + '</i><span><b>' + bdi(l.collector_name) + '</b><span class="dms-sm">' + esc(T('{0} customers', l.customers)) + ' · ' + esc(T('{0} visited', l.done || 0)) + (l.skipped ? ' · <span class="dms-tone-warn">' + esc(T('+{0} over the daily max', l.skipped)) + '</span>' : '') + '</span></span></span>' +
+      '<span class="sm-cl-n"><span class="dms-sm">' + esc(T('To collect')) + '</span><b class="dms-num">' + esc(money0(l.total_due)) + '</b></span><span class="sm-cl-n"><span class="dms-sm">' + esc(T('Collected')) + '</span><b class="dms-num dms-ok">' + esc(money0(l.total_collected)) + '</b></span>' +
+      '<span class="sm-cl-st">' + (draft ? stat('warn', T('Waiting for approval')) : stat('ok', T('Approved')) + ' <span class="dms-sm">' + esc(T('by {0}', String(l.approved_by || '').split('@')[0])) + '</span>') + '</span>' +
+      (draft ? '<button type="button" class="dms-btn dms-btn-sm dms-btn-primary" data-act="capprove" data-v="' + esc(l.name) + '"' + busy + '>' + esc(T('Approve list')) + '</button>' : '') + '</summary>' +
+      '<div class="sm-row"><button type="button" class="dms-btn dms-btn-sm" data-act="cpdf" data-v="' + esc(l.name) + '">' + esc(T('Daily visit collection PDF')) + '</button>' + docLink('Collection List', l.name) + '</div>' + spec + '</details>';
+  }
+  function assignHtml(ad) {
+    var C = M.coll, nameOf = {}, owner = {}, taken = {};
+    (ad.collectors || []).forEach(function (x) { nameOf[x.user] = x.full_name; taken[x.employee] = 1; taken[x.user] = 1; });
+    Object.keys(ad.assignments || {}).forEach(function (col) { (ad.assignments[col] || []).forEach(function (sp) { (owner[sp] = owner[sp] || []).push(nameOf[col] || col); }); });
+    var q = M.empQ.toLowerCase(), emps = (ad.employees || []).filter(function (e) { return !taken[e.employee] && !(e.user && taken[e.user]) && (!q || (e.name + ' ' + (e.designation || '')).toLowerCase().indexOf(q) >= 0); });
+    var h = '<section class="dms-panelbox dms-mb"><div class="dms-ph"><h3 class="dms-h3">' + esc(T('Collectors and their salespeople')) + '</h3><span class="dms-ph-meta">' + esc(T('Assignments follow salespeople on overdue invoices, including former salespeople.')) + '</span></div>' +
+      '<div class="sm-row"><div class="dms-ff vz-ff"><label for="sm-eq">' + esc(T('Search employees or salespeople')) + '</label><input id="sm-eq" type="search" class="dms-input" data-empq="1" value="' + esc(M.empQ) + '"></div>' +
+      '<div class="dms-ff vz-ff"><label for="sm-emp">' + esc(T('Add a collector from employees…')) + '</label><select id="sm-emp" class="dms-input" data-cemp="1"><option value=""></option>' + emps.map(function (e) { return '<option value="' + esc(e.employee) + '"' + (e.user ? '' : ' disabled') + (C.emp === e.employee ? ' selected' : '') + '>' + esc(e.name) + (e.designation ? ' · ' + esc(e.designation) : '') + (e.user ? '' : ' · ' + esc(T('no login'))) + '</option>'; }).join('') + '</select></div>' +
+      '<button type="button" class="dms-btn dms-btn-primary" data-act="caddcol"' + (C.emp && !C.busy.all ? '' : ' disabled') + '>' + esc(T('Add collector')) + '</button></div>';
+    if (!(ad.collectors || []).length) { h += empty(T('No collectors yet. Pick the employees who collect; they need a User ID on their Employee form to log in.')); }
+    h += '<div class="sm-assign">' + (ad.collectors || []).map(function (x) {
+      var mine = (ad.assignments || {})[x.user] || [], sel = C.sel[x.user] || {}, rm = C.rm === x.employee;
+      return '<div class="sm-assign-c"><div class="sm-card-h"><span><b>' + bdi(x.full_name) + '</b><span class="dms-sm"> ' + esc(x.user) + ' · ' + esc(T('{0} salespeople', mine.length)) + (x.max_customers ? ' · ' + esc(T('max {0} a day', x.max_customers)) : '') + '</span></span>' +
+        '<button type="button" class="dms-btn dms-btn-sm sm-bad" data-act="crmcol" data-v="' + esc(x.employee) + '">' + esc(T(rm ? 'Confirm remove' : 'Remove')) + '</button></div><div class="sm-assign-l">' +
+        (ad.sales_persons || []).filter(function (sp) { return !q || (sp + ' ' + x.full_name).toLowerCase().indexOf(q) >= 0; }).map(function (sp) {
+          var on = sel[sp] != null ? sel[sp] : mine.indexOf(sp) >= 0, det = (ad.sales_person_details || {})[sp] || {}, other = mine.indexOf(sp) < 0 && owner[sp] ? owner[sp].join(', ') : '';
+          return '<label class="sm-chk"><input type="checkbox" data-csp="' + esc(x.user) + '" value="' + esc(sp) + '"' + (on ? ' checked' : '') + '><span>' + esc(sp) + (det.left ? ' <span class="dms-sm dms-tone-bad">' + esc(T(det.pending_invoices ? 'Left salesperson · invoices pending' : 'Left salesperson')) + '</span>' : '') + (det.pending_invoices ? ' <span class="dms-sm">' + esc(T('{0} pending invoices', det.pending_invoices)) + '</span>' : '') + (other ? ' <span class="dms-sm">· ' + esc(other) + '</span>' : '') + '</span></label>';
+        }).join('') + '</div><div class="sm-row"><div class="dms-ff vz-ff"><label>' + esc(T('Max customers a day')) + '<input class="dms-input" type="number" min="0" step="1" inputmode="numeric" data-cmax="' + esc(x.user) + '" value="' + esc(C.max[x.user] != null ? C.max[x.user] : (x.max_customers || '')) + '" placeholder="' + esc(T('No limit')) + '"></label></div>' +
+        '<button type="button" class="dms-btn dms-btn-sm dms-btn-primary" data-act="csave" data-v="' + esc(x.user) + '"' + (C.busy['a:' + x.user] ? ' disabled' : '') + '>' + esc(T('Save')) + '</button></div></div>';
+    }).join('') + '</div></section>';
+    return h;
+  }
+  function collCall(method, args, msg) {
+    var C = M.coll; C.busy.all = true; renderSoft();
+    return api(method, args).then(function () { C.busy = {}; if (msg) { toast(msg); } loadColl(true); renderSoft(); }, function (e) { C.busy = {}; renderSoft(); toast(errMsg(e), true); });
+  }
+  function saveAssign(col) {
+    var C = M.coll, ad = D.coll.admin, sel = {};
+    ((ad.assignments || {})[col] || []).forEach(function (sp) { sel[sp] = true; }); Object.assign(sel, C.sel[col] || {});
+    var args = { collector: col, sales_persons: JSON.stringify(Object.keys(sel).filter(function (k) { return sel[k]; })) }, mx = C.max[col];
+    if (mx != null) { args.max_customers = mx === '' ? 0 : mx; }
+    C.busy['a:' + col] = true; renderSoft();
+    api('coll_assign', args).then(function (r) {
+      C.busy = {}; ad.assignments = r.assignments; C.sel[col] = {}; if (r.collectors) { ad.collectors = r.collectors; } delete C.max[col];
+      toast(T('Saved. Tomorrow’s list uses these salespeople; rebuild today’s lists to apply it now.')); renderSoft();
+    }, function (e) { C.busy = {}; renderSoft(); toast(errMsg(e), true); });
+  }
+  function collectorOp(emp, op) {
+    var C = M.coll; C.busy.all = true; renderSoft();
+    api('coll_collectors', { employee: emp, op: op }).then(function (r) {
+      C.busy = {}; C.emp = ''; C.rm = ''; D.coll.admin.collectors = r.collectors; D.coll.admin.assignments = r.assignments;
+      toast(T(op === 'remove' ? 'Collector removed' : 'Collector added. Now tick their salespeople and save.')); renderSoft();
+    }, function (e) { C.busy = {}; renderSoft(); toast(errMsg(e), true); });
+  }
+  function downloadCollection(list, btn) {
+    if (btn.disabled) { return; }
+    var label = btn.textContent; btn.disabled = true; btn.textContent = T('Preparing PDF…');
+    fetch('/api/method/soa_api', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Frappe-CSRF-Token': (G.frappe && frappe.csrf_token) || '' }, body: new URLSearchParams({ action: 'coll_pdf', list: list }).toString() })
+      .then(function (r) { if (!r.ok || (r.headers.get('content-type') || '').indexOf('application/pdf') < 0) { return r.json().catch(function () { return { message: T('Something went wrong. Try again.') }; }).then(function (e) { throw e; }); } return r.blob(); })
+      .then(function (blob) { var url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = 'Daily_Visit_Collection.pdf'; HOST.appendChild(a); a.click(); a.remove(); later(function () { URL.revokeObjectURL(url); }, 60000); }, function (e) { toast(errMsg(e), true); })
+      .then(function () { btn.disabled = false; btn.textContent = label; });
+  }
+  function chooseReplacement(list, item) {
+    api('coll_candidates', { list: list, item: item }).then(function (r) {
+      if (!r.customers.length) { toast(T('No eligible replacement customers')); return; }
+      M.repl = { list: list, item: item, customers: r.customers }; openDrill('repl');
+    }, function (e) { toast(errMsg(e), true); });
+  }
+
+  /* ================================================================== workflow requests and access */
+  function wfCard(r) {
+    var pending = r.status === 'Pending', dis = M.wfBusy ? ' disabled' : '';
+    return '<article class="sm-card">' + typePill(r.kind) + '<div class="sm-card-h"><h3>' + bdi(r.kind === 'Customer Transfer' ? r.from_sales_person + ' → ' + r.to_sales_person : T(r.kind)) + '</h3>' + stat(pending ? 'warn' : 'n', T(r.status)) + '</div>' +
+      '<p class="dms-sm">' + bdi(r.requested_by) + ' · ' + esc(r.report_date || '') + (r.to_date && r.kind === 'Sales vs Target Report' ? ' → ' + esc(r.to_date) : '') + ' ' + esc(r.company || '') + ' · ' + docLink('SOA Workflow Request', r.name) + '</p>' +
+      (r.kind === 'Customer Transfer' ? '<p class="dms-sm">' + num((r.customers || []).length) + ' ' + esc(T('Customers')) + '</p>' : '') +
+      (pending || r.file_url ? '<div class="sm-row"><button type="button" class="dms-btn dms-btn-sm" data-act="wprev" data-v="' + esc(r.name) + '">' + esc(T(r.file_url ? 'Open PDF' : 'Generate PDF preview')) + '</button></div>' : '') +
+      '<details class="sm-det"' + (M.open['w:' + r.name] ? ' open' : '') + ' data-open="w:' + esc(r.name) + '"><summary>' + esc(T('Request details')) + '</summary><p class="dms-sm">' + esc(r.note || '') + '</p><p class="dms-sm">' + esc((r.customers || []).join(', ')) + '</p><p class="dms-sm">' + esc(r.review_note || '') + '</p></details>' +
+      (pending ? '<label class="sm-note"><span>' + esc(T('Review note')) + '</span><textarea class="dms-input dms-ta" data-wnote="' + esc(r.name) + '" maxlength="500" rows="2" placeholder="' + esc(T('Optional unless rejecting')) + '">' + esc(M.wfNotes[r.name] || '') + '</textarea></label>' +
+        '<div class="sm-row"><button class="dms-btn dms-btn-primary" type="button" data-act="wop" data-v="approve" data-id="' + esc(r.name) + '"' + dis + '>' + esc(T(r.kind === 'Customer Transfer' ? 'Approve transfer' : 'Approve & email')) + '</button><button class="dms-btn" type="button" data-act="wop" data-v="reject" data-id="' + esc(r.name) + '"' + dis + '>' + esc(T('Reject')) + '</button></div>' : '') + '</article>';
+  }
+  function tabWf(which) {
+    return src('wf', 'soa_workflow_api · admin', function () {
+      var items = wfReqs().filter(function (r) { return which === 'transfers' ? r.kind === 'Customer Transfer' : ['Advance Report', 'Sales vs Target Report'].indexOf(r.kind) >= 0; });
+      items.sort(function (a, b) { return (a.status === 'Pending' ? 0 : 1) - (b.status === 'Pending' ? 0 : 1); });
+      return items.length ? '<div class="sm-cards">' + items.map(wfCard).join('') + '</div>' : empty(T('Nothing to review'));
+    });
+  }
+  function wfReview(name, op) {
+    if (M.wfBusy) { return; }
+    var note = M.wfNotes[name] || '';
+    M.wfBusy = true; renderSoft();
+    wfApi('review', { name: name, op: op, note: note }).then(function () { M.wfBusy = false; delete M.wfNotes[name]; toast(T('Saved')); fetchInto('wf', function () { return wfApi('admin'); }, true); }, function (e) { M.wfBusy = false; renderSoft(); toast(errMsg(e), true); });
+  }
+  function tabAccess() {
+    return src('wf', 'soa_workflow_api · admin', function (w) {
+      var q = M.accessQ.trim().toLowerCase(), users = (w.users || []).filter(function (u) { return ((u.full_name || '') + ' ' + u.name).toLowerCase().indexOf(q) >= 0; });
+      return panel(tr('Employee access', 'صلاحيات الموظفين'), '<div class="dms-ff vz-ff sm-mb"><label for="sm-aq">' + esc(tr('Search employees', 'ابحث عن موظف')) + '</label><input id="sm-aq" class="dms-input" type="search" data-accq="1" value="' + esc(M.accessQ) + '" placeholder="' + esc(tr('Name or email', 'الاسم أو البريد')) + '"></div>' +
+        (users.length ? '<div class="sm-access">' + users.slice(0, 300).map(function (u) {
+          return '<div class="sm-access-r"><span><b>' + bdi(u.full_name || u.name) + '</b><span class="dms-sm"> ' + esc(u.name) + '</span></span><label class="sm-chk"><input type="checkbox" data-acc="access" value="' + esc(u.name) + '"' + ((w.access || []).indexOf(u.name) >= 0 ? ' checked' : '') + '> ' + esc(T('Customer transfers')) + '</label><label class="sm-chk"><input type="checkbox" data-acc="finance_access" value="' + esc(u.name) + '"' + ((w.finance_access || []).indexOf(u.name) >= 0 ? ' checked' : '') + '> ' + esc(T('Finance reports')) + '</label></div>';
+        }).join('') + '</div>' + (users.length > 300 ? note(esc(tr('First 300 matches — type to narrow.', 'أول 300 نتيجة — اكتب للتضييق.'))) : '') : empty(T('No matching employees'))), '', esc(num((w.access || []).length) + ' · ' + num((w.finance_access || []).length)));
+    });
+  }
+  function setAccess(n) {
+    var finance = n.getAttribute('data-acc') === 'finance_access', user = n.value, on = n.checked; n.disabled = true;
+    wfApi(finance ? 'finance_access' : 'access', { user: user, enabled: on ? 1 : 0 }).then(function () {
+      var w = D.wf, k = finance ? 'finance_access' : 'access', ex = w[k] || []; w[k] = on ? uniq(ex.concat([user])) : ex.filter(function (x) { return x !== user; }); n.disabled = false; toast(T('Saved'));
+    }, function (e) { n.checked = !on; n.disabled = false; toast(errMsg(e), true); });
+  }
+  function tabActions(AM) { return actionsTab(AM, tr('Everything waiting right now, not limited by the period or filters. Each row opens the record; the categories open the tab where you act on them.', 'كل ما ينتظر الآن، غير مقيد بالفترة أو المرشحات. كل سطر يفتح السجل، والفئات تفتح التبويب الذي تتخذ فيه الإجراء.')); }
+
+  /* ================================================================== drill-downs */
+  var ACT_TAB = { a_rev: 'queue', a_cl: 'coll', a_rep: 'queue', a_tr: 'transfers', a_fin: 'finance' };
+  function drill(id) {
+    if (id.indexOf('cli:') === 0) {
+      var k = id.slice(4), cc = actClient(), x = cc && cc[k], sp = actSpecs().filter(function (s) { return s.id === k; })[0];
+      if (!x || typeof x === 'string' || !sp) { return null; }
+      return { title: sp.title, sub: sp.why, body: '<div class="dms-actions-row"><button type="button" class="dms-btn dms-btn-primary" data-act="gotab" data-v="' + ACT_TAB[k] + '">' + esc(tr('Open the tab to act on them', 'افتح التبويب لاتخاذ الإجراء')) + '</button></div>',
+        spec: { rows: x.rows.map(x.item), file: k, text: function (it) { return [it.title, it.desc, it.who].join(' '); }, cols: [
+          { h: tr('Record', 'السجل'), r: function (it) { return docLink(it.dt, it.name, it.title); }, c: function (it) { return it.name; } },
+          { h: tr('Details', 'التفاصيل'), r: function (it) { return '<span class="dms-sm">' + bdi(it.desc) + '</span>'; }, c: function (it) { return it.desc; } },
+          { h: tr('Requested by', 'مقدم الطلب'), r: function (it) { return bdi(it.who || '—'); }, c: function (it) { return it.who; } },
+          { h: tr('Waiting', 'الانتظار'), r: function (it) { return '<span class="dms-tone-' + (it.tone || 'n') + '">' + esc(it.due || '') + '</span>'; }, c: function (it) { return it.due; } }] } };
     }
-    function bindWorkflows(wrap) {
-        wrap.addEventListener('input', event=>{
-            if(event.target.matches('[data-wf-review-note]'))workflowNotes[event.target.dataset.name]=event.target.value;
-            if(event.target.matches('[data-access-search]')){accessQuery=event.target.value;renderAccess();}
-            if(event.target.matches('[data-employee-search]')){employeeQuery=event.target.value.toLowerCase();wrap.querySelectorAll('[data-f="cemp"] option').forEach(option=>{if(option.value)option.hidden=!option.textContent.toLowerCase().includes(employeeQuery);});wrap.querySelectorAll('[data-employee-row]').forEach(row=>{row.hidden=!row.dataset.employeeRow.includes(employeeQuery);});}
-        });
-        wrap.addEventListener('click', async event=>{
-            const button=event.target.closest('[data-wf-preview],[data-main-preview]');if(!button)return;
-            button.disabled=true;
-            const popup=window.open('about:blank','_blank');
-            try {
-                if(button.dataset.wfPreview){const name=button.dataset.wfPreview;const request=(workflowData.requests||[]).find(item=>item.name===name);if(!request || !request.file_url){const preview=await workflowApi('preview',{name});if(request)request.file_url=preview.file_url;}if(popup)popup.location.href='/api/method/soa_workflow_api?action=open_pdf&name='+encodeURIComponent(name);}
-                else {const data=await api('manager_preview',{name:button.dataset.mainPreview});const file=(data.files||[])[0];if(!file)throw new Error('No PDF generated. Check request details.');if(popup)popup.location.href='/api/method/soa_api?action=manager_file&name='+encodeURIComponent(button.dataset.mainPreview)+'&file='+encodeURIComponent(file.file_url);}
-                if(!popup)toast('Allow pop-ups to view PDF previews.','bad');
-            }catch(error){if(popup)popup.close();toast(errText(error),'bad');}
-            finally{button.disabled=false;}
-        });
-        wrap.addEventListener('change', event => {
-            const input = event.target;
-            const finance = !!input.dataset.wfFinanceAccess;
-            const user = input.dataset.wfAccess || input.dataset.wfFinanceAccess;
-            if (!user) return;
-            input.disabled = true;
-            workflowApi(finance ? 'finance_access' : 'access', { user, enabled: input.checked ? 1 : 0 }).then(() => {
-                if (workflowData) { const key = finance ? 'finance_access' : 'access'; const existing = workflowData[key] || []; workflowData[key] = input.checked ? Array.from(new Set(existing.concat(user))) : existing.filter(name => name !== user); }
-                toast(T('Saved'), 'ok');
-            }).catch(error => { input.checked = !input.checked; toast(errText(error), 'bad'); }).finally(() => { input.disabled = false; });
-        });
-        wrap.addEventListener('click', event => {
-            const button = event.target.closest('[data-wf-review]');
-            if (!button || workflowBusy) return;
-            const card = button.closest('[data-wf-card]');
-            const note = card.querySelector('[data-wf-review-note]').value;
-            workflowBusy = true; card.querySelectorAll('button').forEach(item => { item.disabled = true; });
-            workflowApi('review', { name: button.dataset.name, op: button.dataset.wfReview, note }).then(() => {
-                workflowBusy = false; delete workflowNotes[button.dataset.name]; return loadWorkflows();
-            }).catch(error => { workflowBusy = false; card.querySelectorAll('button').forEach(item => { item.disabled = false; }); toast(errText(error), 'bad'); });
-        });
+    if (id === 'repl' && M.repl) {
+      var R = M.repl;
+      return { title: T('Assign another'), sub: T('Choose replacement customer'), stack: false, body: '<div class="dms-ff"><label for="sm-repl">' + esc(T('Choose replacement customer')) + '</label><select id="sm-repl" class="dms-input" data-repl="1">' + R.customers.map(function (c) { return '<option value="' + esc(c.customer) + '">' + esc(c.customer_name + ' · ' + c.customer + ' · ' + money0(c.due_amount)) + '</option>'; }).join('') + '</select></div><div class="dms-actions-row"><button type="button" class="dms-btn dms-btn-primary" data-act="creplgo">' + esc(T('Assign another')) + '</button></div>' };
     }
+    return null;
+  }
 
-	// ------------------------------------------------------------ Azrah: SOA Manager dashboard
-	const M = { tab: store.get('soa_m_tab', 'queue'), reqs: null, files: null, st: '', sp: '', q: '', fq: '', busy: {}, notes: {}, today: '',
-		coll: { admin: null, data: null, date: '', assign: false, busy: {}, err: '', sel: {} } };
-	let $root = null, mo = null, timer = null;
-    let loadSequence = 0, activeLoad = null, stopAutoRefresh = null;
+  /* ================================================================== events */
+  function onAct(a, v, n, id) {
+    if (a === 'gotab') { closeOverlay(); goTab(v); return true; }
+    if (a === 'op') { act(id, v); return true; }
+    if (a === 'mprev') { preview(v, false); return true; }
+    if (a === 'wprev') { preview(v, true); return true; }
+    if (a === 'wop') { var ta = HOST.querySelector('[data-wnote="' + id + '"]'); if (ta) { M.wfNotes[id] = ta.value; } wfReview(id, v); return true; }
+    if (a === 'cday') { M.coll.date = v; D.coll = null; loadColl(false); return true; }
+    if (a === 'cassign') { M.coll.assign = !M.coll.assign; renderSoft(); return true; }
+    if (a === 'cbuild') { collCall('coll_build', {}, T('Today’s lists rebuilt')); return true; }
+    if (a === 'capprove') { collCall('coll_approve', { lists: JSON.stringify([v]) }, T('List approved — the collector was notified')); return true; }
+    if (a === 'capproveall') { var dl = drafts().map(function (l) { return l.name; }); if (!dl.length) { toast(T('No lists waiting for approval')); } else { collCall('coll_approve', { lists: JSON.stringify(dl) }, T('{0} lists approved — collectors were notified', dl.length)); } return true; }
+    if (a === 'cremove') { collCall('coll_item', { list: v, item: id, removed: n.getAttribute('data-removed') }, ''); return true; }
+    if (a === 'creplace') { chooseReplacement(v, id); return true; }
+    if (a === 'creplgo' && M.repl) { var s = HOST.querySelector('[data-repl]'), R = M.repl; n.disabled = true; api('coll_replace', { list: R.list, item: R.item, customer: s.value }).then(function () { M.repl = null; closeOverlay(); toast(T('Customer replaced')); loadColl(true); }, function (e) { n.disabled = false; toast(errMsg(e), true); }); return true; }
+    if (a === 'cpdf') { downloadCollection(v, n); return true; }
+    if (a === 'csave') { saveAssign(v); return true; }
+    if (a === 'caddcol') { if (M.coll.emp) { collectorOp(M.coll.emp, 'add'); } return true; }
+    if (a === 'crmcol') { if (M.coll.rm === v) { collectorOp(v, 'remove'); } else { M.coll.rm = v; renderSoft(); } return true; }
+    return false;
+  }
+  function onInputApp(n) {
+    var g = function (k) { return n.getAttribute(k); };
+    if (g('data-note') != null) { M.notes[g('data-note')] = n.value; return true; }
+    if (g('data-wnote') != null) { M.wfNotes[g('data-wnote')] = n.value; return true; }
+    if (g('data-cdate')) { if (n.value && n.value !== M.coll.date) { M.coll.date = n.value; D.coll = null; loadColl(false); } return true; }
+    if (g('data-cemp')) { M.coll.emp = n.value; renderSoft(); var e1 = HOST.querySelector('[data-cemp]'); if (e1) { e1.focus(); } return true; }
+    if (g('data-cmax') != null) { M.coll.max[g('data-cmax')] = n.value.replace(/[^0-9]/g, ''); return true; }
+    if (g('data-csp') != null) { var col = g('data-csp'); M.coll.sel[col] = M.coll.sel[col] || {}; M.coll.sel[col][n.value] = n.checked; return true; }
+    if (g('data-acc') != null) { if (!n.disabled) { setAccess(n); } return true; }
+    if (g('data-empq')) { if (M.empQ !== n.value) { M.empQ = n.value; renderSoft(); refocus('[data-empq]'); } return true; }
+    if (g('data-accq')) { if (M.accessQ !== n.value) { M.accessQ = n.value; renderSoft(); refocus('[data-accq]'); } return true; }
+    if (g('data-repl')) { return true; }
+    return false;
+  }
+  function refocus(sel) { var el = HOST.querySelector(sel); if (el) { el.focus(); try { el.setSelectionRange(el.value.length, el.value.length); } catch (e) { /* ignore */ } } }
+  /* <details> toggles do not bubble: remember them so a refresh keeps panels as the user left them. */
+  HOST.addEventListener('toggle', function (ev) { var k = ev.target && ev.target.getAttribute && ev.target.getAttribute('data-open'); if (k) { M.open[k] = ev.target.open; } }, Object.assign({ capture: true }, SIG || {}));
 
-	function build() {
-		if (mo) mo.disconnect();
-		if (timer) clearInterval(timer);
-        if (stopAutoRefresh) stopAutoRefresh();
-		ROOT.querySelectorAll('.soa').forEach((x) => x.remove());
-		const rtl = LANG === 'ar';
-		const wrap = document.createElement('div');
-		wrap.className = 'soa' + (rtl ? ' soa-rtl' : '');
-		wrap.dir = rtl ? 'rtl' : 'ltr';
-		wrap.lang = rtl ? 'ar' : 'en';
-		wrap.innerHTML = `
-			<div class="soa-top">
-				<div class="soa-tabs" role="tablist">
-					<button type="button" class="soa-tab" data-tab="queue" role="tab">${esc(T('Review queue'))} <span class="soa-cnt" data-c="queue">0</span></button>
-					<button type="button" class="soa-tab" data-tab="all" role="tab">${esc(T('All requests'))}</button>
-					<button type="button" class="soa-tab" data-tab="files" role="tab">${esc(T('Files emailed'))}</button>
-					<button type="button" class="soa-tab" data-tab="coll" role="tab">${esc(T('Collections'))} <span class="soa-cnt" data-c="coll">0</span></button>
-				</div>
-				<div class="soa-side"><span class="soa-me"><i></i><span></span></span>
-					<button type="button" class="soa-ibtn" data-a="refresh" title="${esc(T('Refresh'))}">↻</button>
-					<button type="button" class="soa-lang" data-a="lang" title="${esc(T('Switch language'))}">${rtl ? 'English' : 'العربية'}</button></div>
-			</div>
-			<div class="soa-warnbar" hidden></div>
-			<div class="soa-kpis"></div>
-			<div class="soa-pane" data-pane="queue"><div class="soa-queue"><div class="soa-card"><div class="soa-skel"></div></div></div></div>
-			<div class="soa-pane" data-pane="all"><section class="soa-card">
-				<div class="soa-card-h"><h3 class="soa-card-t">${esc(T('Request log'))}</h3><span class="soa-card-s" data-c="all"></span></div>
-				<div class="soa-tools"><input class="soa-in" type="search" data-f="q" placeholder="${esc(T('Search customer, request or salesperson'))}">
-					<select class="soa-sel" data-f="st"></select><select class="soa-sel" data-f="sp"></select></div>
-				<div class="soa-all"><div class="soa-skel"></div></div></section></div>
-			<div class="soa-pane" data-pane="files"><section class="soa-card">
-				<div class="soa-card-h"><h3 class="soa-card-t">${esc(T('Files emailed to salespeople'))}</h3><span class="soa-card-s" data-c="files"></span></div>
-				<div class="soa-tools"><input class="soa-in" type="search" data-f="fq" placeholder="${esc(T('Search customer, file or salesperson'))}"></div>
-				<div class="soa-flog"><div class="soa-skel"></div></div></section></div>
-			<div class="soa-pane" data-pane="coll"><div class="soa-coll"><div class="soa-card"><div class="soa-skel"></div></div></div></div>`;
-        wrap.querySelector('.soa-tabs').insertAdjacentHTML('beforeend', ['transfers','finance','access'].map((tab,index)=>`<button type="button" class="soa-tab" data-tab="${tab}" role="tab">${esc(T(['Transfers','Finance requests','Access'][index]))}</button>`).join(''));
-        wrap.insertAdjacentHTML('beforeend', '<div class="soa-pane" data-pane="transfers"><div class="soa-workflow-content"></div></div><div class="soa-pane" data-pane="finance"><div class="soa-workflow-content"></div></div><div class="soa-pane" data-pane="access"><section class="soa-card soa-cpad"><h3>Employee access</h3><label>Search employees<input class="soa-in" type="search" data-access-search placeholder="Name or email"></label><div data-access-list class="soa-access-list"></div></section></div>');
-        wrap.querySelector('.soa-queue').insertAdjacentHTML('afterend','<div class="soa-workflow-queue soa-workflow-content"></div>');
-        bindWorkflows(wrap);
-		ROOT.appendChild(wrap);
-		$root = wrap;
-		mo = themeWatch(wrap);
-		bind();
-		switchTab(M.tab);
-		if (M.reqs) paint(); else load();
-		if (M.coll.data) renderColl(); else loadColl();
-        const refreshAutomatically = () => {
-            if (!wrap.isConnected) { clearInterval(timer); if (stopAutoRefresh) stopAutoRefresh(); return; }
-            if (M.tab==='access') return;
-            if (document.hidden || workflowBusy || Object.keys(M.busy).length || M.coll.busy.all) return;
-            // Saved notes stay in M.notes; avoid replacing controls while Azrah types.
-            if (wrap.contains(document.activeElement) && document.activeElement.matches('input,textarea,select')) return;
-            load(true);
-            if (M.tab === 'coll') loadColl(true);
-            loadWorkflows(true);
-        };
-        timer = setInterval(refreshAutomatically, 15000);
-        window.addEventListener('focus', refreshAutomatically);
-        document.addEventListener('visibilitychange', refreshAutomatically);
-        stopAutoRefresh = () => {
-            window.removeEventListener('focus', refreshAutomatically);
-            document.removeEventListener('visibilitychange', refreshAutomatically);
-        };
-	}
+  start();
+})();
 
-    async function downloadCollection(list, button) {
-        if (button.disabled) return;
-        const label = button.textContent;
-        button.disabled = true;
-        button.textContent = T('Preparing PDF…');
-        try {
-            const response = await fetch('/api/method/soa_api', {
-                method: 'POST', credentials: 'same-origin',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Frappe-CSRF-Token': frappe.csrf_token || '' },
-                body: new URLSearchParams({ action: 'coll_pdf', list: list }).toString()
-            });
-            if (!response.ok || !(response.headers.get('content-type') || '').includes('application/pdf')) {
-                let error;
-                try { error = await response.json(); } catch (_) { error = { message: T('Something went wrong. Try again.') }; }
-                throw error;
-            }
-            const blob = await response.blob();
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = 'Daily_Visit_Collection.pdf';
-            document.body.appendChild(link);
-            link.click(); link.remove();
-            setTimeout(() => URL.revokeObjectURL(url), 60000);
-        } catch (error) { toast(errText(error), 'bad'); }
-        finally { button.disabled = false; button.textContent = label; }
-    }
-
-	function bind() {
-		$root.addEventListener('click', (e) => {
-			const t = e.target.closest('[data-tab],[data-a],[data-op],[data-day]');
-			if (!t) return;
-			if (t.dataset.tab) return switchTab(t.dataset.tab);
-			if (t.dataset.op) return act(t.dataset.name, t.dataset.op);
-			if (t.dataset.day) { M.coll.date = t.dataset.day; return loadColl(); }
-			const a = t.dataset.a;
-            if (a === 'cpdf') { e.preventDefault(); return downloadCollection(t.dataset.list, t); }
-			if (a === 'lang') return setLang(LANG === 'ar' ? 'en' : 'ar', build);
-			if (a === 'refresh') { loadColl(); return load(); }
-			if (a === 'cassign') { M.coll.assign = !M.coll.assign; return renderColl(); }
-			if (a === 'csave') return saveAssign(t.dataset.col);
-			if (a === 'caddcol') return M.coll.emp && collectorOp(M.coll.emp, 'add');
-			if (a === 'crmcol') { if (M.coll.rm === t.dataset.emp) return collectorOp(t.dataset.emp, 'remove'); M.coll.rm = t.dataset.emp; return renderColl(); }
-			if (a === 'cbuild') return collCall('coll_build', {}, T('Today’s lists rebuilt'));
-			if (a === 'capprove') return collCall('coll_approve', { lists: JSON.stringify([t.dataset.list]) }, T('List approved — the collector was notified'));
-			if (a === 'capprove-all') {
-				const drafts = ((M.coll.data || {}).lists || []).filter((l) => l.status === 'Draft').map((l) => l.name);
-				if (!drafts.length) return toast(T('No lists waiting for approval'));
-				return collCall('coll_approve', { lists: JSON.stringify(drafts) }, T('{0} lists approved — collectors were notified', drafts.length));
-			}
-			if (a === 'creplace') return chooseReplacement(t);
-			if (a === 'cremove') return collCall('coll_item', { list: t.dataset.list, item: t.dataset.item, removed: t.dataset.removed }, '');
-		});
-		$root.addEventListener('input', (e) => {
-			const f = e.target.dataset.f;
-			if (f === 'q') { M.q = e.target.value; renderAll(); }
-			if (f === 'fq') { M.fq = e.target.value; renderFiles(); }
-			if (f === 'note') M.notes[e.target.dataset.name] = e.target.value;
-		});
-		$root.addEventListener('change', (e) => {
-			const f = e.target.dataset.f;
-			if (f === 'st' || f === 'sp') { M[f] = e.target.value; renderAll(); }
-			if (f === 'cdate') { M.coll.date = e.target.value; loadColl(); }
-			if (f === 'cemp') { M.coll.emp = e.target.value; renderColl(); }
-			if (f === 'cmax') { M.coll.max = M.coll.max || {}; M.coll.max[e.target.dataset.col] = e.target.value.replace(/[^0-9]/g, ''); }
-			if (f === 'csp') { const col = e.target.dataset.col; M.coll.sel[col] = M.coll.sel[col] || {}; M.coll.sel[col][e.target.value] = e.target.checked; }
-		});
-	}
-	function switchTab(id) {
-        if(id==='workflows')id='transfers';
-		M.tab = id; store.set('soa_m_tab', id);
-        if (['queue','finance','transfers','access'].includes(id)) loadWorkflows();
-		$root.querySelectorAll('.soa-tab').forEach((b) => { b.classList.toggle('on', b.dataset.tab === id); b.setAttribute('aria-selected', b.dataset.tab === id); });
-		$root.querySelectorAll('.soa-pane').forEach((p) => p.classList.toggle('on', p.dataset.pane === id));
-	}
-
-	function load(quiet) {
-        if (quiet && activeLoad) return activeLoad;
-        const sequence = ++loadSequence;
-		// each call on its own: one failing call no longer leaves the other tabs loading forever
-		const safe = (p) => p.then((v) => ({ ok: true, v: v }), (e) => ({ ok: false, e: e }));
-		const task = Promise.all([safe(api('bootstrap')), safe(api('list', { scope: 'all', limit: 800 })), safe(api('files'))]).then((r) => {
-            if (sequence !== loadSequence) return;
-			M.errs = {};
-			if (r[0].ok) { M.today = r[0].v.today; M.me = r[0].v; } else { M.today = M.today || iso(new Date()); M.me = M.me || {}; M.errs.boot = errText(r[0].e); }
-			if (r[1].ok) M.reqs = r[1].v.requests || []; else { if (quiet && M.reqs) { /* keep the old list */ } else M.reqs = []; M.errs.reqs = errText(r[1].e); }
-			if (r[2].ok) M.files = r[2].v.files || []; else { if (quiet && M.files) { /* keep the old list */ } else M.files = []; M.errs.files = errText(r[2].e); }
-			paint();
-		}).finally(() => { if (activeLoad === task) activeLoad = null; });
-        activeLoad = task;
-        return task;
-	}
-	const errBox = (title, msg) => `<div class="soa-empty"><b>${esc(T(title))}</b>${esc(msg)}</div>`;
-
-	function paint() {
-		const b = M.me || {};
-		$root.querySelector('.soa-me i').textContent = initials(b.full_name);
-		$root.querySelector('.soa-me span').textContent = b.full_name || b.user || '';
-		const w = $root.querySelector('.soa-warnbar');
-		const msgs = [];
-		if (b.is_manager === false) msgs.push(T('A configured manager role is required to review requests.'));
-		if (b.no_manager) msgs.push(T('Azrah’s login is not set in the dashboard settings (manager_user), so requests that need review stay with the salesperson.'));
-		if (b.missing_letterheads && b.missing_letterheads.length) msgs.push(T(LH_HINT, b.missing_letterheads.join(', ')));
-		w.hidden = !msgs.length; w.textContent = msgs.join(' ');
-		// each part on its own: a problem in one real record can no longer leave the other tabs on "loading"
-		const run = (fn, sel) => {
-			try { fn(); } catch (e) {
-				console.error(e);
-				const el = $root.querySelector(sel);
-				if (el) el.innerHTML = `<div class="soa-card" style="grid-column:1/-1"><div class="soa-empty"><b>${esc(T('Could not show this list'))}</b>${esc(e && e.message ? e.message : e)}</div></div>`;
-			}
-		};
-		run(renderKpis, '.soa-kpis'); run(renderQueue, '.soa-queue'); run(renderAll, '.soa-all'); run(renderFiles, '.soa-flog'); renderWorkflows();
-	}
-
-	function renderKpis() {
-		const r = M.reqs || [];
-		const month = M.today.slice(0, 7);
-		const mreq = r.filter((x) => String(x.creation).slice(0, 7) === month && x.status !== 'Processing');
-		const auto = mreq.filter((x) => x.matched === true).length;
-		const waiting = r.filter((x) => x.status === 'Needs Review' || x.status === 'Failed');
-		const oldest = waiting.length ? waiting.map((x) => x.creation).sort()[0] : '';
-		const sentToday = r.filter((x) => String(x.sent_on).slice(0, 10) === M.today).length;
-		$root.querySelector('[data-c="queue"]').textContent = waiting.length;
-		$root.querySelector('[data-c="queue"]').classList.toggle('hot', waiting.length > 0);
-		$root.querySelector('.soa-kpis').innerHTML = [
-			['amber', 'clock', T('Waiting for you'), waiting.length, oldest ? T('oldest {0}', ago(oldest)) : T('queue is clear')],
-			['green', 'send', T('Approved today'), sentToday, T('sent to salespeople')],
-			['', 'ok', T('Matched this month'), mreq.length ? Math.round((auto / mreq.length) * 100) + '%' : '—', T('{0} of {1} requests', auto, mreq.length)],
-			['red', 'x', T('Rejected this month'), mreq.filter((x) => x.status === 'Rejected').length, T('returned to salespeople')],
-		].map((k) => `<div class="soa-card soa-kpi ${k[0]}"><div class="soa-kpi-i">${ico(k[1])}</div><div class="soa-kpi-l">${esc(k[2])}</div><div class="soa-kpi-v">${k[3]}</div><div class="soa-kpi-s">${esc(k[4])}</div></div>`).join('');
-	}
-
-	// ------------------------------------------------------------ queue
-	function renderQueue() {
-		const el = $root.querySelector('.soa-queue');
-		if (M.errs && M.errs.reqs) { el.innerHTML = `<div class="soa-card" style="grid-column:1/-1">${errBox('Could not load the requests', M.errs.reqs)}</div>`; return; }
-		const q = (M.reqs || []).filter((x) => x.status === 'Needs Review' || x.status === 'Failed').sort((a, b) => String(a.creation).localeCompare(String(b.creation)));
-		if (!q.length) {
-			el.innerHTML = `<div class="soa-card" style="grid-column:1/-1"><div class="soa-empty" style="padding:50px 20px">${ico('ok').replace('<svg', '<svg style="width:34px;height:34px;color:#1f8a5b;margin-bottom:8px"')}<b>${esc(T('Nothing to review'))}</b>${esc(T('New requests from salespeople show here.'))}</div></div>`;
-			return;
-		}
-		el.innerHTML = q.map(card).join('');
-	}
-    function card(r) {
-        const dis=M.busy[r.name]?'disabled':'';
-        const mismatch=Math.abs(Number(r.difference)||0)>1 || (r.gl && r.gl.matched===false);
-        return `<article class="soa-review-card">${typePill(r.document_type)}<div class="soa-review-heading"><h3>${esc(r.customer_name || r.customer)}</h3><b>${money(r.invoice_outstanding)}</b></div>
-            <p class="soa-review-meta">${esc(r.requested_by_name || r.requested_by || 'Unknown requester')} · ${esc(period(r))}</p>
-            ${r.error?`<p class="soa-review-alert">${esc(r.error)}</p>`:mismatch?`<p class="soa-review-alert">${esc(T('Balance difference'))}: ${money(r.difference)}</p>`:`<p class="soa-review-match">${esc(T('Balances match'))}</p>`}
-            <div class="soa-review-preview"><button class="soa-btn" type="button" data-main-preview="${esc(r.name)}" ${dis}>${esc(T('Open PDF preview'))}</button>${(r.files||[]).map(file=>`<a class="soa-file" target="_blank" rel="noopener" href="/api/method/soa_api?action=manager_file&name=${encodeURIComponent(r.name)}&file=${encodeURIComponent(file.file_url)}">${esc(file.file_name||'PDF')}</a>`).join('')}</div>
-            <details><summary>${esc(T('Checks & details'))}</summary>${glBlock(r)}${(r.details||[]).map(detail=>`<p>${esc(detail.kind)} · ${esc(detail.voucher || '')} · ${money(detail.amount)}</p>`).join('')}<button type="button" class="soa-btn sm" data-op="recheck" data-name="${esc(r.name)}" ${dis}>${esc(T('Re-check'))}</button></details>
-            <label class="soa-review-note">${esc(T('Review note'))}<textarea class="soa-ta" data-f="note" data-name="${esc(r.name)}" rows="1" maxlength="500" placeholder="${esc(T('Optional unless rejecting'))}">${esc(M.notes[r.name]||'')}</textarea></label>
-            <div class="soa-review-actions"><button type="button" class="soa-btn pri" data-op="approve" data-name="${esc(r.name)}" ${dis}>${esc(T('Approve & email'))}</button><button type="button" class="soa-btn" data-op="reject" data-name="${esc(r.name)}" ${dis}>${esc(T('Reject'))}</button></div></article>`;
-    }
-
-	const GL_LINES = { opening: 'Opening balance', debit: 'Debit total', credit: 'Credit total', closing: 'Closing balance' };
-	function vlink(d) {
-		return d.voucher_type ? `<a class="soa-vno" href="/app/${slug(d.voucher_type)}/${encodeURIComponent(d.voucher)}" target="_blank" rel="noopener">${esc(d.voucher)}</a>` : `<span class="soa-vno">${esc(d.voucher || '—')}</span>`;
-	}
-	function glBlock(r) {
-		const g = r.gl;
-		if (!g || !g.lines) return '';
-		const glUrl = `/app/query-report/General Ledger?party_type=Customer&party=${encodeURIComponent(r.customer)}&from_date=${encodeURIComponent(r.from_date)}&to_date=${encodeURIComponent(r.to_date)}`;
-		const rows = g.lines.map((l) => `<tr class="${Math.abs(l.difference) > 0.005 ? 'bad' : ''}"><th>${esc(T(GL_LINES[l.key] || l.key))}</th><td>${money(l.statement)}</td><td>${money(l.gl)}</td><td>${money(l.difference)}</td></tr>`).join('');
-		const v = (g.vouchers || []).length
-			? `<ul>${g.vouchers.map((d) => `<li><span>${esc(T(d.kind))} · ${vlink(d)}</span><b class="n">${money(d.difference)}</b><small>${esc(T('Statement {0} / {1} · General Ledger {2} / {3}', money(d.st_debit), money(d.st_credit), money(d.gl_debit), money(d.gl_credit)))}</small></li>`).join('')}</ul>`
-			: '';
-		return `<div class="soa-why"><div class="soa-why-h soa-glh"><span>${esc(T(g.matched ? 'Agrees with the General Ledger' : 'Customer ledger vs General Ledger'))}</span><a href="${glUrl}" target="_blank" rel="noopener">${esc(T('Open General Ledger'))}</a></div>
-			<div class="soa-mini-w"><table class="soa-mini"><thead><tr><th></th><th>${esc(T('Statement'))}</th><th>${esc(T('General Ledger'))}</th><th>${esc(T('Difference'))}</th></tr></thead><tbody>${rows}</tbody></table></div>${v}</div>`;
-	}
-	function act(name, op) {
-		const note = (M.notes[name] || '').trim();
-		if (op === 'reject' && !note) { toast(T('Write a reason so the salesperson knows what to fix.'), 'bad'); const t = $root.querySelector(`textarea[data-name="${CSS.escape(name)}"]`); if (t) t.focus(); return; }
-        ++loadSequence; // Discard any poll started before this approval/rejection.
-		M.busy[name] = true; renderQueue();
-		api('review', { name: name, op: op, note: note }).then((r) => {
-			delete M.busy[name]; delete M.notes[name];
-			const i = M.reqs.findIndex((x) => x.name === name);
-			if (i >= 0) M.reqs[i] = r;
-			const msg = r.status === 'Approved' ? T('Approved and emailed to {0}', r.requested_by_name || r.requested_by)
-				: r.status === 'Rejected' ? T('Rejected — the salesperson was notified')
-					: r.status === 'Needs Review' ? (r.matched ? T('Checked again — it matches now') : T('Still different by {0} SAR', money(r.difference))) : T('Status: {0}', T((STATUS[r.status] || [0, r.status])[1]));
-			toast(msg, r.status === 'Approved' ? 'ok' : r.status === 'Failed' ? 'bad' : '');
-            paint();
-            return load();
-		}).catch((e) => { delete M.busy[name]; renderQueue(); toast(errText(e), 'bad'); });
-	}
-
-	// ------------------------------------------------------------ all requests
-	function renderAll() {
-		const reqs = M.reqs || [];
-		const stSel = $root.querySelector('[data-f="st"]'), spSel = $root.querySelector('[data-f="sp"]');
-		stSel.innerHTML = `<option value="">${esc(T('All statuses'))}</option>` + Object.keys(STATUS).map((s) => `<option value="${esc(s)}" ${M.st === s ? 'selected' : ''}>${esc(T(STATUS[s][1]))}</option>`).join('');
-		const sps = {};
-		reqs.forEach((r) => { if (r.requested_by) sps[r.requested_by] = String(r.requested_by_name || r.requested_by); });
-		spSel.innerHTML = `<option value="">${esc(T('All salespeople'))}</option>` + Object.keys(sps).sort((a, b) => String(sps[a] || '').localeCompare(String(sps[b] || ''))).map((u) => `<option value="${esc(u)}" ${M.sp === u ? 'selected' : ''}>${esc(sps[u])}</option>`).join('');
-		const q = M.q.trim().toLowerCase();
-		const rows = reqs.filter((r) => (!M.st || r.status === M.st) && (!M.sp || r.requested_by === M.sp)
-			&& (!q || (r.customer_name + ' ' + r.customer + ' ' + r.name + ' ' + (r.requested_by_name || '')).toLowerCase().includes(q)));
-		$root.querySelector('[data-c="all"]').textContent = T('{0} of {1}', rows.length, reqs.length);
-		const el = $root.querySelector('.soa-all');
-		if (M.errs && M.errs.reqs) { el.innerHTML = errBox('Could not load the requests', M.errs.reqs); return; }
-		if (!rows.length) { el.innerHTML = `<div class="soa-empty">${esc(T(reqs.length ? 'Nothing matches these filters' : 'No requests yet'))}</div>`; return; }
-		el.innerHTML = `<div class="soa-scroll"><table class="soa-t soa-stack"><thead><tr><th>${esc(T('Customer'))}</th><th>${esc(T('Requested'))}</th><th>${esc(T('Salesperson'))}</th><th>${esc(T('Document'))}</th><th>${esc(T('Period'))}</th><th>${esc(T('Status'))}</th><th class="n">${esc(T('Difference'))}</th><th class="c-opt">${esc(T('Reviewed'))}</th><th>${esc(T('Files'))}</th></tr></thead><tbody>${rows.map((r) => `
-			<tr>${td(T('Customer'), `<b>${esc(r.customer_name)}</b><br><small>${esc(r.customer)}</small>`, 'lead')}
-				${td(T('Requested'), `${esc(fdate(r.creation))} <small>${esc(ftime(r.creation))}</small><br><small class="soa-vno"><a href="${DOC_ROUTE}${encodeURIComponent(r.name)}" target="_blank" rel="noopener">${esc(r.name)}</a></small>`, 'nw')}
-				${td(T('Salesperson'), esc(r.requested_by_name || r.requested_by))}
-				${td(T('Document'), `${esc(T((DOC_INFO[r.document_type] || {}).label || r.document_type))}${r.letterheads ? '<br><small>' + esc(r.letterheads) + '</small>' : ''}`)}
-				${td(T('Period'), esc(period(r)), 'nw')}
-				${td(T('Status'), badge(r.status))}
-				${td(T('Difference'), money(r.difference), 'n' + (Math.abs(r.difference) > 1 ? ' soa-neg' : ''))}
-				${td(T('Reviewed'), `${r.reviewed_by ? esc(r.reviewed_by.split('@')[0]) + '<br><small>' + esc(fdate(r.reviewed_on)) + '</small>' : '<small>' + esc(r.status === 'Sent' ? T('auto') : '—') + '</small>'}${r.review_note ? '<br><small>' + esc(r.review_note) + '</small>' : ''}`, 'c-opt')}
-				${td(T('Files'), r.document_type === 'Customer Outstanding' ? (r.status === 'Approved' ? `<b>${money(r.invoice_outstanding)}</b>` : '<small>—</small>') : `<div class="soa-files">${fileLinks(r.files) || '<small>—</small>'}</div>`)}</tr>`).join('')}</tbody></table></div>`;
-	}
-
-	// ------------------------------------------------------------ files sent
-	function renderFiles() {
-		const files = M.files || [];
-		const q = M.fq.trim().toLowerCase();
-		const rows = files.filter((f) => !q || (f.customer_name + ' ' + f.customer + ' ' + f.file_name + ' ' + f.requested_by + ' ' + f.request).toLowerCase().includes(q));
-		$root.querySelector('[data-c="files"]').textContent = T('{0} files', rows.length);
-		const el = $root.querySelector('.soa-flog');
-		if (M.errs && M.errs.files) { el.innerHTML = errBox('Could not load the files', M.errs.files); return; }
-		if (!M.files) return;
-		if (!rows.length) { el.innerHTML = `<div class="soa-empty">${esc(T(files.length ? 'Nothing matches this search' : 'No files sent yet'))}</div>`; return; }
-		el.innerHTML = `<div class="soa-scroll"><table class="soa-t soa-stack"><thead><tr><th>${esc(T('Customer'))}</th><th>${esc(T('Sent'))}</th><th>${esc(T('File'))}</th><th class="c-opt">${esc(T('Letterhead'))}</th><th>${esc(T('Document'))}</th><th>${esc(T('Period'))}</th><th>${esc(T('Sent to'))}</th><th class="n">${esc(T('Amount'))}</th><th class="c-opt">${esc(T('How'))}</th></tr></thead><tbody>${rows.map((f) => `
-			<tr>${td(T('Customer'), `<b>${esc(f.customer_name)}</b><br><small>${esc(f.customer)}</small>`, 'lead')}
-				${td(T('Sent'), `${esc(fdate(f.sent_on))} <small>${esc(ftime(f.sent_on))}</small>`, 'nw')}
-				${td(T('File'), `<a class="soa-file" href="${esc(f.file_url)}" target="_blank" rel="noopener">${ico('dl')}${esc(f.file_name)}</a>`)}
-				${td(T('Letterhead'), `${brandChip(f.brand)}<br><small>${esc(f.letter_head)}</small>`, 'c-opt')}
-				${td(T('Document'), esc(T((DOC_INFO[f.document_type] || {}).label || f.document_type)))}
-				${td(T('Period'), esc(period(f)), 'nw')}
-				${td(T('Sent to'), esc(f.requested_by))}
-				${td(T('Amount'), money(f.amount), 'n')}
-				${td(T('How'), f.status === 'Sent' ? `<span class="soa-b green">${esc(T('auto-matched'))}</span>` : `<span class="soa-b blue">${esc(T('approved'))}</span>`, 'c-opt')}</tr>`).join('')}</tbody></table></div>`;
-	}
-
-
-	// ------------------------------------------------------------ collections
-	const RESULT = { 'Collected': 'green', 'Part collected': 'blue', 'Promised': 'amber', 'Not reachable': 'grey', 'Refused': 'red' };
-	const resBadge = (r) => (r ? `<span class="soa-b ${RESULT[r] || 'grey'}">${esc(T(r))}</span>` : '');
-	function loadColl(quiet) {
-		const C = M.coll;
-		const args = C.date ? { date: C.date } : {};
-		return Promise.all([C.admin && quiet ? Promise.resolve(C.admin) : api('coll_admin'), api('coll_lists', args)]).then((r) => {
-			C.admin = r[0]; C.data = r[1]; C.err = '';
-			if (!C.date) C.date = C.data.date;
-			renderColl();
-		}).catch((e) => { C.err = errText(e); if (!quiet || !C.data) renderColl(); });
-	}
-	function collCall(method, args, msg) {
-		const C = M.coll;
-		C.busy.all = true; renderColl();
-		return api(method, args).then(() => { C.busy = {}; if (msg) toast(msg, 'ok'); return loadColl(); })
-			.catch((e) => { C.busy = {}; renderColl(); toast(errText(e), 'bad'); });
-	}
-	function saveAssign(col) {
-		const C = M.coll;
-		const sel = {};
-		((C.admin.assignments || {})[col] || []).forEach((sp) => { sel[sp] = true; });
-		Object.assign(sel, C.sel[col] || {});
-		const sps = Object.keys(sel).filter((k) => sel[k]);
-		C.busy['a:' + col] = true; renderColl();
-		const mx = (C.max || {})[col];
-		const args = { collector: col, sales_persons: JSON.stringify(sps) };
-		if (mx != null) args.max_customers = mx === '' ? 0 : mx;
-		api('coll_assign', args).then((r) => {
-			C.busy = {}; C.admin.assignments = r.assignments; C.sel[col] = {};
-			if (r.collectors) C.admin.collectors = r.collectors;
-			if (C.max) delete C.max[col];
-			toast(T('Saved. Tomorrow’s list uses these salespeople; rebuild today’s lists to apply it now.'), 'ok');
-			renderColl();
-		}).catch((e) => { C.busy = {}; renderColl(); toast(errText(e), 'bad'); });
-	}
-	function renderColl() {
-		const el = $root.querySelector('.soa-coll');
-		const C = M.coll;
-		if (C.err && !C.data) { el.innerHTML = `<div class="soa-card">${errBox('Could not load collections', C.err)}</div>`; return; }
-		if (!C.data || !C.admin) return;
-		const d = C.data, ad = C.admin;
-		const lists = d.lists || [];
-		const drafts = lists.filter((l) => l.status === 'Draft');
-		const cnt = $root.querySelector('[data-c="coll"]');
-		cnt.textContent = drafts.length; cnt.classList.toggle('hot', drafts.length > 0);
-		const sum = (k) => lists.reduce((a, l) => a + (l[k] || 0), 0);
-		const isToday = d.date === d.today;
-		const busy = C.busy.all ? 'disabled' : '';
-		const bar = `<section class="soa-card soa-cbar">
-			<label class="soa-cdate">${esc(T('Day'))}<input class="soa-in" type="date" data-f="cdate" value="${esc(d.date)}" max="${esc(d.today)}"></label>
-			<div class="soa-cdays">${(d.history || []).slice(0, 7).map((h) => `<button type="button" class="soa-chipbtn ${h.date === d.date ? 'on' : ''}" data-day="${esc(h.date)}">${esc(fdate(h.date))}</button>`).join('')}</div>
-			<div class="soa-cbtns">
-				<button type="button" class="soa-btn sm" data-a="cassign" aria-expanded="${C.assign}">${ico('users').replace('<svg', '<svg style="width:14px;height:14px"')} ${esc(T(C.assign ? 'Hide assignments' : 'Assign salespeople'))}</button>
-				${isToday ? `<button type="button" class="soa-btn sm" data-a="cbuild" ${busy} title="${esc(T('Rebuild the lists that are not approved yet, from today’s Accounts Receivable'))}">↻ ${esc(T('Rebuild today’s lists'))}</button>` : ''}
-				${drafts.length ? `<button type="button" class="soa-btn sm ok" data-a="capprove-all" ${busy}>${C.busy.all ? '<span class="soa-spin"></span>' : ico('ok').replace('<svg', '<svg style="width:14px;height:14px"')} ${esc(T('Approve all ({0})', drafts.length))}</button>` : ''}
-			</div></section>`;
-		const stats = `<div class="soa-cstats">
-			<div class="soa-card"><small>${esc(T('Waiting for approval'))}</small><b class="${drafts.length ? 'amber' : ''}">${drafts.length}</b><span>${esc(T('{0} lists', lists.length))}</span></div>
-			<div class="soa-card"><small>${esc(T('To collect ({0}+ days)', ad.collect_after_days))}</small><b>${money0(sum('total_due'))}</b><span>${esc(T('{0} customers', sum('customers')))}</span></div>
-			<div class="soa-card"><small>${esc(T('Collected'))}</small><b class="green">${money0(sum('total_collected'))}</b><span>${esc(T('logged by collectors'))}</span></div>
-			<div class="soa-card"><small>${esc(T('Customers visited'))}</small><b>${lists.reduce((a, l) => a + (l.done || 0), 0)}</b><span>${esc(T('with a result logged'))}</span></div></div>`;
-		let body;
-		if (!(ad.collectors || []).length) { C.assign = true; body = ''; }
-		if (body === '') { /* the assignment panel above explains what to do */ } else if (!lists.length) body = `<div class="soa-card">${errBox(isToday ? 'No lists for today' : 'No lists for this day', T(Object.keys(ad.assignments || {}).length ? 'No assigned customer has a balance older than {0} days.' : 'Assign salespeople to the collectors first.', ad.collect_after_days))}</div>`;
-		else body = lists.map(listCard).join('');
-		el.innerHTML = bar + (C.assign ? assignHtml() : '') + stats + body;
-	}
-    function chooseReplacement(button) {
-        button.disabled = true;
-        api('coll_candidates', { list: button.dataset.list, item: button.dataset.item }).then((r) => {
-            if (!r.customers.length) return toast(T('No eligible replacement customers'));
-            const dialog = new frappe.ui.Dialog({
-                title: T('Assign another'),
-                fields: [{ fieldname: 'customer', fieldtype: 'Select', label: T('Choose replacement customer'), reqd: 1,
-                    options: [{ label: '', value: '' }].concat(r.customers.map((it) => ({ value: it.customer, label: it.customer_name + ' · ' + it.customer + ' · ' + money0(it.due_amount) }))) }],
-                primary_action_label: T('Assign another'),
-                primary_action(values) {
-                    dialog.get_primary_btn().prop('disabled', true);
-                    api('coll_replace', { list: button.dataset.list, item: button.dataset.item, customer: values.customer })
-                        .then(() => { dialog.hide(); toast(T('Customer replaced'), 'ok'); return loadColl(); })
-                        .catch((error) => { toast(errText(error), 'bad'); })
-                        .finally(() => dialog.get_primary_btn().prop('disabled', false));
-                }
-            });
-            dialog.show();
-        }).catch((error) => toast(errText(error), 'bad')).finally(() => { button.disabled = false; });
-    }
-
-	function listCard(l) {
-		const C = M.coll;
-		const draft = l.status === 'Draft';
-		const busy = C.busy.all ? 'disabled' : '';
-		const rows = (l.items || []).map((it) => {
-			const inv = (it.invoices || []).slice(0, 6).map((v) => `${esc(v.voucher)} · ${money0(v.amount)} · ${esc(T('{0} d', v.days))}`).join('<br>');
-			const res = it.result
-				? `${resBadge(it.result)}${it.collected_amount ? ' <b>' + money(it.collected_amount) + '</b>' : ''}${it.promise_date ? '<br><small>' + esc(T('promised {0}', fdate(it.promise_date))) + '</small>' : ''}${it.payment_mode ? '<br><small>' + esc(T(it.payment_mode)) + '</small>' : ''}${it.note ? '<br><small>' + esc(it.note) + '</small>' : ''}`
-				: (it.note ? `<small>${esc(it.note)}</small>` : '<small>—</small>');
-			return `<tr class="${it.removed ? 'soa-off' : ''}">${td(T('Customer'), `<b>${esc(it.customer_name)}</b><br><small><a href="/app/customer/${encodeURIComponent(it.customer)}" target="_blank" rel="noopener">${esc(it.customer)}</a> · ${esc(it.sales_person)}</small>${it.removed ? '<br><small class="soa-neg">' + esc(T('removed from this list')) + '</small>' : ''}`, 'lead')}
-				${td(T('To collect'), `<b>${money(it.due_amount)}</b><br><small>${esc(T('since {0}', fdate(it.oldest_date)))}</small>`, 'n')}
-				${td(T('Total outstanding'), money(it.total_outstanding), 'n c-opt')}
-				${td(T('Invoices'), `<small>${inv}${(it.invoices || []).length > 6 ? '<br>' + esc(T('+{0} more', it.invoices.length - 6)) : ''}</small>`, 'c-opt')}
-				${td(T('Last update'), it.last_update ? `<small>${esc(it.last_update)}</small>` : '<small>—</small>')}
-				${td(T('Result'), res)}
-				${draft ? td('', `<button type="button" class="soa-btn sm ${it.removed ? '' : 'bad'}" data-a="cremove" data-list="${esc(l.name)}" data-item="${esc(it.name)}" data-removed="${it.removed ? 0 : 1}" ${busy}>${esc(T(it.removed ? 'Put back' : 'Remove'))}</button>${it.removed ? ` <button type="button" class="soa-btn sm" data-a="creplace" data-list="${esc(l.name)}" data-item="${esc(it.name)}" ${busy}>${esc(T('Assign another'))}</button>` : ''}`) : ''}</tr>`;
-		}).join('');
-		return `<details class="soa-card soa-cl" ${draft ? 'open' : ''}>
-			<summary class="soa-cl-h"><span class="soa-cl-who"><i>${esc(initials(l.collector_name))}</i><span><b>${esc(l.collector_name)}</b><small>${esc(T('{0} customers', l.customers))} · ${esc(T('{0} visited', l.done || 0))}${l.skipped ? ` · <span class="soa-skip">${esc(T('+{0} over the daily max', l.skipped))}</span>` : ''}</small></span></span>
-				<span class="soa-cl-n"><small>${esc(T('To collect'))}</small><b>${money0(l.total_due)}</b></span>
-				<span class="soa-cl-n"><small>${esc(T('Collected'))}</small><b class="green">${money0(l.total_collected)}</b></span>
-				<span class="soa-cl-st">${draft ? `<span class="soa-b amber">${esc(T('Waiting for approval'))}</span>` : `<span class="soa-b green">${esc(T('Approved'))}</span><small>${esc(T('by {0}', String(l.approved_by || '').split('@')[0]))}</small>`}</span>
-				${draft ? `<button type="button" class="soa-btn sm ok" data-a="capprove" data-list="${esc(l.name)}" ${busy}>${esc(T('Approve list'))}</button>` : ''}</summary>
-            <div class="soa-cpad"><button type="button" class="soa-btn sm" data-a="cpdf" data-list="${esc(l.name)}">${esc(T('Daily visit collection PDF'))}</button></div>
-			${(l.items || []).length ? `<div class="soa-scroll"><table class="soa-t soa-stack"><thead><tr><th>${esc(T('Customer'))}</th><th class="n">${esc(T('To collect'))}</th><th class="n c-opt">${esc(T('Total outstanding'))}</th><th class="c-opt">${esc(T('Invoices'))}</th><th>${esc(T('Last update'))}</th><th>${esc(T('Result'))}</th>${draft ? '<th></th>' : ''}</tr></thead><tbody>${rows}</tbody></table></div>` : errBox('Nothing to collect', '')}
-		</details>`;
-	}
-	function assignHtml() {
-		const C = M.coll, ad = C.admin;
-		const nameOf = {};
-		(ad.collectors || []).forEach((x) => { nameOf[x.user] = x.full_name; });
-		const owner = {};
-		Object.keys(ad.assignments || {}).forEach((col) => (ad.assignments[col] || []).forEach((sp) => { (owner[sp] = owner[sp] || []).push(nameOf[col] || col); }));
-		const taken = {};
-		(ad.collectors || []).forEach((x) => { taken[x.employee] = 1; taken[x.user] = 1; });
-		const emps = (ad.employees || []).filter((e) => !taken[e.employee] && !(e.user && taken[e.user]));
-		return `<section class="soa-card soa-assign">
-			<div class="soa-card-h"><h3 class="soa-card-t">${esc(T('Collectors and their salespeople'))}</h3>
-				<span class="soa-card-s">${esc(T('Assignments follow salespeople on overdue invoices, including former salespeople.'))}</span></div>
-			<label class="soa-cpad">${esc(T('Search employees or salespeople'))}<input type="search" class="soa-in" data-employee-search value="${esc(employeeQuery)}"></label><div class="soa-addcol">
-				<select class="soa-sel" data-f="cemp"><option value="">${esc(T('Add a collector from employees…'))}</option>${emps.map((e) => `<option value="${esc(e.employee)}" ${e.user ? '' : 'disabled'} ${C.emp === e.employee ? 'selected' : ''}>${esc(e.name)}${e.designation ? ' · ' + esc(e.designation) : ''}${e.user ? '' : ' · ' + esc(T('no login'))}</option>`).join('')}</select>
-				<button type="button" class="soa-btn sm pri" data-a="caddcol" ${C.emp && !C.busy.all ? '' : 'disabled'}>${esc(T('Add collector'))}</button>
-			</div>
-			${(ad.collectors || []).length ? '' : `<div class="soa-empty">${esc(T('No collectors yet. Pick the employees who collect; they need a User ID on their Employee form to log in.'))}</div>`}
-			<div class="soa-assign-g">${(ad.collectors || []).map((x) => {
-				const mine = (ad.assignments || {})[x.user] || [];
-				const sel = C.sel[x.user] || {};
-				const rm = C.rm === x.employee;
-				return `<div class="soa-assign-c"><div class="soa-assign-top"><span><b>${esc(x.full_name)}</b><small>${esc(x.user)} · ${esc(T('{0} salespeople', mine.length))}${x.max_customers ? ' · ' + esc(T('max {0} a day', x.max_customers)) : ''}</small></span>
-						<button type="button" class="soa-btn sm bad" data-a="crmcol" data-emp="${esc(x.employee)}">${esc(T(rm ? 'Confirm remove' : 'Remove'))}</button></div>
-					<div class="soa-assign-l">${(ad.sales_persons || []).map((sp) => {
-						const on = sel[sp] != null ? sel[sp] : mine.indexOf(sp) >= 0;
-                        const detail = (ad.sales_person_details || {})[sp] || {};
-                        const left = detail.left ? `<small class="soa-neg">${esc(T(detail.pending_invoices ? 'Left salesperson · invoices pending' : 'Left salesperson'))}</small>` : '';
-                        const pending = detail.pending_invoices ? `<small>${esc(T('{0} pending invoices', detail.pending_invoices))}</small>` : '';
-						const other = mine.indexOf(sp) < 0 && owner[sp] ? owner[sp].join(', ') : '';
-						return `<label class="soa-chk-row" data-employee-row="${esc((sp+' '+x.full_name).toLowerCase())}"><input type="checkbox" data-f="csp" data-col="${esc(x.user)}" value="${esc(sp)}" ${on ? 'checked' : ''}><span>${esc(sp)}${left}${pending}${other ? `<small> · ${esc(other)}</small>` : ''}</span></label>`;
-					}).join('')}</div>
-					<div class="soa-assign-f"><label>${esc(T('Max customers a day'))}<input class="soa-in" type="number" min="0" step="1" inputmode="numeric" data-f="cmax" data-col="${esc(x.user)}" value="${esc((C.max || {})[x.user] != null ? C.max[x.user] : (x.max_customers || ''))}" placeholder="${esc(T('No limit'))}"></label>
-					<button type="button" class="soa-btn sm pri" data-a="csave" data-col="${esc(x.user)}" ${C.busy['a:' + x.user] ? 'disabled' : ''}>${esc(T('Save'))}</button></div></div>`;
-			}).join('')}</div></section>`;
-	}
-	function collectorOp(emp, op) {
-		const C = M.coll;
-		C.busy.all = true; renderColl();
-		api('coll_collectors', { employee: emp, op: op }).then((r) => {
-			C.busy = {}; C.emp = ''; C.rm = '';
-			C.admin.collectors = r.collectors; C.admin.assignments = r.assignments;
-			toast(T(op === 'remove' ? 'Collector removed' : 'Collector added. Now tick their salespeople and save.'), 'ok');
-			renderColl();
-		}).catch((e) => { C.busy = {}; renderColl(); toast(errText(e), 'bad'); });
-	}
-
-	build();
+/* ==== DM theme sync (same as tools/erp/shell/dark_theme.py output; maintained here since this block left the generated shell) ==== */
+;(function () {
+  var r = typeof root_element !== 'undefined' ? root_element : null, h = r && r.host;
+  if (!h || h.__dmsTheme) return; h.__dmsTheme = 1;
+  var s = function () { h.setAttribute('data-dms-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'); };
+  s(); new MutationObserver(s).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 })();

@@ -1,0 +1,26 @@
+{
+ "doctype": "DocType",
+ "name": "Design Studio User",
+ "module": "Custom",
+ "custom": 1,
+ "istable": 1,
+ "issingle": 0,
+ "track_changes": 0,
+ "fields": [
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "label": "User",
+   "options": "User",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "full_name",
+   "fieldtype": "Data",
+   "label": "Full name",
+   "in_list_view": 1
+  }
+ ],
+ "permissions": []
+}

@@ -49,7 +49,7 @@ def main():
         manifest['files'].append({'path': path.as_posix(), 'sha256': hashlib.sha256(data).hexdigest()})
 
     def references(method, text):
-        return bool(re.search(r'''["'`](?:/api/method/)?''' + re.escape(method) + r'''["'`]''', text))
+        return bool(re.search(r'''["'`](?:/api/method/)?''' + re.escape(method) + r'''(?:["'`?])''', text))
 
     def linked_scripts(doc):
         text = (doc.get('script') or '') + '\n' + (doc.get('html') or '')

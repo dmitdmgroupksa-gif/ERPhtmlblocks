@@ -1,657 +1,1118 @@
+/* ===== DM Group KSA — Delivery & Forklift Dashboard — SCRIPT field · v3 =====
+   Moves v2 onto the DM dashboard standard. Read-only. Data comes from the unchanged Server Script API
+   dm_delivery_forklift_dashboard (record and field permissions are checked on the server; a figure whose field is not
+   readable arrives as null and is shown as unavailable, never as zero). Kept from v2: submitted and draft records kept apart,
+   the effective trip date (delivery date, else departure date), the timing pairs, the warehouse comparison, every review flag
+   (now the Actions pending categories) and the detail tables with their flag filters.
+   The shared runtime between the "DMS kit" markers is generated from tools/erp/kit/dms-kit.js (edit the kit, not the copy). */
 (function () {
-    var root = (typeof root_element !== 'undefined' && root_element) ? root_element : document;
-    var host = root.querySelector('#dfd-dashboard');
-    if (!host) { return; }
+  'use strict';
+  var API = 'dm_delivery_forklift_dashboard';
+  var APP = {
+    key: '__dmsDeliveryForklift',
+    period: 'month',
+    tabs: [{ id: 'overview', en: 'Overview', ar: 'نظرة عامة' }, { id: 'delivery', en: 'Delivery trips', ar: 'رحلات التوصيل' }, { id: 'forklift', en: 'Forklift activity', ar: 'نشاط الرافعات' }, { id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }],
+    filters: [
+      { k: 'company', en: 'Company', ar: 'الشركة', options: function () { return (OPT.companies || []).slice().sort(); } },
+      { k: 'warehouse', en: 'Warehouse (origin or destination)', ar: 'المستودع (المصدر أو الوجهة)', dependsOn: 'company', options: function (dr) { var co = dr ? dr.company : F.company; return (OPT.warehouses || []).filter(function (w) { return !co || w.company === co; }).map(function (w) { return w.name; }).sort(); } },
+      { k: 'driver', en: 'Driver', ar: 'السائق', options: function () { return (OPT.drivers || []).map(function (d) { return { v: d.name, l: d.label && d.label !== d.name ? d.label + ' (' + d.name + ')' : d.name }; }); } },
+      { k: 'vehicle', en: 'Vehicle (trips only)', ar: 'المركبة (الرحلات فقط)', options: function () { return OPT.vehicles || []; } },
+      { k: 'trip_type', en: 'Trip type (trips only)', ar: 'نوع الرحلة (الرحلات فقط)', options: function () { return OPT.trip_types || []; } },
+      { k: 'forklift', en: 'Forklift number (forklift only)', ar: 'رقم الرافعة (الرافعات فقط)', options: function () { return OPT.forklifts || []; } }
+    ],
+    sources: ['data'],
+    dtLabels: { 'Delivery Trip': ['Trip', 'رحلة'], 'ForkLift': ['Forklift record', 'سجل رافعة'] },
+    title: function () { return tr('Delivery & Forklift Dashboard', 'لوحة التوصيل والرافعات الشوكية'); },
+    stamp: function () { return tr('Delivery trips and forklift activity', 'رحلات التوصيل ونشاط الرافعات'); },
+    periodNote: function () { return tr('Trip date = delivery date, or the departure date when the delivery date is blank. Forklift records use their Date field.', 'تاريخ الرحلة = تاريخ التسليم، أو تاريخ المغادرة عند غيابه. سجلات الرافعات تستخدم حقل التاريخ.'); },
+    filterNote: function () { return tr('Company filters trips by their company and forklift records through their warehouse\'s company. Warehouse matches a trip\'s origin or destination.', 'الشركة تصفّي الرحلات بشركتها وسجلات الرافعات عبر شركة مستودعها. المستودع يطابق مصدر الرحلة أو وجهتها.'); },
+    boot: function () {
+      return Promise.all([callP(API, { action: 'options' }).then(function (o) { OPT = o || {}; }, function (e) { OPT = {}; OPTERR = errKind(e); }), getList({ doctype: 'Company', fields: ['name', 'default_currency'], limit_page_length: 0 }, null).then(function (r) { CO = r || []; }, function () { CO = []; })]);
+    },
+    load: function () { run('data', function () { var a = { action: 'data', from_date: PERIOD[0], to_date: PERIOD[1] }; ['company', 'warehouse', 'driver', 'vehicle', 'trip_type', 'forklift'].forEach(function (k) { if (F[k]) { a[k] = F[k]; } }); return callP(API, a); }); },
+    actions: function () { return actModel(actSpecs(), 'act', actClient()); },
+    banner: function () { return banner(); },
+    content: function (t, AM) { return ({ overview: tabOverview, delivery: tabDelivery, forklift: tabForklift, actions: tabActions })[t](AM); },
+    drill: function (id) { return drill(id); },
+    onAct: function (a, v) { return onAct(a, v); }
+  };
 
-    var API = 'dm_delivery_forklift_dashboard';
-    var PAGE = 50;
-    var C = { trips: '#1e78d6', delivered: '#0a3d7a', load: '#0f8b8d', unload: '#7fcfcf', ops: '#0f8b8d' };
-    var st = {
-        tab: 'overview', preset: 'monthly',
-        f: { from_date: '', to_date: '', company: '', warehouse: '', driver: '', vehicle: '', trip_type: '', forklift: '' },
-        opts: null, optsError: null, data: null, error: null, loading: false, seq: 0, lastOk: null,
-        dt: { page: 0, q: '', flag: '' }, fl: { page: 0, q: '', flag: '' }, showAll: {}
-    };
+  /* ==== DMS kit v1 · generated from tools/erp/kit/dms-kit.js by build_kit.py — edit the kit, not this copy ==== */
+  /* Shared runtime for DM dashboards on the standard (toolbar, period, filters, tabs, tables, drill-downs, charts,
+     actions pending). Copied into each dashboard.js by tools/erp/kit/build_kit.py; the dashboard defines `APP` before
+     this block. Read-only helpers: frappe.client.get_list / frappe.desk.query_report.run under the viewer's permissions. */
+  var G = window;
+  var ROOT = (typeof root_element !== 'undefined' && root_element) ? root_element : document;
+  var HOST = ROOT.querySelector('[data-dms-root]');
+  if (!HOST) { return; }
+  if (G[APP.key] && typeof G[APP.key].destroy === 'function') { try { G[APP.key].destroy(); } catch (e) { /* ignore */ } }
+  var abort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  var SIG = abort ? { signal: abort.signal } : false;
+  var timers = [], destroyed = false, GEN = 0, BOOTED = false, LOADED = '';
+  G[APP.key] = { destroy: function () { destroyed = true; GEN++; if (abort) { abort.abort(); } timers.forEach(clearTimeout); timers = []; } };
+  var CFG = Object.assign({ conc: 6, pageSize: 25, modalPage: 15, weekStart: 0 }, APP.cfg || {});
+  var CUR = 'SAR';
+  try { CUR = (frappe.boot.sysdefaults && frappe.boot.sysdefaults.currency) || 'SAR'; } catch (e) { /* default */ }
+  var LANG = 'en';
+  try { var sv = G.localStorage.getItem('dms_lang'); if (sv === 'ar' || sv === 'en') { LANG = sv; } } catch (e) { /* storage unavailable */ }
+  function tr(en, ar) { return LANG === 'ar' ? ar : en; }
 
-    // ---------------- helpers ----------------
-    function esc(v) {
-        return String(v === null || v === undefined ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    }
-    function today() { return frappe.datetime.now_date(); }
-    function addDays(d, n) { return frappe.datetime.add_days(d, n); }
-    function monthStart(d) { return d.slice(0, 8) + '01'; }
-    var NA = '<span class="na" title="Unavailable: you do not have verified read access to the field(s) this figure needs">Unavailable</span>';
-    function isNum(v) { return typeof v === 'number' && isFinite(v); }
-    function n(v, dec) {
-        if (!isNum(v)) { return NA; }
-        return esc(v.toLocaleString('en-US', { maximumFractionDigits: dec === undefined ? 0 : dec, minimumFractionDigits: dec || 0 }));
-    }
-    var CUR = (frappe.boot && frappe.boot.sysdefaults && frappe.boot.sysdefaults.currency) || '';
-    function amt(v) { return isNum(v) ? esc(CUR ? CUR + ' ' : '') + n(v, 2) : NA; }
-    function dur(min) {
-        if (!isNum(min)) { return NA; }
-        var h = Math.floor(min / 60), m = Math.round(min - h * 60);
-        if (m === 60) { h += 1; m = 0; }
-        return esc((h ? h + 'h ' : '') + m + 'm');
-    }
-    function fdate(d) {
-        if (!d) { return '&mdash;'; }
-        try { return esc(frappe.datetime.str_to_user(d)); } catch (e) { return esc(d); }
-    }
-    function slug(dt) { return dt.toLowerCase().replace(/ /g, '-'); }
-    function rec(dt, name) {
-        if (!name) { return '&mdash;'; }
-        return '<a class="rec" href="/app/' + slug(dt) + '/' + encodeURIComponent(name) + '" data-dt="' + esc(dt) + '" data-name="' + esc(name) + '">' + esc(name) + '</a>';
-    }
-    function cmpDesc(k) { return function (a, b) { return (b[k] || 0) - (a[k] || 0); }; }
-    function objToList(o, key) {
-        if (!o) { return null; }
-        return Object.keys(o).map(function (k) { var r = { value: o[k] }; r[key] = k; return r; });
-    }
-    function sel(q) { return host.querySelector(q); }
-    function selAll(q) { return host.querySelectorAll(q); }
+  /* ---------- helpers ---------- */
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function clean(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+  function plain(s, n) { return clean(String(s || '').replace(/<[^>]*>/g, ' ')).slice(0, n || 90); }
+  function $(sel) { return HOST.querySelector(sel); }
+  function later(fn, ms) { var id = setTimeout(function () { if (!destroyed) { fn(); } }, ms); timers.push(id); return id; }
+  function bdi(s) { return '<bdi>' + esc(s) + '</bdi>'; }
+  function num(n) { return (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString('en-US'); }
+  function money(v) {
+    if (v == null || isNaN(v)) { return '—'; }
+    var a = Math.abs(v), s = v < 0 ? '-' : '';
+    if (a >= 1e9) { return s + (a / 1e9).toFixed(2) + 'B'; }
+    if (a >= 1e6) { return s + (a / 1e6).toFixed(2) + 'M'; }
+    if (a >= 1e4) { return s + (a / 1e3).toFixed(1) + 'K'; }
+    return s + Math.round(a).toLocaleString('en-US');
+  }
+  function amt(v) { return (v == null || isNaN(v)) ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function moneyS(v, cur) { return (cur || CUR) + ' ' + money(v); }
+  function moneyB(v, cur) { return '<bdi>' + esc(moneyS(v, cur)) + '</bdi>'; }
+  function moneyFull(v, cur) { return (v == null || isNaN(v)) ? '' : (cur || CUR) + ' ' + amt(v); }
+  function cur$(v, cur) { return '<bdi>' + esc(money(v)) + '<small>' + esc(cur || CUR) + '</small></bdi>'; }
+  function pct(n, d, dp) { return (d > 0 && n != null) ? (n / d * 100).toFixed(dp == null ? 1 : dp) + '%' : tr('N/A', 'غير متاح'); }
+  function sum(arr, f) { var t = 0; for (var i = 0; i < arr.length; i++) { t += (f ? f(arr[i]) : arr[i]) || 0; } return t; }
+  function vals(o) { return Object.keys(o).map(function (k) { return o[k]; }); }
+  function uniq(a) { var m = {}; a.forEach(function (x) { if (x) { m[x] = 1; } }); return Object.keys(m).sort(function (x, y) { return x.localeCompare(y); }); }
+  function rep(s, n) { var o = ''; for (var i = 0; i < n; i++) { o += s; } return o; }
+  function one(r) { return (r && r[0]) || {}; }
+  function groupBy(rows, f) { var m = {}; rows.forEach(function (r) { var k = f(r); (m[k] || (m[k] = [])).push(r); }); return m; }
+  var NAtxt = function () { return tr('Not assigned', 'غير مُعيَّن'); };
 
-    // ---------------- skeleton ----------------
-    host.innerHTML =
-        '<div class="dfd">' +
-        '<div class="dfd-head"><div><h1>Delivery &amp; Forklift Dashboard</h1>' +
-        '<div class="sub">DM Group &middot; Delivery Trips and ForkLift activity from live ERP records &middot; Asia/Riyadh</div></div>' +
-        '<div class="meta"><button class="dfd-btn ghost" data-act="refresh">&#8635; Refresh</button>' +
-        '<div class="dfd-last" style="margin-top:6px">Not loaded yet</div></div></div>' +
-        '<div class="dfd-filters"></div>' +
-        '<div class="dfd-main" style="position:relative">' +
-        '<div class="dfd-state"></div>' +
-        '<div class="dfd-cards"></div>' +
-        '<div class="dfd-tabs">' +
-        '<button class="dfd-tab on" data-tab="overview">Overview</button>' +
-        '<button class="dfd-tab" data-tab="delivery">Delivery Trips</button>' +
-        '<button class="dfd-tab" data-tab="forklift">Forklift Activity</button></div>' +
-        '<div class="dfd-body"></div>' +
-        '<div class="dfd-loading" style="display:none"><span><span class="dfd-spin"></span>Loading live ERP data&hellip;</span></div>' +
-        '</div></div>';
+  /* ---------- dates (ERP site time zone, calendar arithmetic) ---------- */
+  function siteTz() {
+    try {
+      if (G.frappe && frappe.boot) {
+        if (frappe.boot.time_zone && frappe.boot.time_zone.system) { return frappe.boot.time_zone.system; }
+        if (frappe.boot.sysdefaults && frappe.boot.sysdefaults.time_zone) { return frappe.boot.sysdefaults.time_zone; }
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+  function siteParts() {
+    var tz = siteTz(), o = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }, p;
+    if (tz) { o.timeZone = tz; }
+    try { p = new Intl.DateTimeFormat('en-CA', o).formatToParts(new Date()); } catch (e) { delete o.timeZone; p = new Intl.DateTimeFormat('en-CA', o).formatToParts(new Date()); }
+    var m = {}; p.forEach(function (x) { m[x.type] = x.value; }); if (m.hour === '24') { m.hour = '00'; } return m;
+  }
+  function parseISO(s) {
+    if (!s || typeof s !== 'string') { return null; }
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s); if (!m) { return null; }
+    var y = +m[1], mo = +m[2], d = +m[3], ms = Date.UTC(y, mo - 1, d), dt = new Date(ms);
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) { return null; }
+    return ms;
+  }
+  function isoOf(ms) { var d = new Date(ms); return d.getUTCFullYear() + '-' + ('0' + (d.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + d.getUTCDate()).slice(-2); }
+  function addDays(iso, n) { return isoOf(parseISO(iso) + n * 86400000); }
+  function diffDays(a, b) { return Math.round((parseISO(b) - parseISO(a)) / 86400000); }
+  var TODAY = '', STAMP = '';
+  function setToday() { var p = siteParts(); TODAY = p.year + '-' + p.month + '-' + p.day; STAMP = p.hour + ':' + p.minute; }
+  function monthStart(iso) { return iso.slice(0, 8) + '01'; }
+  function monthEnd(iso) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7); return isoOf(Date.UTC(y, m, 0)); }
+  function addMonths(iso, n) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n; return isoOf(Date.UTC(y, m, 1)); }
+  function weekStartOf(iso) { var dow = new Date(parseISO(iso)).getUTCDay(); return addDays(iso, -((dow - CFG.weekStart + 7) % 7)); }
+  function quarterStart(iso) { var m = +iso.slice(5, 7); return iso.slice(0, 5) + ('0' + (Math.floor((m - 1) / 3) * 3 + 1)).slice(-2) + '-01'; }
+  function shiftMonths(iso, n) {
+    var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n, d = +iso.slice(8, 10), last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    return isoOf(Date.UTC(y, m, Math.min(d, last)));
+  }
+  function periodRange(key, cf, ct) {
+    var t = TODAY, y = t.slice(0, 4), ws = weekStartOf(t), qs = quarterStart(t), lm = addMonths(monthStart(t), -1);
+    switch (key) {
+      case 'today': return [t, t];
+      case 'yesterday': return [addDays(t, -1), addDays(t, -1)];
+      case 'week': return [ws, addDays(ws, 6)];
+      case 'lastWeek': return [addDays(ws, -7), addDays(ws, -1)];
+      case 'month': return [monthStart(t), monthEnd(t)];
+      case 'lastMonth': return [lm, monthEnd(lm)];
+      case 'quarter': return [qs, monthEnd(addMonths(qs, 2))];
+      case 'year': return [y + '-01-01', y + '-12-31'];
+      case 'prevYear': return [(y - 1) + '-01-01', (y - 1) + '-12-31'];
+      case 'custom': return [cf, ct];
+      default: return [y + '-01-01', t];   // ytd
+    }
+  }
+  /* Comparison window: the same span one preset unit earlier; custom ranges compare with the equally long range before. */
+  function prevRange(key, from, to) {
+    switch (key) {
+      case 'today': case 'yesterday': return [addDays(from, -1), addDays(to, -1)];
+      case 'week': case 'lastWeek': return [addDays(from, -7), addDays(to, -7)];
+      case 'month': case 'lastMonth': return [shiftMonths(from, -1), shiftMonths(to, -1)];
+      case 'quarter': return [shiftMonths(from, -3), shiftMonths(to, -3)];
+      case 'ytd': case 'year': case 'prevYear': return [shiftMonths(from, -12), shiftMonths(to, -12)];
+      default: var n = diffDays(from, to) + 1; return [addDays(from, -n), addDays(from, -1)];
+    }
+  }
+  /* In-progress periods stop at today, so this month to date compares with the same days of last month. */
+  function clip(r) { return [r[0], r[1] > TODAY && r[0] <= TODAY ? TODAY : r[1]]; }
+  function cmpRanges() { var c = clip(PERIOD); return { cur: c, prev: prevRange(F.period, c[0], c[1]) }; }
+  function monthList(from, to) { var out = [], cur = monthStart(from); for (var i = 0; i < 72 && cur <= to; i++) { out.push(cur.slice(0, 7)); cur = addMonths(cur, 1); } return out; }
+  function locale() { return LANG === 'ar' ? 'ar-SA-u-nu-latn-ca-gregory' : 'en-GB'; }
+  function fmtDate(iso, yr) {
+    try { var o = { day: 'numeric', month: 'short', timeZone: 'UTC' }; if (yr) { o.year = 'numeric'; } return new Intl.DateTimeFormat(locale(), o).format(new Date(parseISO(String(iso).slice(0, 10)))); } catch (e) { return iso; }
+  }
+  function rangeLabel(r) {
+    if (!r || !r[0] || !r[1]) { return ''; }
+    return r[0] === r[1] ? fmtDate(r[0], true) : fmtDate(r[0], r[0].slice(0, 4) !== r[1].slice(0, 4)) + ' – ' + fmtDate(r[1], true);
+  }
+  var PLR = null;
+  function daysTxt(n) {
+    if (LANG !== 'ar') { return num(n) + (n === 1 ? ' day' : ' days'); }
+    var c = 'other'; try { c = (PLR || (PLR = new Intl.PluralRules('ar'))).select(n); } catch (e) { /* generic form */ }
+    return c === 'one' ? 'يوم واحد' : c === 'two' ? 'يومان' : c === 'few' ? n + ' أيام' : c === 'many' ? n + ' يومًا' : n + ' يوم';
+  }
+  function ageOf(iso) { var d = iso ? diffDays(String(iso).slice(0, 10), TODAY) : 0; return isNaN(d) ? 0 : Math.max(0, d); }
+  function lateTxt(iso) {
+    var d = diffDays(String(iso).slice(0, 10), TODAY); if (isNaN(d)) { return ''; }
+    return d > 0 ? tr(daysTxt(d) + ' overdue', 'متأخر ' + daysTxt(d)) : d === 0 ? tr('Due today', 'مستحق اليوم') : tr('Due in ' + daysTxt(-d), 'مستحق خلال ' + daysTxt(-d));
+  }
+  function agoTxt(iso, en, ar) { var a = ageOf(iso); return a ? tr((en || 'Waiting') + ' ' + daysTxt(a), (ar || 'منذ') + ' ' + daysTxt(a)) : tr('Today', 'اليوم'); }
 
-    // ---------------- filters ----------------
-    function setPreset(p) {
-        st.preset = p;
-        var t = today();
-        if (p === 'daily') { st.f.from_date = t; st.f.to_date = t; }
-        else if (p === 'weekly') { st.f.from_date = addDays(t, -6); st.f.to_date = t; }
-        else if (p === 'monthly') { st.f.from_date = monthStart(t); st.f.to_date = t; }
+  /* ---------- ERP read-only API layer (bounded concurrency, one retry, cancellation) ---------- */
+  var REQ_TIMEOUT = 90000;
+  function callP(method, args) {
+    return new Promise(function (resolve, reject) {
+      var done = false, ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var timer = setTimeout(function () { if (done) { return; } done = true; if (ctl) { try { ctl.abort(); } catch (x) { /* ignore */ } } var te = new Error('Request timed out'); te.timeout = true; reject(te); }, REQ_TIMEOUT);
+      var body = new URLSearchParams();
+      Object.keys(args || {}).forEach(function (k) { var v = args[k]; if (v === undefined || v === null) { return; } body.append(k, (typeof v === 'object') ? JSON.stringify(v) : String(v)); });
+      fetch('/api/method/' + method, { method: 'POST', credentials: 'same-origin', signal: ctl ? ctl.signal : undefined,
+        headers: { 'X-Frappe-CSRF-Token': (G.frappe && frappe.csrf_token) || '', 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' }, body: body.toString() })
+        .then(function (r) { return r.text().then(function (txt) { return { r: r, txt: txt }; }); })
+        .then(function (o) {
+          if (done) { return; } done = true; clearTimeout(timer);
+          var j = null; try { j = JSON.parse(o.txt); } catch (x) { /* ignore */ }
+          if (o.r.ok && j && !j.exc) { resolve(j.message === undefined ? null : j.message); return; }
+          var ex = String((j && (j.exception || j.exc_type)) || '');
+          var perm = o.r.status === 401 || o.r.status === 403 || /permission/i.test(ex);
+          var e = new Error((perm ? 'No access to ' + ((args && (args.doctype || args.report_name)) || method) : (ex.split(':').slice(-1)[0].trim() || ('HTTP ' + o.r.status))));
+          e.status = perm ? 403 : o.r.status; reject(e);
+        })
+        .catch(function (err) { if (done) { return; } done = true; clearTimeout(timer); reject(err || new Error('request failed')); });
+    });
+  }
+  var active = 0, queue = [];
+  function pump() {
+    while (active < CFG.conc && queue.length) {
+      var j = queue.shift(); active++;
+      j.fn().then(j.res, j.rej).then(function () { active--; pump(); });
     }
+  }
+  function limited(fn) { return new Promise(function (res, rej) { queue.push({ fn: fn, res: res, rej: rej }); pump(); }); }
+  function guarded(chk, method, args) {
+    return limited(function () {
+      if (destroyed || (chk && !chk())) { return Promise.resolve(null); }
+      return callP(method, args).catch(function (e) { if (e && (e.status === 403 || e.timeout || e.status === 417)) { throw e; } return new Promise(function (r) { setTimeout(r, 400); }).then(function () { return callP(method, args); }); });
+    });
+  }
+  function errKind(e) {
+    var txt = ''; try { txt = (e && (e.responseText || e.statusText || e.message)) || ''; } catch (x) { /* ignore */ }
+    return (/PermissionError|not permitted|No access|403/i.test(String(txt)) || (e && e.status === 403)) ? 'perm' : 'tech';
+  }
+  function getList(args, chk) { return guarded(chk, 'frappe.client.get_list', args); }
+  function getCount(dt, filters, chk) { return getList({ doctype: dt, fields: ['count(name) as n'], filters: filters || [], limit_page_length: 1 }, chk).then(function (r) { return +one(r).n || 0; }); }
+  /* All rows of a bounded list (paged); rejects with e.tooLarge when the source exceeds `cap`. */
+  function fetchAll(args, chk, cap) {
+    cap = cap || 20000;
+    return getCount(args.doctype, args.filters, chk).then(function (n) {
+      if (n > cap) { var e = new Error('too large'); e.tooLarge = n; throw e; }
+      var jobs = []; for (var i = 0; i < Math.ceil(n / 500); i++) { jobs.push(getList(Object.assign({}, args, { order_by: args.order_by || 'name asc', limit_start: i * 500, limit_page_length: 500 }), chk)); }
+      return Promise.all(jobs).then(function (res) { var out = []; res.forEach(function (r) { if (r) { out = out.concat(r); } }); return out; });
+    });
+  }
+  function docUrl(dt, name) {
+    try { if (G.frappe && frappe.utils && frappe.utils.get_form_link) { return frappe.utils.get_form_link(dt, name); } } catch (e) { /* fall through */ }
+    return '/app/' + dt.toLowerCase().replace(/ /g, '-') + '/' + encodeURIComponent(name);
+  }
+  function docLink(dt, name, label) { return '<a class="dms-link" href="' + esc(docUrl(dt, name)) + '" target="_blank" rel="noopener noreferrer"><bdi>' + esc(label || name) + '</bdi> ↗</a>'; }
 
-    function optionList(items, cur, allLabel) {
-        var h = '<option value="">' + esc(allLabel) + '</option>';
-        (items || []).forEach(function (it) {
-            var v = typeof it === 'string' ? it : it.value, l = typeof it === 'string' ? it : it.label;
-            h += '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(l) + '</option>';
-        });
-        return h;
-    }
+  /* ---------- data store: each source loads and renders independently; stale generations are dropped ---------- */
+  var D = {};
+  var softT = null;
+  function soon() { if (softT) { return; } softT = later(function () { softT = null; renderSoft(); }, 40); }
+  function run(key, fn) {
+    var g = GEN, chk = function () { return g === GEN && !destroyed; }, tok = {};
+    D[key] = null; D[key + 'Err'] = null; D[key + 'Tok'] = tok;
+    var mine = function () { return chk() && D[key + 'Tok'] === tok; };
+    fn(mine).then(function (v) { if (!mine()) { return; } D[key] = v; if (APP.afterLoad) { APP.afterLoad(key); } soon(); },
+      function (e) { if (!mine()) { return; } D[key + 'Err'] = e && e.tooLarge ? 'large:' + e.tooLarge : errKind(e); if (G.console && e && !e.status && !e.tooLarge) { console.error(APP.key, key, e); } soon(); });
+  }
+  function busy() { return !BOOTED || (APP.sources || []).some(function (k) { return D[k] == null && D[k + 'Err'] == null; }); }
+  function errText(kind) { return /^large:/.test(String(kind)) ? tr('too many records (' + num(+String(kind).slice(6)) + ') — narrow the filters or period', 'عدد كبير من السجلات (' + num(+String(kind).slice(6)) + ') — ضيّق المرشحات أو الفترة') : kind === 'perm' ? tr('permission denied for your user', 'لا تملك صلاحية القراءة') : tr('technical error while reading', 'خطأ تقني أثناء القراءة'); }
 
-    function renderFilters() {
-        var o = st.opts || {};
-        var whs = (o.warehouses || []).filter(function (w) { return !st.f.company || w.company === st.f.company; })
-            .map(function (w) { return w.name; }).sort();
-        if (st.f.warehouse && whs.indexOf(st.f.warehouse) < 0) { st.f.warehouse = ''; }
-        var drivers = (o.drivers || []).map(function (d) { return { value: d.name, label: d.label + (d.label !== d.name ? ' (' + d.name + ')' : '') }; });
-        var presets = [['daily', 'Daily (today)'], ['weekly', 'Weekly (last 7 days)'], ['monthly', 'Monthly (month to date)'], ['custom', 'Custom']];
-        var h = '<div class="dfd-presets">' + presets.map(function (p) {
-            return '<button class="dfd-chip' + (st.preset === p[0] ? ' on' : '') + '" data-preset="' + p[0] + '">' + esc(p[1]) + '</button>';
-        }).join('') + '<span class="dfd-note" style="margin-left:6px">Trip date = Delivery Date, or the Departure date when Delivery Date is blank. ForkLift uses its Date field.</span></div>';
-        h += '<div class="dfd-fgroup" style="border-top:none;margin-top:0;padding-top:0"><div class="gt">Applies to both<span>Delivery Trips + ForkLift</span></div><div class="dfd-fgrid">' +
-            '<label class="f">From Date<input type="date" data-f="from_date" value="' + esc(st.f.from_date) + '"></label>' +
-            '<label class="f">To Date<input type="date" data-f="to_date" value="' + esc(st.f.to_date) + '"></label>' +
-            '<label class="f">Company<select data-f="company">' + optionList(o.companies, st.f.company, 'All companies') + '</select></label>' +
-            '<label class="f">Warehouse &mdash; origin or destination<select data-f="warehouse">' + optionList(whs, st.f.warehouse, 'All warehouses') + '</select></label>' +
-            '<label class="f">Driver<select data-f="driver">' + optionList(drivers, st.f.driver, 'All drivers') + '</select></label>' +
-            '</div></div>';
-        h += '<div class="dfd-fgrid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:0 16px">';
-        h += '<div class="dfd-fgroup"><div class="gt">Delivery Trips only<span>no effect on forklift figures</span></div><div class="dfd-fgrid">' +
-            '<label class="f">Vehicle<select data-f="vehicle">' + optionList(o.vehicles, st.f.vehicle, 'All vehicles') + '</select></label>' +
-            '<label class="f">Trip type<select data-f="trip_type">' + optionList(o.trip_types, st.f.trip_type, 'All trip types') + '</select></label></div></div>';
-        h += '<div class="dfd-fgroup"><div class="gt">ForkLift only<span>no effect on delivery figures</span></div><div class="dfd-fgrid">' +
-            '<label class="f">Forklift number<select data-f="forklift">' + optionList(o.forklifts, st.f.forklift, 'All forklifts') + '</select></label></div></div>';
-        h += '</div>';
-        h += '<div class="dfd-factions"><span class="dfd-note">Company filter: Delivery Trip by its Company; ForkLift through its warehouse&#39;s company.</span>' +
-            '<button class="dfd-btn" data-act="reset">Reset filters</button></div>';
-        if (st.optsError) { h += '<div class="dfd-banner warn" style="margin:10px 0 0">Filter choices could not be loaded (' + esc(st.optsError) + '). Date filters still work.</div>'; }
-        sel('.dfd-filters').innerHTML = h;
-    }
+  /* ---------- UI primitives ---------- */
+  var ICO = {
+    refresh: '<path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/>', filter: '<path d="M4 5h16l-6.2 7.6V19l-3.6 1.6v-8z"/>',
+    cal: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/>', down: '<path d="m6 9 6 6 6-6"/>',
+    prev: '<path d="m15 6-6 6 6 6"/>', next: '<path d="m9 6 6 6-6 6"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
+    up: '<path d="M12 19V6M6.5 11.5 12 6l5.5 5.5"/>', dn: '<path d="M12 5v13M6.5 12.5 12 18l5.5-5.5"/>', dl: '<path d="M12 4v11M7 10.5 12 15.5l5-5M5 20h14"/>'
+  };
+  function ico(n, cls) { return '<svg class="dms-ico' + (cls ? ' ' + cls : '') + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + ICO[n] + '</svg>'; }
+  function kpi(o) {
+    var inner = '<span class="dms-kpi-h"><span class="dms-kpi-l">' + (o.dot ? '<i class="dms-dot" style="--dms-c:' + o.dot + '"></i>' : '') + esc(o.label) + '</span>' + (o.top || '') + '</span>' +
+      '<span class="dms-kpi-n">' + o.val + '</span>' + (o.sub ? '<span class="dms-kpi-s">' + o.sub + '</span>' : '') + (o.foot != null ? '<span class="dms-kpi-f">' + o.foot + '</span>' : '');
+    var t = o.tip ? ' title="' + esc(o.tip) + '"' : '';
+    return o.act ? '<button type="button" class="dms-kpi" data-act="kpi" data-v="' + esc(o.act) + '"' + t + '>' + inner + '</button>' : '<div class="dms-kpi"' + t + '>' + inner + '</div>';
+  }
+  function kpis(list, ov) { return '<div class="dms-grid dms-kpis' + (ov ? ' dms-ov-kpis' : '') + '">' + list.join('') + '</div>'; }
+  function tagc(txt) { return '<span class="dms-tag">' + txt + '</span>'; }
+  function stat(k, txt) { return '<span class="dms-stat dms-stat-' + k + '">' + esc(txt) + '</span>'; }
+  function ctx(html) { return '<span class="dms-kpi-ctx">' + html + '</span>'; }
+  function badge(txt, color) { return '<span class="dms-badge" style="--dms-c:' + color + '">' + esc(txt) + '</span>'; }
+  function wait() { return '<span class="dms-sm">' + esc(tr('Calculating…', 'جارٍ الحساب…')) + '</span>'; }
+  function asOf() { return tagc(esc(tr('As of today', 'حتى اليوم'))); }
+  /* Value of a source-backed KPI: '…' while loading, '—' when the source failed (never a false zero). */
+  function kv(key, f) { return D[key + 'Err'] ? '—' : D[key] == null ? '…' : f(D[key]); }
+  function ks(key, f) { return D[key + 'Err'] ? esc(tr('Unavailable', 'غير متاح')) : D[key] == null ? wait() : f(D[key]); }
+  function spark(vs) {
+    var n = vs.length, real = vs.filter(function (v) { return v != null; }), pts = [];
+    if (n < 3 || real.length < 3 || !real.some(function (v) { return v > 0; })) { return ''; }
+    var max = Math.max.apply(null, real), min = Math.min(0, Math.min.apply(null, real)), rng = (max - min) || 1;
+    vs.forEach(function (v, i) { if (v != null) { pts.push([(i / (n - 1) * 100).toFixed(2), (26 - (v - min) / rng * 23).toFixed(2)]); } });
+    var line = pts.map(function (p) { return p.join(','); }).join(' L');
+    return '<svg class="dms-spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path class="dms-spark-a" d="M' + pts[0][0] + ',28 L' + line + ' L' + pts[pts.length - 1][0] + ',28 Z"/><path class="dms-spark-l" d="M' + line + '"/></svg>';
+  }
+  /* Change vs the comparison window. fmt formats values; small count bases show "was N" instead of a percentage. */
+  function deltaChip(cur, prev, R, fmt, isCount, lowerIsBetter) {
+    if (cur == null || prev == null || !R) { return ''; }
+    fmt = fmt || moneyS;
+    var tip = tr('This period', 'هذه الفترة') + ' (' + rangeLabel(R[0]) + '): ' + fmt(cur) + '\n' + tr('Previous', 'السابقة') + ' (' + rangeLabel(R[1]) + '): ' + fmt(prev);
+    var sr = '<span class="dms-sr"> ' + esc(tr('vs previous period', 'مقارنة بالفترة السابقة')) + '</span>';
+    if (prev === 0 || (isCount && prev < 5)) { return '<span class="dms-delta dms-flat" data-tip="' + esc(tip) + '">' + esc(tr('was', 'كان')) + ' <bdi>' + esc(fmt(prev)) + '</bdi>' + sr + '</span>'; }
+    var p = (cur - prev) / prev * 100, a = Math.abs(p), k = a < 0.05 ? 'flat' : p > 0 ? 'up' : 'down', tone = k === 'flat' ? 'flat' : ((k === 'up') !== !!lowerIsBetter ? 'up' : 'down');
+    var txt = a > 999 ? '10×+' : (a < 10 ? a.toFixed(1) : Math.round(a)) + '%';
+    return '<span class="dms-delta dms-' + tone + '" data-tip="' + esc(tip) + '">' + (k === 'flat' ? '' : ico(k === 'up' ? 'up' : 'dn')) + '<bdi>' + (k === 'down' ? '−' : '') + txt + '</bdi>' + sr + '</span>';
+  }
+  function panel(title, body, extra, meta) {
+    return '<section class="dms-panelbox ' + (extra || '') + '"><div class="dms-ph"><h3 class="dms-h3">' + esc(title) + '</h3>' + (meta ? '<span class="dms-ph-meta">' + meta + '</span>' : '') + '</div>' + body + '</section>';
+  }
+  function note(txt) { return '<p class="dms-note">' + txt + '</p>'; }
+  function alertBox(kind, html) { return '<div class="dms-alert dms-alert-' + kind + '" role="' + (kind === 'err' ? 'alert' : 'status') + '">' + html + '</div>'; }
+  function empty(txt) { return '<div class="dms-empty">' + esc(txt || tr('No data for the current filters.', 'لا توجد بيانات للمرشحات الحالية.')) + '</div>'; }
+  function srcErr(kind, what) { return alertBox('err', '<b>' + esc(tr('Source unavailable', 'المصدر غير متاح')) + ':</b> ' + esc(what) + ' — ' + esc(errText(kind))); }
+  function skel(n, cls) { return rep('<div class="dms-skel ' + (cls || '') + '"></div>', n); }
+  /* Body for a panel backed by source `key`: skeleton while loading, named error on failure, else f(data). */
+  function src(key, what, f) { return D[key + 'Err'] ? srcErr(D[key + 'Err'], what) : D[key] == null ? skel(1, 'dms-skel-panel') : f(D[key]); }
 
-    // ---------------- data loading ----------------
-    var tmr = null;
-    function scheduleLoad(delay) {
-        if (tmr) { clearTimeout(tmr); }
-        tmr = setTimeout(load, delay || 0);
-    }
+  /* ---------- charts (HTML/CSS; hover details via the shared tooltip, data-tip) ---------- */
+  function niceMax(v) { if (!(v > 0)) { return 1; } var p = Math.pow(10, Math.floor(Math.log(v) / Math.LN10)), f = v / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
+  function axisFmt(v) { var a = Math.abs(v); return a >= 1e9 ? +(v / 1e9).toFixed(1) + 'B' : a >= 1e6 ? +(v / 1e6).toFixed(1) + 'M' : a >= 1e3 ? +(v / 1e3).toFixed(1) + 'K' : String(a < 10 ? +v.toFixed(2) : Math.round(v)); }
+  function bucketLabel(k, g, short) {
+    if (g === 'cat') { return String(k); }
+    if (g === 'week' && !short) { return tr('Week of ', 'أسبوع ') + fmtDate(k, true); }
+    if (g !== 'month') { return fmtDate(k, !short); }
+    try { return new Intl.DateTimeFormat(locale(), { month: 'short', year: '2-digit', timeZone: 'UTC' }).format(new Date(parseISO(k + '-01'))); } catch (e) { return k; }
+  }
+  /* Count charts get whole-number ticks (top is a multiple of 4), so small counts never show 0, 1, 1, 2, 2. */
+  function countTop(max, fmt) { var t = niceMax(max); return fmt === num ? Math.max(4, Math.ceil(t / 4) * 4) : t; }
+  function granName(g) { return g === 'day' ? tr('by day', 'يوميًا') : g === 'week' ? tr('by week', 'أسبوعيًا') : tr('by month', 'شهريًا'); }
+  /* Time buckets for a range: daily up to 45 days, weekly up to 120 days, monthly beyond; stops at today. */
+  function buckets(range) {
+    var from = range[0], to = clip(range)[1], span = diffDays(from, to) + 1, g = span <= 45 ? 'day' : span <= 120 ? 'week' : 'month', keys = [], cur, i;
+    function keyOf(iso) { iso = String(iso).slice(0, 10); return g === 'day' ? iso : g === 'week' ? weekStartOf(iso) : iso.slice(0, 7); }
+    if (to < from) { return { keys: [], gran: g, keyOf: keyOf }; }
+    if (g === 'month') { keys = monthList(from, to); } else { cur = keyOf(from); for (i = 0; i < 200 && cur <= to; i++) { keys.push(cur); cur = addDays(cur, g === 'day' ? 1 : 7); } }
+    return { keys: keys, gran: g, keyOf: keyOf };
+  }
+  /* Grouped rows (one per date) folded into buckets: rows[dateField], rows[valField]. */
+  function series(range, rows, dateF, valF) {
+    var B = buckets(range), d = {}; B.keys.forEach(function (k) { d[k] = { v: 0, n: 0 }; });
+    (rows || []).forEach(function (r) { var k = B.keyOf(r[dateF]); if (d[k]) { d[k].v += valF ? (+r[valF] || 0) : 1; d[k].n += +r.n || (valF ? 0 : 1); } });
+    B.d = d; return B;
+  }
+  function legend(series) { return '<div class="dms-legend">' + series.map(function (s) { return '<span><i style="--dms-c:' + s.color + '"></i>' + esc(s.label) + '</span>'; }).join('') + '</div>'; }
+  /* Column chart. ser = [{label, color, val: function (key) {}}]; fmt formats values (default money). */
+  function barChart(keys, gran, ser, fmt, extraTip, emptyTxt) {
+    if (!Array.isArray(ser)) { ser = [ser]; }
+    fmt = fmt || moneyFull; var max = 0;
+    keys.forEach(function (k) { ser.forEach(function (s) { max = Math.max(max, s.val(k) || 0); }); });
+    if (!keys.length || !max) { return empty(emptyTxt || tr('Nothing in this range.', 'لا شيء في هذا النطاق.')); }
+    var top = countTop(max, fmt), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, gran) + ser.map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k) || 0); }).join('') + (extraTip ? extraTip(k) : '');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '">' + ser.map(function (s) { var v = s.val(k) || 0; return '<i class="dms-bar' + (v ? '' : ' dms-bar-0') + '" style="height:' + (v / top * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i>'; }).join('') + '</div>';
+    }).join('');
+    var aria = ser.map(function (s) { return s.label + ': ' + keys.map(function (k) { return bucketLabel(k, gran, true) + ' ' + fmt(s.val(k) || 0); }).join(', '); }).join('; ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + (ser.length > 1 ? legend(ser) : '');
+  }
+  /* Line chart for balances (may go negative). ser = [{label, color, val(key), dash?}]; the first series is the main line. */
+  function lineChart(keys, gran, ser, fmt) {
+    fmt = fmt || moneyFull; var all = [];
+    keys.forEach(function (k) { ser.forEach(function (s) { var v = s.val(k); if (v != null) { all.push(v); } }); });
+    if (!keys.length || !all.length) { return empty(); }
+    var mx = Math.max.apply(null, all), mn = Math.min.apply(null, all), hi = mx > 0 ? niceMax(mx) : 0, lo = mn < 0 ? -niceMax(-mn) : 0;
+    if (hi === lo) { hi = lo + 1; }
+    var y = function (v) { return (100 - (v - lo) / (hi - lo) * 100).toFixed(2); }, x = function (i) { return (keys.length < 2 ? 50 : i / (keys.length - 1) * 100).toFixed(2); };
+    var ticks = [0, 0.25, 0.5, 0.75, 1].map(function (t) { return lo + (hi - lo) * t; });
+    var paths = ser.map(function (s) { var pts = keys.map(function (k, i) { var v = s.val(k); return v == null ? null : x(i) + ',' + y(v); }).filter(Boolean); return '<polyline class="dms-line' + (s.dash ? ' dms-line-ref' : '') + '" style="--dms-c:' + s.color + '" points="' + pts.join(' ') + '"/>'; }).join('');
+    var zero = lo < 0 ? '<i class="dms-gl dms-gl-0" style="bottom:' + ((0 - lo) / (hi - lo) * 100).toFixed(2) + '%"></i>' : '';
+    var hits = keys.map(function (k) { return '<div class="dms-col dms-col-hit" data-tip="' + esc(bucketLabel(k, gran) + ser.map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k)); }).join('')) + '"></div>'; }).join('');
+    var aria = ser[0].label + ': ' + keys.map(function (k) { return bucketLabel(k, gran, true) + ' ' + fmt(ser[0].val(k)); }).join(', ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (v, i) { return '<span style="bottom:' + i * 25 + '%">' + axisFmt(v) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + [0, 25, 50, 75, 100].map(function (b) { return '<i class="dms-gl" style="bottom:' + b + '%"></i>'; }).join('') + zero + '<svg class="dms-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">' + paths + '</svg><div class="dms-cols">' + hits + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + (ser.length > 1 ? legend(ser) : '');
+  }
+  /* Stacked columns (one bar per key, segments per series). */
+  function stackChart(keys, gran, ser, fmt) {
+    fmt = fmt || num; var tot = {}, max = 0;
+    keys.forEach(function (k) { tot[k] = sum(ser, function (s) { return s.val(k) || 0; }); max = Math.max(max, tot[k]); });
+    if (!keys.length || !max) { return empty(); }
+    var top = countTop(max, fmt), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, gran) + ser.filter(function (s) { return s.val(k); }).map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k)); }).join('');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '"><span class="dms-stackbar" style="height:' + (tot[k] / top * 100).toFixed(2) + '%">' + ser.map(function (s) { var v = s.val(k) || 0; return v ? '<i style="flex:' + v + ' 0 0;background:' + s.color + '"></i>' : ''; }).join('') + '</span></div>';
+    }).join('');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(ser.map(function (s) { return s.label; }).join(', ')) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + legend(ser);
+  }
+  function fitChartLabels() {
+    HOST.querySelectorAll('.dms-xaxis').forEach(function (axis) {
+      var labels = axis.querySelectorAll('span'), widest = 0;
+      labels.forEach(function (label) { var range = document.createRange(); range.selectNodeContents(label); widest = Math.max(widest, range.getBoundingClientRect().width); });
+      var slots = Math.max(1, Math.min(8, Math.floor(axis.clientWidth / (widest + 16)))), step = Math.max(1, Math.ceil(labels.length / slots));
+      labels.forEach(function (label, i) { label.style.visibility = i % step ? 'hidden' : 'visible'; });
+    });
+  }
+  /* Share rows: label · bar · value · %. items = [{label, value, color, act?, tip?}]; ordered=true keeps the given order. */
+  function shareList(items, head, fmt, ordered) {
+    fmt = fmt || num; var tot = sum(items, function (s) { return s.value; }), rows = items.filter(function (s) { return s.value; });
+    if (!ordered) { rows = rows.slice().sort(function (a, b) { return b.value - a.value; }); }
+    if (!tot) { return empty(); }
+    return (head ? '<div class="dms-share-t">' + head + '</div>' : '') + rows.map(function (s) {
+      var tip = s.tip || (s.label + ': ' + fmt(s.value) + ' (' + pct(s.value, tot) + ')');
+      var inner = '<span class="dms-share-l"><i class="dms-dot" style="--dms-c:' + s.color + '"></i>' + bdi(s.label) + '</span><span class="dms-share-b"><i style="width:' + (s.value / tot * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i></span>' +
+        '<span class="dms-num">' + esc(fmt(s.value)) + '</span><span class="dms-share-p dms-num">' + pct(s.value, tot, 0) + '</span>';
+      return s.act ? '<button type="button" class="dms-share dms-share-btn" data-act="kpi" data-v="' + esc(s.act) + '" data-tip="' + esc(tip) + '">' + inner + '</button>' : '<div class="dms-share" data-tip="' + esc(tip) + '">' + inner + '</div>';
+    }).join('');
+  }
+  /* Ranked horizontal bars: items = [{label, value, color?, act?}]. */
+  function hbars(items, fmt, color) {
+    if (!items.length) { return empty(); }
+    var max = Math.max.apply(null, items.map(function (i) { return Math.abs(i.value); }).concat([1])); fmt = fmt || num;
+    return items.map(function (i) {
+      var inner = '<span class="dms-split-l">' + bdi(i.label) + '</span><span class="dms-split"><i style="width:' + (Math.abs(i.value) / max * 100).toFixed(2) + '%;background:' + (i.color || color || 'var(--dms-royal)') + '"></i></span><span class="dms-num dms-split-v">' + esc(fmt(i.value)) + '</span>';
+      var tip = ' data-tip="' + esc(i.label + ': ' + fmt(i.value)) + '"';
+      return i.act ? '<button type="button" class="dms-stack-row dms-split-row" data-act="kpi" data-v="' + esc(i.act) + '"' + tip + '>' + inner + '</button>' : '<div class="dms-stack-row dms-split-row"' + tip + '>' + inner + '</div>';
+    }).join('');
+  }
+  /* Two-part bars ranked by total: items = [{label, total, part, act?}]; parts = [{label, color}] for part and remainder. */
+  function splitBars(items, parts, fmt) {
+    if (!items.length) { return empty(); }
+    fmt = fmt || money; var max = Math.max.apply(null, items.map(function (i) { return i.total; }).concat([1]));
+    return items.map(function (i) {
+      var tip = i.label + '\n' + parts[0].label + ': ' + fmt(i.part) + '\n' + parts[1].label + ': ' + fmt(i.total - i.part);
+      var bar = '<span class="dms-split"><i style="width:' + (i.part / max * 100).toFixed(2) + '%;background:' + parts[0].color + '"></i><i style="width:' + (Math.max(0, i.total - i.part) / max * 100).toFixed(2) + '%;background:' + parts[1].color + '"></i></span>';
+      var inner = '<span class="dms-split-l">' + bdi(i.label) + '</span>' + bar + '<span class="dms-num dms-split-v">' + esc(fmt(i.total)) + '</span>';
+      return i.act ? '<button type="button" class="dms-stack-row dms-split-row" data-act="kpi" data-v="' + esc(i.act) + '" data-tip="' + esc(tip) + '">' + inner + '</button>' : '<div class="dms-stack-row dms-split-row" data-tip="' + esc(tip) + '">' + inner + '</div>';
+    }).join('') + legend(parts);
+  }
+  function mixBar(segs) {
+    var tot = sum(segs, function (s) { return s.value; }); if (!tot) { return ''; }
+    return '<span class="dms-mix"><span class="dms-mix-b">' + segs.map(function (s) { return s.value ? '<i style="width:' + (s.value / tot * 100).toFixed(2) + '%;background:' + s.color + '" data-tip="' + esc(s.label + ': ' + (s.fmt || num)(s.value)) + '"></i>' : ''; }).join('') + '</span></span>';
+  }
+  var PAL = ['var(--dms-royal)', '#6b8be0', '#1f8a5b', '#d97a1e', '#8a97a8', '#a3b4ef', '#c2412d', '#d6a419', '#4b5a6e', '#b6bfca'];
 
-    function load() {
-        tmr = null;
-        if (!st.f.from_date || !st.f.to_date || st.f.from_date > st.f.to_date) {
-            st.data = null; st.error = 'Choose a valid date range (From Date must be on or before To Date).';
-            st.loading = false; renderAll(); return;
-        }
-        var my = ++st.seq;
-        st.loading = true; st.error = null; showLoading();
-        var args = {};
-        Object.keys(st.f).forEach(function (k) { if (st.f[k]) { args[k] = st.f[k]; } });
-        frappe.call({ method: API, args: args, freeze: false, silent: true, type: 'GET' })
-            .then(function (r) {
-                if (my !== st.seq) { return; } // stale response - a newer request is in flight
-                st.loading = false;
-                if (!r || !r.message) { st.data = null; st.error = 'Empty response from the dashboard API.'; }
-                else { st.data = r.message; st.lastOk = r.message.generated_at; st.dt.page = 0; st.fl.page = 0; }
-                renderAll();
-            }, function (e) {
-                if (my !== st.seq) { return; }
-                st.loading = false; st.data = null;
-                st.error = errText(e);
-                renderAll();
-            });
+  /* ---------- tables: client-side (search / sort / pagination / CSV) and server-side (paginated, sortable, CSV) ---------- */
+  var TBL = {}, TS = {}, SS = {}, focusId = null;
+  function regTable(spec) { TBL[spec.id] = spec; return '<div class="dms-tbl" data-tbl="' + esc(spec.id) + '"></div>'; }
+  function fillTables(scope) { var els = (scope || HOST).querySelectorAll('[data-tbl]'); for (var i = 0; i < els.length; i++) { fillTable(els[i].getAttribute('data-tbl'), els[i]); } }
+  function clientRows(sp, st) {
+    var rows = sp.rows, q = st.q.trim().toLowerCase();
+    if (q) { rows = rows.filter(function (r) { return sp.text(r).toLowerCase().indexOf(q) >= 0; }); }
+    if (st.sk) { var col = sp.cols.filter(function (c) { return c.k === st.sk; })[0]; if (col && col.s) { rows = rows.slice().sort(function (a, b) { var x = col.s(a), y = col.s(b); return (x < y ? -1 : x > y ? 1 : 0) * st.dir; }); } }
+    return rows;
+  }
+  function thead(sp, sk, dir, act, id) {
+    return '<thead><tr>' + sp.cols.map(function (c) {
+      var key = act === 'ssort' ? c.sf : c.k, can = act === 'ssort' ? !!c.sf : !!c.s, on = can && sk === key;
+      return '<th class="' + (can ? 'dms-th-s' : '') + (c.num ? ' dms-th-n' : '') + '"' + (can ? ' data-act="' + act + '" data-id="' + esc(id) + '" data-v="' + esc(key) + '" tabindex="0" aria-sort="' + (on ? (dir > 0 ? 'ascending' : 'descending') : 'none') + '"' : '') + '>' + esc(c.h) + (on ? (dir > 0 ? ' ▲' : ' ▼') : '') + '</th>';
+    }).join('') + '</tr></thead>';
+  }
+  function tcells(sp, r) { return '<tr>' + sp.cols.map(function (c) { return '<td' + (c.num ? ' class="dms-td-n"' : '') + '>' + c.r(r) + '</td>'; }).join('') + '</tr>'; }
+  function fillTable(id, el) {
+    var sp = TBL[id]; el = el || HOST.querySelector('[data-tbl="' + id + '"]'); if (!sp || !el) { return; }
+    if (sp.server) { return fillServer(id, el); }
+    var st = TS[id] || (TS[id] = { q: '', page: 1, sk: sp.sk || '', dir: sp.dir || 1 }), rows = clientRows(sp, st);
+    var ps = sp.pageSize || CFG.pageSize, pages = Math.max(1, Math.ceil(rows.length / ps)); if (st.page > pages) { st.page = pages; }
+    var slice = rows.slice((st.page - 1) * ps, st.page * ps);
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(tr('Search this table…', 'ابحث في الجدول…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search this table', 'ابحث في الجدول')) + '"><span class="dms-tb-r"><span class="dms-sm">' + num(rows.length) + ' ' + esc(rows.length === 1 ? tr('row', 'سجل') : tr('rows', 'سجل')) + (st.q ? ' / ' + num(sp.rows.length) : '') + '</span>' +
+      (rows.length ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csv" data-id="' + esc(id) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    if (sp.notice) { h += sp.notice; }
+    if (!rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
+    h += '<div class="dms-tablewrap"><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'tsort', id) + '<tbody>' + slice.map(function (r) { return tcells(sp, r); }).join('') + '</tbody>' + (sp.foot ? '<tfoot>' + sp.foot(rows) + '</tfoot>' : '') + '</table></div>';
+    h += pager(id, 'tpage', st.page, pages, rows.length, ps);
+    el.innerHTML = h; restoreFocus(el, id);
+  }
+  function pager(id, act, pg, pages, total, ps) {
+    if (total <= ps) { return ''; }
+    return '<div class="dms-pager"><span>' + esc(tr('Showing', 'عرض')) + ' ' + num((pg - 1) * ps + 1) + '–' + num(Math.min(pg * ps, total)) + ' / ' + num(total) + '</span><span><button type="button" class="dms-btn" data-act="' + act + '" data-id="' + esc(id) + '" data-v="-1"' + (pg <= 1 ? ' disabled' : '') + '>‹ ' + esc(tr('Previous', 'السابق')) + '</button> ' +
+      esc(tr('Page', 'صفحة')) + ' ' + pg + ' ' + esc(tr('of', 'من')) + ' ' + pages + ' <button type="button" class="dms-btn" data-act="' + act + '" data-id="' + esc(id) + '" data-v="1"' + (pg >= pages ? ' disabled' : '') + '>' + esc(tr('Next', 'التالي')) + ' ›</button></span></div>';
+  }
+  function restoreFocus(el, id) { if (focusId === id) { var i = el.querySelector('[data-tq]'); if (i) { i.focus(); try { i.setSelectionRange(i.value.length, i.value.length); } catch (e) { /* ignore */ } } } }
+  function srvArgs(sp, st) {
+    var q = st.q.trim(), base = { doctype: sp.dt, filters: sp.filters };
+    if (sp.parent) { base.parent = sp.parent; }
+    if (q && sp.search) { base.or_filters = sp.search.map(function (f) { return [sp.dt, f, 'like', '%' + q + '%']; }); }
+    return base;
+  }
+  function srvOrder(sp, st) { return st.sk ? st.sk + (st.dir > 0 ? ' asc' : ' desc') : sp.order; }
+  function fillServer(id, el) {
+    var sp = TBL[id], st = SS[id] || (SS[id] = { q: '', page: 1, total: null, rows: null, loading: false, err: null, req: 0, sk: '', dir: 1 });
+    if (!st.dirty && st.rows && st.key === JSON.stringify(sp.filters)) { return paintServer(id, el); }
+    st.dirty = false; st.key = JSON.stringify(sp.filters);
+    var req = ++st.req; st.loading = true; st.err = null;
+    var ps = sp.pageSize || CFG.modalPage, base = srvArgs(sp, st);
+    paintServer(id, el);
+    var chk = function () { return !destroyed && SS[id] && SS[id].req === req; };
+    if (sp.loader) { sp.loader(st.page - 1, ps, st.q.trim(), srvOrder(sp, st)).then(function (res) { if (!chk()) { return; } st.total = res.total; st.rows = res.rows || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); }, function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } }); return; }
+    var cnt = getList(Object.assign({}, base, { fields: ['count(name) as n'], limit_page_length: 1 }), chk).then(function (r) { return r ? +one(r).n || 0 : null; });
+    var rows = getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: (st.page - 1) * ps, limit_page_length: ps }), chk);
+    Promise.all([cnt, rows]).then(function (res) {
+      if (!chk()) { return; } st.total = res[0]; st.rows = res[1] || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]'));
+    }).catch(function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } });
+  }
+  function paintServer(id, el) {
+    if (!el) { return; } var sp = TBL[id], st = SS[id], ps = sp.pageSize || CFG.modalPage;
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(sp.searchHint || tr('Search…', 'بحث…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search', 'بحث')) + '"><span class="dms-tb-r"><span class="dms-sm">' + (st.total == null ? '' : num(st.total) + ' ' + esc(st.total === 1 ? tr('record', 'سجل') : tr('records', 'سجل'))) + '</span>' +
+      (st.total ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csvall" data-id="' + esc(id) + '" title="' + esc(tr('Export up to 5,000 rows', 'تصدير حتى 5,000 سجل')) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    if (st.err) { el.innerHTML = h + alertBox('err', esc(st.err === 'perm' ? tr('Permission denied for your user.', 'لا تملك صلاحية القراءة.') : tr('Technical error while reading this list.', 'خطأ تقني أثناء قراءة القائمة.')) + ' <button type="button" class="dms-linkbtn" data-act="sretry" data-id="' + esc(id) + '">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>'); return restoreFocus(el, id); }
+    if (st.loading && !st.rows) { el.innerHTML = h + '<div class="dms-skel"></div>'; return restoreFocus(el, id); }
+    if (!st.rows || !st.rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
+    var pages = Math.max(1, Math.ceil((st.total || 0) / ps));
+    h += '<div class="dms-tablewrap" style="opacity:' + (st.loading ? .55 : 1) + '"' + (st.loading ? ' aria-busy="true"' : '') + '><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'ssort', id) + '<tbody>' + st.rows.map(function (r) { return tcells(sp, r); }).join('') + '</tbody></table></div>' + pager(id, 'spage', st.page, pages, st.total || 0, ps);
+    el.innerHTML = h; restoreFocus(el, id);
+  }
+  function csvCell(v) { v = v == null ? '' : String(v); if (/^[=+\-@\t\r]/.test(v) && !/^-?[\d.,]+$/.test(v)) { v = "'" + v; } return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  function download(name, sp, rows) {
+    var cols = sp.cols.filter(function (c) { return c.c; }), lines = [cols.map(function (c) { return csvCell(c.h); }).join(',')].concat(rows.map(function (r) { return cols.map(function (c) { return csvCell(c.c(r)); }).join(','); }));
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+    a.download = String(name).replace(/[^\w-]+/g, '_') + '_' + TODAY + '.csv'; HOST.appendChild(a); a.click(); later(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+  function exportServer(id) {
+    var sp = TBL[id], st = SS[id], out = [], step = 500, base = srvArgs(sp, st), g = GEN;
+    if (sp.loader) { toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…')); var acc = [], pg = function (p) { return sp.loader(p, 500, st.q.trim(), srvOrder(sp, st)).then(function (res) { acc = acc.concat(res.rows || []); return (res.rows || []).length === 500 && acc.length < 5000 ? pg(p + 1) : acc; }); }; pg(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); }); return; }
+    function next(s) {
+      return getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: s, limit_page_length: step }), function () { return g === GEN; }).then(function (r) {
+        out = out.concat(r || []); return (r && r.length === step && out.length < 5000) ? next(s + step) : out;
+      });
     }
-    function errText(e) {
-        try {
-            if (e && e.responseJSON) {
-                var j = e.responseJSON;
-                if (j._server_messages) { var m = JSON.parse(j._server_messages); if (m && m.length) { return JSON.parse(m[0]).message || String(m[0]); } }
-                if (j.exc_type) { return j.exc_type === 'PermissionError' ? 'Access unavailable: you do not have permission to use this dashboard API.' : j.exc_type; }
-            }
-            if (e && e.status === 403) { return 'Access unavailable (HTTP 403).'; }
-            if (e && e.status) { return 'Request failed (HTTP ' + e.status + ').'; }
-        } catch (x) { /* ignore */ }
-        return 'Request failed. Check your connection and try Refresh.';
-    }
-    function loadOptions() {
-        frappe.call({ method: API, args: { action: 'options' }, freeze: false, silent: true, type: 'GET' }).then(function (r) {
-            st.opts = (r && r.message) || {}; st.optsError = null; renderFilters();
-        }, function (e) { st.opts = {}; st.optsError = errText(e); renderFilters(); });
-    }
-    function showLoading() {
-        sel('.dfd-loading').style.display = st.loading ? 'flex' : 'none';
-        var b = sel('[data-act="refresh"]'); if (b) { b.disabled = !!st.loading; }
-    }
+    toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…'));
+    next(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); });
+  }
+  function toast(msg, bad) { var e = document.createElement('div'); e.className = 'dms-toast' + (bad ? ' dms-toast-err' : ''); e.setAttribute('role', 'status'); e.textContent = msg; HOST.appendChild(e); later(function () { e.remove(); }, 3500); }
+  /* common cells */
+  function dtc(v) { return v ? '<span class="dms-num">' + esc(String(v).slice(0, 10)) + '</span>' : '<span class="dms-sm">—</span>'; }
+  function who(v) { return v ? bdi(v) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>'; }
+  function txt(v) { return v ? bdi(v) : '<span class="dms-sm">—</span>'; }
+  function amc(v) { return v == null || v === '' ? '<span class="dms-sm">—</span>' : '<span class="dms-num">' + esc(amt(v)) + '</span>'; }
+  function overdueTag(due) { var d = diffDays(String(due || TODAY).slice(0, 10), TODAY); return d > 0 ? '<span class="dms-days ' + (d > 90 ? 'dms-days-bad' : 'dms-days-warn') + '">' + num(d) + '</span>' : '<span class="dms-sm">—</span>'; }
+  function col(h, f, o) { o = o || {}; return Object.assign({ h: h, sf: o.sort === false ? undefined : f, r: function (x) { return o.fmt ? o.fmt(x[f], x) : txt(x[f]); }, c: function (x) { return x[f]; } }, o); }
+  function linkCol(h, dt, f, labelF) { return { h: h, sf: f, r: function (x) { return docLink(typeof dt === 'function' ? dt(x) : dt, x[f], labelF ? x[labelF] || x[f] : x[f]); }, c: function (x) { return x[f]; } }; }
 
-    // ---------------- charts ----------------
-    function dateSeq(from, to) {
-        var out = [], d = from, guard = 0;
-        while (d <= to && guard < 400) { out.push(d); d = addDays(d, 1); guard++; }
-        return guard >= 400 ? null : out;
-    }
-    function trend(list, keys, colors, labels, emptyMsg) {
-        if (!list) { return '<div class="dfd-empty">' + NA + '</div>'; }
-        var map = {}; list.forEach(function (r) { map[r.date] = r; });
-        var dates = dateSeq(st.data.filters.from_date, st.data.filters.to_date) || list.map(function (r) { return r.date; });
-        var any = list.some(function (r) { return keys.some(function (k) { return (r[k] || 0) > 0; }); });
-        if (!any) { return '<div class="dfd-empty">' + esc(emptyMsg) + '</div>'; }
-        var W = 640, H = 190, L = 34, B = 26, T = 8, R = 6, iw = W - L - R, ih = H - T - B;
-        var max = 0;
-        dates.forEach(function (d) { var r = map[d] || {}; var s = 0; keys.forEach(function (k) { s += (r[k] || 0); }); if (s > max) { max = s; } });
-        max = max || 1;
-        var raw = max / 4, mag = Math.pow(10, Math.floor(Math.log10(raw))), nrm = raw / mag;
-        var step = (nrm <= 1 ? 1 : (nrm <= 2 ? 2 : (nrm <= 5 ? 5 : 10))) * mag; if (step < 1) { step = 1; }
-        var top = step * 4;
-        var bw = iw / dates.length, g = '';
-        for (var i = 0; i <= 4; i++) {
-            var y = T + ih - ih * i / 4;
-            g += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y + '" y2="' + y + '" stroke="#e6ecf4"/>' +
-                '<text x="' + (L - 4) + '" y="' + (y + 3) + '" text-anchor="end">' + Math.round(top * i / 4) + '</text>';
-        }
-        var every = Math.max(1, Math.ceil(dates.length / 10));
-        dates.forEach(function (d, i) {
-            var r = map[d] || {}, y0 = T + ih, x = L + i * bw + bw * 0.12, w = Math.max(1, bw * 0.76), tip = fdateTxt(d);
-            keys.forEach(function (k, j) {
-                var v = r[k] || 0, h = ih * v / top;
-                tip += '\n' + labels[j] + ': ' + v.toLocaleString('en-US');
-                if (h > 0) { g += '<rect x="' + x.toFixed(1) + '" y="' + (y0 - h).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + h.toFixed(1) + '" fill="' + colors[j] + '" rx="1.5"><title>__TIP__</title></rect>'; }
-                y0 -= h;
-            });
-            g = g.split('__TIP__').join(esc(tip));
-            g += '<rect x="' + (L + i * bw).toFixed(1) + '" y="' + T + '" width="' + bw.toFixed(1) + '" height="' + ih + '" fill="transparent"><title>' + esc(tip) + '</title></rect>';
-            if (i % every === 0) { g += '<text x="' + (L + i * bw + bw / 2).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle">' + esc(d.slice(5)) + '</text>'; }
-        });
-        var leg = '<div class="dfd-legend">' + keys.map(function (k, j) { return '<span><i style="background:' + colors[j] + '"></i>' + esc(labels[j]) + '</span>'; }).join('') + '</div>';
-        return leg + '<svg class="dfd-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img">' + g + '</svg>';
-    }
-    function fdateTxt(d) { try { return frappe.datetime.str_to_user(d); } catch (e) { return d; } }
+  /* ---------- actions pending ---------- */
+  var PRIO = { high: ['High', 'عالية'], med: ['Medium', 'متوسطة'], low: ['Low', 'منخفضة'] };
+  function score(p, amount, age) { return { high: 300, med: 200, low: 100 }[p] + Math.min(40, Math.log(1 + Math.abs(amount || 0)) / Math.LN10 * 6) + Math.min(20, (age || 0) / 10); }
+  /* Server specs ({id, server:true, dt, filters, fields, order, it(row) → item}) load count + 6 most urgent rows each. */
+  function loadActions(specs, key) {
+    run(key || 'act', function (chk) {
+      return Promise.all(specs.filter(function (s) { return s.server; }).map(function (s) {
+        var c = getList({ doctype: s.dt, fields: ['count(name) as n'], filters: s.filters, limit_page_length: 1 }, chk).then(function (r) { return +one(r).n || 0; }, function (e) { return 'ERR:' + errKind(e); });
+        var l = (s.rank ? fetchAll({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order }, chk, 2000) : getList({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order, limit_page_length: 6 }, chk)).then(function (r) { return r || []; }, function (e) { return 'ERR:' + errKind(e); });
+        return Promise.all([c, l]).then(function (x) { return { id: s.id, count: typeof x[1] === 'string' ? x[1] : x[0], rows: Array.isArray(x[1]) ? x[1] : [] }; });
+      })).then(function (res) { var o = {}; res.forEach(function (x) { o[x.id] = x; }); return o; });
+    });
+  }
+  /* client: {id: {rows, item}} for client specs, null while their sources load, or 'ERR:kind'. */
+  function actModel(specs, key, client) {
+    var counts = {}, items = [], A = D[key || 'act'], AE = D[(key || 'act') + 'Err'];
+    specs.forEach(function (s) {
+      if (s.client) {
+        var c = client == null ? null : typeof client === 'string' ? client : client[s.id];
+        if (typeof c === 'string') { counts[s.id] = c; }
+        else if (c) { counts[s.id] = c.count != null ? c.count : c.rows.length; c.rows.slice(0, 6).forEach(function (r) { items.push(c.item(r)); }); }
+        return;
+      }
+      if (AE) { counts[s.id] = 'ERR:' + AE; return; }
+      var x = A && A[s.id]; if (!x) { return; }
+      counts[s.id] = x.count;
+      x.rows.forEach(function (r) { var it = s.it(r); it.dt = it.dt || s.dt; it.name = it.name || r.name; items.push(it); });
+    });
+    items.sort(function (a, b) { return b.score - a.score; });
+    var seen = {}; items = items.filter(function (it) { var k = it.dt + '|' + it.name; if (seen[k]) { return false; } seen[k] = 1; return true; });   /* one row per record, under its most urgent category */
+    return { specs: specs, counts: counts, items: items, ready: specs.every(function (s) { return counts[s.id] !== undefined; }) };
+  }
+  function pendingTotal(AM) {
+    if (!AM) { return null; }
+    var t = 0, any = false; Object.keys(AM.counts).forEach(function (k) { var c = AM.counts[k]; if (typeof c === 'number') { t += c; any = true; } });
+    return any ? t : null;
+  }
+  function dtLabel(dt) { var L = APP.dtLabels && APP.dtLabels[dt]; return L ? tr(L[0], L[1]) : dt; }
+  function arow(it) {
+    return '<a class="dms-arow" href="' + esc(it.href || docUrl(it.dt, it.name)) + '" target="_blank" rel="noopener noreferrer">' +
+      '<span class="dms-prio dms-prio-' + it.p + '">' + esc(tr(PRIO[it.p][0], PRIO[it.p][1])) + '</span>' +
+      '<span class="dms-arow-main"><span class="dms-arow-t"><bdi>' + esc(it.title || it.name) + '</bdi><span class="dms-arow-dt">' + esc(dtLabel(it.dt)) + '</span></span><span class="dms-arow-d">' + bdi(it.desc || '') + '</span></span>' +
+      '<span class="dms-arow-who">' + (it.who ? bdi(it.who) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>') + '</span>' +
+      '<span class="dms-arow-due dms-tone-' + (it.tone || 'n') + '">' + esc(it.due || '') + '</span><span class="dms-sr"> (' + esc(tr('opens in a new tab', 'يفتح في علامة تبويب جديدة')) + ')</span></a>';
+  }
+  function drillId(s) { return s.drill || ((s.client ? 'cli:' : 'srv:') + s.id); }
+  function catBtn(s, c) {
+    var err = typeof c === 'string', inner = '<span class="dms-acat-t">' + esc(s.short) + '</span><b class="dms-num">' + (err || c == null ? '—' : num(c)) + '</b>';
+    return (!err && c) ? '<button type="button" class="dms-acat" data-act="kpi" data-v="' + esc(drillId(s)) + '" title="' + esc(s.title + ' — ' + tr('view all', 'عرض الكل')) + '">' + inner + '</button>'
+      : '<div class="dms-acat dms-acat-off" title="' + esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.title) + '">' + inner + '</div>';
+  }
+  function actionsPanel(AM) {
+    var tot = pendingTotal(AM);
+    var h = '<section class="dms-panelbox dms-actpanel" id="dms-pending" tabindex="-1" aria-labelledby="dms-pending-h"><div class="dms-ph"><h3 class="dms-h3" id="dms-pending-h">' + esc(tr('Actions pending', 'الإجراءات المعلقة')) +
+      (tot != null ? ' <span class="dms-h3-n dms-num">' + num(tot) + '</span>' : '') + '</h3><span class="dms-ph-meta">' + esc(tr('As of today · most urgent first', 'حتى اليوم · الأكثر إلحاحًا أولًا')) + '</span>' +
+      (tab !== 'actions' && APP.tabs.some(function (x) { return x.id === 'actions'; }) ? '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="goto:actions">' + esc(tr('View all', 'عرض الكل')) + '</button>' : '') + '</div>';
+    if (!AM) { return h + '<div class="dms-arows" aria-busy="true">' + skel(6, 'dms-skel-row') + '</div></section>'; }
+    var known = AM.specs.filter(function (s) { return AM.counts[s.id] !== undefined; });
+    if (!known.length) { return h + '<div class="dms-arows" aria-busy="true">' + skel(6, 'dms-skel-row') + '</div></section>'; }
+    var errs = known.filter(function (s) { return typeof AM.counts[s.id] === 'string'; });
+    if (AM.ready && errs.length === AM.specs.length) { return h + alertBox('err', esc(tr('Pending actions could not be loaded.', 'تعذر تحميل الإجراءات المعلقة.')) + ' <button type="button" class="dms-linkbtn" data-act="refresh">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>') + '</section>'; }
+    var items = AM.items.slice(0, CFG.actRows || 7);
+    h += items.length ? '<div class="dms-arows">' + items.map(arow).join('') + '</div>' : (AM.ready ? '<div class="dms-empty dms-empty-sm">' + esc(tr('Nothing pending for this selection.', 'لا توجد إجراءات معلقة لهذا الاختيار.')) + '</div>' : '<div class="dms-arows" aria-busy="true">' + skel(4, 'dms-skel-row') + '</div>');
+    h += '<div class="dms-acats">' + AM.specs.map(function (s) { return catBtn(s, AM.counts[s.id]); }).join('') + '</div>';
+    if (errs.length) { h += note(esc(tr('Could not load: ', 'تعذر التحميل: ') + errs.map(function (s) { return s.short; }).join(', '))); }
+    return h + '</section>';
+  }
+  function actionsTab(AM, info) {
+    var h = alertBox('info', esc(info || tr('Action lists are as of today and not filtered by the period. They follow the filters where the source supports them.', 'قوائم الإجراءات حتى اليوم وغير مرتبطة بالفترة، وتتبع المرشحات حيثما يدعمها المصدر.')));
+    h += kpis((AM ? AM.specs : []).map(function (s) {
+      var c = AM.counts[s.id], err = typeof c === 'string';
+      return kpi({ label: s.title, val: c === undefined ? '…' : err ? '—' : num(c), sub: esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.why), act: (!err && c) ? drillId(s) : null });
+    }));
+    return h + actionsPanel(AM);
+  }
 
-    function bars(list, nameKey, segs, opts) {
-        opts = opts || {};
-        if (!list) { return '<div class="dfd-empty">' + NA + '</div>'; }
-        if (!list.length) { return '<div class="dfd-empty">No records for the selected filters.</div>'; }
-        var totalKey = opts.total || segs[0].k;
-        var rows = list.slice().sort(cmpDesc(totalKey));
-        var id = opts.id || '';
-        var lim = st.showAll[id] ? rows.length : (opts.limit || 12);
-        var max = 0; rows.forEach(function (r) { var v = r[totalKey] || 0; if (v > max) { max = v; } }); max = max || 1;
-        var h = '<div class="dfd-bars">';
-        rows.slice(0, lim).forEach(function (r) {
-            var label = opts.label ? opts.label(r) : r[nameKey];
-            var tip = label + ' - ' + segs.map(function (s) { return s.l + ': ' + (isNum(r[s.k]) ? r[s.k].toLocaleString('en-US') : 'n/a'); }).join(', ');
-            h += '<div class="r" title="' + esc(tip) + '"><div class="n">' + esc(label) + '</div><div class="t">' +
-                segs.map(function (s) { return '<b style="width:' + (100 * (r[s.k] || 0) / max).toFixed(2) + '%;background:' + s.c + '"></b>'; }).join('') +
-                '</div><div class="v">' + (opts.fmt ? opts.fmt(r[totalKey]) : n(r[totalKey])) + '</div></div>';
-        });
-        h += '</div>';
-        if (rows.length > (opts.limit || 12) && id) {
-            h += '<div style="margin-top:6px"><button class="dfd-btn" data-showall="' + esc(id) + '">' + (st.showAll[id] ? 'Show top ' + (opts.limit || 12) : 'Show all ' + rows.length) + '</button></div>';
-        }
-        return h;
+  /* ---------- drill-downs (overlay) ---------- */
+  var OVL = null;
+  function openDrill(id) {
+    if (id.indexOf('goto:') === 0) { goTab(id.slice(5)); return; }
+    var r = null;
+    if (id.indexOf('srv:') === 0 && APP.actSpecs) {
+      var s = APP.actSpecs().filter(function (x) { return x.id === id.slice(4); })[0];
+      if (s && s.table) { delete SS.drill; r = { title: s.title, sub: s.why, spec: Object.assign({ id: 'drill', server: true, dt: s.dt, filters: s.filters, order: s.order, file: s.id }, s.table()) }; }
     }
-    function legend(segs) { return '<div class="dfd-legend">' + segs.map(function (s) { return '<span><i style="background:' + s.c + '"></i>' + esc(s.l) + '</span>'; }).join('') + '</div>'; }
-    function panel(title, sub, body, extra) {
-        return '<div class="dfd-panel"' + (extra || '') + '><h3>' + esc(title) + '</h3>' + (sub ? '<div class="ps">' + sub + '</div>' : '<div class="ps"></div>') + body + '</div>';
+    if (!r && APP.drill) { r = APP.drill(id); }
+    if (!r || (!r.spec && r.body == null)) { return; }
+    if (r.spec) { r.spec.id = 'drill'; if (!r.spec.server && !r.spec.pageSize) { r.spec.pageSize = CFG.modalPage; } }
+    delete SS.drill; delete TS.drill;
+    var opener = OVL ? OVL.opener : activeEl();
+    OVL = Object.assign(r, { id: id, prev: OVL && r.stack !== false ? OVL : null, opener: opener, openerKey: OVL ? OVL.openerKey : opener && opener.getAttribute && opener.getAttribute('data-v') }); renderOverlay();
+  }
+  function overlayHTML() {
+    if (!OVL) { return ''; }
+    var link = OVL.link ? ' ' + docLink(OVL.link[0], OVL.link[1], OVL.link[2]) : '';
+    return '<div class="dms-overlay" data-act="ovbg"><div class="dms-modal" role="dialog" aria-modal="true" aria-labelledby="dms-dialog-title"><div class="dms-dhead"><div>' + (OVL.prev ? '<button type="button" class="dms-linkbtn" data-act="ovback">‹ ' + esc(tr('Back', 'رجوع')) + '</button>' : '') + '<h3 id="dms-dialog-title">' + esc(OVL.title) + '</h3>' + (OVL.sub || link ? '<p class="dms-sm">' + esc(OVL.sub || '') + link + '</p>' : '') + '</div><button type="button" class="dms-x" data-act="closeov" aria-label="' + esc(tr('Close', 'إغلاق')) + '">×</button></div>' + (OVL.body || '') + (OVL.spec ? regTable(OVL.spec) : '') + '</div></div>';
+  }
+  function renderOverlay() { var el = $('[data-ref="overlay"]'); if (!el) { return; } var app = $('.dms-app'); if (app) { app.inert = !!OVL; } if (!OVL) { Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { delete TBL[k]; } }); } else { delete TBL.drill; } el.innerHTML = overlayHTML(); fillTables(el); var x = el.querySelector('.dms-x'); if (x) { x.focus(); } }
+  function closeOverlay() {
+    var previous = OVL; OVL = null; renderOverlay(); delete SS.drill; delete TS.drill;
+    if (!previous) { return; }
+    var opener = previous.opener;
+    if (!opener || !opener.isConnected) { opener = Array.prototype.find.call(HOST.querySelectorAll('[data-act="kpi"]'), function (el) { return el.getAttribute('data-v') === previous.openerKey; }); }
+    if (opener) { opener.focus({ preventScroll: true }); }
+  }
+
+  /* ---------- filters, period, toolbar, tabs ---------- */
+  var F = { period: APP.period || 'month', from: '', to: '' }, PERIOD = [];
+  (APP.filters || []).forEach(function (f) { F[f.k] = ''; });
+  var tab = APP.tabs[0].id, POP = null, FD = null, FS = {}, CAL = null, ANIM = false, built = false, AMC = null;
+  var PERIODS = [['today', 'Today', 'اليوم'], ['yesterday', 'Yesterday', 'أمس'], ['week', 'This week', 'هذا الأسبوع'], ['lastWeek', 'Last week', 'الأسبوع الماضي'],
+    ['month', 'This month', 'هذا الشهر'], ['lastMonth', 'Last month', 'الشهر الماضي'], ['quarter', 'This quarter', 'هذا الربع'], ['ytd', 'Year to date', 'السنة حتى اليوم'],
+    ['year', 'This year', 'هذه السنة'], ['prevYear', 'Previous year', 'السنة الماضية'], ['custom', 'Custom range', 'نطاق مخصص']];
+  var PGROUPS = [['today', 'yesterday'], ['week', 'lastWeek'], ['month', 'lastMonth'], ['quarter', 'ytd', 'year', 'prevYear'], ['custom']];
+  function curPeriod() { return periodRange(F.period, F.from, F.to); }
+  function periodName(k) { var p = PERIODS.filter(function (x) { return x[0] === k; })[0]; return p ? tr(p[1], p[2]) : k; }
+  function filterCount() { return (APP.filters || []).filter(function (f) { return F[f.k]; }).length; }
+  function optList(f, draft) { var l = f.options ? f.options(draft || F) : []; return (l || []).map(function (x) { return typeof x === 'string' ? { v: x, l: x } : x; }); }
+  function optLabel(f, v) { var o = optList(f).filter(function (x) { return x.v === v; })[0]; return o ? o.l : (f.label ? f.label(v) : v); }
+  function pendingBtnHTML() {
+    var n = pendingTotal(AMC), lbl = n == null ? (AMC && AMC.ready ? '—' : '…') : num(n);
+    return '<button type="button" class="dms-pend' + (n ? ' dms-pend-on' : '') + '" data-act="pending" data-fk="pending" title="' + esc(tr('Pending actions as of today — show the list', 'الإجراءات المعلقة حتى اليوم — عرض القائمة')) + '">' +
+      '<i class="dms-pend-dot" aria-hidden="true"></i><b class="dms-num">' + lbl + '</b><span class="dms-pend-l">' + esc(tr('pending', 'معلّقة')) + '</span></button>';
+  }
+  function opt(v, label, cur) { return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(label) + '</option>'; }
+  function ffield(f) {
+    if (f.type === 'text' || f.type === 'date') { return '<div class="dms-ff"><label for="dms-fd-' + f.k + '">' + esc(tr(f.en, f.ar)) + '</label><input type="' + (f.type === 'date' ? 'date' : 'search') + '" id="dms-fd-' + f.k + '" class="dms-input" data-fd="' + f.k + '" data-fk="fd:' + f.k + '" value="' + esc(FD[f.k] || '') + '" placeholder="' + esc(f.ph ? tr(f.ph[0], f.ph[1]) : '') + '" autocomplete="off"></div>'; }
+    var list = optList(f, FD), label = tr(f.en, f.ar), k = f.k;
+    var q = clean(FS[k]).toLowerCase(), cur = FD[k], shown = list.filter(function (x) { return !q || String(x.l).toLowerCase().indexOf(q) >= 0 || String(x.v).toLowerCase().indexOf(q) >= 0; }), more = shown.length > 200;
+    shown = shown.slice(0, 200);
+    if (cur && !shown.some(function (x) { return x.v === cur; })) { shown.unshift({ v: cur, l: optLabel(f, cur) }); }
+    var h = '<div class="dms-ff"><label for="dms-fd-' + k + '">' + esc(label) + '</label>';
+    if (list.length > 8) { h += '<input type="search" class="dms-input" data-fs="' + k + '" data-fk="fs:' + k + '" value="' + esc(FS[k] || '') + '" placeholder="' + esc(tr('Search ' + num(list.length) + ' options', 'ابحث في ' + num(list.length) + ' خيار')) + '" aria-label="' + esc(tr('Search', 'بحث') + ' — ' + label) + '" autocomplete="off">'; }
+    h += '<select id="dms-fd-' + k + '" class="dms-input" data-fd="' + k + '" data-fk="fd:' + k + '">' + opt('', f.none ? tr(f.none[0], f.none[1]) : tr('All', 'الكل'), cur) + shown.map(function (x) { return opt(x.v, x.l, cur); }).join('') + '</select>';
+    if (q && !shown.length) { h += '<span class="dms-ff-hint">' + esc(tr('No matches', 'لا نتائج')) + '</span>'; }
+    else if (more) { h += '<span class="dms-ff-hint">' + esc(tr('First 200 matches — type to narrow', 'أول 200 نتيجة — اكتب للتضييق')) + '</span>'; }
+    return h + '</div>';
+  }
+  function filtersPopHTML() {
+    var n = APP.filterNote ? APP.filterNote() : '';
+    return '<div class="dms-pop dms-pop-filters" role="dialog" aria-label="' + esc(tr('Filters', 'المرشحات')) + '"><div class="dms-pop-b">' + APP.filters.map(ffield).join('') + '</div>' +
+      (n ? '<p class="dms-pop-note">' + esc(n) + '</p>' : '') +
+      '<div class="dms-pop-f"><button type="button" class="dms-btn" data-act="fclear" data-fk="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button><button type="button" class="dms-btn dms-btn-primary" data-act="fapply" data-fk="fapply">' + esc(tr('Apply', 'تطبيق')) + '</button></div></div>';
+  }
+  function calendarHTML() {
+    var v = CAL.view, first = weekStartOf(v), mon = v.slice(0, 7), fdy = CAL.focus && CAL.focus.slice(0, 7) === mon ? CAL.focus : (CAL.from && CAL.from.slice(0, 7) === mon ? CAL.from : v), wd = '', rows = '', r, c, d;
+    for (c = 0; c < 7; c++) { try { wd += '<span role="columnheader">' + esc(new Intl.DateTimeFormat(locale(), { weekday: 'narrow', timeZone: 'UTC' }).format(new Date(parseISO(addDays(first, c))))) + '</span>'; } catch (e) { wd += '<span></span>'; } }
+    for (r = 0; r < 6; r++) {
+      rows += '<div role="row" class="dms-cal-row">';
+      for (c = 0; c < 7; c++) {
+        d = addDays(first, r * 7 + c);
+        var end = d === CAL.from || d === CAL.to, inR = CAL.from && CAL.to && d > CAL.from && d < CAL.to;
+        rows += '<button type="button" role="gridcell" class="dms-day' + (d.slice(0, 7) !== mon ? ' dms-out' : '') + (d === TODAY ? ' dms-today' : '') + (inR ? ' dms-in' : '') + (end ? ' dms-end' : '') +
+          (CAL.from && CAL.to && d === CAL.from && d !== CAL.to ? ' dms-s' : '') + (CAL.from && CAL.to && d === CAL.to && d !== CAL.from ? ' dms-e' : '') + '" data-act="calday" data-v="' + d + '" data-fk="day:' + d + '" tabindex="' + (d === fdy ? 0 : -1) +
+          '" aria-pressed="' + end + '" aria-label="' + esc(fmtDate(d, true)) + '"><bdi>' + (+d.slice(8, 10)) + '</bdi></button>';
+      }
+      rows += '</div>';
     }
-    function kv(items) {
-        return '<div class="dfd-kv">' + items.map(function (it) {
-            return '<div class="k"><div class="l">' + esc(it[0]) + '</div><div class="v">' + it[1] + '</div>' + (it[2] ? '<div class="s">' + it[2] + '</div>' : '') + '</div>';
+    var ok = CAL.from && CAL.to, msg = ok ? '<bdi>' + esc(rangeLabel([CAL.from, CAL.to])) + '</bdi> · ' + esc(daysTxt(diffDays(CAL.from, CAL.to) + 1)) : esc(CAL.from ? tr('Select an end date', 'اختر تاريخ النهاية') : tr('Select a start date', 'اختر تاريخ البداية'));
+    var title = v; try { title = new Intl.DateTimeFormat(locale(), { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(parseISO(v))); } catch (e) { /* ISO fallback */ }
+    return '<div class="dms-cal"><div class="dms-cal-h"><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="-1" data-fk="calprev" aria-label="' + esc(tr('Previous month', 'الشهر السابق')) + '">' + ico('prev', 'dms-flip') + '</button>' +
+      '<b aria-live="polite">' + esc(title) + '</b><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="1" data-fk="calnext" aria-label="' + esc(tr('Next month', 'الشهر التالي')) + '">' + ico('next', 'dms-flip') + '</button></div>' +
+      '<div class="dms-cal-g" role="grid" aria-label="' + esc(title) + '"><div class="dms-cal-wd" role="row">' + wd + '</div>' + rows + '</div>' +
+      '<div class="dms-cal-f"><span class="dms-cal-msg" aria-live="polite">' + msg + '</span><span class="dms-cal-btns"><button type="button" class="dms-btn" data-act="popclose" data-fk="calcancel">' + esc(tr('Cancel', 'إلغاء')) + '</button>' +
+      '<button type="button" class="dms-btn dms-btn-primary" data-act="calapply" data-fk="calapply"' + (ok ? '' : ' disabled') + '>' + esc(tr('Apply', 'تطبيق')) + '</button></span></div></div>';
+  }
+  function periodPopHTML() {
+    var n = APP.periodNote ? APP.periodNote() : '';
+    return '<div class="dms-pop dms-pop-period' + (CAL ? ' dms-has-cal' : '') + '" role="dialog" aria-label="' + esc(tr('Select period', 'اختر الفترة')) + '"><div class="dms-presets">' +
+      PGROUPS.map(function (g) {
+        return '<div class="dms-pgroup">' + g.map(function (k) {
+          var on = CAL ? k === 'custom' : F.period === k;
+          return '<button type="button" class="dms-preset' + (on ? ' dms-on' : '') + '" aria-pressed="' + on + '" data-act="preset" data-v="' + k + '" data-fk="preset:' + k + '"><span>' + esc(periodName(k)) + '</span>' +
+            (k !== 'custom' ? '<small><bdi>' + esc(rangeLabel(periodRange(k))) + '</bdi></small>' : '') + '</button>';
         }).join('') + '</div>';
-    }
+      }).join('') + '</div>' + (CAL ? calendarHTML() : '') + (n ? '<p class="dms-pop-note dms-pop-note-p">' + esc(n) + '</p>' : '') + '</div>';
+  }
+  function toolbarHTML() {
+    var ac = filterCount(), R = PERIOD, hasF = APP.filters && APP.filters.length;
+    return '<div class="dms-topbar"><div class="dms-tb-title"><h2 class="dms-title">' + esc(APP.title()) + '</h2><p class="dms-sub" data-ref="stamp"></p></div>' +
+      '<div class="dms-tb-ctrls"><div class="dms-pendwrap" data-ref="pendwrap">' + pendingBtnHTML() + '</div>' +
+      (APP.period === false ? '' : '<div class="dms-anchor"><button type="button" class="dms-btn dms-period" data-act="pop" data-v="period" data-fk="pop:period" aria-haspopup="dialog" aria-expanded="' + (POP === 'period') + '" aria-label="' + esc(tr('Period', 'الفترة') + ': ' + periodName(F.period) + ' ' + rangeLabel(R)) + '">' + ico('cal') +
+        '<span class="dms-period-t"><b>' + esc(periodName(F.period)) + '</b><span class="dms-period-r"><bdi>' + esc(rangeLabel(R)) + '</bdi></span></span>' + ico('down', 'dms-chev') + '</button>' + (POP === 'period' ? periodPopHTML() : '') + '</div>') +
+      (hasF ? '<div class="dms-anchor"><button type="button" class="dms-btn' + (ac ? ' dms-btn-on' : '') + '" data-act="pop" data-v="filters" data-fk="pop:filters" aria-haspopup="dialog" aria-expanded="' + (POP === 'filters') + '">' + ico('filter') +
+        '<span class="dms-btn-t">' + esc(tr('Filters', 'المرشحات')) + '</span>' + (ac ? '<span class="dms-count" aria-label="' + esc(ac + ' ' + tr('active', 'نشط')) + '">' + ac + '</span>' : '') + '</button>' + (POP === 'filters' ? filtersPopHTML() : '') + '</div>' : '') +
+      '<button type="button" class="dms-btn dms-icobtn" data-act="refresh" data-ref="refresh" data-fk="refresh" aria-label="' + esc(tr('Refresh data', 'تحديث البيانات')) + '" title="' + esc(tr('Refresh data (keeps filters)', 'تحديث البيانات (مع الإبقاء على المرشحات)')) + '">' + ico('refresh') + '</button></div>' +
+      '<div class="dms-lang" role="group" aria-label="Language / اللغة"><button type="button" data-act="lang" data-v="en" data-fk="lang:en" lang="en" aria-pressed="' + (LANG === 'en') + '"' + (LANG === 'en' ? ' class="dms-on"' : '') + '>English</button>' +
+        '<button type="button" data-act="lang" data-v="ar" data-fk="lang:ar" lang="ar" aria-pressed="' + (LANG === 'ar') + '"' + (LANG === 'ar' ? ' class="dms-on"' : '') + '>العربية</button></div></div>';
+  }
+  function chipsHTML() {
+    var a = (APP.filters || []).filter(function (f) { return F[f.k]; }); if (!a.length) { return ''; }
+    return '<div class="dms-chips">' + a.map(function (f) {
+      var v = optLabel(f, F[f.k]), lab = tr(f.en, f.ar);
+      return '<span class="dms-chip"><span class="dms-chip-k">' + esc(lab) + '</span><bdi>' + esc(v) + '</bdi><button type="button" class="dms-chip-x" data-act="rmf" data-v="' + f.k + '" data-fk="rmf:' + f.k + '" aria-label="' + esc(tr('Remove filter', 'إزالة المرشح') + ' ' + lab + ': ' + v) + '">' + ico('x') + '</button></span>';
+    }).join('') + (a.length > 1 ? '<button type="button" class="dms-linkbtn" data-act="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button>' : '') + '</div>';
+  }
+  function tabsHTML() {
+    var pend = pendingTotal(AMC);
+    return '<div class="dms-tabs" role="tablist" aria-label="' + esc(tr('Sections', 'الأقسام')) + '">' + APP.tabs.map(function (x) {
+      var on = x.id === tab, lbl = tr(x.en, x.ar), b = x.id === 'actions' && pend ? '<span class="dms-tab-n dms-num" title="' + esc(tr('Pending actions as of today', 'الإجراءات المعلقة حتى اليوم')) + '">' + num(pend) + '</span>' : '';
+      return '<button class="dms-tab' + (on ? ' dms-on' : '') + '" role="tab" id="dms-tab-' + x.id + '" aria-selected="' + on + '" aria-controls="dms-panel" tabindex="' + (on ? 0 : -1) + '" data-act="tab" data-v="' + x.id + '" data-fk="tab:' + x.id + '" title="' + esc(lbl) + '" type="button"><span>' + esc(lbl) + '</span>' + b + '</button>';
+    }).join('') + '</div>';
+  }
 
-    // ---------------- cards ----------------
-    function sectionState(sec, label) {
-        // returns null if usable, else banner html
-        var d = st.data;
-        if (!d) { return null; }
-        var s = d[sec];
-        if (!s) { return '<div class="dfd-banner lock">' + esc(label) + ': access unavailable.</div>'; }
-        if (s.available === false) { return '<div class="dfd-banner lock"><b>' + esc(label) + ' &mdash; access unavailable.</b> ' + esc(s.reason || '') + '</div>'; }
-        return null;
+  /* ---------- rendering: a fixed skeleton whose regions repaint independently (focus kept via data-fk) ---------- */
+  function activeEl() { try { return ROOT.activeElement || null; } catch (e) { return null; } }
+  function paint(el, html) {
+    if (!el) { return; }
+    var a = activeEl(), fk = a && el.contains(a) && a.getAttribute ? a.getAttribute('data-fk') : null, ss = null;
+    if (fk && typeof a.selectionStart === 'number') { try { ss = [a.selectionStart, a.selectionEnd]; } catch (e) { /* not a text input */ } }
+    el.innerHTML = html;
+    if (fk) { focusFk(fk); if (ss) { var n = activeEl(); try { n.setSelectionRange(ss[0], ss[1]); } catch (e) { /* ignore */ } } }
+  }
+  function focusFk(k) { var n = HOST.querySelector('[data-fk="' + k + '"]'); if (n) { try { n.focus({ preventScroll: true }); } catch (e) { n.focus(); } } }
+  function skeleton() {
+    HOST.innerHTML = '<div class="dms-app"><div data-ref="tb"></div><div data-ref="chips"></div><div data-ref="tabs"></div><div class="dms-sheet" role="tabpanel" id="dms-panel" data-ref="sheet"><div data-ref="banner"></div><div class="dms-content" data-ref="content"></div></div>' +
+      '<div class="dms-tip" data-ref="tip" role="tooltip" hidden></div></div><div data-ref="overlay"></div>';
+    built = true;
+  }
+  function renderHeaderState() {
+    var b = $('[data-ref="refresh"]'), s = $('[data-ref="stamp"]'), bz = busy();
+    if (b) { b.classList.toggle('dms-busy', bz); b.setAttribute('aria-busy', String(bz)); }
+    if (s) { s.textContent = (APP.stamp ? APP.stamp() : tr('Read-only', 'للقراءة فقط')) + (LOADED ? ' · ' + tr('Updated ', 'آخر تحديث ') + LOADED : '') + (bz ? ' · ' + tr('loading…', 'جارٍ التحميل…') : ''); }
+    paint($('[data-ref="pendwrap"]'), pendingBtnHTML());
+    paint($('[data-ref="tabs"]'), tabsHTML());
+  }
+  function renderToolbar() { paint($('[data-ref="tb"]'), toolbarHTML()); paint($('[data-ref="chips"]'), chipsHTML()); renderHeaderState(); }
+  function contentHTML() {
+    if (!BOOTED) {
+      return '<div class="dms-grid dms-kpis dms-ov-kpis" aria-busy="true">' + skel(CFG.kpiCount || 6, 'dms-skel-kpi') + '</div><div class="dms-main2"><div class="dms-skel dms-skel-panel"></div><div class="dms-skel dms-skel-panel"></div></div>' +
+        note(esc(tr('Loading from ERPNext…', 'جارٍ التحميل من ERPNext…')));
     }
-    function renderCards() {
-        var d = st.data, D = d && d.delivery && d.delivery.available ? d.delivery : null, F = d && d.forklift && d.forklift.available ? d.forklift : null;
-        function v(x, f) { if (!d) { return '<span class="na">&mdash;</span>'; } return x === undefined ? NA : f(x); }
-        var noAccD = d && !D, noAccF = d && !F;
-        var h = '';
-        h += '<div class="dfd-card"><div class="lbl">Delivery trips <span class="tag">Submitted records</span></div><div class="val">' +
-            (noAccD ? NA : v(D && D.submitted.trips, n)) + '</div><div class="sm">' +
-            (D ? 'Drafts (separate): ' + n(D.draft.trips) + ' &middot; ' + n(D.submitted.fallback_date) + ' dated from departure' : '&nbsp;') + '</div></div>';
-        h += '<div class="dfd-card"><div class="lbl">Delivered trips <span class="tag">Submitted records</span></div><div class="val">' +
-            (noAccD ? NA : v(D && D.submitted.delivered, n)) + '</div><div class="sm">' +
-            (D ? 'Delivery Status = Delivered &middot; drafts marked Delivered: ' + n(D.draft.delivered) : '&nbsp;') + '</div></div>';
-        h += '<div class="dfd-card teal"><div class="lbl">Forklift operations <span class="tag">Submitted records</span></div><div class="val">' +
-            (noAccF ? NA : v(F && F.submitted.operations, n)) + '</div><div class="sm">' +
-            (F ? 'Loading ' + n(F.submitted.loading) + ' &middot; Unloading ' + n(F.submitted.unloading) + ' &middot; Drafts: ' + n(F.draft.operations) : '&nbsp;') + '</div></div>';
-        h += '<div class="dfd-card"><div class="lbl">Recorded amount earned <span class="tag">Submitted records</span></div><div class="val" style="font-size:22px">' +
-            (noAccD ? NA : v(D && D.submitted.amount, amt)) + '</div><div class="sm">' +
-            (D ? 'Draft amount (separate): ' + amt(D.draft.amount) + ' &middot; business meaning not yet confirmed' : '&nbsp;') + '</div></div>';
-        sel('.dfd-cards').innerHTML = h;
-    }
+    if (APP.period !== false && (!PERIOD[0] || PERIOD[0] > PERIOD[1])) { return alertBox('err', esc(tr('Choose a valid date range.', 'اختر نطاق تاريخ صحيحًا.'))); }
+    return APP.content(tab, AMC);
+  }
+  function renderSoft() {
+    PERIOD = curPeriod(); AMC = APP.actions ? APP.actions() : null;
+    var keep = {}; Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { keep[k] = TBL[k]; } }); TBL = keep;
+    var b = $('[data-ref="banner"]'), c = $('[data-ref="content"]'), sh = $('[data-ref="sheet"]');
+    if (b) { b.innerHTML = BOOTED && APP.banner ? APP.banner() : ''; }
+    if (c) { paint(c, contentHTML()); c.classList.remove('dms-enter'); if (ANIM) { void c.offsetWidth; c.classList.add('dms-enter'); } ANIM = false; fillTables(c); fitChartLabels(); if (APP.afterRender) { APP.afterRender(c); } }
+    if (sh) { sh.setAttribute('aria-labelledby', 'dms-tab-' + tab); }
+    renderHeaderState();
+  }
+  function renderAll() {
+    HOST.setAttribute('dir', LANG === 'ar' ? 'rtl' : 'ltr'); HOST.setAttribute('lang', LANG);
+    if (!built) { skeleton(); }
+    PERIOD = curPeriod(); renderToolbar(); renderSoft();
+  }
+  /* Full reload (filters, refresh): new generation, empty store, tables back to page 1. */
+  function reload() {
+    setToday(); PERIOD = curPeriod(); GEN++; D = {}; LOADED = STAMP;
+    Object.keys(SS).forEach(function (k) { SS[k].dirty = true; SS[k].page = 1; }); Object.keys(TS).forEach(function (k) { TS[k].page = 1; });
+    APP.load(); ANIM = true; renderAll();
+  }
 
-    // ---------------- top state ----------------
-    function renderState() {
-        var h = '';
-        if (st.error) { h += '<div class="dfd-banner err"><b>Could not load data.</b> ' + esc(st.error) + '</div>'; }
-        var d = st.data;
-        if (d) {
-            if (d.limitations && d.limitations.length) {
-                h += '<div class="dfd-banner info">' + d.limitations.map(esc).join('<br>') + '</div>';
-            }
-            var un = [];
-            ['delivery', 'forklift'].forEach(function (k) {
-                var s = d[k]; if (s && s.available && s.unavailable_fields && Object.keys(s.unavailable_fields).length) {
-                    un.push((k === 'delivery' ? 'Delivery Trip' : 'ForkLift') + ': ' + Object.keys(s.unavailable_fields).join(', '));
-                }
-            });
-            if (un.length) { h += '<div class="dfd-banner lock"><b>Some figures are unavailable</b> because read access to these fields could not be verified for your account: ' + esc(un.join(' | ')) + '. They are shown as &ldquo;Unavailable&rdquo;, not as zero.</div>'; }
-        }
-        sel('.dfd-state').innerHTML = h;
-        sel('.dfd-last').innerHTML = st.lastOk ? 'Last successful refresh: ' + esc(fdateTxtTime(st.lastOk)) : 'Not loaded yet';
-    }
-    function fdateTxtTime(s) { try { return frappe.datetime.str_to_user(s.slice(0, 19)); } catch (e) { return s; } }
+  /* ---------- navigation and popovers ---------- */
+  function goTab(id, focusTab, force) {
+    if (tab !== id || force) { tab = id; ANIM = true; if (APP.onTab) { APP.onTab(id); } renderAll(); }
+    var t = $('#dms-tab-' + id); if (!t) { return; }
+    try { t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) { /* ignore */ }
+    if (focusTab) { t.focus(); }
+  }
+  function openPop(w) {
+    POP = w; CAL = null;
+    if (w === 'filters') { FD = {}; APP.filters.forEach(function (f) { FD[f.k] = F[f.k]; }); FS = {}; }
+    else if (F.period === 'custom' && F.from && F.to) { CAL = { from: F.from, to: F.to, view: monthStart(F.from), focus: F.from }; }
+    renderToolbar(); focusFk(w === 'filters' ? 'fd:' + APP.filters[0].k : CAL ? 'day:' + CAL.focus : 'preset:' + F.period);
+  }
+  function closePop(restore) { var w = POP; if (!w) { return; } POP = null; CAL = null; renderToolbar(); if (restore) { focusFk('pop:' + w); } }
+  function applyFilters(next) {
+    var prev = {}; APP.filters.forEach(function (f) { prev[f.k] = F[f.k]; F[f.k] = (next && next[f.k]) || ''; }); POP = null;
+    if (APP.onFilters) { APP.onFilters(prev); }
+    reload();
+  }
+  function applyPeriod(key, from, to) {
+    F.period = key; if (key === 'custom') { F.from = from; F.to = to; }
+    POP = null; CAL = null; setToday(); PERIOD = curPeriod();
+    Object.keys(SS).forEach(function (k) { if (TBL[k] && TBL[k].period) { SS[k].dirty = true; SS[k].page = 1; } });
+    if (APP.onPeriod) { APP.onPeriod(); } else { reload(); return; }
+    ANIM = true; renderAll(); focusFk('pop:period');
+  }
+  function calPick(d) {
+    if (!CAL.from || CAL.to) { CAL.from = d; CAL.to = null; } else if (d < CAL.from) { CAL.to = CAL.from; CAL.from = d; } else { CAL.to = d; }
+    CAL.focus = d;
+  }
+  function calMove(d) { CAL.focus = d; if (d.slice(0, 7) !== CAL.view.slice(0, 7)) { CAL.view = monthStart(d); } renderToolbar(); focusFk('day:' + d); }
 
-    // ---------------- overview ----------------
-    function renderOverview() {
-        var d = st.data, D = d.delivery && d.delivery.available ? d.delivery : null, F = d.forklift && d.forklift.available ? d.forklift : null;
-        var h = '';
-        if (D && F && D.submitted.trips === 0 && D.draft.trips === 0 && F.submitted.records === 0 && F.draft.records === 0) {
-            h += '<div class="dfd-panel"><div class="dfd-empty"><b>No records</b> match the selected filters and date range.</div></div>';
-        }
-        h += '<div class="dfd-grid2">';
-        h += panel('Daily delivery trips', 'Submitted trips per effective trip date (bars include Delivered trips)',
-            sectionState('delivery', 'Delivery Trips') || trend(D.by_date, ['trips'], [C.trips], ['Submitted trips'], 'No submitted delivery trips in this range.'));
-        h += panel('Daily forklift operations', 'Submitted ForkLift records per Date &middot; loading + unloading counts',
-            sectionState('forklift', 'Forklift Activity') || trend(F.by_date, ['loading', 'unloading'], [C.load, C.unload], ['Loading', 'Unloading'], 'No submitted forklift operations in this range.'));
-        h += '</div>';
+  /* ---------- tooltip (one shared element; positioned against the dashboard, clamped to its width) ---------- */
+  function showTip(n) {
+    var tip = $('[data-ref="tip"]'), app = $('.dms-app'); if (!tip || !app) { return; }
+    tip.textContent = n.getAttribute('data-tip'); tip.hidden = false;
+    var a = app.getBoundingClientRect(), r = n.getBoundingClientRect(), w = tip.offsetWidth, hgt = tip.offsetHeight;
+    var x = Math.max(4, Math.min(r.left - a.left + r.width / 2 - w / 2, a.width - w - 4)), y = r.top - a.top - hgt - 8;
+    if (y < 0) { y = r.bottom - a.top + 8; }
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  }
+  function hideTip() { var tip = $('[data-ref="tip"]'); if (tip) { tip.hidden = true; } }
+  function onOver(ev) { var n = ev.target.closest ? ev.target.closest('[data-tip]') : null; if (n && HOST.contains(n)) { showTip(n); } else { hideTip(); } }
 
-        // warehouse comparison
-        var whBody;
-        if (!D && !F) { whBody = '<div class="dfd-empty">' + NA + '</div>'; }
-        else {
-            var m = {};
-            var dw = D ? D.by_warehouse_either : undefined;
-            var fw = F ? F.by_warehouse : undefined;
-            if (dw) { Object.keys(dw).forEach(function (k) { m[k] = m[k] || { warehouse: k }; m[k].trips = dw[k]; }); }
-            if (fw) { fw.forEach(function (r) { m[r.warehouse] = m[r.warehouse] || { warehouse: r.warehouse }; m[r.warehouse].ops = r.operations; }); }
-            var rows = Object.keys(m).map(function (k) { return m[k]; });
-            var mt = 1, mo = 1; rows.forEach(function (r) { mt = Math.max(mt, r.trips || 0); mo = Math.max(mo, r.ops || 0); });
-            rows.sort(function (a, b) { return ((b.trips || 0) / mt + (b.ops || 0) / mo) - ((a.trips || 0) / mt + (a.ops || 0) / mo); });
-            if (!rows.length) { whBody = '<div class="dfd-empty">No warehouse activity for the selected filters.</div>'; }
-            else {
-                whBody = legend([{ l: 'Delivery trips (origin or destination)', c: C.trips }, { l: 'Forklift operations', c: C.ops }]) +
-                    '<div class="dfd-tbl-wrap"><table><thead><tr><th>Warehouse</th><th class="num">Trips</th><th style="min-width:110px"></th><th class="num">Forklift ops</th><th style="min-width:110px"></th></tr></thead><tbody>' +
-                    rows.map(function (r) {
-                        return '<tr><td>' + esc(r.warehouse) + '</td><td class="num">' + (dw ? n(r.trips || 0) : NA) + '</td><td><div class="dfd-bars"><div class="t"><b style="width:' + (100 * (r.trips || 0) / mt).toFixed(1) + '%;background:' + C.trips + '"></b></div></div></td>' +
-                            '<td class="num">' + (fw ? n(r.ops || 0) : NA) + '</td><td><div class="dfd-bars"><div class="t"><b style="width:' + (100 * (r.ops || 0) / mo).toFixed(1) + '%;background:' + C.ops + '"></b></div></div></td></tr>';
-                    }).join('') + '</tbody></table></div>';
-            }
-        }
-        h += panel('Warehouse activity comparison', 'Submitted records. A trip whose origin and destination are different warehouses is counted under each of them, so this column does not add up to the trip total.', whBody);
-
-        h += '<div class="dfd-grid2">';
-        h += panel('Trips by origin warehouse', 'Submitted trips &middot; From Warehouse',
-            sectionState('delivery', 'Delivery Trips') || bars(objToList(D.by_origin, 'warehouse'), 'warehouse', [{ k: 'value', l: 'Trips', c: C.trips }], { id: 'org' }));
-        h += panel('Trips by destination warehouse', 'Submitted trips &middot; To Warehouse',
-            sectionState('delivery', 'Delivery Trips') || bars(objToList(D.by_destination, 'warehouse'), 'warehouse', [{ k: 'value', l: 'Trips', c: C.delivered }], { id: 'dst' }));
-        h += '</div>';
-
-        h += panel('Records needing attention', 'Review items for the selected filters. They are flags for checking, not confirmed errors. &ldquo;Review&rdquo; opens the matching rows in the detail table.', quality(D, F));
-        return h;
+  /* ---------- events (single delegated set, removed on destroy) ---------- */
+  function onClick(ev) {
+    var n = ev.target.closest ? ev.target.closest('[data-act]') : null;
+    if (POP && !(ev.target.closest && ev.target.closest('.dms-anchor'))) { closePop(false); }
+    if (!n || !HOST.contains(n)) { return; }
+    var a = n.getAttribute('data-act'), v = n.getAttribute('data-v'), id = n.getAttribute('data-id');
+    if (APP.onAct && APP.onAct(a, v, n, id) === true) { return; }
+    if (a === 'ovbg') { if (ev.target === n) { closeOverlay(); } return; }
+    if (a === 'closeov') { closeOverlay(); return; }
+    if (a === 'ovback' && OVL && OVL.prev) { var pv = OVL.prev; delete SS.drill; delete TS.drill; OVL = pv; if (OVL.spec) { regTable(OVL.spec); } renderOverlay(); return; }
+    if (a === 'tab') { goTab(v); return; }
+    if (a === 'lang') { if (LANG !== v) { LANG = v; try { G.localStorage.setItem('dms_lang', LANG); } catch (e) { /* ignore */ } POP = null; CAL = null; renderAll(); if (OVL) { var o = OVL; OVL = null; renderOverlay(); openDrill(o.id); } focusFk('lang:' + v); } return; }
+    if (a === 'refresh') { if (APP.onRefresh) { APP.onRefresh(); } reload(); return; }
+    if (a === 'pop') { if (POP === v) { closePop(true); } else { openPop(v); } return; }
+    if (a === 'popclose') { closePop(true); return; }
+    if (a === 'preset') {
+      if (v !== 'custom') { applyPeriod(v); return; }
+      var r0 = PERIOD[0] || TODAY, r1 = PERIOD[1] || TODAY; CAL = { from: r0, to: r1, view: monthStart(r1 > TODAY ? TODAY : r1), focus: r1 > TODAY ? TODAY : r1 };
+      renderToolbar(); focusFk('day:' + CAL.focus); return;
     }
-    function qli(label, val, link, note) {
-        return '<li><span>' + esc(label) + (note ? ' <span class="dfd-note">' + note + '</span>' : '') + '</span><span><span class="c">' + (isNum(val) ? n(val) : NA) + '</span>' +
-            (link && isNum(val) && val > 0 ? ' &nbsp;<a class="rec" ' + link + '>Review</a>' : '') + '</span></li>';
+    if (a === 'calnav' && CAL) { CAL.view = addMonths(CAL.view, +v); CAL.focus = CAL.view; renderToolbar(); return; }
+    if (a === 'calday' && CAL) { calPick(v); renderToolbar(); focusFk('day:' + v); return; }
+    if (a === 'calapply' && CAL && CAL.from && CAL.to) { applyPeriod('custom', CAL.from, CAL.to); return; }
+    if (a === 'fapply') { applyFilters(FD); focusFk('pop:filters'); return; }
+    if (a === 'fclear') { applyFilters(null); focusFk('pop:filters'); return; }
+    if (a === 'rmf') { var nf = {}; APP.filters.forEach(function (f) { nf[f.k] = F[f.k]; }); nf[v] = ''; applyFilters(nf); focusFk('pop:filters'); return; }
+    if (a === 'pending') {
+      goTab(APP.tabs[0].id); var p = $('#dms-pending');
+      if (p) { var still = G.matchMedia && G.matchMedia('(prefers-reduced-motion: reduce)').matches; try { p.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' }); } catch (e) { p.scrollIntoView(); } p.focus({ preventScroll: true }); }
+      return;
     }
-    function quality(D, F) {
-        var h = '<div class="dfd-grid2"><div><b style="color:#0a3d7a">Delivery Trips</b>';
-        if (D) {
-            var a = D.attention;
-            h += '<ul class="dfd-q">' +
-                qli('Reversed timestamps (excluded from timing)', a.reversed_timestamps, 'data-goto="delivery" data-flag="reversed"') +
-                qli('Valid durations over 24 hours', a.over_24h, 'data-goto="delivery" data-flag="over24"', '(kept in averages)') +
-                qli('Delivery Date differs from Departure date', a.date_mismatch, 'data-goto="delivery" data-flag="mismatch"') +
-                qli('Missing origin warehouse', a.missing_origin, 'data-goto="delivery" data-flag="missing origin"') +
-                qli('Missing destination warehouse', a.missing_destination, 'data-goto="delivery" data-flag="missing destination"') +
-                qli('Missing trip type', a.missing_trip_type, 'data-goto="delivery" data-flag="missing trip type"') +
-                qli('Missing driver', a.missing_driver, 'data-goto="delivery" data-flag="missing driver"') +
-                qli('Draft trips already marked Delivered', a.draft_marked_delivered, 'data-goto="delivery" data-flag="draftdelivered"', '(drafts)') +
-                qli('Trip date taken from Departure (no Delivery Date)', D.submitted.fallback_date, 'data-goto="delivery" data-flag="fallback"', '(info)') +
-                '</ul>';
-        } else { h += sectionState('delivery', 'Delivery Trips'); }
-        h += '</div><div><b style="color:#0b6668">Forklift Activity</b>';
-        if (F) {
-            var b = F.attention;
-            h += '<ul class="dfd-q">' +
-                qli('Submitted records with zero loading/unloading', b.zero_activity_submitted, 'data-goto="forklift" data-flag="zero"') +
-                qli('Repeated date / forklift combinations', b.repeated_date_forklift ? b.repeated_date_forklift.length : null, 'data-goto="forklift" data-flag="repeat"', '(may be legitimate)') +
-                qli('Missing driver', b.missing_driver, 'data-goto="forklift" data-flag="missing driver"') +
-                qli('Missing forklift number', b.missing_forklift_no, 'data-goto="forklift" data-flag="missing forklift no"') +
-                qli('Non-numeric or negative counts', b.invalid_values ? b.invalid_values.length : null, 'data-goto="forklift" data-flag="invalid"') +
-                qli('Undated records', F.undated.submitted + F.undated.draft, 'data-undated="1"', '(outside selected date range)') +
-                '</ul>';
-        } else { h += sectionState('forklift', 'Forklift Activity'); }
-        return h + '</div></div>';
+    if (a === 'kpi') { openDrill(v); return; }
+    if (a === 'tpage') { TS[id].page = Math.max(1, TS[id].page + (+v)); fillTable(id); return; }
+    if (a === 'tsort') { var st = TS[id]; if (st.sk === v) { st.dir = -st.dir; } else { st.sk = v; st.dir = 1; } st.page = 1; fillTable(id); focusHead(id, v); return; }
+    if (a === 'spage') { var ss = SS[id]; ss.page = Math.max(1, ss.page + (+v)); ss.dirty = true; fillTable(id); return; }
+    if (a === 'ssort') { var s2 = SS[id]; if (s2.sk === v) { s2.dir = -s2.dir; } else { s2.sk = v; s2.dir = 1; } s2.page = 1; s2.dirty = true; fillTable(id); focusHead(id, v); return; }
+    if (a === 'sretry') { SS[id].dirty = true; fillTable(id); return; }
+    if (a === 'csv') { var sp = TBL[id]; download(sp.file || id, sp, clientRows(sp, TS[id])); return; }
+    if (a === 'csvall') { exportServer(id); return; }
+  }
+  function focusHead(id, v) { var th = HOST.querySelector('[data-tbl="' + id + '"] th[data-v="' + v + '"]'); if (th) { th.focus(); } }
+  function onInput(ev) {
+    var n = ev.target; if (!n || !n.getAttribute || !HOST.contains(n)) { return; }
+    var fs = n.getAttribute('data-fs'), fd = n.getAttribute('data-fd'), tq = n.getAttribute('data-tq');
+    if (APP.onInput && APP.onInput(n, ev) === true) { return; }
+    if (fs) { if (FS[fs] === n.value) { return; } FS[fs] = n.value; renderToolbar(); return; }
+    if (fd) { if (!FD || FD[fd] === n.value) { return; } FD[fd] = n.value; if (n.type === 'search') { return; } if (APP.filters.some(function (f) { return f.dependsOn === fd; })) { APP.filters.forEach(function (f) { if (f.dependsOn === fd && FD[f.k] && !optList(f, FD).some(function (x) { return x.v === FD[f.k]; })) { FD[f.k] = ''; } }); renderToolbar(); } return; }
+    if (tq) {
+      focusId = tq; var spx = TBL[tq]; if (!spx) { return; }
+      if (spx.server) { var s2 = SS[tq]; if (s2.q === n.value) { return; } s2.q = n.value; s2.page = 1; clearTimeout(onInput.t); onInput.t = later(function () { s2.dirty = true; fillTable(tq); }, 350); }
+      else { var s1 = TS[tq] || (TS[tq] = { q: '', page: 1, sk: spx.sk || '', dir: spx.dir || 1 }); if (s1.q === n.value) { return; } s1.q = n.value; s1.page = 1; fillTable(tq); }
     }
-
-    // ---------------- delivery tab ----------------
-    var DT_FLAGS = [
-        ['', 'All rows'], ['reversed', 'Reversed timestamps'], ['over24', 'Duration over 24h'], ['mismatch', 'Delivery vs departure date differ'],
-        ['missing origin', 'Missing origin'], ['missing destination', 'Missing destination'], ['missing trip type', 'Missing trip type'],
-        ['missing driver', 'Missing driver'], ['fallback', 'Date from departure'], ['draft', 'Draft records'], ['draftdelivered', 'Drafts marked Delivered']];
-    function dtMatch(r, f) {
-        if (!f) { return true; }
-        var fl = r.flags || [];
-        if (f === 'reversed') { return fl.some(function (x) { return / reversed$/.test(x); }); }
-        if (f === 'over24') { return fl.some(function (x) { return / over 24h$/.test(x); }); }
-        if (f === 'mismatch') { return fl.indexOf('delivery date differs from departure date') >= 0; }
-        if (f === 'fallback') { return r.date_source !== 'custom_delivery_date'; }
-        if (f === 'draft') { return r.docstatus === 0; }
-        if (f === 'draftdelivered') { return r.docstatus === 0 && r.delivery_status === 'Delivered'; }
-        return fl.indexOf(f) >= 0;
+  }
+  function onKey(ev) {
+    var t = ev.target, act = t && t.getAttribute ? t.getAttribute('data-act') : null, rtl = LANG === 'ar', k = ev.key;
+    if (k === 'Escape') {
+      if (POP) { ev.preventDefault(); closePop(true); return; }
+      if (OVL) { closeOverlay(); }
+      return;
     }
-    function dsBadge(s) {
-        if (s === null || s === undefined) { return '<span class="na">&mdash;</span>'; }
-        var c = s === 'Delivered' ? 'del' : (s === 'Not Delivered' ? 'nd' : 'pd');
-        return '<span class="bdg ' + c + '">' + esc(s) + '</span>';
+    if ((k === 'Enter' || k === ' ') && (act === 'tsort' || act === 'ssort')) { ev.preventDefault(); t.click(); return; }
+    if (k === 'Tab' && OVL) {
+      var modal = $('.dms-modal'), controls = Array.prototype.filter.call(modal.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), [tabindex="0"]'), function (el) { return el.getClientRects().length; });
+      var first = controls[0], last = controls[controls.length - 1];
+      if (ev.shiftKey && t === first) { ev.preventDefault(); last.focus(); }
+      else if (!ev.shiftKey && t === last) { ev.preventDefault(); first.focus(); }
     }
-    function renderDelivery() {
-        var blk = sectionState('delivery', 'Delivery Trips');
-        if (blk) { return blk; }
-        var D = st.data.delivery, S = D.submitted, h = '';
-        if (S.trips === 0 && D.draft.trips === 0) { return '<div class="dfd-panel"><div class="dfd-empty"><b>No delivery trips</b> match the selected filters and date range.</div></div>'; }
-        h += panel('Delivery status — submitted records', 'Delivery Status is separate from Document Status (a submitted trip shows Document Status &ldquo;Scheduled&rdquo;).', kv([
-            ['Submitted trips', n(S.trips)], ['Delivered', n(S.delivered)], ['Partially Delivered', n(S.partially_delivered)],
-            ['Not Delivered', n(S.not_delivered)], ['No delivery status', n(S.no_status)],
-            ['Draft trips', n(D.draft.trips), 'separate, not in totals'], ['Drafts marked Delivered', n(D.draft.delivered)],
-            ['Draft amount', amt(D.draft.amount), 'Recorded amount earned']]));
-        var cross = D.by_docstatus_and_delivery_status;
-        h += '<div class="dfd-grid2">';
-        h += panel('Delivery Status (submitted)', '', bars(objToList(D.by_delivery_status, 'status'), 'status', [{ k: 'value', l: 'Trips', c: C.trips }], { id: 'dst2' }));
-        h += panel('Document status × Delivery status', 'All non-cancelled records (cancelled are excluded)', cross ?
-            '<div class="dfd-tbl-wrap"><table><thead><tr><th>Document</th><th>Delivery Status</th><th class="num">Trips</th></tr></thead><tbody>' +
-            Object.keys(cross).sort().map(function (k) { var p = k.split(' | '); return '<tr><td>' + (p[0] === 'Draft' ? '<span class="bdg dr">Draft</span>' : '<span class="bdg sub">Submitted</span>') + '</td><td>' + dsBadge(p[1]) + '</td><td class="num">' + n(cross[k]) + '</td></tr>'; }).join('') +
-            '</tbody></table></div>' : '<div class="dfd-empty">' + NA + '</div>');
-        h += '</div>';
-        h += '<div class="dfd-grid2">';
-        var drvLabel = function (r) { return (r.driver_name ? r.driver_name : r.driver); };
-        h += panel('Trips by driver', 'Submitted trips (dark = Delivered portion)', legend([{ l: 'Delivered', c: C.delivered }, { l: 'Other submitted', c: C.trips }]) +
-            bars(D.by_driver ? D.by_driver.map(function (r) { return { driver: r.driver, driver_name: r.driver_name, trips: r.trips, delivered: r.delivered, rest: isNum(r.delivered) ? r.trips - r.delivered : r.trips }; }) : null, 'driver',
-                [{ k: 'delivered', l: 'Delivered', c: C.delivered }, { k: 'rest', l: 'Other', c: C.trips }], { id: 'drv', total: 'trips', label: drvLabel }));
-        h += panel('Recorded amount earned by driver', 'Submitted trips &middot; meaning of this amount not yet confirmed',
-            bars(D.by_driver, 'driver', [{ k: 'amount', l: 'Recorded amount earned', c: '#3b6fb6' }], { id: 'drvamt', total: 'amount', label: drvLabel, fmt: amt }));
-        h += panel('Trips by vehicle', 'Submitted trips', bars(D.by_vehicle, 'vehicle', [{ k: 'trips', l: 'Trips', c: C.trips }], { id: 'veh', total: 'trips' }));
-        h += panel('Trips by trip type', 'Submitted trips', bars(objToList(D.by_trip_type, 'type'), 'type', [{ k: 'value', l: 'Trips', c: C.trips }], { id: 'typ' }));
-        h += '</div>';
-        // timing
-        var T = D.timing, tl = [['warehouse_wait', 'Warehouse waiting', 'Reporting at warehouse &rarr; Departure'], ['travel', 'Travel', 'Departure &rarr; Delivered at site'], ['site_wait', 'Site waiting', 'Delivered at site &rarr; Out of site']];
-        h += panel('Timing averages — submitted trips', 'Only pairs where both times exist and are in order. Missing or reversed pairs are excluded. Valid durations over 24 hours are <b>kept</b> in the averages and only flagged.',
-            '<div class="dfd-grid3">' + tl.map(function (t) {
-                var x = T[t[0]];
-                if (!x) { return '<div class="dfd-kv"><div class="k"><div class="l">' + esc(t[1]) + '</div><div class="v">' + NA + '</div><div class="s">' + t[2] + '</div></div></div>'; }
-                return '<div class="dfd-kv" style="grid-template-columns:1fr"><div class="k"><div class="l">' + esc(t[1]) + ' &middot; average</div><div class="v">' + (x.valid_pairs ? dur(x.avg_minutes) : '<span class="na">No valid pairs</span>') + '</div>' +
-                    '<div class="s">' + t[2] + '<br>Valid pairs: <b>' + n(x.valid_pairs) + '</b> &middot; over 24h: <b>' + n(x.over_24h) + '</b><br>Excluded: ' + n(x.reversed) + ' reversed, ' + n(x.missing) + ' missing</div></div></div>';
-            }).join('') + '</div>');
-        h += panel('Trip details', '', dtTable(D));
-        return h;
+    if (act === 'tab' && /^(ArrowLeft|ArrowRight|Home|End)$/.test(k)) {
+      var ids = APP.tabs.map(function (x) { return x.id; }), i = ids.indexOf(t.getAttribute('data-v')), L = ids.length;
+      var d = k === 'Home' ? -i : k === 'End' ? L - 1 - i : ((k === 'ArrowRight') !== rtl ? 1 : -1);
+      ev.preventDefault(); goTab(ids[(i + d + L) % L], true); return;
     }
-    function truncBanner(sec, label) {
-        if (!sec.rows_truncated) { return ''; }
-        return '<div class="dfd-banner warn"><b>Detail limit reached:</b> this table lists the latest ' + n(sec.rows.length) + ' of ' + n(sec.row_count) + ' matching ' + esc(label) +
-            '. Summary cards, charts and totals still include <b>all ' + n(sec.row_count) + '</b> records. Narrow the filters to see every row.</div>';
+    if (act === 'calday' && CAL) {
+      var cur = t.getAttribute('data-v'), step = { ArrowRight: rtl ? -1 : 1, ArrowLeft: rtl ? 1 : -1, ArrowUp: -7, ArrowDown: 7 }[k];
+      if (step) { ev.preventDefault(); calMove(addDays(cur, step)); return; }
+      if (k === 'PageUp' || k === 'PageDown') { ev.preventDefault(); calMove(shiftMonths(cur, k === 'PageUp' ? -1 : 1)); return; }
+      if (k === 'Home' || k === 'End') { ev.preventDefault(); calMove(k === 'Home' ? weekStartOf(cur) : addDays(weekStartOf(cur), 6)); }
     }
-    function pager(key, total) {
-        var p = st[key].page, pages = Math.max(1, Math.ceil(total / PAGE));
-        if (p >= pages) { p = st[key].page = pages - 1; }
-        return '<div class="dfd-pager"><span class="dfd-note">' + n(total) + ' rows &middot; page ' + (p + 1) + ' of ' + pages + '</span><span>' +
-            '<button class="dfd-btn" data-page="' + key + '" data-dir="-1"' + (p <= 0 ? ' disabled' : '') + '>&lsaquo; Prev</button> ' +
-            '<button class="dfd-btn" data-page="' + key + '" data-dir="1"' + (p >= pages - 1 ? ' disabled' : '') + '>Next &rsaquo;</button></span></div>';
-    }
-    function txtMatch(r, q, keys) {
-        if (!q) { return true; }
-        q = q.toLowerCase();
-        return keys.some(function (k) { return String(r[k] || '').toLowerCase().indexOf(q) >= 0; });
-    }
-    function dtTable(D) {
-        var rows = D.rows.filter(function (r) { return dtMatch(r, st.dt.flag) && txtMatch(r, st.dt.q, ['name', 'driver', 'driver_name', 'vehicle', 'origin', 'destination', 'trip_type']); });
-        var p = st.dt.page;
-        var h = truncBanner(D, 'trips (submitted and draft)');
-        h += '<div class="dfd-tools"><input class="srch" data-q="dt" placeholder="Search trip, driver, vehicle, warehouse&hellip;" value="' + esc(st.dt.q) + '">' +
-            '<select class="sm" data-flagsel="dt">' + DT_FLAGS.map(function (f) { return '<option value="' + esc(f[0]) + '"' + (st.dt.flag === f[0] ? ' selected' : '') + '>' + esc(f[1]) + '</option>'; }).join('') + '</select></div>';
-        h += '<div class="dfd-note" style="margin-bottom:6px"><span class="bdg fb">dep.</span> = effective trip date taken from Departure Time (Delivery Date blank). Draft rows are shaded and are not in the totals.</div>';
-        var pg = pager('dt', rows.length);
-        h += '<div class="dfd-tbl-wrap"><table><thead><tr><th>Effective trip date</th><th>Trip</th><th>Driver</th><th>Vehicle</th><th>Trip type</th><th>Origin</th><th>Destination</th><th>Delivery Status</th><th>Document Status</th><th class="num">Recorded amount earned</th><th class="num">Wh. wait</th><th class="num">Travel</th><th class="num">Site wait</th><th>Review flags</th></tr></thead><tbody>';
-        if (!rows.length) { h += '<tr><td colspan="14"><div class="dfd-empty">No rows match.</div></td></tr>'; }
-        rows.slice(st.dt.page * PAGE, st.dt.page * PAGE + PAGE).forEach(function (r) {
-            h += '<tr class="' + (r.docstatus === 0 ? 'draft' : '') + '"><td>' + fdate(r.effective_date) + (r.date_source !== 'custom_delivery_date' ? ' <span class="bdg fb" title="Derived from Departure Time">dep.</span>' : '') + '</td>' +
-                '<td>' + rec('Delivery Trip', r.name) + '</td><td>' + esc(r.driver_name || r.driver || '') + (r.driver_name && r.driver ? '<div class="dfd-note">' + esc(r.driver) + '</div>' : '') + '</td>' +
-                '<td>' + esc(r.vehicle || '') + '</td><td>' + esc(r.trip_type || '') + '</td><td>' + esc(r.origin || '') + '</td><td>' + esc(r.destination || '') + '</td>' +
-                '<td>' + dsBadge(r.delivery_status) + '</td><td>' + (r.docstatus === 0 ? '<span class="bdg dr">Draft</span>' : '<span class="bdg sub">Submitted</span>') + (r.doc_status ? ' <span class="dfd-note">' + esc(r.doc_status) + '</span>' : '') + '</td>' +
-                '<td class="num">' + amt(r.amount) + '</td><td class="num">' + (r.warehouse_wait_min === null ? '&ndash;' : dur(r.warehouse_wait_min)) + '</td><td class="num">' + (r.travel_min === null ? '&ndash;' : dur(r.travel_min)) + '</td><td class="num">' + (r.site_wait_min === null ? '&ndash;' : dur(r.site_wait_min)) + '</td>' +
-                '<td>' + (r.flags || []).map(function (f) { return '<span class="flag">' + esc(f) + '</span>'; }).join('') + '</td></tr>';
-        });
-        h += '</tbody></table></div>' + pg;
-        return h;
-    }
-
-    // ---------------- forklift tab ----------------
-    var FL_FLAGS = [['', 'All rows'], ['zero', 'Zero loading/unloading'], ['repeat', 'Repeated date/forklift'], ['missing driver', 'Missing driver'],
-        ['missing forklift no', 'Missing forklift number'], ['invalid', 'Non-numeric/negative values'], ['draft', 'Draft records']];
-    var FLF = [['loading_trailer', 'Load Trailer'], ['unloading_trailer', 'Unload Trailer'], ['loading_dayana', 'Load Dayana'], ['unloading_dayana', 'Unload Dayana'],
-        ['loading_container', 'Load Container'], ['unloading_container', 'Unload Container'], ['loading_pickup', 'Load Pick Up'], ['unloading_pickup', 'Unload Pick Up']];
-    function flMatch(r, f) {
-        if (!f) { return true; }
-        var fl = r.flags || [];
-        if (f === 'zero') { return fl.indexOf('no loading/unloading recorded') >= 0; }
-        if (f === 'repeat') { return fl.indexOf('repeated date/forklift - review') >= 0; }
-        if (f === 'invalid') { return fl.some(function (x) { return / (nonnumeric|negative) \(/.test(x); }); }
-        if (f === 'draft') { return r.docstatus === 0; }
-        return fl.indexOf(f) >= 0;
-    }
-    function renderForklift() {
-        var blk = sectionState('forklift', 'Forklift Activity');
-        if (blk) { return blk; }
-        var F = st.data.forklift, S = F.submitted, h = '';
-        var und = F.undated;
-        h += panel('Forklift operations — submitted records', 'Operations = sum of the 8 loading/unloading counts. Expense and Washing fields are excluded.', kv([
-            ['Loading', n(S.loading)], ['Unloading', n(S.unloading)], ['Total operations', n(S.operations)], ['Submitted records', n(S.records)],
-            ['Zero-activity records', n(S.zero_activity), 'review item'], ['Draft records', n(F.draft.records), n(F.draft.operations) + ' ops, not in totals'],
-            ['Outside selected date range', n(und.submitted + und.draft), 'Undated records: ' + n(und.submitted) + ' submitted, ' + n(und.draft) + ' draft &middot; <a class="rec" data-undated="1">open list</a>']]));
-        if (S.records === 0 && F.draft.records === 0) {
-            h += '<div class="dfd-panel"><div class="dfd-empty"><b>No dated forklift records</b> match the selected filters and date range.</div></div>';
-            return h;
-        }
-        var bf = F.by_field || [];
-        var types = [['trailer', 'Trailer'], ['dayana', 'Dayana'], ['container', 'Container'], ['pickup', 'Pick Up']].map(function (t) {
-            var l = 0, u = 0; bf.forEach(function (x) { if (x.field === 'loading_' + t[0]) { l = x.value; } if (x.field === 'unloading_' + t[0]) { u = x.value; } });
-            return { type: t[1], loading: l, unloading: u, total: l + u };
-        });
-        var segs = [{ k: 'loading', l: 'Loading', c: C.load }, { k: 'unloading', l: 'Unloading', c: C.unload }];
-        h += '<div class="dfd-grid2">';
-        h += panel('Breakdown by loading/unloading category', '8 verified count fields (submitted records)', legend(segs) + bars(types, 'type', segs, { total: 'total' }) +
-            '<div class="dfd-tbl-wrap" style="margin-top:10px"><table><thead><tr><th>Field</th><th class="num">Count</th></tr></thead><tbody>' +
-            bf.map(function (x) { return '<tr><td>' + esc(x.label) + '</td><td class="num">' + n(x.value) + '</td></tr>'; }).join('') + '</tbody></table></div>');
-        h += panel('Operations by forklift', 'Grouped by trimmed, uppercased number. Different identifiers are not merged.', legend(segs) + bars(F.by_forklift, 'forklift', segs, { id: 'fk', total: 'operations' }));
-        h += panel('Operations by warehouse', 'Submitted records', legend(segs) + bars(F.by_warehouse, 'warehouse', segs, { id: 'fwh', total: 'operations' }));
-        h += panel('Operations by driver', 'Submitted records', legend(segs) + bars(F.by_driver, 'driver', segs, { id: 'fdr', total: 'operations', label: function (r) { return r.driver_name || r.driver; } }));
-        h += '</div>';
-        // review items
-        var rep = F.attention.repeated_date_forklift, inv = F.attention.invalid_values || [];
-        var rb = '<ul class="dfd-q">' +
-            qli('Zero loading/unloading (submitted)', S.zero_activity, 'data-goto="forklift" data-flag="zero"') +
-            qli('Repeated date / forklift combinations', rep ? rep.length : null, 'data-goto="forklift" data-flag="repeat"', '(may be separate legitimate shifts)') +
-            qli('Non-numeric or negative counts', inv.length, 'data-goto="forklift" data-flag="invalid"') + '</ul>';
-        if (rep && rep.length) {
-            rb += '<div class="dfd-tbl-wrap" style="margin-top:8px;max-height:220px;overflow:auto"><table><thead><tr><th>Date | Forklift</th><th>Records</th></tr></thead><tbody>' +
-                rep.slice(0, 200).map(function (x) { return '<tr><td>' + esc(x.key) + '</td><td>' + x.records.map(function (nm) { return rec('ForkLift', nm); }).join(', ') + '</td></tr>'; }).join('') +
-                '</tbody></table></div>' + (rep.length > 200 ? '<div class="dfd-note">First 200 of ' + n(rep.length) + ' shown.</div>' : '');
-        }
-        h += panel('Review items', 'Highlighted for checking only &mdash; not confirmed errors.', rb);
-        h += panel('Forklift records', '', flTable(F));
-        return h;
-    }
-    function flTable(F) {
-        var rows = F.rows.filter(function (r) { return flMatch(r, st.fl.flag) && txtMatch(r, st.fl.q, ['name', 'forklift_no', 'warehouse', 'driver', 'driver_name']); });
-        var h = truncBanner(F, 'forklift records (submitted and draft)');
-        h += '<div class="dfd-tools"><input class="srch" data-q="fl" placeholder="Search record, forklift, warehouse, driver&hellip;" value="' + esc(st.fl.q) + '">' +
-            '<select class="sm" data-flagsel="fl">' + FL_FLAGS.map(function (f) { return '<option value="' + esc(f[0]) + '"' + (st.fl.flag === f[0] ? ' selected' : '') + '>' + esc(f[1]) + '</option>'; }).join('') + '</select></div>';
-        var pg = pager('fl', rows.length);
-        h += '<div class="dfd-tbl-wrap"><table><thead><tr><th>Date</th><th>Record</th><th>Forklift no.</th><th>Warehouse</th><th>Driver</th><th>Doc</th>' +
-            FLF.map(function (x) { return '<th class="num">' + esc(x[1]) + '</th>'; }).join('') + '<th class="num">Loading</th><th class="num">Unloading</th><th class="num">Total</th><th>Review flags</th></tr></thead><tbody>';
-        if (!rows.length) { h += '<tr><td colspan="18"><div class="dfd-empty">No rows match.</div></td></tr>'; }
-        rows.slice(st.fl.page * PAGE, st.fl.page * PAGE + PAGE).forEach(function (r) {
-            h += '<tr class="' + (r.docstatus === 0 ? 'draft' : '') + '"><td>' + fdate(r.date) + '</td><td>' + rec('ForkLift', r.name) + '</td><td>' + esc(r.forklift_no || '') + '</td><td>' + esc(r.warehouse || '') + '</td>' +
-                '<td>' + esc(r.driver_name || r.driver || '') + '</td><td>' + (r.docstatus === 0 ? '<span class="bdg dr">Draft</span>' : '<span class="bdg sub">Submitted</span>') + '</td>' +
-                FLF.map(function (x) { return '<td class="num">' + n(r[x[0]]) + '</td>'; }).join('') +
-                '<td class="num">' + n(r.loading) + '</td><td class="num">' + n(r.unloading) + '</td><td class="num"><b>' + n(r.operations) + '</b></td>' +
-                '<td>' + (r.flags || []).map(function (f) { return '<span class="flag">' + esc(f) + '</span>'; }).join('') + '</td></tr>';
-        });
-        h += '</tbody></table></div>' + pg;
-        return h;
-    }
-
-    // ---------------- render ----------------
-    function renderBody() {
-        var b = sel('.dfd-body');
-        if (!st.data) {
-            b.innerHTML = st.error ? '<div class="dfd-panel"><div class="dfd-empty">No data to display. ' + esc(st.error) + '</div></div>' :
-                '<div class="dfd-panel"><div class="dfd-empty">Loading&hellip;</div></div>';
-            return;
-        }
-        try {
-            b.innerHTML = st.tab === 'delivery' ? renderDelivery() : (st.tab === 'forklift' ? renderForklift() : renderOverview());
-        } catch (e) {
-            b.innerHTML = '<div class="dfd-banner err">Display error: ' + esc(e && e.message) + '</div>';
-        }
-    }
-    function renderAll() { showLoading(); renderState(); renderCards(); renderBody(); }
-
-    // ---------------- events ----------------
-    host.addEventListener('click', function (ev) {
-        var t = ev.target.closest ? ev.target : null; if (!t) { return; }
-        var a = t.closest('a.rec[data-name]');
-        if (a) {
-            if (ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.button === 1) { return; }
-            ev.preventDefault(); frappe.set_route('Form', a.getAttribute('data-dt'), a.getAttribute('data-name')); return;
-        }
-        var u = t.closest('[data-undated]');
-        if (u) {
-            ev.preventDefault();
-            frappe.route_options = { date: ['is', 'not set'], docstatus: ['!=', 2] };
-            frappe.set_route('List', 'ForkLift'); return;
-        }
-        var g = t.closest('[data-goto]');
-        if (g) {
-            ev.preventDefault();
-            var tab = g.getAttribute('data-goto'), key = tab === 'delivery' ? 'dt' : 'fl';
-            st[key].flag = g.getAttribute('data-flag') || ''; st[key].page = 0; st[key].q = '';
-            switchTab(tab);
-            setTimeout(function () { var tb = sel('.dfd-body .dfd-tools'); if (tb && tb.scrollIntoView) { tb.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, 30);
-            return;
-        }
-        var tb = t.closest('.dfd-tab'); if (tb) { switchTab(tb.getAttribute('data-tab')); return; }
-        var p = t.closest('[data-preset]');
-        if (p) {
-            var pr = p.getAttribute('data-preset');
-            if (pr === 'custom') { st.preset = 'custom'; renderFilters(); return; }
-            setPreset(pr); renderFilters(); scheduleLoad(0); return;
-        }
-        var act = t.closest('[data-act]');
-        if (act) {
-            var an = act.getAttribute('data-act');
-            if (an === 'refresh') { scheduleLoad(0); loadOptions(); }
-            if (an === 'reset') { Object.keys(st.f).forEach(function (k) { st.f[k] = ''; }); setPreset('monthly'); renderFilters(); scheduleLoad(0); }
-            return;
-        }
-        var pgb = t.closest('[data-page]');
-        if (pgb && !pgb.disabled) { var k = pgb.getAttribute('data-page'); st[k].page += parseInt(pgb.getAttribute('data-dir'), 10); renderBody(); return; }
-        var sa = t.closest('[data-showall]');
-        if (sa) { var id = sa.getAttribute('data-showall'); st.showAll[id] = !st.showAll[id]; renderBody(); return; }
-    });
-    host.addEventListener('change', function (ev) {
-        var t = ev.target;
-        var fk = t.getAttribute && t.getAttribute('data-f');
-        if (fk) {
-            st.f[fk] = t.value || '';
-            if (fk === 'from_date' || fk === 'to_date') { st.preset = 'custom'; }
-            if (fk === 'company') { renderFilters(); } else if (fk === 'from_date' || fk === 'to_date') {
-                selAll('[data-preset]').forEach(function (c) { c.classList.toggle('on', c.getAttribute('data-preset') === 'custom'); });
-            }
-            scheduleLoad(fk === 'from_date' || fk === 'to_date' ? 350 : 0); return;
-        }
-        var fs = t.getAttribute && t.getAttribute('data-flagsel');
-        if (fs) { st[fs].flag = t.value; st[fs].page = 0; renderBody(); }
-    });
-    var qt = null;
-    host.addEventListener('input', function (ev) {
-        var t = ev.target, q = t.getAttribute && t.getAttribute('data-q');
-        if (!q) { return; }
-        st[q].q = t.value; st[q].page = 0;
-        if (qt) { clearTimeout(qt); }
-        qt = setTimeout(function () {
-            var pos = t.selectionStart; renderBody();
-            var ni = sel('[data-q="' + q + '"]'); if (ni) { ni.focus(); try { ni.setSelectionRange(pos, pos); } catch (e) { /* ignore */ } }
-        }, 250);
-    });
-    function switchTab(tab) {
-        st.tab = tab;
-        selAll('.dfd-tab').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-tab') === tab); });
-        renderBody();
-    }
-
-    // ---------------- init ----------------
-    setPreset('monthly');
-    renderFilters();
+  }
+  /* Start: wire events, render the skeleton, run APP.boot (reference lists), then the first load. */
+  function start() {
+    HOST.addEventListener('click', onClick, SIG);
+    HOST.addEventListener('input', onInput, SIG);
+    HOST.addEventListener('change', onInput, SIG);
+    HOST.addEventListener('keydown', onKey, SIG);
+    HOST.addEventListener('pointerover', onOver, SIG);
+    HOST.addEventListener('pointerleave', hideTip, SIG);
+    HOST.addEventListener('focusin', function (ev) { var n = ev.target.closest && ev.target.closest('[data-tip]'); if (n) { showTip(n); } }, SIG);
+    HOST.addEventListener('focusout', hideTip, SIG);
+    document.addEventListener('pointerdown', function (ev) {
+      if (!POP) { return; } var p = ev.composedPath ? ev.composedPath() : [];
+      for (var i = 0; i < p.length; i++) { if (p[i] === HOST) { return; } }
+      closePop(false);
+    }, SIG);
+    if (!G.frappe || !frappe.call) { HOST.innerHTML = '<div class="dms-empty">Frappe client API not available.</div>'; return; }
+    setToday(); PERIOD = curPeriod();
+    var chartResize = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fitChartLabels) : null;
+    if (chartResize) { chartResize.observe(HOST); if (abort) { abort.signal.addEventListener('abort', function () { chartResize.disconnect(); }); } }
+    if (document.fonts) { document.fonts.ready.then(function () { if (!destroyed) { fitChartLabels(); } }); }
     renderAll();
-    loadOptions();
-    load();
+    var g = GEN, chk = function () { return g === GEN && !destroyed; };
+    Promise.resolve(APP.boot ? APP.boot(chk) : null).catch(function (e) { if (G.console) { console.error(APP.key, 'boot', e); } }).then(function () { if (destroyed) { return; } BOOTED = true; reload(); });
+  }
+  /* ==== end DMS kit ==== */
+
+  var OPT = {}, OPTERR = '', CO = [];
+  var FLF = [['loading_trailer', 'Load trailer', 'تحميل مقطورة'], ['unloading_trailer', 'Unload trailer', 'تنزيل مقطورة'], ['loading_dayana', 'Load dayana', 'تحميل دينا'], ['unloading_dayana', 'Unload dayana', 'تنزيل دينا'], ['loading_container', 'Load container', 'تحميل حاوية'], ['unloading_container', 'Unload container', 'تنزيل حاوية'], ['loading_pickup', 'Load pick up', 'تحميل بيك أب'], ['unloading_pickup', 'Unload pick up', 'تنزيل بيك أب']];
+  var TYPES = [['trailer', 'Trailer', 'مقطورة'], ['dayana', 'Dayana', 'دينا'], ['container', 'Container', 'حاوية'], ['pickup', 'Pick up', 'بيك أب']];
+  function isN(v) { return typeof v === 'number' && isFinite(v); }
+  function nv(v, f) { return isN(v) ? (f || num)(v) : '—'; }
+  function NA() { return tr('Unavailable', 'غير متاح'); }
+  function dur(m) { if (!isN(m)) { return '—'; } if (m < 60) { return (Math.round(m * 10) / 10) + tr(' min', ' د'); } var h = Math.floor(m / 60), r = Math.round(m - h * 60); return h + tr(' h ', ' س ') + r + tr(' min', ' د'); }
+  function secD() { var d = D.data; return d && d.delivery && d.delivery.available ? d.delivery : null; }
+  function secF() { var d = D.data; return d && d.forklift && d.forklift.available ? d.forklift : null; }
+  function blocked(key, label) { var d = D.data; if (D.dataErr) { return srcErr(D.dataErr, label); } if (!d) { return skel(1, 'dms-skel-panel'); } var s = d[key]; if (!s || s.available === false) { return alertBox('warn', '<b>' + esc(label + tr(': access unavailable.', ': الوصول غير متاح.')) + '</b> ' + esc((s && s.reason) || '')); } return ''; }
+  function listOf(o, key) { if (!o) { return null; } return Object.keys(o).map(function (k) { var r = { value: o[k] }; r[key] = k; return r; }); }
+  function blank(k) { return /^\(.*\)$/.test(k) ? ({ '(blank)': tr('Not set', 'غير محدد'), '(no driver)': tr('No driver', 'بلا سائق'), '(no vehicle)': tr('No vehicle', 'بلا مركبة'), '(no origin)': tr('No origin', 'بلا مصدر'), '(no destination)': tr('No destination', 'بلا وجهة'), '(no warehouse)': tr('No warehouse', 'بلا مستودع'), '(unavailable)': NA() })[k] || k : k; }
+  function amtCur() { return F.company ? ((CO.filter(function (c) { return c.name === F.company; })[0] || {}).default_currency || CUR) : CUR; }
+
+  /* ============================================================ flags: v2 detail filters and actions */
+  var DT_Q = [['', 'All rows', 'كل الصفوف'], ['reversed', 'Reversed timestamps', 'أوقات معكوسة'], ['over24', 'Duration over 24 h', 'مدة أكثر من 24 ساعة'], ['mismatch', 'Delivery and departure dates differ', 'اختلاف تاريخ التسليم والمغادرة'], ['missing origin', 'Missing origin', 'بلا مصدر'], ['missing destination', 'Missing destination', 'بلا وجهة'], ['missing trip type', 'Missing trip type', 'بلا نوع رحلة'], ['missing driver', 'Missing driver', 'بلا سائق'], ['fallback', 'Date from departure', 'التاريخ من المغادرة'], ['draft', 'Draft records', 'سجلات مسودة'], ['draftdelivered', 'Drafts marked Delivered', 'مسودات بحالة مُسلّمة']];
+  var FL_Q = [['', 'All rows', 'كل الصفوف'], ['zero', 'Zero loading and unloading', 'بلا تحميل أو تنزيل'], ['repeat', 'Repeated date and forklift', 'تكرار التاريخ والرافعة'], ['missing driver', 'Missing driver', 'بلا سائق'], ['missing forklift no', 'Missing forklift number', 'بلا رقم رافعة'], ['invalid', 'Non-numeric or negative values', 'قيم غير رقمية أو سالبة'], ['draft', 'Draft records', 'سجلات مسودة']];
+  function dtMatch(r, f) { var fl = r.flags || []; if (!f) { return true; } if (f === 'reversed') { return fl.some(function (x) { return / reversed$/.test(x); }); } if (f === 'over24') { return fl.some(function (x) { return / over 24h$/.test(x); }); } if (f === 'mismatch') { return fl.indexOf('delivery date differs from departure date') > -1; } if (f === 'fallback') { return r.date_source !== 'custom_delivery_date'; } if (f === 'draft') { return r.docstatus === 0; } if (f === 'draftdelivered') { return r.docstatus === 0 && r.delivery_status === 'Delivered'; } return fl.indexOf(f) > -1; }
+  function flMatch(r, f) { var fl = r.flags || []; if (!f) { return true; } if (f === 'zero') { return fl.indexOf('no loading/unloading recorded') > -1; } if (f === 'repeat') { return fl.indexOf('repeated date/forklift - review') > -1; } if (f === 'invalid') { return fl.some(function (x) { return / (nonnumeric|negative) \(/.test(x); }); } if (f === 'draft') { return r.docstatus === 0; } return fl.indexOf(f) > -1; }
+  var FLAG_AR = { 'missing driver': 'بلا سائق', 'missing trip type': 'بلا نوع رحلة', 'missing origin': 'بلا مصدر', 'missing destination': 'بلا وجهة', 'delivery date differs from departure date': 'تاريخ التسليم يختلف عن المغادرة', 'warehouse wait reversed': 'انتظار المستودع معكوس', 'travel reversed': 'التنقل معكوس', 'site wait reversed': 'انتظار الموقع معكوس', 'warehouse wait over 24h': 'انتظار المستودع أكثر من 24 ساعة', 'travel over 24h': 'التنقل أكثر من 24 ساعة', 'site wait over 24h': 'انتظار الموقع أكثر من 24 ساعة', 'missing forklift no': 'بلا رقم رافعة', 'no loading/unloading recorded': 'لا تحميل ولا تنزيل', 'repeated date/forklift - review': 'تكرار التاريخ والرافعة' };
+  function flagTxt(f) { return LANG === 'ar' && FLAG_AR[f] ? FLAG_AR[f] : f.charAt(0).toUpperCase() + f.slice(1); }
+  function urgentFlag(f) { return / reversed$|nonnumeric|negative/.test(f); }
+  function flagChips(list) { return (list || []).length ? list.map(function (f) { return stat(urgentFlag(f) ? 'bad' : 'warn', flagTxt(f)); }).join(' ') : '<span class="dms-sm">—</span>'; }
+  function actSpecs() {
+    var s = function (id, p, sec, q, short, title, why) { return { id: id, client: true, p: p, sec: sec, q: q, short: short, title: title, why: why }; };
+    return [
+      s('a_rev', 'high', 'd', 'reversed', tr('Reversed trip times', 'أوقات رحلات معكوسة'), tr('Submitted trips with a timestamp earlier than the one before it', 'رحلات معتمدة بوقت أسبق من الذي قبله'), tr('Excluded from the timing averages until corrected.', 'مستبعدة من متوسطات التوقيت حتى التصحيح.')),
+      s('a_draftdel', 'high', 'd', 'draftdelivered', tr('Drafts marked Delivered', 'مسودات بحالة مُسلّمة'), tr('Draft trips already marked Delivered', 'رحلات مسودة بحالة مُسلّمة'), tr('Submit them so they count, or correct the delivery status.', 'اعتمدها لتُحتسب أو صحّح حالة التسليم.')),
+      s('a_inv', 'high', 'f', 'invalid', tr('Invalid forklift counts', 'أعداد رافعات غير صالحة'), tr('Forklift records with non-numeric or negative counts', 'سجلات رافعات بأعداد غير رقمية أو سالبة'), tr('These values are counted as zero.', 'هذه القيم تُحتسب صفرًا.')),
+      s('a_drv', 'med', 'd', 'missing driver', tr('Trips without a driver', 'رحلات بلا سائق'), tr('Submitted trips with no driver', 'رحلات معتمدة بلا سائق'), tr('Set the driver so driver figures are complete.', 'حدد السائق لتكتمل أرقام السائقين.')),
+      s('a_zero', 'med', 'f', 'zero', tr('Forklift records with no activity', 'سجلات رافعات بلا نشاط'), tr('Submitted forklift records with zero loading and unloading', 'سجلات رافعات معتمدة بلا تحميل أو تنزيل'), tr('Check whether counts were left out.', 'تحقق من عدم إغفال الأعداد.')),
+      s('a_fkno', 'med', 'f', 'missing forklift no', tr('Missing forklift number', 'بلا رقم رافعة'), tr('Forklift records without a forklift number', 'سجلات رافعات بلا رقم رافعة'), tr('They cannot be grouped by forklift.', 'لا يمكن تجميعها حسب الرافعة.')),
+      s('a_org', 'low', 'd', 'missing origin', tr('Missing origin', 'بلا مصدر'), tr('Submitted trips with no origin warehouse', 'رحلات معتمدة بلا مستودع مصدر'), tr('Warehouse figures leave them out.', 'أرقام المستودعات تستبعدها.')),
+      s('a_dst', 'low', 'd', 'missing destination', tr('Missing destination', 'بلا وجهة'), tr('Submitted trips with no destination warehouse', 'رحلات معتمدة بلا مستودع وجهة'), tr('Customer deliveries often have none; review the rest.', 'التسليم للعملاء غالبًا بلا وجهة؛ راجع الباقي.')),
+      s('a_type', 'low', 'd', 'missing trip type', tr('Missing trip type', 'بلا نوع رحلة'), tr('Submitted trips with no trip type', 'رحلات معتمدة بلا نوع'), tr('Set the movement type.', 'حدد نوع الحركة.')),
+      s('a_mis', 'low', 'd', 'mismatch', tr('Delivery and departure dates differ', 'اختلاف التاريخين'), tr('Trips whose delivery date differs from the departure date', 'رحلات يختلف تاريخ تسليمها عن تاريخ المغادرة'), tr('Review only; it can be legitimate.', 'للمراجعة فقط؛ قد يكون مشروعًا.')),
+      s('a_rep', 'low', 'f', 'repeat', tr('Repeated date and forklift', 'تكرار التاريخ والرافعة'), tr('Forklift records sharing a date and forklift number', 'سجلات رافعات تشترك في التاريخ ورقم الرافعة'), tr('May be separate shifts.', 'قد تكون ورديات منفصلة.'))
+    ];
+  }
+  function attnCount(sp) {
+    var Dd = secD(), Ff = secF();
+    if (sp.sec === 'd') { if (!Dd) { return null; } var a = Dd.attention || {}; return { a_rev: a.reversed_timestamps, a_draftdel: a.draft_marked_delivered, a_drv: a.missing_driver, a_org: a.missing_origin, a_dst: a.missing_destination, a_type: a.missing_trip_type, a_mis: a.date_mismatch }[sp.id]; }
+    if (!Ff) { return null; } var b = Ff.attention || {}; return { a_inv: b.invalid_values ? uniqNames(b.invalid_values).length : null, a_zero: b.zero_activity_submitted, a_fkno: b.missing_forklift_no, a_rep: b.repeated_date_forklift ? b.repeated_date_forklift.reduce(function (s, x) { return s + x.records.length; }, 0) : null }[sp.id];
+  }
+  function uniqNames(list) { var m = {}; list.forEach(function (x) { m[x.name] = 1; }); return Object.keys(m); }
+  function actClient() {
+    if (D.dataErr) { return 'ERR:' + D.dataErr; } if (!D.data) { return null; }
+    var o = {};
+    actSpecs().forEach(function (sp) {
+      var sec = sp.sec === 'd' ? secD() : secF(), n = attnCount(sp);
+      if (!sec) { o[sp.id] = 'ERR:perm'; return; } if (!isN(n)) { o[sp.id] = 'ERR:perm'; return; }
+      var rows = (sec.rows || []).filter(function (r) { return (['draftdelivered', 'invalid', 'missing forklift no'].indexOf(sp.q) > -1 || r.docstatus === 1) && (sp.sec === 'd' ? dtMatch(r, sp.q) : flMatch(r, sp.q)); });
+      o[sp.id] = { rows: rows, count: n, item: function (r) { var dl = sp.sec === 'd' ? r.effective_date : r.date; return { p: sp.p, score: score(sp.p, 0, ageOf(dl)), dt: sp.sec === 'd' ? 'Delivery Trip' : 'ForkLift', name: r.name, title: r.name, desc: sp.sec === 'd' ? [r.trip_type, (r.origin || '—') + ' → ' + (r.destination || '—')].filter(Boolean).join(' · ') : [r.forklift_no, r.warehouse].filter(Boolean).join(' · '), who: r.driver_name || r.driver || null, due: dl || '', tone: sp.p === 'high' ? 'bad' : sp.p === 'med' ? 'warn' : 'n' }; } };
+    });
+    return o;
+  }
+
+  /* ============================================================ shared */
+  function banner() {
+    var h = '', d = D.data; if (OPTERR) { h += alertBox('warn', esc(tr('Filter choices could not be loaded; filters other than the period may be empty.', 'تعذر تحميل خيارات المرشحات؛ قد تكون المرشحات غير الفترة فارغة.'))); }
+    if (!d) { return h; }
+    if (d.limitations && d.limitations.length) { h += alertBox('info', d.limitations.map(esc).join('<br>')); }
+    var un = []; [['delivery', 'Delivery Trip'], ['forklift', 'ForkLift']].forEach(function (k) { var s = d[k[0]]; if (s && s.available && s.unavailable_fields && Object.keys(s.unavailable_fields).length) { un.push(k[1] + ': ' + Object.keys(s.unavailable_fields).join(', ')); } });
+    if (un.length) { h += alertBox('warn', '<b>' + esc(tr('Some figures are unavailable', 'بعض الأرقام غير متاحة')) + '</b> ' + esc(tr('because read access to these fields could not be verified for your account: ', 'لأنه تعذر التحقق من صلاحية قراءة هذه الحقول لحسابك: ') + un.join(' | ') + tr('. They show a dash, not zero.', '. تظهر بشرطة لا بصفر.'))); }
+    var ot = CO.filter(function (c) { return (c.default_currency || CUR) !== CUR; }); if (!F.company && ot.length && secD() && isN(secD().submitted.amount)) { h += alertBox('info', esc(tr('Recorded amounts add trips from every company; companies in another currency: ', 'المبالغ المسجلة تجمع رحلات كل الشركات؛ شركات بعملة أخرى: ') + ot.map(function (c) { return c.name + ' (' + c.default_currency + ')'; }).join(', ') + tr('. Select a company for a single-currency amount.', '. اختر شركة لمبلغ بعملة واحدة.'))); }
+    return h;
+  }
+  function facts(rows) { return '<div class="dms-facts df-facts">' + rows.map(function (r) { return '<div><span class="dms-sm">' + esc(r[0]) + '</span><b class="dms-num' + (r[2] ? ' dms-tone-' + r[2] : '') + '">' + r[1] + '</b>' + (r[3] ? '<span class="dms-sm">' + r[3] + '</span>' : '') + '</div>'; }).join('') + '</div>'; }
+  function trend(list, ser) { var B = buckets(PERIOD), m = ser.map(function () { return {}; }); (list || []).forEach(function (r) { var k = B.keyOf(r.date); ser.forEach(function (s, i) { m[i][k] = (m[i][k] || 0) + (isN(r[s.k]) ? r[s.k] : 0); }); }); return barChart(B.keys, B.gran, ser.map(function (s, i) { return { label: s.label, color: s.color, val: function (k) { return m[i][k] || 0; } }; }), num); }
+  function ranked(list, nameF, valF, n, fmt) { if (!list) { return alertBox('warn', esc(NA())); } var rows = list.map(function (r) { return { label: nameF(r), value: valF(r) }; }).filter(function (x) { return isN(x.value) && x.value; }).sort(function (a, b) { return b.value - a.value; }); return rows.length ? hbars(rows.slice(0, n || 10), fmt || num) : empty(); }
+  function split(list, nameF, partF, totF, parts, n) { if (!list) { return alertBox('warn', esc(NA())); } var rows = list.map(function (r) { return { label: nameF(r), part: partF(r) || 0, total: totF(r) || 0 }; }).filter(function (x) { return x.total; }).sort(function (a, b) { return b.total - a.total; }); return rows.length ? splitBars(rows.slice(0, n || 10), parts, num) : empty(); }
+  function two(a, b) { return '<div class="dms-cols-2 dms-grid">' + a + b + '</div>'; }
+  function drvName(r) { return r.driver_name || blank(r.driver); }
+  function dsChip(s) { return s == null ? '<span class="dms-sm">—</span>' : stat(s === 'Delivered' ? 'ok' : s === 'Not Delivered' ? 'bad' : s === 'Partially Delivered' ? 'warn' : 'n', s); }
+  function docChip(ds) { return ds === 0 ? stat('warn', tr('Draft', 'مسودة')) : stat('n', tr('Submitted', 'معتمد')); }
+  function trunc(sec, what) { return sec.rows_truncated ? alertBox('warn', esc(tr('Detail limit reached: this table lists the latest ', 'بلغ حد التفاصيل: يعرض الجدول أحدث ') + num(sec.rows.length) + tr(' of ', ' من ') + num(sec.row_count) + ' ' + what + tr('. Cards, charts and totals include every record. Narrow the filters to see every row.', '. البطاقات والرسوم والمجاميع تشمل كل السجلات. ضيّق المرشحات لرؤية كل الصفوف.'))) : ''; }
+  function chipsQ(key, list, cur, counts) { return '<div class="df-qf" role="group">' + list.map(function (q) { var on = cur === q[0]; return '<button type="button" class="dms-btn dms-btn-sm' + (on ? ' dms-btn-primary' : '') + '" data-act="' + key + '" data-v="' + esc(q[0]) + '" aria-pressed="' + on + '">' + esc(tr(q[1], q[2])) + ' <b>' + num(counts(q[0])) + '</b></button>'; }).join('') + '</div>'; }
+
+  /* ============================================================ overview */
+  function tabOverview(AM) {
+    if (D.dataErr) { return srcErr(D.dataErr, API) + actionsPanel(AM); }
+    if (!D.data) { return '<div class="dms-grid dms-kpis dms-ov-kpis" aria-busy="true">' + skel(4, 'dms-skel-kpi') + '</div><div class="dms-main2">' + actionsPanel(AM) + '<div class="dms-skel dms-skel-panel"></div></div>'; }
+    var Dd = secD(), Ff = secF(), S = Dd && Dd.submitted, FS = Ff && Ff.submitted;
+    var h = kpis([
+      kpi({ label: tr('Delivery trips', 'رحلات التوصيل'), dot: 'var(--dms-royal)', val: Dd ? nv(S.trips) : '—', sub: esc(Dd ? tr('Submitted · ', 'معتمدة · ') + num(Dd.draft.trips) + tr(' drafts apart', ' مسودات منفصلة') : NA()), act: 'goto:delivery' }),
+      kpi({ label: tr('Delivered trips', 'الرحلات المسلّمة'), dot: 'var(--dms-ok)', val: Dd ? nv(S.delivered) : '—', sub: esc(Dd ? (isN(S.delivered) && S.trips ? pct(S.delivered, S.trips, 0) + tr(' of submitted', ' من المعتمدة') : tr('Delivery status = Delivered', 'حالة التسليم = مُسلّمة')) : NA()) }),
+      kpi({ label: tr('Partly or not delivered', 'جزئيًا أو لم تُسلّم'), dot: 'var(--dms-age3)', val: Dd && isN(S.partially_delivered) ? num(S.partially_delivered + S.not_delivered) : '—', sub: esc(Dd && isN(S.no_status) ? num(S.no_status) + tr(' with no delivery status', ' بلا حالة تسليم') : NA()) }),
+      kpi({ label: tr('Forklift operations', 'عمليات الرافعات'), dot: 'var(--dms-age1)', val: Ff ? nv(FS.operations) : '—', sub: esc(Ff ? tr('Loading ', 'تحميل ') + num(FS.loading) + tr(' · unloading ', ' · تنزيل ') + num(FS.unloading) : NA()), act: 'goto:forklift' }),
+      kpi({ label: tr('Recorded amount earned', 'المبلغ المكتسب المسجل'), val: Dd && isN(S.amount) ? cur$(S.amount, amtCur()) : '—', sub: esc(Dd ? tr('Submitted trips · drafts ', 'الرحلات المعتمدة · المسودات ') + nv(Dd.draft.amount, money) : NA()) }),
+      kpi({ label: tr('Average travel', 'متوسط التنقل'), val: Dd && Dd.timing && Dd.timing.travel && Dd.timing.travel.valid_pairs ? esc(dur(Dd.timing.travel.avg_minutes)) : '—', sub: esc(Dd && Dd.timing && Dd.timing.travel ? tr('Departure → delivered, ', 'المغادرة ← التسليم، ') + num(Dd.timing.travel.valid_pairs) + tr(' trips', ' رحلة') : NA()) })
+    ], true);
+    h += '<div class="dms-main2">' + actionsPanel(AM) + '<div class="dms-stackcol">' +
+      panel(tr('Daily delivery trips', 'رحلات التوصيل اليومية'), blocked('delivery', tr('Delivery trips', 'رحلات التوصيل')) || trend(Dd.by_date, [{ k: 'delivered', label: tr('Delivered', 'مُسلّمة'), color: 'var(--dms-ok)' }, { k: 'trips', label: tr('Submitted trips', 'الرحلات المعتمدة'), color: 'var(--dms-royal)' }]), '', esc(tr('By effective trip date', 'حسب تاريخ الرحلة الفعلي'))) +
+      panel(tr('Daily forklift operations', 'عمليات الرافعات اليومية'), blocked('forklift', tr('Forklift activity', 'نشاط الرافعات')) || trend(Ff.by_date, [{ k: 'loading', label: tr('Loading', 'تحميل'), color: 'var(--dms-royal)' }, { k: 'unloading', label: tr('Unloading', 'تنزيل'), color: '#6b8be0' }]), '', esc(tr('Submitted records', 'السجلات المعتمدة'))) + '</div></div>';
+    var dw = Dd ? Dd.by_warehouse_either : undefined, fw = Ff ? Ff.by_warehouse : undefined, m = {};
+    if (dw) { Object.keys(dw).forEach(function (k) { (m[k] = m[k] || { w: k }).t = dw[k]; }); } if (fw) { fw.forEach(function (r) { (m[r.warehouse] = m[r.warehouse] || { w: r.warehouse }).o = r.operations; }); }
+    h += panel(tr('Warehouse activity', 'نشاط المستودعات'), !Dd && !Ff ? alertBox('warn', esc(NA())) : regTable({ id: 't_wh', rows: vals(m), pageSize: 10, file: 'warehouse_activity', text: function (r) { return r.w; }, sk: 't', dir: -1, empty: tr('No warehouse activity for the selected filters.', 'لا نشاط مستودعات للمرشحات المحددة.'), cols: [
+      { k: 'w', h: tr('Warehouse', 'المستودع'), s: function (r) { return r.w; }, r: function (r) { return bdi(blank(r.w)); }, c: function (r) { return r.w; } },
+      { k: 't', h: tr('Delivery trips', 'رحلات التوصيل'), num: 1, s: function (r) { return r.t || 0; }, r: function (r) { return dw ? '<span class="dms-num">' + num(r.t || 0) + '</span>' : '—'; }, c: function (r) { return r.t || 0; } },
+      { k: 'o', h: tr('Forklift operations', 'عمليات الرافعات'), num: 1, s: function (r) { return r.o || 0; }, r: function (r) { return fw ? '<span class="dms-num">' + num(r.o || 0) + '</span>' : '—'; }, c: function (r) { return r.o || 0; } }] }), '', esc(tr('A trip between two warehouses counts under each, so the column does not add up to the trip total', 'الرحلة بين مستودعين تُحتسب لكل منهما، فلا يساوي العمود إجمالي الرحلات')));
+    h += two(panel(tr('Trips by origin warehouse', 'الرحلات حسب مستودع المصدر'), blocked('delivery', tr('Delivery trips', 'رحلات التوصيل')) || ranked(listOf(Dd.by_origin, 'k'), function (r) { return blank(r.k); }, function (r) { return r.value; }, 8)),
+      panel(tr('Trips by destination warehouse', 'الرحلات حسب مستودع الوجهة'), blocked('delivery', tr('Delivery trips', 'رحلات التوصيل')) || ranked(listOf(Dd.by_destination, 'k'), function (r) { return blank(r.k); }, function (r) { return r.value; }, 8)));
+    return h;
+  }
+
+  /* ============================================================ delivery trips */
+  var DQ = { q: '' }, FQ = { q: '' };
+  function tabDelivery() {
+    var b = blocked('delivery', tr('Delivery trips', 'رحلات التوصيل')); if (b) { return b; }
+    var Dd = secD(), S = Dd.submitted, dr = Dd.draft;
+    if (!S.trips && !dr.trips) { return empty(tr('No delivery trips match the selected filters and period.', 'لا رحلات توصيل تطابق المرشحات والفترة.')); }
+    var h = kpis([kpi({ label: tr('Submitted trips', 'الرحلات المعتمدة'), val: nv(S.trips) }), kpi({ label: tr('Delivered', 'مُسلّمة'), dot: 'var(--dms-ok)', val: nv(S.delivered) }), kpi({ label: tr('Partially delivered', 'مُسلّمة جزئيًا'), dot: 'var(--dms-age3)', val: nv(S.partially_delivered) }), kpi({ label: tr('Not delivered', 'لم تُسلّم'), dot: 'var(--dms-bad)', val: nv(S.not_delivered) }), kpi({ label: tr('No delivery status', 'بلا حالة تسليم'), val: nv(S.no_status) }),
+      kpi({ label: tr('Draft trips', 'رحلات مسودة'), val: nv(dr.trips), sub: esc(tr('Not in totals', 'خارج المجاميع')) })]);
+    var cross = Dd.by_docstatus_and_delivery_status;
+    h += two(panel(tr('Delivery status', 'حالة التسليم'), ranked(listOf(Dd.by_delivery_status, 'k'), function (r) { return blank(r.k); }, function (r) { return r.value; }), '', esc(tr('Submitted trips; separate from document status', 'الرحلات المعتمدة؛ منفصلة عن حالة المستند'))),
+      panel(tr('Document status and delivery status', 'حالة المستند وحالة التسليم'), cross ? '<div class="dms-tablewrap"><table class="dms-table"><thead><tr><th scope="col">' + esc(tr('Document', 'المستند')) + '</th><th scope="col">' + esc(tr('Delivery status', 'حالة التسليم')) + '</th><th scope="col" class="dms-num">' + esc(tr('Trips', 'الرحلات')) + '</th></tr></thead><tbody>' + Object.keys(cross).sort().map(function (k) { var p = k.split(' | '); return '<tr><td>' + docChip(p[0] === 'Draft' ? 0 : 1) + '</td><td>' + (p[1] === '(blank)' ? '<span class="dms-sm">' + esc(tr('Not set', 'غير محدد')) + '</span>' : dsChip(p[1])) + '</td><td class="dms-num">' + num(cross[k]) + '</td></tr>'; }).join('') + '</tbody></table></div>' : alertBox('warn', esc(NA())), '', esc(tr('All non-cancelled records', 'كل السجلات غير الملغاة'))));
+    h += two(panel(tr('Trips by driver', 'الرحلات حسب السائق'), split(Dd.by_driver, drvName, function (r) { return r.delivered; }, function (r) { return r.trips; }, [{ label: tr('Delivered', 'مُسلّمة'), color: 'var(--dms-ok)' }, { label: tr('Other submitted', 'معتمدة أخرى'), color: 'var(--dms-royal)' }], 10)),
+      panel(tr('Recorded amount by driver', 'المبلغ المسجل حسب السائق'), ranked(Dd.by_driver, drvName, function (r) { return r.amount; }, 10, function (v) { return moneyS(v, amtCur()); }), '', esc(tr('Business meaning of this amount is not yet confirmed', 'المعنى التجاري لهذا المبلغ غير مؤكد بعد'))));
+    h += two(panel(tr('Trips by vehicle', 'الرحلات حسب المركبة'), ranked(Dd.by_vehicle, function (r) { return blank(r.vehicle); }, function (r) { return r.trips; }, 10)), panel(tr('Trips by trip type', 'الرحلات حسب نوع الرحلة'), ranked(listOf(Dd.by_trip_type, 'k'), function (r) { return blank(r.k); }, function (r) { return r.value; })));
+    var T = Dd.timing || {}, tl = [['warehouse_wait', tr('Warehouse waiting', 'الانتظار في المستودع'), tr('Report at warehouse → departure', 'الحضور ← المغادرة')], ['travel', tr('Travel', 'التنقل'), tr('Departure → delivered at site', 'المغادرة ← التسليم')], ['site_wait', tr('Site waiting', 'الانتظار في الموقع'), tr('Delivered → out of site', 'التسليم ← الخروج')]];
+    h += panel(tr('Average times', 'متوسط الأوقات'), facts(tl.map(function (t) { var x = T[t[0]]; return [t[1], x ? (x.valid_pairs ? esc(dur(x.avg_minutes)) : esc(tr('No valid pairs', 'لا أزواج صالحة'))) : esc(NA()), '', x ? esc(t[2] + ' · ' + num(x.valid_pairs) + tr(' pairs · ', ' زوج · ') + num(x.over_24h) + tr(' over 24 h · excluded ', ' أكثر من 24 س · مستبعد ') + num(x.reversed) + tr(' reversed, ', ' معكوس، ') + num(x.missing) + tr(' missing', ' ناقص')) : esc(t[2])]; })), '', esc(tr('Submitted trips; only pairs with both times in order. Durations over 24 h are kept and flagged.', 'الرحلات المعتمدة؛ الأزواج ذات الوقتين المرتبين فقط. المدد فوق 24 ساعة تبقى وتُعلَّم.')));
+    var rows = Dd.rows.filter(function (r) { return dtMatch(r, DQ.q); }), cnt = function (q) { return Dd.rows.filter(function (r) { return dtMatch(r, q); }).length; };
+    h += panel(tr('Trip details', 'تفاصيل الرحلات'), trunc(Dd, tr('trips', 'رحلة')) + chipsQ('dq', DT_Q, DQ.q, cnt) + regTable({ id: 't_dt', rows: rows, pageSize: 25, file: 'delivery_trips', text: function (r) { return [r.name, r.driver, r.driver_name, r.vehicle, r.origin, r.destination, r.trip_type].join(' '); }, empty: tr('No rows match.', 'لا صفوف مطابقة.'), cols: [
+      { k: 'd', h: tr('Trip date', 'تاريخ الرحلة'), s: function (r) { return r.effective_date; }, r: function (r) { return '<span class="dms-num">' + esc(r.effective_date) + '</span>' + (r.date_source !== 'custom_delivery_date' ? ' ' + tagc(esc(tr('dep.', 'مغادرة'))) : ''); }, c: function (r) { return r.effective_date; } },
+      { k: 't', h: tr('Trip', 'الرحلة'), s: function (r) { return r.name; }, r: function (r) { return docLink('Delivery Trip', r.name) + ' ' + docChip(r.docstatus); }, c: function (r) { return r.name; } },
+      { k: 'dr', h: tr('Driver and vehicle', 'السائق والمركبة'), s: function (r) { return r.driver_name || r.driver || ''; }, r: function (r) { return bdi(r.driver_name || r.driver || '—') + '<span class="dms-sm df-sub">' + esc(r.vehicle || '') + '</span>'; }, c: function (r) { return (r.driver_name || r.driver || '') + ' / ' + (r.vehicle || ''); } },
+      { k: 'rt', h: tr('Type and route', 'النوع والمسار'), s: function (r) { return r.origin || ''; }, r: function (r) { return bdi(r.trip_type || '—') + '<span class="dms-sm df-sub">' + bdi((r.origin || '—') + ' → ' + (r.destination || '—')) + '</span>'; }, c: function (r) { return (r.trip_type || '') + ' ' + (r.origin || '') + ' → ' + (r.destination || ''); } },
+      { k: 'ds', h: tr('Delivery status', 'حالة التسليم'), s: function (r) { return r.delivery_status || ''; }, r: function (r) { return dsChip(r.delivery_status); }, c: function (r) { return r.delivery_status; } },
+      { k: 'a', h: tr('Amount', 'المبلغ'), num: 1, s: function (r) { return r.amount || 0; }, r: function (r) { return '<span class="dms-num">' + nv(r.amount, amt) + '</span>'; }, c: function (r) { return r.amount; } },
+      { k: 'tm', h: tr('Wait, travel, site', 'انتظار، تنقل، موقع'), s: function (r) { return r.travel_min || 0; }, r: function (r) { return '<span class="dms-sm">' + esc([dur(r.warehouse_wait_min), dur(r.travel_min), dur(r.site_wait_min)].join(' · ')) + '</span>'; }, c: function (r) { return [r.warehouse_wait_min, r.travel_min, r.site_wait_min].join(' / '); } },
+      { k: 'f', h: tr('Review flags', 'علامات المراجعة'), r: function (r) { return flagChips(r.flags); }, c: function (r) { return (r.flags || []).join('; '); } }] }), '', esc(tr('"dep." = trip date taken from the departure time. Draft rows are not in the totals.', '"مغادرة" = التاريخ من وقت المغادرة. صفوف المسودات خارج المجاميع.')));
+    return h;
+  }
+
+  /* ============================================================ forklift activity */
+  function tabForklift() {
+    var b = blocked('forklift', tr('Forklift activity', 'نشاط الرافعات')); if (b) { return b; }
+    var Ff = secF(), S = Ff.submitted, und = Ff.undated || { submitted: 0, draft: 0 }, att = Ff.attention || {};
+    var undUrl = '/app/forklift?date=' + encodeURIComponent(JSON.stringify(['is', 'not set']));
+    var h = kpis([kpi({ label: tr('Loading', 'تحميل'), val: nv(S.loading) }), kpi({ label: tr('Unloading', 'تنزيل'), val: nv(S.unloading) }), kpi({ label: tr('Total operations', 'إجمالي العمليات'), dot: 'var(--dms-royal)', val: nv(S.operations) }), kpi({ label: tr('Submitted records', 'السجلات المعتمدة'), val: nv(S.records), sub: esc(num(S.zero_activity) + tr(' with no activity', ' بلا نشاط')) }),
+      kpi({ label: tr('Draft records', 'سجلات مسودة'), val: nv(Ff.draft.records), sub: esc(num(Ff.draft.operations) + tr(' operations, not in totals', ' عملية خارج المجاميع')) }), kpi({ label: tr('Undated records', 'سجلات بلا تاريخ'), dot: und.submitted + und.draft ? 'var(--dms-age3)' : null, val: num(und.submitted + und.draft), sub: esc(num(und.submitted) + tr(' submitted, ', ' معتمد، ') + num(und.draft) + tr(' draft', ' مسودة')) + ' · <a class="dms-link" href="' + esc(undUrl) + '" target="_blank" rel="noopener noreferrer">' + esc(tr('Open list', 'فتح القائمة')) + ' ↗</a>' })]);
+    if (!S.records && !Ff.draft.records) { return h + empty(tr('No dated forklift records match the selected filters and period.', 'لا سجلات رافعات مؤرخة تطابق المرشحات والفترة.')); }
+    var bf = Ff.by_field || [], by = function (f) { var x = bf.filter(function (y) { return y.field === f; })[0]; return x ? x.value : 0; };
+    var parts = [{ label: tr('Loading', 'تحميل'), color: 'var(--dms-royal)' }, { label: tr('Unloading', 'تنزيل'), color: '#6b8be0' }];
+    h += two(panel(tr('Loading and unloading by vehicle type', 'التحميل والتنزيل حسب نوع المركبة'), split(TYPES.map(function (t) { return { t: tr(t[1], t[2]), l: by('loading_' + t[0]), u: by('unloading_' + t[0]) }; }), function (r) { return r.t; }, function (r) { return r.l; }, function (r) { return r.l + r.u; }, parts, 4) +
+      '<div class="dms-tablewrap df-mt"><table class="dms-table"><thead><tr><th scope="col">' + esc(tr('Field', 'الحقل')) + '</th><th scope="col" class="dms-num">' + esc(tr('Count', 'العدد')) + '</th></tr></thead><tbody>' + FLF.map(function (x) { return '<tr><td>' + esc(tr(x[1], x[2])) + '</td><td class="dms-num">' + num(by(x[0])) + '</td></tr>'; }).join('') + '</tbody></table></div>', '', esc(tr('The 8 count fields on submitted records; expense and washing fields are not included', 'حقول الأعداد الثمانية في السجلات المعتمدة؛ المصروف والغسيل غير مشمولين'))),
+      panel(tr('Operations by forklift', 'العمليات حسب الرافعة'), split(Ff.by_forklift, function (r) { return blank(r.forklift); }, function (r) { return r.loading; }, function (r) { return r.operations; }, parts, 12), '', esc(tr('Grouped by trimmed, uppercased number; different identifiers are not merged', 'مجمّعة بالرقم بعد التهذيب؛ المعرفات المختلفة لا تُدمج'))));
+    h += two(panel(tr('Operations by warehouse', 'العمليات حسب المستودع'), split(Ff.by_warehouse, function (r) { return blank(r.warehouse); }, function (r) { return r.loading; }, function (r) { return r.operations; }, parts, 10)), panel(tr('Operations by driver', 'العمليات حسب السائق'), split(Ff.by_driver, drvName, function (r) { return r.loading; }, function (r) { return r.operations; }, parts, 10)));
+    var rep = att.repeated_date_forklift;
+    if (rep && rep.length) { h += panel(tr('Repeated date and forklift', 'تكرار التاريخ والرافعة'), regTable({ id: 't_rep', rows: rep, pageSize: 10, file: 'repeated_date_forklift', text: function (x) { return x.key + ' ' + x.records.join(' '); }, cols: [{ k: 'k', h: tr('Date and forklift', 'التاريخ والرافعة'), s: function (x) { return x.key; }, r: function (x) { return bdi(x.key); }, c: function (x) { return x.key; } }, { k: 'r', h: tr('Records', 'السجلات'), r: function (x) { return x.records.map(function (n) { return docLink('ForkLift', n); }).join(', '); }, c: function (x) { return x.records.join(', '); } }] }), '', esc(tr('May be separate legitimate shifts', 'قد تكون ورديات منفصلة مشروعة'))); }
+    var rows = Ff.rows.filter(function (r) { return flMatch(r, FQ.q); }), cnt = function (q) { return Ff.rows.filter(function (r) { return flMatch(r, q); }).length; };
+    return h + panel(tr('Forklift records', 'سجلات الرافعات'), trunc(Ff, tr('forklift records', 'سجل رافعة')) + chipsQ('fq', FL_Q, FQ.q, cnt) + regTable({ id: 't_fl', rows: rows, pageSize: 25, file: 'forklift_records', text: function (r) { return [r.name, r.forklift_no, r.warehouse, r.driver, r.driver_name].join(' '); }, empty: tr('No rows match.', 'لا صفوف مطابقة.'), cols: [
+      { k: 'd', h: tr('Date', 'التاريخ'), s: function (r) { return r.date; }, r: function (r) { return '<span class="dms-num">' + esc(r.date) + '</span>'; }, c: function (r) { return r.date; } },
+      { k: 'n', h: tr('Record', 'السجل'), s: function (r) { return r.name; }, r: function (r) { return docLink('ForkLift', r.name) + ' ' + docChip(r.docstatus); }, c: function (r) { return r.name; } },
+      { k: 'f', h: tr('Forklift and warehouse', 'الرافعة والمستودع'), s: function (r) { return r.forklift_no || ''; }, r: function (r) { return bdi(r.forklift_no || '—') + '<span class="dms-sm df-sub">' + esc(r.warehouse || '') + '</span>'; }, c: function (r) { return (r.forklift_no || '') + ' / ' + (r.warehouse || ''); } },
+      { k: 'dr', h: tr('Driver', 'السائق'), s: function (r) { return r.driver_name || r.driver || ''; }, r: function (r) { return bdi(r.driver_name || r.driver || '—'); }, c: function (r) { return r.driver_name || r.driver; } },
+      { k: 'l', h: tr('Loading', 'تحميل'), num: 1, s: function (r) { return r.loading; }, r: function (r) { return '<span class="dms-num" title="' + esc(FLF.filter(function (x) { return x[0].indexOf('loading') === 0; }).map(function (x) { return tr(x[1], x[2]) + ': ' + num(r[x[0]]); }).join(', ')) + '">' + num(r.loading) + '</span>'; }, c: function (r) { return r.loading; } },
+      { k: 'u', h: tr('Unloading', 'تنزيل'), num: 1, s: function (r) { return r.unloading; }, r: function (r) { return '<span class="dms-num" title="' + esc(FLF.filter(function (x) { return x[0].indexOf('unloading') === 0; }).map(function (x) { return tr(x[1], x[2]) + ': ' + num(r[x[0]]); }).join(', ')) + '">' + num(r.unloading) + '</span>'; }, c: function (r) { return r.unloading; } },
+      { k: 'o', h: tr('Total', 'الإجمالي'), num: 1, s: function (r) { return r.operations; }, r: function (r) { return '<b class="dms-num">' + num(r.operations) + '</b>'; }, c: function (r) { return r.operations; } },
+      { k: 'fl', h: tr('Review flags', 'علامات المراجعة'), r: function (r) { return flagChips(r.flags); }, c: function (r) { return (r.flags || []).join('; '); } }] }), '', esc(tr('Hover a count to see its four vehicle types. Draft rows are not in the totals.', 'مرّر على العدد لرؤية أنواع المركبات الأربعة. صفوف المسودات خارج المجاميع.')));
+  }
+  function tabActions(AM) { return actionsTab(AM, tr('Review flags for the selected filters and period. They are items to check, not confirmed errors.', 'علامات المراجعة للمرشحات والفترة المحددة. هي بنود للتحقق وليست أخطاء مؤكدة.')); }
+
+  /* ============================================================ drills and events */
+  function drill(id) {
+    if (id.indexOf('cli:') !== 0) { return null; }
+    var k = id.slice(4), cc = actClient(), x = cc && typeof cc === 'object' && cc[k], s = actSpecs().filter(function (y) { return y.id === k; })[0];
+    if (!x || typeof x === 'string' || !s) { return null; }
+    return { title: s.title, sub: s.why + (x.rows.length < x.count ? tr(' Only rows within the detail limit are listed.', ' تُعرض فقط الصفوف ضمن حد التفاصيل.') : ''), spec: { rows: x.rows.map(x.item), file: k, text: function (it) { return [it.title, it.desc, it.who].join(' '); }, cols: [
+      { h: tr('Record', 'السجل'), r: function (it) { return docLink(it.dt, it.name, it.title); }, c: function (it) { return it.name; } },
+      { h: tr('Details', 'التفاصيل'), r: function (it) { return '<span class="dms-sm">' + bdi(it.desc) + '</span>'; }, c: function (it) { return it.desc; } },
+      { h: tr('Driver', 'السائق'), r: function (it) { return bdi(it.who || '—'); }, c: function (it) { return it.who; } },
+      { h: tr('Date', 'التاريخ'), r: function (it) { return '<span class="dms-num">' + esc(it.due) + '</span>'; }, c: function (it) { return it.due; } }] } };
+  }
+  function onAct(a, v) {
+    if (a === 'kpi' && v.indexOf('goto:') === 0) { goTab(v.slice(5), false, true); return true; }
+    if (a === 'dq') { DQ.q = v; renderSoft(); return true; }
+    if (a === 'fq') { FQ.q = v; renderSoft(); return true; }
+    return false;
+  }
+
+  start();
+})();
+
+/* ==== DM theme sync (same as tools/erp/shell/dark_theme.py output; maintained here since this block is built on the standard) ==== */
+;(function () {
+  var r = typeof root_element !== 'undefined' ? root_element : null, h = r && r.host;
+  if (!h || h.__dmsTheme) return; h.__dmsTheme = 1;
+  var s = function () { h.setAttribute('data-dms-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'); };
+  s(); new MutationObserver(s).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 })();

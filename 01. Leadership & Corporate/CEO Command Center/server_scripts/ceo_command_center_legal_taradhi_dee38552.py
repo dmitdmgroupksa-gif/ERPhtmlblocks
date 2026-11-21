@@ -1,66 +1,40 @@
-# CEO Command Center - Collections > Legal / Taradhi (STATIC reference data).
-# Fixed reference copied from Journal Entry JV-DM-2026-39728. NOT live outstanding
-# balances: never refreshed from invoices, payments or the ledger, and never added to
-# Collections receipts, outstanding or achievement calculations.
-# Classification: each entry is "legal", "taradhi" or "" (pending). Entries are shown
-# only in the tab they are classified for; pending entries are not shown in either tab.
-# 2026-10-24: all 14 entries confirmed by the CEO as Legal. No Taradhi entries confirmed yet.
-# Access: returned only when the user can read the reference Journal Entry and the
-# reference company (standard role permissions + user permissions apply).
-REF_DOC = "JV-DM-2026-39728"
-REF_COMPANY = "Durar Masagh Trading Company"
-ROWS = [
-    ["Saudi Arabian Baytur Construction Co. (MISK)", 585095.61, "legal"],
-    ["Saudi Arabian Baytur Construction Co. (KAUST)", 148605.88, "legal"],
-    ["Yaris General Contracting Company", 193563.91, "legal"],
-    ["Sarh Al-Mostaqble Trading Company", 276525.00, "legal"],
-    ["Riyadh Meadows Agricultural Corporation", 17748.40, "legal"],
-    ["Overseas Construction Company Pvt. Ltd. (OCC)", 11070.50, "legal"],
-    ["Condor Arabia Contracting Est.", 20142.50, "legal"],
-    ["AUR Wire Steel Factory", 219563.11, "legal"],
-    ["Arabian Varieties Trading Company", 471408.00, "legal"],
-    ["Alfen Construction Company", 100000.00, "legal"],
-    ["Shapoorji Pallonji Mideast LLC (NIC Water Reservoir)", 19692.72, "legal"],
-    ["Shapoorji Pallonji Mideast LLC (SEC PROJECT)", 20040.55, "legal"],
-    ["Shapoorji Pallonji Mideast LLC (Salwa PROJECT)", 20700.00, "legal"],
-    ["Saudi Arabian Oil Company (Saudi Aramco)", 43715.93, "legal"]
-]
-
-company = frappe.form_dict.get("company") or ""
+# API method: ceo_command_center_legal_taradhi. Read-only, native record permissions.
 category = frappe.form_dict.get("category") or ""
+company = frappe.form_dict.get("company") or ""
 if category not in ["legal", "taradhi"]:
-    frappe.throw("Invalid category.")
-out = {"view": "legal_taradhi", "category": category, "reference": REF_DOC,
-       "reference_company": REF_COMPANY, "selected_company": company, "available": 0,
-       "reason": "", "rows": [], "count": 0, "total": 0.0, "currency": "",
-       "dataset_count": len(ROWS), "pending_count": 0}
-
-comp = frappe.get_list("Company", filters=[["name", "=", REF_COMPANY]],
-                       fields=["name", "default_currency"], limit_page_length=1)
-ref = frappe.get_list("Journal Entry", filters=[["name", "=", REF_DOC]],
-                      fields=["name", "company", "docstatus", "posting_date"], limit_page_length=1)
-
-if not comp or not ref:
-    out["reason"] = "no_access"
-elif company != REF_COMPANY:
-    out["reason"] = "other_company"
-else:
-    total = 0.0
-    rows = []
-    pending = 0
-    for r in ROWS:
-        if not r[2]:
-            pending = pending + 1
-        elif r[2] == category:
-            rows.append({"label": r[0], "amount": r[1]})
-            total = total + r[1]
-    out["available"] = 1
-    out["rows"] = rows
-    out["count"] = len(rows)
-    out["total"] = frappe.utils.flt(total, 2)
-    out["pending_count"] = pending
-    out["currency"] = comp[0].default_currency
-    out["reference_docstatus"] = ref[0].docstatus
-    out["reference_posting_date"] = str(ref[0].posting_date)
-
-frappe.response["message"] = out
+    frappe.throw("Invalid category")
+sources = [["Taradhi Cases", "customer", "amount", "order_no", "date", "payment_status"]] if category == "taradhi" else [["Court Cases", "customer_name", "amount", "", "creation", ""], ["Legal Case List", "customer", "amount", "order_no", "case_filing_date", "legal_case_status"]]
+if category == "taradhi":
+    sources.append(["Legal Case List", "customer", "amount", "order_no", "case_filing_date", "legal_case_status"])
+rows = []
+unresolved = 0
+for spec in sources:
+    dt = spec[0]
+    fields = ["name", spec[1], spec[2], spec[4]]
+    if spec[3]:
+        fields.append(spec[3])
+    if spec[5]:
+        fields.append(spec[5])
+    filters = [["docstatus", "<", 2]]
+    if dt == "Legal Case List":
+        filters.append(["legal_case_authority", "=", "Legal" if category == "legal" else "Taradhi"])
+    offset = 0
+    while True:
+        batch = frappe.get_list(dt, fields=fields, filters=filters, order_by="name asc", limit_start=offset, limit_page_length=200)
+        for record in batch:
+            order = record.get(spec[3]) if spec[3] else ""
+            order_company = ""
+            if order:
+                orders = frappe.get_list("Sales Order", fields=["company"], filters=[["name", "=", order]], limit_page_length=1)
+                if orders:
+                    order_company = orders[0].company
+            if company and not order_company:
+                unresolved = unresolved + 1
+                continue
+            if company and order_company != company:
+                continue
+            rows.append({"doctype": dt, "name": record.name, "label": record.get(spec[1]) or record.name, "recorded_amount": str(record.get(spec[2]) or ""), "date": str(record.get(spec[4]) or ""), "status": record.get(spec[5]) if spec[5] else "", "company": order_company})
+        if len(batch) < 200:
+            break
+        offset = offset + len(batch)
+frappe.response["message"] = {"available": 1, "category": category, "count": len(rows), "rows": rows, "unresolved_company": unresolved, "basis": "Live case records, not ledger outstanding. Company is verified only through an accessible linked Sales Order. Case amount has no currency field; no cross-case monetary total is inferred."}

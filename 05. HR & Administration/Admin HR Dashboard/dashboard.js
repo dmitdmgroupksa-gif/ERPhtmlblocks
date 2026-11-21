@@ -1,32 +1,15 @@
-/* Admin & HR Dashboard (DM Group KSA) - compact dashboard v3 (2026-10-29: Arabic/RTL, royal-blue navigation). Data source: server script API admin_hr_dashboard_data (permissions enforced server-side). Read-only. */
+/* ===== DM Group KSA — Admin & HR Dashboard — SCRIPT field · v4 =====
+   Moves v3 onto the DM dashboard standard. Read-only. The seven Server Script APIs are called unchanged:
+   admin_hr_dashboard_data (overview, employees, attendance, analytics, actions), admin_hr_employee_directory and
+   admin_hr_employee_detail (directory and employee panel, HR Manager / HR User only), and admin_hr_leave_data,
+   admin_hr_compliance_data, admin_hr_training_data, admin_hr_requests_data (summary + paged list each).
+   Kept from v3: permissions and the detail / aggregate tiers stay on the server; the attendance policy (approved leave
+   first, Friday off for everyone, Saturday off for Saudi nationals, an incomplete basis is shown as unavailable, never
+   zero); every definition, preset and data-quality check comes from the APIs; the English labels and the v3 Arabic
+   dictionary (reused as is). The shared runtime between the "DMS kit" markers is generated from tools/erp/kit/dms-kit.js. */
 (function () {
-  var host = root_element.querySelector('#ahd');
-  if (!host) return;
-  var S = { d: null, tab: 'overview', busy: false, err: null, lang: 'en',
-  f: {
-    company: 'Durar Masagh Trading Company',
-    branch: '',
-    job_location: '',
-    department: '',
-    from_date: frappe.datetime.add_months(frappe.datetime.get_today(), -1),
-    to_date: frappe.datetime.get_today()
-} };
-  try { var st = localStorage.getItem('ahd_tab'); if (st) S.tab = st; } catch (e) {}
-  /* lang-sync 2026-11-15: ERP User.language is the source of truth */ S.lang = (frappe.boot && frappe.boot.lang === 'ar') ? 'ar' : 'en';
-  try {
-    var sf = JSON.parse(sessionStorage.getItem('ahd_f') || 'null');
-    if (sf && typeof sf === 'object') {
-        ['company', 'branch', 'job_location', 'department', 'from_date', 'to_date']
-            .forEach(function (k) {
-                if (typeof sf[k] === 'string') S.f[k] = sf[k];
-            });
-    }
-} catch (e) {}
-  var TABS = [['overview', 'Overview'], ['employees', 'Employees'], ['attendance', 'Attendance'], ['leave', 'Leave'],
-    ['compliance', 'Documents & Compliance'], ['requests', 'HR Requests'], ['training', 'Training'], ['analytics', 'HR Analytics']];
-  var STATE = { actual: ['Actual', 'ok'], partial: ['Partial', 'warn'], missing: ['Missing data', 'muted'], unavailable: ['Unavailable', 'bad'] };
-  var DR = [];
-  // ---- Arabic / RTL (display only). Keys are the English UI text; digits are matched as '#'. Logic never reads translated text. ----
+  'use strict';
+  /* ---- v3 Arabic dictionary (display only; English UI text is the key) ---- */
   var AR = {
     /* shell */
     'Admin & HR Dashboard':'لوحة الإدارة والموارد البشرية','Full HR view':'عرض الموارد البشرية الكامل','Aggregate view':'عرض إجمالي','Refresh':'تحديث','Reset':'إعادة ضبط','Loading…':'جارٍ التحميل…',
@@ -86,16 +69,16 @@
   var FRAG = [['as of','حتى'],['updated','آخر تحديث'],['Showing first','عرض أول'],['Showing','عرض'],['with a copy attached','لها نسخة مرفقة'],['required records have a current, non-conflicting date','مستند مطلوب بتاريخ ساري وغير متعارض'],['Saudi nationals: not required','سعوديون: غير مطلوب'],['required documents have no expiry date.','مستندات مطلوبة بلا تاريخ انتهاء.'],['employees have incomplete mandatory training.','موظفون لديهم تدريب إلزامي غير مكتمل.'],['employees have no nationality recorded.','موظفون بلا جنسية مسجلة.'],['employees','موظف'],['applications','طلب'],['documents','مستند'],['records','سجل'],['requests','طلب'],['days','يوماً'],['active','نشط'],['evaluated','تم تقييمهم'],['of','من'],['and','و'],['total','الإجمالي'],['latest','الأحدث'],['provisional','مؤقت'],['before','قبل'],['after','بعد'],['required','مطلوب'],['Pending','معلق'],['Open','مفتوح'],['closed','مغلق'],['punches','بصمات']];
   var FRAGRE = FRAG.map(function (p) { return [new RegExp('(^|[^A-Za-z])' + p[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![A-Za-z])', 'g'), p[1]]; });
   var AR_RULES = [
-    [/^Sort by (.+)$/, function (m, a) { return 'ترتيب حسب ' + tr(a); }],
-    [/^(.+?) ([▲▼])$/, function (m, a, ar) { return tr(a) + ' ' + ar; }],
-    [/^(.+) \((\d+)\)$/, function (m, a, n) { return tr(a) + ' (' + n + ')'; }],
+    [/^Sort by (.+)$/, function (m, a) { return 'ترتيب حسب ' + arT(a); }],
+    [/^(.+?) ([▲▼])$/, function (m, a, ar) { return arT(a) + ' ' + ar; }],
+    [/^(.+) \((\d+)\)$/, function (m, a, n) { return arT(a) + ' (' + n + ')'; }],
     [/^Leave application (.+)$/, function (m, a) { return 'طلب إجازة ' + a; }],
     [/^Exported (\d+) rows( \(first 2,000\))?$/, function (m, n, f) { return 'تم تصدير ' + n + ' صفاً' + (f ? ' (أول 2,000)' : ''); }],
     [/^Department: (.+)$/, function (m, a) { return 'القسم: ' + a; }],
     [/^Branch: (.+)$/, function (m, a) { return 'الفرع: ' + a; }],
     [/^Job location: (.+)$/, function (m, a) { return 'موقع العمل: ' + a; }],
     [/^Designation: (.+)$/, function (m, a) { return 'المسمى الوظيفي: ' + a; }],
-    [/^(.+) — expired or due ≤60 days$/, function (m, a) { return tr(a) + ' — منتهية أو تستحق خلال ≤60 يوماً'; }],
+    [/^(.+) — expired or due ≤60 days$/, function (m, a) { return arT(a) + ' — منتهية أو تستحق خلال ≤60 يوماً'; }],
     [/^(.+) — open$/, function (m, a) { return a + ' — مفتوحة'; }],
     [/^(\d+) request types? (?:is|are) not readable with your permissions and not counted\.$/, function (m, n) { return n + ' من أنواع الطلبات غير مقروء بصلاحياتك وغير محتسب.'; }],
     [/^(\d+)% of (\d+) required records have a current, non-conflicting date · (\d+) with a copy attached(?: · (\d+) Saudi nationals: not required)?$/, function (m, p, r, a, s) { return p + '% من ' + r + ' سجلاً مطلوباً بتاريخ ساري وغير متعارض · ' + a + ' لها نسخة مرفقة' + (s ? ' · ' + s + ' سعوديون: غير مطلوب' : ''); }],
@@ -129,7 +112,7 @@
     if (hit.indexOf('#') < 0 || key === s) return hit;
     var i = 0; return hit.replace(/#/g, function () { return nums[i++] !== undefined ? nums[i - 1] : '#'; });
   }
-  function tr(raw) {
+  function arT(raw) {
     if (raw === null || raw === undefined) return raw;
     raw = String(raw);
     if (!raw || hasAr(raw)) return raw;
@@ -140,2064 +123,1263 @@
     if (out === null) {
       var seps = [' · ', ': ', ', ', '; '];
       for (var si = 0; si < seps.length; si++) {
-        if (s.indexOf(seps[si]) > 0) { out = s.split(seps[si]).map(tr).join({ ', ': '، ', '; ': '؛ ' }[seps[si]] || seps[si]); break; }
+        if (s.indexOf(seps[si]) > 0) { out = s.split(seps[si]).map(arT).join({ ', ': '، ', '; ': '؛ ' }[seps[si]] || seps[si]); break; }
       }
     }
     if (out === null && /\d/.test(s)) { out = s; FRAGRE.forEach(function (f) { out = out.replace(f[0], function (m0, pre) { return pre + f[1]; }); }); if (out === s) out = null; }
     if (out === null) { out = s; if (/[A-Za-z]{3}/.test(s)) MISSING[s] = 1; }
     return lead + out + trail;
   }
-  function trTree(root) {
-    if (!root || !root.querySelectorAll) return;
-    root.querySelectorAll('option:not([value])').forEach(function (o) { o.setAttribute('value', o.textContent); });
-    var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), nodes = [], n;
-    while ((n = w.nextNode())) { var pn = n.parentNode && n.parentNode.nodeName; if (pn !== 'STYLE' && pn !== 'SCRIPT' && /[A-Za-z]{2}/.test(n.nodeValue)) nodes.push(n); }
-    nodes.forEach(function (t) { var v = tr(t.nodeValue); if (v !== t.nodeValue) t.nodeValue = v; });
-    root.querySelectorAll('[placeholder],[aria-label],[title]').forEach(function (e) { ['placeholder', 'aria-label', 'title'].forEach(function (k) { var v = e.getAttribute(k); if (v && /[A-Za-z]{2}/.test(v)) { var t = tr(v); if (t !== v) e.setAttribute(k, t); } }); });
-  }
-  function T(s) { return S.lang === 'ar' ? tr(s) : s; }
-  window.ahdMissing = function () { return Object.keys(MISSING).sort(); };
-  var trPend = null;
-  function applyLang() {
-    var ar = S.lang === 'ar';
-    host.classList.toggle('ahd-rtl', ar); host.setAttribute('dir', ar ? 'rtl' : 'ltr'); host.setAttribute('lang', ar ? 'ar' : 'en');
-    if (ar) trTree(host);
-  }
-  var langObserver = new MutationObserver(function () {
-    if (S.lang !== 'ar' || trPend) return;
-    trPend = setTimeout(function () { trPend = null; trTree(host); }, 0);
+  /* ---- v4 additions to the v3 dictionary (labels new in v4) ---- */
+  Object.assign(AR, {
+    'Permission-checked ERP data · read-only': 'بيانات النظام وفق الصلاحيات · قراءة فقط', 'Employee-level detail': 'تفاصيل على مستوى الموظف', 'Aggregate figures only': 'أرقام إجمالية فقط',
+    'Not readable with your permissions': 'غير مقروء بصلاحياتك', '(fewer than 3)': '(أقل من 3)', '(Not set)': '(غير محدد)',
+    'Employee-level lists are available to HR Manager / HR User only. Your view shows aggregate figures.': 'القوائم على مستوى الموظف متاحة لمدير ومستخدم الموارد البشرية فقط. يعرض عرضك أرقاماً إجمالية.',
+    'd overdue': 'يوم تأخير', 'Approval queues': 'قوائم الاعتماد', 'Request queues': 'قوائم الطلبات', 'of documents current': 'من المستندات سارية', 'of employees without issues': 'من الموظفين بلا ملاحظات',
+    'Data quality · HR review': 'جودة البيانات · مراجعة الموارد البشرية', 'Issues are displayed only; fix records in ERPNext after HR review.': 'تُعرض الملاحظات فقط؛ صحّح السجلات في ERPNext بعد مراجعة الموارد البشرية.',
+    'Show all': 'عرض الكل', 'click a card or a data-quality count to narrow the list': 'انقر بطاقة أو عدداً في جودة البيانات لتضييق القائمة', 'days ago': 'يوماً مضت', 'Holiday list': 'قائمة العطلات', 'in': 'خلال',
+    'Attendance reliability': 'موثوقية الحضور', 'of active': 'من النشطين', 'd': 'ي', 'Employee.status = Active (current filters)': 'حالة الموظف = نشط (حسب المرشحات)',
+    'Headcount by department': 'عدد الموظفين حسب القسم', 'Headcount by branch': 'عدد الموظفين حسب الفرع', 'Headcount by job location': 'عدد الموظفين حسب موقع العمل', 'Headcount by designation': 'عدد الموظفين حسب المسمى الوظيفي',
+    'Employee ID or name': 'رقم الموظف أو اسمه', 'Distinct employees with at least one punch': 'موظفون مختلفون لديهم بصمة واحدة على الأقل', 'mobile': 'جوال', 'device/untagged': 'جهاز/غير موسوم', 'inferred': 'مستنتج', 'recorded': 'مسجل',
+    'Friday is a weekoff for all; Saturday is also a weekoff for Saudi nationals.': 'الجمعة عطلة للجميع؛ والسبت عطلة أيضاً للمواطنين السعوديين.', 'Attendance in the selected period': 'الحضور في الفترة المحددة', 'capped': 'بحد أقصى',
+    'Attendance by employee in the period': 'الحضور حسب الموظف في الفترة', 'Attrition (12 months)': 'معدل الدوران (12 شهراً)', 'Approximate': 'تقريبي', 'Nationality conflicts': 'تعارض الجنسية', 'Nationality fields disagree': 'حقلا الجنسية غير متطابقين',
+    'Left without relieving date': 'غادروا بلا تاريخ إخلاء طرف', 'Tenure': 'مدة الخدمة', 'Saudization by branch': 'السعودة حسب الفرع', 'Saudization by job location': 'السعودة حسب موقع العمل', 'Joiners and leavers by month': 'المنضمون والمغادرون شهرياً',
+    'Monthly turnover rate': 'معدل الدوران الشهري', 'Turnover %': 'الدوران %', 'Data quality': 'جودة البيانات',
+    'Action lists are as of today and follow the company, department, branch and job location filters.': 'قوائم الإجراءات حتى اليوم وتتبع مرشحات الشركة والقسم والفرع وموقع العمل.',
+    'Record': 'السجل', 'Detail': 'التفاصيل', 'Age / due': 'العمر / الاستحقاق', 'Not permitted': 'غير مسموح', 'Could not load employee details.': 'تعذر تحميل تفاصيل الموظف.', 'Employee details': 'تفاصيل الموظف',
+    'Default company': 'الشركة الافتراضية', 'All job locations': 'كل مواقع العمل', 'Status distribution': 'توزيع الحالات', 'Awaiting approval': 'بانتظار الاعتماد', 'Employees without a valid list': 'موظفون بلا قائمة صالحة',
+    'Basis': 'الأساس', 'Share of active': 'النسبة من النشطين', 'Paid': 'مدفوعة', 'Unpaid (LWP)': 'غير مدفوعة (LWP)', 'Attendance %': 'نسبة الحضور', 'Check': 'تحقق', 'records': 'سجل',
+    'Expired documents': 'مستندات منتهية', 'Iqama/ID, passport, contract or insurance already expired': 'إقامة/هوية أو جواز أو عقد أو تأمين منتهٍ بالفعل', 'Assigned holiday list does not cover today': 'قائمة العطلات المسندة لا تغطي اليوم',
+    'Absence cannot be judged until a holiday list covers today': 'لا يمكن الحكم على الغياب حتى تغطي قائمة عطلات اليوم', 'Saudization and weekoff rules depend on nationality': 'قواعد السعودة والعطلة الأسبوعية تعتمد على الجنسية',
+    'Pending leave approvals': 'اعتمادات إجازة معلقة', 'Workflow state Pending* or On-Hold; oldest first': 'حالة سير العمل معلق أو قيد الانتظار؛ الأقدم أولاً', 'Documents due within 30 days': 'مستندات تستحق خلال 30 يوماً',
+    'Start renewal before the expiry date': 'ابدأ التجديد قبل تاريخ الانتهاء', 'Absent today': 'غائب اليوم', 'Approved leave and weekoffs excluded': 'باستثناء الإجازات المعتمدة والعطل الأسبوعية', 'Leave status mismatches': 'عدم تطابق حالة الإجازة',
+    'Status and workflow state disagree': 'الحالة وحالة سير العمل غير متطابقتين', 'Training overdue': 'تدريب متأخر', 'Assigned and past the due date': 'مسند وتجاوز تاريخ الاستحقاق', 'Open HR requests': 'طلبات موارد بشرية مفتوحة',
+    'Across the request types you can read; oldest first': 'عبر أنواع الطلبات التي يمكنك قراءتها؛ الأقدم أولاً', 'expired': 'منتهٍ', 'due': 'الاستحقاق', 'days': 'يوماً',
+    'Leave leave and attendance': 'الإجازات والحضور', 'Employee directory': 'دليل الموظفين', 'Employment type': 'نوع التوظيف', 'Gender': 'الجنس', 'Present': 'حاضر', 'Absent': 'غائب', 'On leave': 'في إجازة'
   });
-  langObserver.observe(host, { childList: true, subtree: true });
-  function AHDDialog(o) {
-    var o2 = Object.assign({}, o);
-    if (S.lang === 'ar') o2.title = tr(o.title);
-    var d = new frappe.ui.Dialog(o2);
-    if (S.lang === 'ar') {
-      var el = d.$wrapper && d.$wrapper[0];
-      if (el) {
-        el.setAttribute('dir', 'rtl'); var pend = null;
-        new MutationObserver(function () { if (pend) return; pend = setTimeout(function () { pend = null; trTree(el); }, 0); }).observe(el, { childList: true, subtree: true });
-      }
-      var sp = d.set_primary_action; d.set_primary_action = function (l, f) { return sp.call(d, tr(l), f); };
-    }
-    return d;
-  }
+  function L(s) { return LANG === 'ar' ? arT(s) : s; }
+  var APP = {
+    key: '__dmsAdminHR',
+    period: 'custom',
+    tabs: [['overview', 'Overview'], ['employees', 'Employees'], ['attendance', 'Attendance'], ['leave', 'Leave'], ['compliance', 'Documents & Compliance'], ['requests', 'HR Requests'], ['training', 'Training'], ['analytics', 'HR Analytics']].map(function (x) { return { id: x[0], en: x[1], ar: arT(x[1]) }; }).concat([{ id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }]),
+    filters: [
+      { k: 'company', en: 'Company', ar: 'الشركة', none: ['Default company', 'الشركة الافتراضية'], options: function () { return FO.companies || []; } },
+      { k: 'department', en: 'Department', ar: 'القسم', none: ['All departments', 'كل الأقسام'], options: function () { return FO.departments || []; } },
+      { k: 'branch', en: 'Branch', ar: 'الفرع', none: ['All branches', 'كل الفروع'], options: function () { return FO.branches || []; } },
+      { k: 'job_location', en: 'Job location', ar: 'موقع العمل', none: ['All job locations', 'كل مواقع العمل'], options: function () { return FO.job_locations || []; } }
+    ],
+    sources: ['ov'],
+    dtLabels: { 'Employee': ['Employee', 'موظف'], 'Leave Application': ['Leave application', 'طلب إجازة'] },
+    title: function () { return L('Admin & HR Dashboard'); },
+    stamp: function () { return D.ov ? D.ov.meta.company + ' · ' + L(D.ov.meta.tier === 'detail' ? 'Employee-level detail' : 'Aggregate figures only') : L('Permission-checked ERP data · read-only'); },
+    periodNote: function () { return tr('Leave and attendance activity use this period; headcount and documents are as of its last day.', 'تستخدم الإجازات والحضور هذه الفترة؛ وعدد الموظفين والمستندات حتى آخر يوم فيها.'); },
+    boot: function () { F.period = 'custom'; F.from = shiftMonths(TODAY, -1); F.to = TODAY; return Promise.resolve(); },
+    load: function () { MOD_KEYS.forEach(function (k) { LST[k] = { preset: '', title: '' }; }); EMP = null; run('ov', function (chk) { return callP('admin_hr_dashboard_data', mainArgs()).then(function (d) { if (d && d.meta) { FO = d.meta.filter_options || {}; } return d; }); }); loadTab(tab); },
+    onTab: function (id) { loadTab(id); },
+    actions: function () { return actModel(actSpecs(), 'act', actClient()); },
+    banner: function () { var d = D.ov; return d && d.meta.errors && d.meta.errors.length ? alertBox('warn', esc(L('Not readable with your permissions') + ': ' + d.meta.errors.map(function (e) { return e.doctype || e; }).join(', '))) : ''; },
+    content: function (x, AM) { return ({ overview: vOverview, employees: vEmployees, attendance: vAttendance, leave: vMod, compliance: vMod, requests: vMod, training: vMod, analytics: vAnalytics, actions: vActions })[x](AM, x); },
+    drill: function (id) { return drill(id); },
+    onAct: function (a, v) { return onAct(a, v); }
+  };
+  var FO = {}, EMP = null, LST = {};
 
-  function esc(v) { return (v === null || v === undefined) ? '' : String(v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  /* ==== DMS kit v1 · generated from tools/erp/kit/dms-kit.js by build_kit.py — edit the kit, not this copy ==== */
+  /* Shared runtime for DM dashboards on the standard (toolbar, period, filters, tabs, tables, drill-downs, charts,
+     actions pending). Copied into each dashboard.js by tools/erp/kit/build_kit.py; the dashboard defines `APP` before
+     this block. Read-only helpers: frappe.client.get_list / frappe.desk.query_report.run under the viewer's permissions. */
+  var G = window;
+  var ROOT = (typeof root_element !== 'undefined' && root_element) ? root_element : document;
+  var HOST = ROOT.querySelector('[data-dms-root]');
+  if (!HOST) { return; }
+  if (G[APP.key] && typeof G[APP.key].destroy === 'function') { try { G[APP.key].destroy(); } catch (e) { /* ignore */ } }
+  var abort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  var SIG = abort ? { signal: abort.signal } : false;
+  var timers = [], destroyed = false, GEN = 0, BOOTED = false, LOADED = '';
+  G[APP.key] = { destroy: function () { destroyed = true; GEN++; if (abort) { abort.abort(); } timers.forEach(clearTimeout); timers = []; } };
+  var CFG = Object.assign({ conc: 6, pageSize: 25, modalPage: 15, weekStart: 0 }, APP.cfg || {});
+  var CUR = 'SAR';
+  try { CUR = (frappe.boot.sysdefaults && frappe.boot.sysdefaults.currency) || 'SAR'; } catch (e) { /* default */ }
+  var LANG = 'en';
+  try { var sv = G.localStorage.getItem('dms_lang'); if (sv === 'ar' || sv === 'en') { LANG = sv; } } catch (e) { /* storage unavailable */ }
+  function tr(en, ar) { return LANG === 'ar' ? ar : en; }
 
-  /* ---- Job location names (display only). The filter VALUE stays the stored code, so every total and drill-down is unchanged. ---- */
-  var LOC = { map: {}, ready: false, started: false };
-  function locName(code) { return (code !== null && code !== undefined && LOC.map[code]) || code; }
-  function locList(list) { return (list || []).map(function (x) { var y = Object.assign({}, x); y.code = x.label; y.label = locName(x.label); return y; }); }
-  function locPairs(list) { return (list || []).map(function (x) { return [x, locName(x)]; }); }
-  function locBuild(rows, titleField) {
-    var m = {}, seen = {};
-    (rows || []).forEach(function (r) { var n = titleField && r[titleField] ? String(r[titleField]).trim() : ''; if (n && n !== r.name) { m[r.name] = n; seen[n] = (seen[n] || 0) + 1; } });
-    Object.keys(m).forEach(function (k) { if (seen[m[k]] > 1) m[k] = m[k] + ' (' + k + ')'; });
-    return m;
+  /* ---------- helpers ---------- */
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function clean(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+  function plain(s, n) { return clean(String(s || '').replace(/<[^>]*>/g, ' ')).slice(0, n || 90); }
+  function $(sel) { return HOST.querySelector(sel); }
+  function later(fn, ms) { var id = setTimeout(function () { if (!destroyed) { fn(); } }, ms); timers.push(id); return id; }
+  function bdi(s) { return '<bdi>' + esc(s) + '</bdi>'; }
+  function num(n) { return (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString('en-US'); }
+  function money(v) {
+    if (v == null || isNaN(v)) { return '—'; }
+    var a = Math.abs(v), s = v < 0 ? '-' : '';
+    if (a >= 1e9) { return s + (a / 1e9).toFixed(2) + 'B'; }
+    if (a >= 1e6) { return s + (a / 1e6).toFixed(2) + 'M'; }
+    if (a >= 1e4) { return s + (a / 1e3).toFixed(1) + 'K'; }
+    return s + Math.round(a).toLocaleString('en-US');
   }
-  function locDone(m) { LOC.map = m || {}; LOC.ready = true; if (Object.keys(LOC.map).length) { try { render(); } catch (e) { console.error(e); } } }
-  function locLoad() {
-    if (LOC.started) return; LOC.started = true;
+  function amt(v) { return (v == null || isNaN(v)) ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function moneyS(v, cur) { return (cur || CUR) + ' ' + money(v); }
+  function moneyB(v, cur) { return '<bdi>' + esc(moneyS(v, cur)) + '</bdi>'; }
+  function moneyFull(v, cur) { return (v == null || isNaN(v)) ? '' : (cur || CUR) + ' ' + amt(v); }
+  function cur$(v, cur) { return '<bdi>' + esc(money(v)) + '<small>' + esc(cur || CUR) + '</small></bdi>'; }
+  function pct(n, d, dp) { return (d > 0 && n != null) ? (n / d * 100).toFixed(dp == null ? 1 : dp) + '%' : tr('N/A', 'غير متاح'); }
+  function sum(arr, f) { var t = 0; for (var i = 0; i < arr.length; i++) { t += (f ? f(arr[i]) : arr[i]) || 0; } return t; }
+  function vals(o) { return Object.keys(o).map(function (k) { return o[k]; }); }
+  function uniq(a) { var m = {}; a.forEach(function (x) { if (x) { m[x] = 1; } }); return Object.keys(m).sort(function (x, y) { return x.localeCompare(y); }); }
+  function rep(s, n) { var o = ''; for (var i = 0; i < n; i++) { o += s; } return o; }
+  function one(r) { return (r && r[0]) || {}; }
+  function groupBy(rows, f) { var m = {}; rows.forEach(function (r) { var k = f(r); (m[k] || (m[k] = [])).push(r); }); return m; }
+  var NAtxt = function () { return tr('Not assigned', 'غير مُعيَّن'); };
+
+  /* ---------- dates (ERP site time zone, calendar arithmetic) ---------- */
+  function siteTz() {
     try {
-      frappe.model.with_doctype('Employee', function () {
-        try {
-          var fld = frappe.get_meta('Employee').fields.filter(function (f) { return f.fieldname === 'custom_job_location'; })[0];
-          if (!fld || fld.fieldtype !== 'Link' || !fld.options) return locDone({});
-          var target = fld.options;
-          frappe.model.with_doctype(target, function () {
-            try {
-              var meta = frappe.get_meta(target), tf = meta.title_field || '';
-              if (!tf) {
-                var cand = ['location_name', 'job_location_name', 'location', 'title', 'description', 'name1'];
-                for (var i = 0; i < cand.length && !tf; i++) if (meta.fields.some(function (f) { return f.fieldname === cand[i]; })) tf = cand[i];
-              }
-              if (!tf) { var df = meta.fields.filter(function (f) { return /^(Data|Small Text)$/.test(f.fieldtype) && (f.reqd || f.in_list_view); })[0]; if (df) tf = df.fieldname; }
-              if (!tf) return locDone({});
-              frappe.call({ method: 'frappe.client.get_list', args: { doctype: target, fields: ['name', tf], limit_page_length: 1000 }, freeze: false, silent: true,
-                callback: function (r) { locDone(locBuild(r.message || [], tf)); },
-                error: function () { locDone({}); } });
-            } catch (e) { locDone({}); }
-          });
-        } catch (e) { locDone({}); }
+      if (G.frappe && frappe.boot) {
+        if (frappe.boot.time_zone && frappe.boot.time_zone.system) { return frappe.boot.time_zone.system; }
+        if (frappe.boot.sysdefaults && frappe.boot.sysdefaults.time_zone) { return frappe.boot.sysdefaults.time_zone; }
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+  function siteParts() {
+    var tz = siteTz(), o = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }, p;
+    if (tz) { o.timeZone = tz; }
+    try { p = new Intl.DateTimeFormat('en-CA', o).formatToParts(new Date()); } catch (e) { delete o.timeZone; p = new Intl.DateTimeFormat('en-CA', o).formatToParts(new Date()); }
+    var m = {}; p.forEach(function (x) { m[x.type] = x.value; }); if (m.hour === '24') { m.hour = '00'; } return m;
+  }
+  function parseISO(s) {
+    if (!s || typeof s !== 'string') { return null; }
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s); if (!m) { return null; }
+    var y = +m[1], mo = +m[2], d = +m[3], ms = Date.UTC(y, mo - 1, d), dt = new Date(ms);
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) { return null; }
+    return ms;
+  }
+  function isoOf(ms) { var d = new Date(ms); return d.getUTCFullYear() + '-' + ('0' + (d.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + d.getUTCDate()).slice(-2); }
+  function addDays(iso, n) { return isoOf(parseISO(iso) + n * 86400000); }
+  function diffDays(a, b) { return Math.round((parseISO(b) - parseISO(a)) / 86400000); }
+  var TODAY = '', STAMP = '';
+  function setToday() { var p = siteParts(); TODAY = p.year + '-' + p.month + '-' + p.day; STAMP = p.hour + ':' + p.minute; }
+  function monthStart(iso) { return iso.slice(0, 8) + '01'; }
+  function monthEnd(iso) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7); return isoOf(Date.UTC(y, m, 0)); }
+  function addMonths(iso, n) { var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n; return isoOf(Date.UTC(y, m, 1)); }
+  function weekStartOf(iso) { var dow = new Date(parseISO(iso)).getUTCDay(); return addDays(iso, -((dow - CFG.weekStart + 7) % 7)); }
+  function quarterStart(iso) { var m = +iso.slice(5, 7); return iso.slice(0, 5) + ('0' + (Math.floor((m - 1) / 3) * 3 + 1)).slice(-2) + '-01'; }
+  function shiftMonths(iso, n) {
+    var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + n, d = +iso.slice(8, 10), last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    return isoOf(Date.UTC(y, m, Math.min(d, last)));
+  }
+  function periodRange(key, cf, ct) {
+    var t = TODAY, y = t.slice(0, 4), ws = weekStartOf(t), qs = quarterStart(t), lm = addMonths(monthStart(t), -1);
+    switch (key) {
+      case 'today': return [t, t];
+      case 'yesterday': return [addDays(t, -1), addDays(t, -1)];
+      case 'week': return [ws, addDays(ws, 6)];
+      case 'lastWeek': return [addDays(ws, -7), addDays(ws, -1)];
+      case 'month': return [monthStart(t), monthEnd(t)];
+      case 'lastMonth': return [lm, monthEnd(lm)];
+      case 'quarter': return [qs, monthEnd(addMonths(qs, 2))];
+      case 'year': return [y + '-01-01', y + '-12-31'];
+      case 'prevYear': return [(y - 1) + '-01-01', (y - 1) + '-12-31'];
+      case 'custom': return [cf, ct];
+      default: return [y + '-01-01', t];   // ytd
+    }
+  }
+  /* Comparison window: the same span one preset unit earlier; custom ranges compare with the equally long range before. */
+  function prevRange(key, from, to) {
+    switch (key) {
+      case 'today': case 'yesterday': return [addDays(from, -1), addDays(to, -1)];
+      case 'week': case 'lastWeek': return [addDays(from, -7), addDays(to, -7)];
+      case 'month': case 'lastMonth': return [shiftMonths(from, -1), shiftMonths(to, -1)];
+      case 'quarter': return [shiftMonths(from, -3), shiftMonths(to, -3)];
+      case 'ytd': case 'year': case 'prevYear': return [shiftMonths(from, -12), shiftMonths(to, -12)];
+      default: var n = diffDays(from, to) + 1; return [addDays(from, -n), addDays(from, -1)];
+    }
+  }
+  /* In-progress periods stop at today, so this month to date compares with the same days of last month. */
+  function clip(r) { return [r[0], r[1] > TODAY && r[0] <= TODAY ? TODAY : r[1]]; }
+  function cmpRanges() { var c = clip(PERIOD); return { cur: c, prev: prevRange(F.period, c[0], c[1]) }; }
+  function monthList(from, to) { var out = [], cur = monthStart(from); for (var i = 0; i < 72 && cur <= to; i++) { out.push(cur.slice(0, 7)); cur = addMonths(cur, 1); } return out; }
+  function locale() { return LANG === 'ar' ? 'ar-SA-u-nu-latn-ca-gregory' : 'en-GB'; }
+  function fmtDate(iso, yr) {
+    try { var o = { day: 'numeric', month: 'short', timeZone: 'UTC' }; if (yr) { o.year = 'numeric'; } return new Intl.DateTimeFormat(locale(), o).format(new Date(parseISO(String(iso).slice(0, 10)))); } catch (e) { return iso; }
+  }
+  function rangeLabel(r) {
+    if (!r || !r[0] || !r[1]) { return ''; }
+    return r[0] === r[1] ? fmtDate(r[0], true) : fmtDate(r[0], r[0].slice(0, 4) !== r[1].slice(0, 4)) + ' – ' + fmtDate(r[1], true);
+  }
+  var PLR = null;
+  function daysTxt(n) {
+    if (LANG !== 'ar') { return num(n) + (n === 1 ? ' day' : ' days'); }
+    var c = 'other'; try { c = (PLR || (PLR = new Intl.PluralRules('ar'))).select(n); } catch (e) { /* generic form */ }
+    return c === 'one' ? 'يوم واحد' : c === 'two' ? 'يومان' : c === 'few' ? n + ' أيام' : c === 'many' ? n + ' يومًا' : n + ' يوم';
+  }
+  function ageOf(iso) { var d = iso ? diffDays(String(iso).slice(0, 10), TODAY) : 0; return isNaN(d) ? 0 : Math.max(0, d); }
+  function lateTxt(iso) {
+    var d = diffDays(String(iso).slice(0, 10), TODAY); if (isNaN(d)) { return ''; }
+    return d > 0 ? tr(daysTxt(d) + ' overdue', 'متأخر ' + daysTxt(d)) : d === 0 ? tr('Due today', 'مستحق اليوم') : tr('Due in ' + daysTxt(-d), 'مستحق خلال ' + daysTxt(-d));
+  }
+  function agoTxt(iso, en, ar) { var a = ageOf(iso); return a ? tr((en || 'Waiting') + ' ' + daysTxt(a), (ar || 'منذ') + ' ' + daysTxt(a)) : tr('Today', 'اليوم'); }
+
+  /* ---------- ERP read-only API layer (bounded concurrency, one retry, cancellation) ---------- */
+  var REQ_TIMEOUT = 90000;
+  function callP(method, args) {
+    return new Promise(function (resolve, reject) {
+      var done = false, ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var timer = setTimeout(function () { if (done) { return; } done = true; if (ctl) { try { ctl.abort(); } catch (x) { /* ignore */ } } var te = new Error('Request timed out'); te.timeout = true; reject(te); }, REQ_TIMEOUT);
+      var body = new URLSearchParams();
+      Object.keys(args || {}).forEach(function (k) { var v = args[k]; if (v === undefined || v === null) { return; } body.append(k, (typeof v === 'object') ? JSON.stringify(v) : String(v)); });
+      fetch('/api/method/' + method, { method: 'POST', credentials: 'same-origin', signal: ctl ? ctl.signal : undefined,
+        headers: { 'X-Frappe-CSRF-Token': (G.frappe && frappe.csrf_token) || '', 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' }, body: body.toString() })
+        .then(function (r) { return r.text().then(function (txt) { return { r: r, txt: txt }; }); })
+        .then(function (o) {
+          if (done) { return; } done = true; clearTimeout(timer);
+          var j = null; try { j = JSON.parse(o.txt); } catch (x) { /* ignore */ }
+          if (o.r.ok && j && !j.exc) { resolve(j.message === undefined ? null : j.message); return; }
+          var ex = String((j && (j.exception || j.exc_type)) || '');
+          var perm = o.r.status === 401 || o.r.status === 403 || /permission/i.test(ex);
+          var e = new Error((perm ? 'No access to ' + ((args && (args.doctype || args.report_name)) || method) : (ex.split(':').slice(-1)[0].trim() || ('HTTP ' + o.r.status))));
+          e.status = perm ? 403 : o.r.status; reject(e);
+        })
+        .catch(function (err) { if (done) { return; } done = true; clearTimeout(timer); reject(err || new Error('request failed')); });
+    });
+  }
+  var active = 0, queue = [];
+  function pump() {
+    while (active < CFG.conc && queue.length) {
+      var j = queue.shift(); active++;
+      j.fn().then(j.res, j.rej).then(function () { active--; pump(); });
+    }
+  }
+  function limited(fn) { return new Promise(function (res, rej) { queue.push({ fn: fn, res: res, rej: rej }); pump(); }); }
+  function guarded(chk, method, args) {
+    return limited(function () {
+      if (destroyed || (chk && !chk())) { return Promise.resolve(null); }
+      return callP(method, args).catch(function (e) { if (e && (e.status === 403 || e.timeout || e.status === 417)) { throw e; } return new Promise(function (r) { setTimeout(r, 400); }).then(function () { return callP(method, args); }); });
+    });
+  }
+  function errKind(e) {
+    var txt = ''; try { txt = (e && (e.responseText || e.statusText || e.message)) || ''; } catch (x) { /* ignore */ }
+    return (/PermissionError|not permitted|No access|403/i.test(String(txt)) || (e && e.status === 403)) ? 'perm' : 'tech';
+  }
+  function getList(args, chk) { return guarded(chk, 'frappe.client.get_list', args); }
+  function getCount(dt, filters, chk) { return getList({ doctype: dt, fields: ['count(name) as n'], filters: filters || [], limit_page_length: 1 }, chk).then(function (r) { return +one(r).n || 0; }); }
+  /* All rows of a bounded list (paged); rejects with e.tooLarge when the source exceeds `cap`. */
+  function fetchAll(args, chk, cap) {
+    cap = cap || 20000;
+    return getCount(args.doctype, args.filters, chk).then(function (n) {
+      if (n > cap) { var e = new Error('too large'); e.tooLarge = n; throw e; }
+      var jobs = []; for (var i = 0; i < Math.ceil(n / 500); i++) { jobs.push(getList(Object.assign({}, args, { order_by: args.order_by || 'name asc', limit_start: i * 500, limit_page_length: 500 }), chk)); }
+      return Promise.all(jobs).then(function (res) { var out = []; res.forEach(function (r) { if (r) { out = out.concat(r); } }); return out; });
+    });
+  }
+  function docUrl(dt, name) {
+    try { if (G.frappe && frappe.utils && frappe.utils.get_form_link) { return frappe.utils.get_form_link(dt, name); } } catch (e) { /* fall through */ }
+    return '/app/' + dt.toLowerCase().replace(/ /g, '-') + '/' + encodeURIComponent(name);
+  }
+  function docLink(dt, name, label) { return '<a class="dms-link" href="' + esc(docUrl(dt, name)) + '" target="_blank" rel="noopener noreferrer"><bdi>' + esc(label || name) + '</bdi> ↗</a>'; }
+
+  /* ---------- data store: each source loads and renders independently; stale generations are dropped ---------- */
+  var D = {};
+  var softT = null;
+  function soon() { if (softT) { return; } softT = later(function () { softT = null; renderSoft(); }, 40); }
+  function run(key, fn) {
+    var g = GEN, chk = function () { return g === GEN && !destroyed; }, tok = {};
+    D[key] = null; D[key + 'Err'] = null; D[key + 'Tok'] = tok;
+    var mine = function () { return chk() && D[key + 'Tok'] === tok; };
+    fn(mine).then(function (v) { if (!mine()) { return; } D[key] = v; if (APP.afterLoad) { APP.afterLoad(key); } soon(); },
+      function (e) { if (!mine()) { return; } D[key + 'Err'] = e && e.tooLarge ? 'large:' + e.tooLarge : errKind(e); if (G.console && e && !e.status && !e.tooLarge) { console.error(APP.key, key, e); } soon(); });
+  }
+  function busy() { return !BOOTED || (APP.sources || []).some(function (k) { return D[k] == null && D[k + 'Err'] == null; }); }
+  function errText(kind) { return /^large:/.test(String(kind)) ? tr('too many records (' + num(+String(kind).slice(6)) + ') — narrow the filters or period', 'عدد كبير من السجلات (' + num(+String(kind).slice(6)) + ') — ضيّق المرشحات أو الفترة') : kind === 'perm' ? tr('permission denied for your user', 'لا تملك صلاحية القراءة') : tr('technical error while reading', 'خطأ تقني أثناء القراءة'); }
+
+  /* ---------- UI primitives ---------- */
+  var ICO = {
+    refresh: '<path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/>', filter: '<path d="M4 5h16l-6.2 7.6V19l-3.6 1.6v-8z"/>',
+    cal: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/>', down: '<path d="m6 9 6 6 6-6"/>',
+    prev: '<path d="m15 6-6 6 6 6"/>', next: '<path d="m9 6 6 6-6 6"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
+    up: '<path d="M12 19V6M6.5 11.5 12 6l5.5 5.5"/>', dn: '<path d="M12 5v13M6.5 12.5 12 18l5.5-5.5"/>', dl: '<path d="M12 4v11M7 10.5 12 15.5l5-5M5 20h14"/>'
+  };
+  function ico(n, cls) { return '<svg class="dms-ico' + (cls ? ' ' + cls : '') + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + ICO[n] + '</svg>'; }
+  function kpi(o) {
+    var inner = '<span class="dms-kpi-h"><span class="dms-kpi-l">' + (o.dot ? '<i class="dms-dot" style="--dms-c:' + o.dot + '"></i>' : '') + esc(o.label) + '</span>' + (o.top || '') + '</span>' +
+      '<span class="dms-kpi-n">' + o.val + '</span>' + (o.sub ? '<span class="dms-kpi-s">' + o.sub + '</span>' : '') + (o.foot != null ? '<span class="dms-kpi-f">' + o.foot + '</span>' : '');
+    var t = o.tip ? ' title="' + esc(o.tip) + '"' : '';
+    return o.act ? '<button type="button" class="dms-kpi" data-act="kpi" data-v="' + esc(o.act) + '"' + t + '>' + inner + '</button>' : '<div class="dms-kpi"' + t + '>' + inner + '</div>';
+  }
+  function kpis(list, ov) { return '<div class="dms-grid dms-kpis' + (ov ? ' dms-ov-kpis' : '') + '">' + list.join('') + '</div>'; }
+  function tagc(txt) { return '<span class="dms-tag">' + txt + '</span>'; }
+  function stat(k, txt) { return '<span class="dms-stat dms-stat-' + k + '">' + esc(txt) + '</span>'; }
+  function ctx(html) { return '<span class="dms-kpi-ctx">' + html + '</span>'; }
+  function badge(txt, color) { return '<span class="dms-badge" style="--dms-c:' + color + '">' + esc(txt) + '</span>'; }
+  function wait() { return '<span class="dms-sm">' + esc(tr('Calculating…', 'جارٍ الحساب…')) + '</span>'; }
+  function asOf() { return tagc(esc(tr('As of today', 'حتى اليوم'))); }
+  /* Value of a source-backed KPI: '…' while loading, '—' when the source failed (never a false zero). */
+  function kv(key, f) { return D[key + 'Err'] ? '—' : D[key] == null ? '…' : f(D[key]); }
+  function ks(key, f) { return D[key + 'Err'] ? esc(tr('Unavailable', 'غير متاح')) : D[key] == null ? wait() : f(D[key]); }
+  function spark(vs) {
+    var n = vs.length, real = vs.filter(function (v) { return v != null; }), pts = [];
+    if (n < 3 || real.length < 3 || !real.some(function (v) { return v > 0; })) { return ''; }
+    var max = Math.max.apply(null, real), min = Math.min(0, Math.min.apply(null, real)), rng = (max - min) || 1;
+    vs.forEach(function (v, i) { if (v != null) { pts.push([(i / (n - 1) * 100).toFixed(2), (26 - (v - min) / rng * 23).toFixed(2)]); } });
+    var line = pts.map(function (p) { return p.join(','); }).join(' L');
+    return '<svg class="dms-spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path class="dms-spark-a" d="M' + pts[0][0] + ',28 L' + line + ' L' + pts[pts.length - 1][0] + ',28 Z"/><path class="dms-spark-l" d="M' + line + '"/></svg>';
+  }
+  /* Change vs the comparison window. fmt formats values; small count bases show "was N" instead of a percentage. */
+  function deltaChip(cur, prev, R, fmt, isCount, lowerIsBetter) {
+    if (cur == null || prev == null || !R) { return ''; }
+    fmt = fmt || moneyS;
+    var tip = tr('This period', 'هذه الفترة') + ' (' + rangeLabel(R[0]) + '): ' + fmt(cur) + '\n' + tr('Previous', 'السابقة') + ' (' + rangeLabel(R[1]) + '): ' + fmt(prev);
+    var sr = '<span class="dms-sr"> ' + esc(tr('vs previous period', 'مقارنة بالفترة السابقة')) + '</span>';
+    if (prev === 0 || (isCount && prev < 5)) { return '<span class="dms-delta dms-flat" data-tip="' + esc(tip) + '">' + esc(tr('was', 'كان')) + ' <bdi>' + esc(fmt(prev)) + '</bdi>' + sr + '</span>'; }
+    var p = (cur - prev) / prev * 100, a = Math.abs(p), k = a < 0.05 ? 'flat' : p > 0 ? 'up' : 'down', tone = k === 'flat' ? 'flat' : ((k === 'up') !== !!lowerIsBetter ? 'up' : 'down');
+    var txt = a > 999 ? '10×+' : (a < 10 ? a.toFixed(1) : Math.round(a)) + '%';
+    return '<span class="dms-delta dms-' + tone + '" data-tip="' + esc(tip) + '">' + (k === 'flat' ? '' : ico(k === 'up' ? 'up' : 'dn')) + '<bdi>' + (k === 'down' ? '−' : '') + txt + '</bdi>' + sr + '</span>';
+  }
+  function panel(title, body, extra, meta) {
+    return '<section class="dms-panelbox ' + (extra || '') + '"><div class="dms-ph"><h3 class="dms-h3">' + esc(title) + '</h3>' + (meta ? '<span class="dms-ph-meta">' + meta + '</span>' : '') + '</div>' + body + '</section>';
+  }
+  function note(txt) { return '<p class="dms-note">' + txt + '</p>'; }
+  function alertBox(kind, html) { return '<div class="dms-alert dms-alert-' + kind + '" role="' + (kind === 'err' ? 'alert' : 'status') + '">' + html + '</div>'; }
+  function empty(txt) { return '<div class="dms-empty">' + esc(txt || tr('No data for the current filters.', 'لا توجد بيانات للمرشحات الحالية.')) + '</div>'; }
+  function srcErr(kind, what) { return alertBox('err', '<b>' + esc(tr('Source unavailable', 'المصدر غير متاح')) + ':</b> ' + esc(what) + ' — ' + esc(errText(kind))); }
+  function skel(n, cls) { return rep('<div class="dms-skel ' + (cls || '') + '"></div>', n); }
+  /* Body for a panel backed by source `key`: skeleton while loading, named error on failure, else f(data). */
+  function src(key, what, f) { return D[key + 'Err'] ? srcErr(D[key + 'Err'], what) : D[key] == null ? skel(1, 'dms-skel-panel') : f(D[key]); }
+
+  /* ---------- charts (HTML/CSS; hover details via the shared tooltip, data-tip) ---------- */
+  function niceMax(v) { if (!(v > 0)) { return 1; } var p = Math.pow(10, Math.floor(Math.log(v) / Math.LN10)), f = v / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
+  function axisFmt(v) { var a = Math.abs(v); return a >= 1e9 ? +(v / 1e9).toFixed(1) + 'B' : a >= 1e6 ? +(v / 1e6).toFixed(1) + 'M' : a >= 1e3 ? +(v / 1e3).toFixed(1) + 'K' : String(a < 10 ? +v.toFixed(2) : Math.round(v)); }
+  function bucketLabel(k, g, short) {
+    if (g === 'cat') { return String(k); }
+    if (g === 'week' && !short) { return tr('Week of ', 'أسبوع ') + fmtDate(k, true); }
+    if (g !== 'month') { return fmtDate(k, !short); }
+    try { return new Intl.DateTimeFormat(locale(), { month: 'short', year: '2-digit', timeZone: 'UTC' }).format(new Date(parseISO(k + '-01'))); } catch (e) { return k; }
+  }
+  /* Count charts get whole-number ticks (top is a multiple of 4), so small counts never show 0, 1, 1, 2, 2. */
+  function countTop(max, fmt) { var t = niceMax(max); return fmt === num ? Math.max(4, Math.ceil(t / 4) * 4) : t; }
+  function granName(g) { return g === 'day' ? tr('by day', 'يوميًا') : g === 'week' ? tr('by week', 'أسبوعيًا') : tr('by month', 'شهريًا'); }
+  /* Time buckets for a range: daily up to 45 days, weekly up to 120 days, monthly beyond; stops at today. */
+  function buckets(range) {
+    var from = range[0], to = clip(range)[1], span = diffDays(from, to) + 1, g = span <= 45 ? 'day' : span <= 120 ? 'week' : 'month', keys = [], cur, i;
+    function keyOf(iso) { iso = String(iso).slice(0, 10); return g === 'day' ? iso : g === 'week' ? weekStartOf(iso) : iso.slice(0, 7); }
+    if (to < from) { return { keys: [], gran: g, keyOf: keyOf }; }
+    if (g === 'month') { keys = monthList(from, to); } else { cur = keyOf(from); for (i = 0; i < 200 && cur <= to; i++) { keys.push(cur); cur = addDays(cur, g === 'day' ? 1 : 7); } }
+    return { keys: keys, gran: g, keyOf: keyOf };
+  }
+  /* Grouped rows (one per date) folded into buckets: rows[dateField], rows[valField]. */
+  function series(range, rows, dateF, valF) {
+    var B = buckets(range), d = {}; B.keys.forEach(function (k) { d[k] = { v: 0, n: 0 }; });
+    (rows || []).forEach(function (r) { var k = B.keyOf(r[dateF]); if (d[k]) { d[k].v += valF ? (+r[valF] || 0) : 1; d[k].n += +r.n || (valF ? 0 : 1); } });
+    B.d = d; return B;
+  }
+  function legend(series) { return '<div class="dms-legend">' + series.map(function (s) { return '<span><i style="--dms-c:' + s.color + '"></i>' + esc(s.label) + '</span>'; }).join('') + '</div>'; }
+  /* Column chart. ser = [{label, color, val: function (key) {}}]; fmt formats values (default money). */
+  function barChart(keys, gran, ser, fmt, extraTip, emptyTxt) {
+    if (!Array.isArray(ser)) { ser = [ser]; }
+    fmt = fmt || moneyFull; var max = 0;
+    keys.forEach(function (k) { ser.forEach(function (s) { max = Math.max(max, s.val(k) || 0); }); });
+    if (!keys.length || !max) { return empty(emptyTxt || tr('Nothing in this range.', 'لا شيء في هذا النطاق.')); }
+    var top = countTop(max, fmt), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, gran) + ser.map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k) || 0); }).join('') + (extraTip ? extraTip(k) : '');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '">' + ser.map(function (s) { var v = s.val(k) || 0; return '<i class="dms-bar' + (v ? '' : ' dms-bar-0') + '" style="height:' + (v / top * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i>'; }).join('') + '</div>';
+    }).join('');
+    var aria = ser.map(function (s) { return s.label + ': ' + keys.map(function (k) { return bucketLabel(k, gran, true) + ' ' + fmt(s.val(k) || 0); }).join(', '); }).join('; ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + (ser.length > 1 ? legend(ser) : '');
+  }
+  /* Line chart for balances (may go negative). ser = [{label, color, val(key), dash?}]; the first series is the main line. */
+  function lineChart(keys, gran, ser, fmt) {
+    fmt = fmt || moneyFull; var all = [];
+    keys.forEach(function (k) { ser.forEach(function (s) { var v = s.val(k); if (v != null) { all.push(v); } }); });
+    if (!keys.length || !all.length) { return empty(); }
+    var mx = Math.max.apply(null, all), mn = Math.min.apply(null, all), hi = mx > 0 ? niceMax(mx) : 0, lo = mn < 0 ? -niceMax(-mn) : 0;
+    if (hi === lo) { hi = lo + 1; }
+    var y = function (v) { return (100 - (v - lo) / (hi - lo) * 100).toFixed(2); }, x = function (i) { return (keys.length < 2 ? 50 : i / (keys.length - 1) * 100).toFixed(2); };
+    var ticks = [0, 0.25, 0.5, 0.75, 1].map(function (t) { return lo + (hi - lo) * t; });
+    var paths = ser.map(function (s) { var pts = keys.map(function (k, i) { var v = s.val(k); return v == null ? null : x(i) + ',' + y(v); }).filter(Boolean); return '<polyline class="dms-line' + (s.dash ? ' dms-line-ref' : '') + '" style="--dms-c:' + s.color + '" points="' + pts.join(' ') + '"/>'; }).join('');
+    var zero = lo < 0 ? '<i class="dms-gl dms-gl-0" style="bottom:' + ((0 - lo) / (hi - lo) * 100).toFixed(2) + '%"></i>' : '';
+    var hits = keys.map(function (k) { return '<div class="dms-col dms-col-hit" data-tip="' + esc(bucketLabel(k, gran) + ser.map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k)); }).join('')) + '"></div>'; }).join('');
+    var aria = ser[0].label + ': ' + keys.map(function (k) { return bucketLabel(k, gran, true) + ' ' + fmt(ser[0].val(k)); }).join(', ');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(aria) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (v, i) { return '<span style="bottom:' + i * 25 + '%">' + axisFmt(v) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + [0, 25, 50, 75, 100].map(function (b) { return '<i class="dms-gl" style="bottom:' + b + '%"></i>'; }).join('') + zero + '<svg class="dms-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">' + paths + '</svg><div class="dms-cols">' + hits + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + (ser.length > 1 ? legend(ser) : '');
+  }
+  /* Stacked columns (one bar per key, segments per series). */
+  function stackChart(keys, gran, ser, fmt) {
+    fmt = fmt || num; var tot = {}, max = 0;
+    keys.forEach(function (k) { tot[k] = sum(ser, function (s) { return s.val(k) || 0; }); max = Math.max(max, tot[k]); });
+    if (!keys.length || !max) { return empty(); }
+    var top = countTop(max, fmt), ticks = [0, 0.25, 0.5, 0.75, 1];
+    var cols = keys.map(function (k) {
+      var tip = bucketLabel(k, gran) + ser.filter(function (s) { return s.val(k); }).map(function (s) { return '\n' + s.label + ': ' + fmt(s.val(k)); }).join('');
+      return '<div class="dms-col" data-tip="' + esc(tip) + '"><span class="dms-stackbar" style="height:' + (tot[k] / top * 100).toFixed(2) + '%">' + ser.map(function (s) { var v = s.val(k) || 0; return v ? '<i style="flex:' + v + ' 0 0;background:' + s.color + '"></i>' : ''; }).join('') + '</span></div>';
+    }).join('');
+    return '<div class="dms-chart" role="img" aria-label="' + esc(ser.map(function (s) { return s.label; }).join(', ')) + '"><div class="dms-yaxis" aria-hidden="true">' + ticks.map(function (t) { return '<span style="bottom:' + t * 100 + '%">' + axisFmt(top * t) + '</span>'; }).join('') + '</div>' +
+      '<div class="dms-plot">' + ticks.map(function (t) { return '<i class="dms-gl" style="bottom:' + t * 100 + '%"></i>'; }).join('') + '<div class="dms-cols">' + cols + '</div></div><span></span>' +
+      '<div class="dms-xaxis" aria-hidden="true">' + keys.map(function (k) { return '<span>' + esc(bucketLabel(k, gran, true)) + '</span>'; }).join('') + '</div></div>' + legend(ser);
+  }
+  function fitChartLabels() {
+    HOST.querySelectorAll('.dms-xaxis').forEach(function (axis) {
+      var labels = axis.querySelectorAll('span'), widest = 0;
+      labels.forEach(function (label) { var range = document.createRange(); range.selectNodeContents(label); widest = Math.max(widest, range.getBoundingClientRect().width); });
+      var slots = Math.max(1, Math.min(8, Math.floor(axis.clientWidth / (widest + 16)))), step = Math.max(1, Math.ceil(labels.length / slots));
+      labels.forEach(function (label, i) { label.style.visibility = i % step ? 'hidden' : 'visible'; });
+    });
+  }
+  /* Share rows: label · bar · value · %. items = [{label, value, color, act?, tip?}]; ordered=true keeps the given order. */
+  function shareList(items, head, fmt, ordered) {
+    fmt = fmt || num; var tot = sum(items, function (s) { return s.value; }), rows = items.filter(function (s) { return s.value; });
+    if (!ordered) { rows = rows.slice().sort(function (a, b) { return b.value - a.value; }); }
+    if (!tot) { return empty(); }
+    return (head ? '<div class="dms-share-t">' + head + '</div>' : '') + rows.map(function (s) {
+      var tip = s.tip || (s.label + ': ' + fmt(s.value) + ' (' + pct(s.value, tot) + ')');
+      var inner = '<span class="dms-share-l"><i class="dms-dot" style="--dms-c:' + s.color + '"></i>' + bdi(s.label) + '</span><span class="dms-share-b"><i style="width:' + (s.value / tot * 100).toFixed(2) + '%;--dms-c:' + s.color + '"></i></span>' +
+        '<span class="dms-num">' + esc(fmt(s.value)) + '</span><span class="dms-share-p dms-num">' + pct(s.value, tot, 0) + '</span>';
+      return s.act ? '<button type="button" class="dms-share dms-share-btn" data-act="kpi" data-v="' + esc(s.act) + '" data-tip="' + esc(tip) + '">' + inner + '</button>' : '<div class="dms-share" data-tip="' + esc(tip) + '">' + inner + '</div>';
+    }).join('');
+  }
+  /* Ranked horizontal bars: items = [{label, value, color?, act?}]. */
+  function hbars(items, fmt, color) {
+    if (!items.length) { return empty(); }
+    var max = Math.max.apply(null, items.map(function (i) { return Math.abs(i.value); }).concat([1])); fmt = fmt || num;
+    return items.map(function (i) {
+      var inner = '<span class="dms-split-l">' + bdi(i.label) + '</span><span class="dms-split"><i style="width:' + (Math.abs(i.value) / max * 100).toFixed(2) + '%;background:' + (i.color || color || 'var(--dms-royal)') + '"></i></span><span class="dms-num dms-split-v">' + esc(fmt(i.value)) + '</span>';
+      var tip = ' data-tip="' + esc(i.label + ': ' + fmt(i.value)) + '"';
+      return i.act ? '<button type="button" class="dms-stack-row dms-split-row" data-act="kpi" data-v="' + esc(i.act) + '"' + tip + '>' + inner + '</button>' : '<div class="dms-stack-row dms-split-row"' + tip + '>' + inner + '</div>';
+    }).join('');
+  }
+  /* Two-part bars ranked by total: items = [{label, total, part, act?}]; parts = [{label, color}] for part and remainder. */
+  function splitBars(items, parts, fmt) {
+    if (!items.length) { return empty(); }
+    fmt = fmt || money; var max = Math.max.apply(null, items.map(function (i) { return i.total; }).concat([1]));
+    return items.map(function (i) {
+      var tip = i.label + '\n' + parts[0].label + ': ' + fmt(i.part) + '\n' + parts[1].label + ': ' + fmt(i.total - i.part);
+      var bar = '<span class="dms-split"><i style="width:' + (i.part / max * 100).toFixed(2) + '%;background:' + parts[0].color + '"></i><i style="width:' + (Math.max(0, i.total - i.part) / max * 100).toFixed(2) + '%;background:' + parts[1].color + '"></i></span>';
+      var inner = '<span class="dms-split-l">' + bdi(i.label) + '</span>' + bar + '<span class="dms-num dms-split-v">' + esc(fmt(i.total)) + '</span>';
+      return i.act ? '<button type="button" class="dms-stack-row dms-split-row" data-act="kpi" data-v="' + esc(i.act) + '" data-tip="' + esc(tip) + '">' + inner + '</button>' : '<div class="dms-stack-row dms-split-row" data-tip="' + esc(tip) + '">' + inner + '</div>';
+    }).join('') + legend(parts);
+  }
+  function mixBar(segs) {
+    var tot = sum(segs, function (s) { return s.value; }); if (!tot) { return ''; }
+    return '<span class="dms-mix"><span class="dms-mix-b">' + segs.map(function (s) { return s.value ? '<i style="width:' + (s.value / tot * 100).toFixed(2) + '%;background:' + s.color + '" data-tip="' + esc(s.label + ': ' + (s.fmt || num)(s.value)) + '"></i>' : ''; }).join('') + '</span></span>';
+  }
+  var PAL = ['var(--dms-royal)', '#6b8be0', '#1f8a5b', '#d97a1e', '#8a97a8', '#a3b4ef', '#c2412d', '#d6a419', '#4b5a6e', '#b6bfca'];
+
+  /* ---------- tables: client-side (search / sort / pagination / CSV) and server-side (paginated, sortable, CSV) ---------- */
+  var TBL = {}, TS = {}, SS = {}, focusId = null;
+  function regTable(spec) { TBL[spec.id] = spec; return '<div class="dms-tbl" data-tbl="' + esc(spec.id) + '"></div>'; }
+  function fillTables(scope) { var els = (scope || HOST).querySelectorAll('[data-tbl]'); for (var i = 0; i < els.length; i++) { fillTable(els[i].getAttribute('data-tbl'), els[i]); } }
+  function clientRows(sp, st) {
+    var rows = sp.rows, q = st.q.trim().toLowerCase();
+    if (q) { rows = rows.filter(function (r) { return sp.text(r).toLowerCase().indexOf(q) >= 0; }); }
+    if (st.sk) { var col = sp.cols.filter(function (c) { return c.k === st.sk; })[0]; if (col && col.s) { rows = rows.slice().sort(function (a, b) { var x = col.s(a), y = col.s(b); return (x < y ? -1 : x > y ? 1 : 0) * st.dir; }); } }
+    return rows;
+  }
+  function thead(sp, sk, dir, act, id) {
+    return '<thead><tr>' + sp.cols.map(function (c) {
+      var key = act === 'ssort' ? c.sf : c.k, can = act === 'ssort' ? !!c.sf : !!c.s, on = can && sk === key;
+      return '<th class="' + (can ? 'dms-th-s' : '') + (c.num ? ' dms-th-n' : '') + '"' + (can ? ' data-act="' + act + '" data-id="' + esc(id) + '" data-v="' + esc(key) + '" tabindex="0" aria-sort="' + (on ? (dir > 0 ? 'ascending' : 'descending') : 'none') + '"' : '') + '>' + esc(c.h) + (on ? (dir > 0 ? ' ▲' : ' ▼') : '') + '</th>';
+    }).join('') + '</tr></thead>';
+  }
+  function tcells(sp, r) { return '<tr>' + sp.cols.map(function (c) { return '<td' + (c.num ? ' class="dms-td-n"' : '') + '>' + c.r(r) + '</td>'; }).join('') + '</tr>'; }
+  function fillTable(id, el) {
+    var sp = TBL[id]; el = el || HOST.querySelector('[data-tbl="' + id + '"]'); if (!sp || !el) { return; }
+    if (sp.server) { return fillServer(id, el); }
+    var st = TS[id] || (TS[id] = { q: '', page: 1, sk: sp.sk || '', dir: sp.dir || 1 }), rows = clientRows(sp, st);
+    var ps = sp.pageSize || CFG.pageSize, pages = Math.max(1, Math.ceil(rows.length / ps)); if (st.page > pages) { st.page = pages; }
+    var slice = rows.slice((st.page - 1) * ps, st.page * ps);
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(tr('Search this table…', 'ابحث في الجدول…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search this table', 'ابحث في الجدول')) + '"><span class="dms-tb-r"><span class="dms-sm">' + num(rows.length) + ' ' + esc(rows.length === 1 ? tr('row', 'سجل') : tr('rows', 'سجل')) + (st.q ? ' / ' + num(sp.rows.length) : '') + '</span>' +
+      (rows.length ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csv" data-id="' + esc(id) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    if (sp.notice) { h += sp.notice; }
+    if (!rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
+    h += '<div class="dms-tablewrap"><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'tsort', id) + '<tbody>' + slice.map(function (r) { return tcells(sp, r); }).join('') + '</tbody>' + (sp.foot ? '<tfoot>' + sp.foot(rows) + '</tfoot>' : '') + '</table></div>';
+    h += pager(id, 'tpage', st.page, pages, rows.length, ps);
+    el.innerHTML = h; restoreFocus(el, id);
+  }
+  function pager(id, act, pg, pages, total, ps) {
+    if (total <= ps) { return ''; }
+    return '<div class="dms-pager"><span>' + esc(tr('Showing', 'عرض')) + ' ' + num((pg - 1) * ps + 1) + '–' + num(Math.min(pg * ps, total)) + ' / ' + num(total) + '</span><span><button type="button" class="dms-btn" data-act="' + act + '" data-id="' + esc(id) + '" data-v="-1"' + (pg <= 1 ? ' disabled' : '') + '>‹ ' + esc(tr('Previous', 'السابق')) + '</button> ' +
+      esc(tr('Page', 'صفحة')) + ' ' + pg + ' ' + esc(tr('of', 'من')) + ' ' + pages + ' <button type="button" class="dms-btn" data-act="' + act + '" data-id="' + esc(id) + '" data-v="1"' + (pg >= pages ? ' disabled' : '') + '>' + esc(tr('Next', 'التالي')) + ' ›</button></span></div>';
+  }
+  function restoreFocus(el, id) { if (focusId === id) { var i = el.querySelector('[data-tq]'); if (i) { i.focus(); try { i.setSelectionRange(i.value.length, i.value.length); } catch (e) { /* ignore */ } } } }
+  function srvArgs(sp, st) {
+    var q = st.q.trim(), base = { doctype: sp.dt, filters: sp.filters };
+    if (sp.parent) { base.parent = sp.parent; }
+    if (q && sp.search) { base.or_filters = sp.search.map(function (f) { return [sp.dt, f, 'like', '%' + q + '%']; }); }
+    return base;
+  }
+  function srvOrder(sp, st) { return st.sk ? st.sk + (st.dir > 0 ? ' asc' : ' desc') : sp.order; }
+  function fillServer(id, el) {
+    var sp = TBL[id], st = SS[id] || (SS[id] = { q: '', page: 1, total: null, rows: null, loading: false, err: null, req: 0, sk: '', dir: 1 });
+    if (!st.dirty && st.rows && st.key === JSON.stringify(sp.filters)) { return paintServer(id, el); }
+    st.dirty = false; st.key = JSON.stringify(sp.filters);
+    var req = ++st.req; st.loading = true; st.err = null;
+    var ps = sp.pageSize || CFG.modalPage, base = srvArgs(sp, st);
+    paintServer(id, el);
+    var chk = function () { return !destroyed && SS[id] && SS[id].req === req; };
+    if (sp.loader) { sp.loader(st.page - 1, ps, st.q.trim(), srvOrder(sp, st)).then(function (res) { if (!chk()) { return; } st.total = res.total; st.rows = res.rows || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); }, function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } }); return; }
+    var cnt = getList(Object.assign({}, base, { fields: ['count(name) as n'], limit_page_length: 1 }), chk).then(function (r) { return r ? +one(r).n || 0 : null; });
+    var rows = getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: (st.page - 1) * ps, limit_page_length: ps }), chk);
+    Promise.all([cnt, rows]).then(function (res) {
+      if (!chk()) { return; } st.total = res[0]; st.rows = res[1] || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]'));
+    }).catch(function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } });
+  }
+  function paintServer(id, el) {
+    if (!el) { return; } var sp = TBL[id], st = SS[id], ps = sp.pageSize || CFG.modalPage;
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(sp.searchHint || tr('Search…', 'بحث…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search', 'بحث')) + '"><span class="dms-tb-r"><span class="dms-sm">' + (st.total == null ? '' : num(st.total) + ' ' + esc(st.total === 1 ? tr('record', 'سجل') : tr('records', 'سجل'))) + '</span>' +
+      (st.total ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csvall" data-id="' + esc(id) + '" title="' + esc(tr('Export up to 5,000 rows', 'تصدير حتى 5,000 سجل')) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    if (st.err) { el.innerHTML = h + alertBox('err', esc(st.err === 'perm' ? tr('Permission denied for your user.', 'لا تملك صلاحية القراءة.') : tr('Technical error while reading this list.', 'خطأ تقني أثناء قراءة القائمة.')) + ' <button type="button" class="dms-linkbtn" data-act="sretry" data-id="' + esc(id) + '">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>'); return restoreFocus(el, id); }
+    if (st.loading && !st.rows) { el.innerHTML = h + '<div class="dms-skel"></div>'; return restoreFocus(el, id); }
+    if (!st.rows || !st.rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
+    var pages = Math.max(1, Math.ceil((st.total || 0) / ps));
+    h += '<div class="dms-tablewrap" style="opacity:' + (st.loading ? .55 : 1) + '"' + (st.loading ? ' aria-busy="true"' : '') + '><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'ssort', id) + '<tbody>' + st.rows.map(function (r) { return tcells(sp, r); }).join('') + '</tbody></table></div>' + pager(id, 'spage', st.page, pages, st.total || 0, ps);
+    el.innerHTML = h; restoreFocus(el, id);
+  }
+  function csvCell(v) { v = v == null ? '' : String(v); if (/^[=+\-@\t\r]/.test(v) && !/^-?[\d.,]+$/.test(v)) { v = "'" + v; } return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  function download(name, sp, rows) {
+    var cols = sp.cols.filter(function (c) { return c.c; }), lines = [cols.map(function (c) { return csvCell(c.h); }).join(',')].concat(rows.map(function (r) { return cols.map(function (c) { return csvCell(c.c(r)); }).join(','); }));
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+    a.download = String(name).replace(/[^\w-]+/g, '_') + '_' + TODAY + '.csv'; HOST.appendChild(a); a.click(); later(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+  function exportServer(id) {
+    var sp = TBL[id], st = SS[id], out = [], step = 500, base = srvArgs(sp, st), g = GEN;
+    if (sp.loader) { toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…')); var acc = [], pg = function (p) { return sp.loader(p, 500, st.q.trim(), srvOrder(sp, st)).then(function (res) { acc = acc.concat(res.rows || []); return (res.rows || []).length === 500 && acc.length < 5000 ? pg(p + 1) : acc; }); }; pg(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); }); return; }
+    function next(s) {
+      return getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: s, limit_page_length: step }), function () { return g === GEN; }).then(function (r) {
+        out = out.concat(r || []); return (r && r.length === step && out.length < 5000) ? next(s + step) : out;
       });
-    } catch (e) { LOC.ready = true; }
-  }
-  function num(v) { return (v === null || v === undefined || v === '') ? null : (typeof v === 'number' ? v.toLocaleString() : esc(v)); }
-  function badge(s) { var x = STATE[s] || STATE.unavailable; return '<span class="b b-' + x[1] + '">' + x[0] + '</span>'; }
-  function detail() { return !!(S.d && S.d.meta.tier === 'detail'); }
-  function rows(k) { return (S.d && S.d.rows && S.d.rows[k]) || []; }
-  function uniq(a) { var o = {}, r = []; a.forEach(function (x) { if (x && !o[x]) { o[x] = 1; r.push(x); } }); return r; }
-  function ids(rs) { return uniq(rs.map(function (r) { return r.employee; })); }
-  function reg(sp) { if (!detail() || !sp || sp.locked) return null; DR.push(sp); return DR.length - 1; }
-  function lockTxt() { return '<div class="ft lk">&#128274; Details: HR Manager / HR User only</div>'; }
-  function baseEmp() { var o = { status: 'Active', company: S.d.meta.company }; var f = S.d.meta.filters;
-    if (f.branch) o.branch = f.branch; if (f.job_location) o.custom_job_location = f.job_location; if (f.department) o.department = f.department; return o; }
-
-  function routeFor(doctype, rs, filters) {
-    var o = {};
-    (filters || []).forEach(function (f) { o[f[0]] = (f[1] === '=') ? f[2] : [f[1] === 'between' ? 'Between' : f[1], f[2]]; });
-    if (doctype === 'Employee' && rs.length) { o.name = ['in', ids(rs)]; }
-    else if (doctype === 'Leave Application' && rs.length && rs[0].leave_application) {
-      o.name = ['in', uniq(rs.map(function (r) { return r.leave_application; }))];
     }
-    else if (rs.length && ['Attendance', 'Employee Checkin', 'Leave Application'].includes(doctype)) {
-      o.employee = ['in', ids(rs)];
-    }
-    // Empty drill-downs should remain empty; never silently substitute all active staff.
-    if (!rs.length && doctype === 'Employee') o.name = ['in', ['__NO_MATCH__']];
-    return { doctype: doctype, options: o };
+    toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…'));
+    next(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); });
   }
-  function spec(title, rs, route, cols) { return { title: title, rows: rs, route: route, cols: cols }; }
-  function kspec(k) { if (!k.drill) return detail() ? null : { locked: true }; var rs = rows(k.drill.rows); return spec(k.label, rs, routeFor(k.drill.doctype, rs, k.drill.filters)); }
+  function toast(msg, bad) { var e = document.createElement('div'); e.className = 'dms-toast' + (bad ? ' dms-toast-err' : ''); e.setAttribute('role', 'status'); e.textContent = msg; HOST.appendChild(e); later(function () { e.remove(); }, 3500); }
+  /* common cells */
+  function dtc(v) { return v ? '<span class="dms-num">' + esc(String(v).slice(0, 10)) + '</span>' : '<span class="dms-sm">—</span>'; }
+  function who(v) { return v ? bdi(v) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>'; }
+  function txt(v) { return v ? bdi(v) : '<span class="dms-sm">—</span>'; }
+  function amc(v) { return v == null || v === '' ? '<span class="dms-sm">—</span>' : '<span class="dms-num">' + esc(amt(v)) + '</span>'; }
+  function overdueTag(due) { var d = diffDays(String(due || TODAY).slice(0, 10), TODAY); return d > 0 ? '<span class="dms-days ' + (d > 90 ? 'dms-days-bad' : 'dms-days-warn') + '">' + num(d) + '</span>' : '<span class="dms-sm">—</span>'; }
+  function col(h, f, o) { o = o || {}; return Object.assign({ h: h, sf: o.sort === false ? undefined : f, r: function (x) { return o.fmt ? o.fmt(x[f], x) : txt(x[f]); }, c: function (x) { return x[f]; } }, o); }
+  function linkCol(h, dt, f, labelF) { return { h: h, sf: f, r: function (x) { return docLink(typeof dt === 'function' ? dt(x) : dt, x[f], labelF ? x[labelF] || x[f] : x[f]); }, c: function (x) { return x[f]; } }; }
 
-  function card(label, value, state, note, sub, sp, suffix) {
-    var i = reg(sp), v = num(value);
-    var h = '<div class="card' + (i !== null ? ' click" data-dr="' + i : '') + '"><div class="lb"><span>' + esc(label) + '</span>' + badge(state) + '</div>';
-    h += v === null ? '<div class="v na">' + (state === 'unavailable' ? 'Not available' : 'No data') + '</div>' : '<div class="v">' + v + (suffix || '') + '</div>';
-    if (sub) h += '<div class="sub">' + esc(sub) + '</div>';
-    if (note) h += '<div class="nt" title="' + esc(note) + '">' + esc(note) + '</div>';
-    if (sp) h += i !== null ? '<div class="ft">View details &rarr;</div>' : lockTxt();
+  /* ---------- actions pending ---------- */
+  var PRIO = { high: ['High', 'عالية'], med: ['Medium', 'متوسطة'], low: ['Low', 'منخفضة'] };
+  function score(p, amount, age) { return { high: 300, med: 200, low: 100 }[p] + Math.min(40, Math.log(1 + Math.abs(amount || 0)) / Math.LN10 * 6) + Math.min(20, (age || 0) / 10); }
+  /* Server specs ({id, server:true, dt, filters, fields, order, it(row) → item}) load count + 6 most urgent rows each. */
+  function loadActions(specs, key) {
+    run(key || 'act', function (chk) {
+      return Promise.all(specs.filter(function (s) { return s.server; }).map(function (s) {
+        var c = getList({ doctype: s.dt, fields: ['count(name) as n'], filters: s.filters, limit_page_length: 1 }, chk).then(function (r) { return +one(r).n || 0; }, function (e) { return 'ERR:' + errKind(e); });
+        var l = (s.rank ? fetchAll({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order }, chk, 2000) : getList({ doctype: s.dt, fields: s.fields, filters: s.filters, order_by: s.order, limit_page_length: 6 }, chk)).then(function (r) { return r || []; }, function (e) { return 'ERR:' + errKind(e); });
+        return Promise.all([c, l]).then(function (x) { return { id: s.id, count: typeof x[1] === 'string' ? x[1] : x[0], rows: Array.isArray(x[1]) ? x[1] : [] }; });
+      })).then(function (res) { var o = {}; res.forEach(function (x) { o[x.id] = x; }); return o; });
+    });
+  }
+  /* client: {id: {rows, item}} for client specs, null while their sources load, or 'ERR:kind'. */
+  function actModel(specs, key, client) {
+    var counts = {}, items = [], A = D[key || 'act'], AE = D[(key || 'act') + 'Err'];
+    specs.forEach(function (s) {
+      if (s.client) {
+        var c = client == null ? null : typeof client === 'string' ? client : client[s.id];
+        if (typeof c === 'string') { counts[s.id] = c; }
+        else if (c) { counts[s.id] = c.count != null ? c.count : c.rows.length; c.rows.slice(0, 6).forEach(function (r) { items.push(c.item(r)); }); }
+        return;
+      }
+      if (AE) { counts[s.id] = 'ERR:' + AE; return; }
+      var x = A && A[s.id]; if (!x) { return; }
+      counts[s.id] = x.count;
+      x.rows.forEach(function (r) { var it = s.it(r); it.dt = it.dt || s.dt; it.name = it.name || r.name; items.push(it); });
+    });
+    items.sort(function (a, b) { return b.score - a.score; });
+    var seen = {}; items = items.filter(function (it) { var k = it.dt + '|' + it.name; if (seen[k]) { return false; } seen[k] = 1; return true; });   /* one row per record, under its most urgent category */
+    return { specs: specs, counts: counts, items: items, ready: specs.every(function (s) { return counts[s.id] !== undefined; }) };
+  }
+  function pendingTotal(AM) {
+    if (!AM) { return null; }
+    var t = 0, any = false; Object.keys(AM.counts).forEach(function (k) { var c = AM.counts[k]; if (typeof c === 'number') { t += c; any = true; } });
+    return any ? t : null;
+  }
+  function dtLabel(dt) { var L = APP.dtLabels && APP.dtLabels[dt]; return L ? tr(L[0], L[1]) : dt; }
+  function arow(it) {
+    return '<a class="dms-arow" href="' + esc(it.href || docUrl(it.dt, it.name)) + '" target="_blank" rel="noopener noreferrer">' +
+      '<span class="dms-prio dms-prio-' + it.p + '">' + esc(tr(PRIO[it.p][0], PRIO[it.p][1])) + '</span>' +
+      '<span class="dms-arow-main"><span class="dms-arow-t"><bdi>' + esc(it.title || it.name) + '</bdi><span class="dms-arow-dt">' + esc(dtLabel(it.dt)) + '</span></span><span class="dms-arow-d">' + bdi(it.desc || '') + '</span></span>' +
+      '<span class="dms-arow-who">' + (it.who ? bdi(it.who) : '<span class="dms-sm">' + esc(NAtxt()) + '</span>') + '</span>' +
+      '<span class="dms-arow-due dms-tone-' + (it.tone || 'n') + '">' + esc(it.due || '') + '</span><span class="dms-sr"> (' + esc(tr('opens in a new tab', 'يفتح في علامة تبويب جديدة')) + ')</span></a>';
+  }
+  function drillId(s) { return s.drill || ((s.client ? 'cli:' : 'srv:') + s.id); }
+  function catBtn(s, c) {
+    var err = typeof c === 'string', inner = '<span class="dms-acat-t">' + esc(s.short) + '</span><b class="dms-num">' + (err || c == null ? '—' : num(c)) + '</b>';
+    return (!err && c) ? '<button type="button" class="dms-acat" data-act="kpi" data-v="' + esc(drillId(s)) + '" title="' + esc(s.title + ' — ' + tr('view all', 'عرض الكل')) + '">' + inner + '</button>'
+      : '<div class="dms-acat dms-acat-off" title="' + esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.title) + '">' + inner + '</div>';
+  }
+  function actionsPanel(AM) {
+    var tot = pendingTotal(AM);
+    var h = '<section class="dms-panelbox dms-actpanel" id="dms-pending" tabindex="-1" aria-labelledby="dms-pending-h"><div class="dms-ph"><h3 class="dms-h3" id="dms-pending-h">' + esc(tr('Actions pending', 'الإجراءات المعلقة')) +
+      (tot != null ? ' <span class="dms-h3-n dms-num">' + num(tot) + '</span>' : '') + '</h3><span class="dms-ph-meta">' + esc(tr('As of today · most urgent first', 'حتى اليوم · الأكثر إلحاحًا أولًا')) + '</span>' +
+      (tab !== 'actions' && APP.tabs.some(function (x) { return x.id === 'actions'; }) ? '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="goto:actions">' + esc(tr('View all', 'عرض الكل')) + '</button>' : '') + '</div>';
+    if (!AM) { return h + '<div class="dms-arows" aria-busy="true">' + skel(6, 'dms-skel-row') + '</div></section>'; }
+    var known = AM.specs.filter(function (s) { return AM.counts[s.id] !== undefined; });
+    if (!known.length) { return h + '<div class="dms-arows" aria-busy="true">' + skel(6, 'dms-skel-row') + '</div></section>'; }
+    var errs = known.filter(function (s) { return typeof AM.counts[s.id] === 'string'; });
+    if (AM.ready && errs.length === AM.specs.length) { return h + alertBox('err', esc(tr('Pending actions could not be loaded.', 'تعذر تحميل الإجراءات المعلقة.')) + ' <button type="button" class="dms-linkbtn" data-act="refresh">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>') + '</section>'; }
+    var items = AM.items.slice(0, CFG.actRows || 7);
+    h += items.length ? '<div class="dms-arows">' + items.map(arow).join('') + '</div>' : (AM.ready ? '<div class="dms-empty dms-empty-sm">' + esc(tr('Nothing pending for this selection.', 'لا توجد إجراءات معلقة لهذا الاختيار.')) + '</div>' : '<div class="dms-arows" aria-busy="true">' + skel(4, 'dms-skel-row') + '</div>');
+    h += '<div class="dms-acats">' + AM.specs.map(function (s) { return catBtn(s, AM.counts[s.id]); }).join('') + '</div>';
+    if (errs.length) { h += note(esc(tr('Could not load: ', 'تعذر التحميل: ') + errs.map(function (s) { return s.short; }).join(', '))); }
+    return h + '</section>';
+  }
+  function actionsTab(AM, info) {
+    var h = alertBox('info', esc(info || tr('Action lists are as of today and not filtered by the period. They follow the filters where the source supports them.', 'قوائم الإجراءات حتى اليوم وغير مرتبطة بالفترة، وتتبع المرشحات حيثما يدعمها المصدر.')));
+    h += kpis((AM ? AM.specs : []).map(function (s) {
+      var c = AM.counts[s.id], err = typeof c === 'string';
+      return kpi({ label: s.title, val: c === undefined ? '…' : err ? '—' : num(c), sub: esc(err ? (c === 'ERR:perm' ? tr('Permission denied', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : s.why), act: (!err && c) ? drillId(s) : null });
+    }));
+    return h + actionsPanel(AM);
+  }
+
+  /* ---------- drill-downs (overlay) ---------- */
+  var OVL = null;
+  function openDrill(id) {
+    if (id.indexOf('goto:') === 0) { goTab(id.slice(5)); return; }
+    var r = null;
+    if (id.indexOf('srv:') === 0 && APP.actSpecs) {
+      var s = APP.actSpecs().filter(function (x) { return x.id === id.slice(4); })[0];
+      if (s && s.table) { delete SS.drill; r = { title: s.title, sub: s.why, spec: Object.assign({ id: 'drill', server: true, dt: s.dt, filters: s.filters, order: s.order, file: s.id }, s.table()) }; }
+    }
+    if (!r && APP.drill) { r = APP.drill(id); }
+    if (!r || (!r.spec && r.body == null)) { return; }
+    if (r.spec) { r.spec.id = 'drill'; if (!r.spec.server && !r.spec.pageSize) { r.spec.pageSize = CFG.modalPage; } }
+    delete SS.drill; delete TS.drill;
+    var opener = OVL ? OVL.opener : activeEl();
+    OVL = Object.assign(r, { id: id, prev: OVL && r.stack !== false ? OVL : null, opener: opener, openerKey: OVL ? OVL.openerKey : opener && opener.getAttribute && opener.getAttribute('data-v') }); renderOverlay();
+  }
+  function overlayHTML() {
+    if (!OVL) { return ''; }
+    var link = OVL.link ? ' ' + docLink(OVL.link[0], OVL.link[1], OVL.link[2]) : '';
+    return '<div class="dms-overlay" data-act="ovbg"><div class="dms-modal" role="dialog" aria-modal="true" aria-labelledby="dms-dialog-title"><div class="dms-dhead"><div>' + (OVL.prev ? '<button type="button" class="dms-linkbtn" data-act="ovback">‹ ' + esc(tr('Back', 'رجوع')) + '</button>' : '') + '<h3 id="dms-dialog-title">' + esc(OVL.title) + '</h3>' + (OVL.sub || link ? '<p class="dms-sm">' + esc(OVL.sub || '') + link + '</p>' : '') + '</div><button type="button" class="dms-x" data-act="closeov" aria-label="' + esc(tr('Close', 'إغلاق')) + '">×</button></div>' + (OVL.body || '') + (OVL.spec ? regTable(OVL.spec) : '') + '</div></div>';
+  }
+  function renderOverlay() { var el = $('[data-ref="overlay"]'); if (!el) { return; } var app = $('.dms-app'); if (app) { app.inert = !!OVL; } if (!OVL) { Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { delete TBL[k]; } }); } else { delete TBL.drill; } el.innerHTML = overlayHTML(); fillTables(el); var x = el.querySelector('.dms-x'); if (x) { x.focus(); } }
+  function closeOverlay() {
+    var previous = OVL; OVL = null; renderOverlay(); delete SS.drill; delete TS.drill;
+    if (!previous) { return; }
+    var opener = previous.opener;
+    if (!opener || !opener.isConnected) { opener = Array.prototype.find.call(HOST.querySelectorAll('[data-act="kpi"]'), function (el) { return el.getAttribute('data-v') === previous.openerKey; }); }
+    if (opener) { opener.focus({ preventScroll: true }); }
+  }
+
+  /* ---------- filters, period, toolbar, tabs ---------- */
+  var F = { period: APP.period || 'month', from: '', to: '' }, PERIOD = [];
+  (APP.filters || []).forEach(function (f) { F[f.k] = ''; });
+  var tab = APP.tabs[0].id, POP = null, FD = null, FS = {}, CAL = null, ANIM = false, built = false, AMC = null;
+  var PERIODS = [['today', 'Today', 'اليوم'], ['yesterday', 'Yesterday', 'أمس'], ['week', 'This week', 'هذا الأسبوع'], ['lastWeek', 'Last week', 'الأسبوع الماضي'],
+    ['month', 'This month', 'هذا الشهر'], ['lastMonth', 'Last month', 'الشهر الماضي'], ['quarter', 'This quarter', 'هذا الربع'], ['ytd', 'Year to date', 'السنة حتى اليوم'],
+    ['year', 'This year', 'هذه السنة'], ['prevYear', 'Previous year', 'السنة الماضية'], ['custom', 'Custom range', 'نطاق مخصص']];
+  var PGROUPS = [['today', 'yesterday'], ['week', 'lastWeek'], ['month', 'lastMonth'], ['quarter', 'ytd', 'year', 'prevYear'], ['custom']];
+  function curPeriod() { return periodRange(F.period, F.from, F.to); }
+  function periodName(k) { var p = PERIODS.filter(function (x) { return x[0] === k; })[0]; return p ? tr(p[1], p[2]) : k; }
+  function filterCount() { return (APP.filters || []).filter(function (f) { return F[f.k]; }).length; }
+  function optList(f, draft) { var l = f.options ? f.options(draft || F) : []; return (l || []).map(function (x) { return typeof x === 'string' ? { v: x, l: x } : x; }); }
+  function optLabel(f, v) { var o = optList(f).filter(function (x) { return x.v === v; })[0]; return o ? o.l : (f.label ? f.label(v) : v); }
+  function pendingBtnHTML() {
+    var n = pendingTotal(AMC), lbl = n == null ? (AMC && AMC.ready ? '—' : '…') : num(n);
+    return '<button type="button" class="dms-pend' + (n ? ' dms-pend-on' : '') + '" data-act="pending" data-fk="pending" title="' + esc(tr('Pending actions as of today — show the list', 'الإجراءات المعلقة حتى اليوم — عرض القائمة')) + '">' +
+      '<i class="dms-pend-dot" aria-hidden="true"></i><b class="dms-num">' + lbl + '</b><span class="dms-pend-l">' + esc(tr('pending', 'معلّقة')) + '</span></button>';
+  }
+  function opt(v, label, cur) { return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(label) + '</option>'; }
+  function ffield(f) {
+    if (f.type === 'text' || f.type === 'date') { return '<div class="dms-ff"><label for="dms-fd-' + f.k + '">' + esc(tr(f.en, f.ar)) + '</label><input type="' + (f.type === 'date' ? 'date' : 'search') + '" id="dms-fd-' + f.k + '" class="dms-input" data-fd="' + f.k + '" data-fk="fd:' + f.k + '" value="' + esc(FD[f.k] || '') + '" placeholder="' + esc(f.ph ? tr(f.ph[0], f.ph[1]) : '') + '" autocomplete="off"></div>'; }
+    var list = optList(f, FD), label = tr(f.en, f.ar), k = f.k;
+    var q = clean(FS[k]).toLowerCase(), cur = FD[k], shown = list.filter(function (x) { return !q || String(x.l).toLowerCase().indexOf(q) >= 0 || String(x.v).toLowerCase().indexOf(q) >= 0; }), more = shown.length > 200;
+    shown = shown.slice(0, 200);
+    if (cur && !shown.some(function (x) { return x.v === cur; })) { shown.unshift({ v: cur, l: optLabel(f, cur) }); }
+    var h = '<div class="dms-ff"><label for="dms-fd-' + k + '">' + esc(label) + '</label>';
+    if (list.length > 8) { h += '<input type="search" class="dms-input" data-fs="' + k + '" data-fk="fs:' + k + '" value="' + esc(FS[k] || '') + '" placeholder="' + esc(tr('Search ' + num(list.length) + ' options', 'ابحث في ' + num(list.length) + ' خيار')) + '" aria-label="' + esc(tr('Search', 'بحث') + ' — ' + label) + '" autocomplete="off">'; }
+    h += '<select id="dms-fd-' + k + '" class="dms-input" data-fd="' + k + '" data-fk="fd:' + k + '">' + opt('', f.none ? tr(f.none[0], f.none[1]) : tr('All', 'الكل'), cur) + shown.map(function (x) { return opt(x.v, x.l, cur); }).join('') + '</select>';
+    if (q && !shown.length) { h += '<span class="dms-ff-hint">' + esc(tr('No matches', 'لا نتائج')) + '</span>'; }
+    else if (more) { h += '<span class="dms-ff-hint">' + esc(tr('First 200 matches — type to narrow', 'أول 200 نتيجة — اكتب للتضييق')) + '</span>'; }
     return h + '</div>';
   }
-  function hbars(list, mk, max) {
-    if (!list || !list.length) return '<div class="muted">No records.</div>';
-    var m = 0; list.forEach(function (x) { if (x.count > m) m = x.count; });
-    return '<div class="hb">' + list.slice(0, max || 50).map(function (x) {
-      var i = mk ? reg(mk(x)) : null;
-      return '<div class="hr' + (i !== null ? ' click" data-dr="' + i : '') + '" title="' + esc(x.label) + '"><span class="l">' + esc(x.label) + '</span><span class="t"><span class="f" style="width:' + (m ? Math.max(2, 100 * x.count / m) : 0) + '%"></span></span><span class="n">' + num(x.count) + '</span></div>';
+  function filtersPopHTML() {
+    var n = APP.filterNote ? APP.filterNote() : '';
+    return '<div class="dms-pop dms-pop-filters" role="dialog" aria-label="' + esc(tr('Filters', 'المرشحات')) + '"><div class="dms-pop-b">' + APP.filters.map(ffield).join('') + '</div>' +
+      (n ? '<p class="dms-pop-note">' + esc(n) + '</p>' : '') +
+      '<div class="dms-pop-f"><button type="button" class="dms-btn" data-act="fclear" data-fk="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button><button type="button" class="dms-btn dms-btn-primary" data-act="fapply" data-fk="fapply">' + esc(tr('Apply', 'تطبيق')) + '</button></div></div>';
+  }
+  function calendarHTML() {
+    var v = CAL.view, first = weekStartOf(v), mon = v.slice(0, 7), fdy = CAL.focus && CAL.focus.slice(0, 7) === mon ? CAL.focus : (CAL.from && CAL.from.slice(0, 7) === mon ? CAL.from : v), wd = '', rows = '', r, c, d;
+    for (c = 0; c < 7; c++) { try { wd += '<span role="columnheader">' + esc(new Intl.DateTimeFormat(locale(), { weekday: 'narrow', timeZone: 'UTC' }).format(new Date(parseISO(addDays(first, c))))) + '</span>'; } catch (e) { wd += '<span></span>'; } }
+    for (r = 0; r < 6; r++) {
+      rows += '<div role="row" class="dms-cal-row">';
+      for (c = 0; c < 7; c++) {
+        d = addDays(first, r * 7 + c);
+        var end = d === CAL.from || d === CAL.to, inR = CAL.from && CAL.to && d > CAL.from && d < CAL.to;
+        rows += '<button type="button" role="gridcell" class="dms-day' + (d.slice(0, 7) !== mon ? ' dms-out' : '') + (d === TODAY ? ' dms-today' : '') + (inR ? ' dms-in' : '') + (end ? ' dms-end' : '') +
+          (CAL.from && CAL.to && d === CAL.from && d !== CAL.to ? ' dms-s' : '') + (CAL.from && CAL.to && d === CAL.to && d !== CAL.from ? ' dms-e' : '') + '" data-act="calday" data-v="' + d + '" data-fk="day:' + d + '" tabindex="' + (d === fdy ? 0 : -1) +
+          '" aria-pressed="' + end + '" aria-label="' + esc(fmtDate(d, true)) + '"><bdi>' + (+d.slice(8, 10)) + '</bdi></button>';
+      }
+      rows += '</div>';
+    }
+    var ok = CAL.from && CAL.to, msg = ok ? '<bdi>' + esc(rangeLabel([CAL.from, CAL.to])) + '</bdi> · ' + esc(daysTxt(diffDays(CAL.from, CAL.to) + 1)) : esc(CAL.from ? tr('Select an end date', 'اختر تاريخ النهاية') : tr('Select a start date', 'اختر تاريخ البداية'));
+    var title = v; try { title = new Intl.DateTimeFormat(locale(), { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(parseISO(v))); } catch (e) { /* ISO fallback */ }
+    return '<div class="dms-cal"><div class="dms-cal-h"><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="-1" data-fk="calprev" aria-label="' + esc(tr('Previous month', 'الشهر السابق')) + '">' + ico('prev', 'dms-flip') + '</button>' +
+      '<b aria-live="polite">' + esc(title) + '</b><button type="button" class="dms-btn dms-icobtn" data-act="calnav" data-v="1" data-fk="calnext" aria-label="' + esc(tr('Next month', 'الشهر التالي')) + '">' + ico('next', 'dms-flip') + '</button></div>' +
+      '<div class="dms-cal-g" role="grid" aria-label="' + esc(title) + '"><div class="dms-cal-wd" role="row">' + wd + '</div>' + rows + '</div>' +
+      '<div class="dms-cal-f"><span class="dms-cal-msg" aria-live="polite">' + msg + '</span><span class="dms-cal-btns"><button type="button" class="dms-btn" data-act="popclose" data-fk="calcancel">' + esc(tr('Cancel', 'إلغاء')) + '</button>' +
+      '<button type="button" class="dms-btn dms-btn-primary" data-act="calapply" data-fk="calapply"' + (ok ? '' : ' disabled') + '>' + esc(tr('Apply', 'تطبيق')) + '</button></span></div></div>';
+  }
+  function periodPopHTML() {
+    var n = APP.periodNote ? APP.periodNote() : '';
+    return '<div class="dms-pop dms-pop-period' + (CAL ? ' dms-has-cal' : '') + '" role="dialog" aria-label="' + esc(tr('Select period', 'اختر الفترة')) + '"><div class="dms-presets">' +
+      PGROUPS.map(function (g) {
+        return '<div class="dms-pgroup">' + g.map(function (k) {
+          var on = CAL ? k === 'custom' : F.period === k;
+          return '<button type="button" class="dms-preset' + (on ? ' dms-on' : '') + '" aria-pressed="' + on + '" data-act="preset" data-v="' + k + '" data-fk="preset:' + k + '"><span>' + esc(periodName(k)) + '</span>' +
+            (k !== 'custom' ? '<small><bdi>' + esc(rangeLabel(periodRange(k))) + '</bdi></small>' : '') + '</button>';
+        }).join('') + '</div>';
+      }).join('') + '</div>' + (CAL ? calendarHTML() : '') + (n ? '<p class="dms-pop-note dms-pop-note-p">' + esc(n) + '</p>' : '') + '</div>';
+  }
+  function toolbarHTML() {
+    var ac = filterCount(), R = PERIOD, hasF = APP.filters && APP.filters.length;
+    return '<div class="dms-topbar"><div class="dms-tb-title"><h2 class="dms-title">' + esc(APP.title()) + '</h2><p class="dms-sub" data-ref="stamp"></p></div>' +
+      '<div class="dms-tb-ctrls"><div class="dms-pendwrap" data-ref="pendwrap">' + pendingBtnHTML() + '</div>' +
+      (APP.period === false ? '' : '<div class="dms-anchor"><button type="button" class="dms-btn dms-period" data-act="pop" data-v="period" data-fk="pop:period" aria-haspopup="dialog" aria-expanded="' + (POP === 'period') + '" aria-label="' + esc(tr('Period', 'الفترة') + ': ' + periodName(F.period) + ' ' + rangeLabel(R)) + '">' + ico('cal') +
+        '<span class="dms-period-t"><b>' + esc(periodName(F.period)) + '</b><span class="dms-period-r"><bdi>' + esc(rangeLabel(R)) + '</bdi></span></span>' + ico('down', 'dms-chev') + '</button>' + (POP === 'period' ? periodPopHTML() : '') + '</div>') +
+      (hasF ? '<div class="dms-anchor"><button type="button" class="dms-btn' + (ac ? ' dms-btn-on' : '') + '" data-act="pop" data-v="filters" data-fk="pop:filters" aria-haspopup="dialog" aria-expanded="' + (POP === 'filters') + '">' + ico('filter') +
+        '<span class="dms-btn-t">' + esc(tr('Filters', 'المرشحات')) + '</span>' + (ac ? '<span class="dms-count" aria-label="' + esc(ac + ' ' + tr('active', 'نشط')) + '">' + ac + '</span>' : '') + '</button>' + (POP === 'filters' ? filtersPopHTML() : '') + '</div>' : '') +
+      '<button type="button" class="dms-btn dms-icobtn" data-act="refresh" data-ref="refresh" data-fk="refresh" aria-label="' + esc(tr('Refresh data', 'تحديث البيانات')) + '" title="' + esc(tr('Refresh data (keeps filters)', 'تحديث البيانات (مع الإبقاء على المرشحات)')) + '">' + ico('refresh') + '</button></div>' +
+      '<div class="dms-lang" role="group" aria-label="Language / اللغة"><button type="button" data-act="lang" data-v="en" data-fk="lang:en" lang="en" aria-pressed="' + (LANG === 'en') + '"' + (LANG === 'en' ? ' class="dms-on"' : '') + '>English</button>' +
+        '<button type="button" data-act="lang" data-v="ar" data-fk="lang:ar" lang="ar" aria-pressed="' + (LANG === 'ar') + '"' + (LANG === 'ar' ? ' class="dms-on"' : '') + '>العربية</button></div></div>';
+  }
+  function chipsHTML() {
+    var a = (APP.filters || []).filter(function (f) { return F[f.k]; }); if (!a.length) { return ''; }
+    return '<div class="dms-chips">' + a.map(function (f) {
+      var v = optLabel(f, F[f.k]), lab = tr(f.en, f.ar);
+      return '<span class="dms-chip"><span class="dms-chip-k">' + esc(lab) + '</span><bdi>' + esc(v) + '</bdi><button type="button" class="dms-chip-x" data-act="rmf" data-v="' + f.k + '" data-fk="rmf:' + f.k + '" aria-label="' + esc(tr('Remove filter', 'إزالة المرشح') + ' ' + lab + ': ' + v) + '">' + ico('x') + '</button></span>';
+    }).join('') + (a.length > 1 ? '<button type="button" class="dms-linkbtn" data-act="fclear">' + esc(tr('Clear all', 'مسح الكل')) + '</button>' : '') + '</div>';
+  }
+  function tabsHTML() {
+    var pend = pendingTotal(AMC);
+    return '<div class="dms-tabs" role="tablist" aria-label="' + esc(tr('Sections', 'الأقسام')) + '">' + APP.tabs.map(function (x) {
+      var on = x.id === tab, lbl = tr(x.en, x.ar), b = x.id === 'actions' && pend ? '<span class="dms-tab-n dms-num" title="' + esc(tr('Pending actions as of today', 'الإجراءات المعلقة حتى اليوم')) + '">' + num(pend) + '</span>' : '';
+      return '<button class="dms-tab' + (on ? ' dms-on' : '') + '" role="tab" id="dms-tab-' + x.id + '" aria-selected="' + on + '" aria-controls="dms-panel" tabindex="' + (on ? 0 : -1) + '" data-act="tab" data-v="' + x.id + '" data-fk="tab:' + x.id + '" title="' + esc(lbl) + '" type="button"><span>' + esc(lbl) + '</span>' + b + '</button>';
     }).join('') + '</div>';
   }
-  function empListSpec(title, extra) { return { title: title, rows: null, route: { doctype: 'Employee', options: Object.assign(baseEmp(), extra) } }; }
-  function table(cols, rs, opt) {
-    opt = opt || {};
-    if (!rs || !rs.length) return '<div class="muted">' + (opt.empty || 'No records.') + '</div>';
-    var lim = opt.limit || 500;
-    var h = '<div class="tw"><table><thead><tr>' + cols.map(function (c) { return '<th' + (c[2] ? ' class="n"' : '') + '>' + esc(c[1]) + '</th>'; }).join('') + '</tr></thead><tbody>';
-    rs.slice(0, lim).forEach(function (r) {
-      var i = opt.rowSpec ? reg(opt.rowSpec(r)) : null;
-      h += '<tr' + (i !== null ? ' class="click" data-dr="' + i + '"' : '') + '>' + cols.map(function (c) { var v = typeof c[0] === 'function' ? c[0](r) : esc(r[c[0]]); return '<td' + (c[2] ? ' class="n"' : '') + '>' + (v === undefined || v === null ? '' : v) + '</td>'; }).join('') + '</tr>';
-    });
-    if (rs.length > lim) h += '<tr><td colspan="' + cols.length + '" class="muted">Showing first ' + lim + ' of ' + rs.length + '.</td></tr>';
-    return h + '</tbody></table></div>';
-  }
-  function panel(title, body, hint, right) { return '<div class="panel"><h3><span>' + esc(title) + '</span>' + (right || '') + '</h3>' + (hint ? '<div class="ph">' + esc(hint) + '</div>' : '') + body + '</div>'; }
-  function pctTxt(v) { return v === null || v === undefined ? '—' : v + '%'; }
-  function ov(key) { return S.d.overview.filter(function (k) { return k.key === key; })[0]; }
 
-  /* ---------------- drill-down dialog ---------------- */
-  var LINK = { employee: 'employee', leave_application: 'leave-application' };
-  function goList(route) { if (!route) return; frappe.route_options = route.options; frappe.set_route('List', route.doctype, 'List'); }
-  function openDrill(sp) {
-    if (!sp) return;
-    if (!sp.rows) { goList(sp.route); return; }
-    var rs = sp.rows, cols = sp.cols;
-    if (!cols) { var ks = {}; rs.slice(0, 50).forEach(function (r) { Object.keys(r).forEach(function (k) { ks[k] = 1; }); }); cols = Object.keys(ks); }
-    var d = new AHDDialog({ title: sp.title + ' (' + rs.length + ')', size: 'extra-large', fields: [{ fieldtype: 'HTML', fieldname: 'h' }] });
-    var $w = d.fields_dict.h.$wrapper;
-    $w.html('<div style="margin-bottom:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><input class="form-control input-sm ahd-q" style="max-width:260px" placeholder="Search…"><span class="text-muted small ahd-c"></span></div><div class="ahd-t" style="max-height:60vh;overflow:auto"></div>');
-    function draw(q) {
-      var f = q ? rs.filter(function (r) { return JSON.stringify(r).toLowerCase().indexOf(q) > -1; }) : rs;
-      $w.find('.ahd-c').text(f.length + ' record(s)');
-      if (!f.length) { $w.find('.ahd-t').html('<div class="text-muted">No records.</div>'); return; }
-      var h = '<table class="table table-sm table-bordered" style="font-size:12px"><thead><tr>' + cols.map(function (c) { return '<th style="position:sticky;top:0;background:var(--card-bg)">' + esc(c.replace(/_/g, ' ')) + '</th>'; }).join('') + '</tr></thead><tbody>';
-      f.slice(0, 1000).forEach(function (r) {
-        h += '<tr>' + cols.map(function (c) { var v = r[c]; if (v === null || v === undefined) v = '';
-          if (LINK[c] && v) return '<td><a href="/app/' + LINK[c] + '/' + encodeURIComponent(v) + '" target="_blank">' + esc(v) + '</a></td>';
-          if (c === 'name' && r.doctype && v) return '<td><a href="/app/' + frappe.router.slug(r.doctype) + '/' + encodeURIComponent(v) + '" target="_blank">' + esc(v) + '</a></td>';
-          return '<td>' + esc(v) + '</td>'; }).join('') + '</tr>';
-      });
-      $w.find('.ahd-t').html(h + '</tbody></table>');
+  /* ---------- rendering: a fixed skeleton whose regions repaint independently (focus kept via data-fk) ---------- */
+  function activeEl() { try { return ROOT.activeElement || null; } catch (e) { return null; } }
+  function paint(el, html) {
+    if (!el) { return; }
+    var a = activeEl(), fk = a && el.contains(a) && a.getAttribute ? a.getAttribute('data-fk') : null, ss = null;
+    if (fk && typeof a.selectionStart === 'number') { try { ss = [a.selectionStart, a.selectionEnd]; } catch (e) { /* not a text input */ } }
+    el.innerHTML = html;
+    if (fk) { focusFk(fk); if (ss) { var n = activeEl(); try { n.setSelectionRange(ss[0], ss[1]); } catch (e) { /* ignore */ } } }
+  }
+  function focusFk(k) { var n = HOST.querySelector('[data-fk="' + k + '"]'); if (n) { try { n.focus({ preventScroll: true }); } catch (e) { n.focus(); } } }
+  function skeleton() {
+    HOST.innerHTML = '<div class="dms-app"><div data-ref="tb"></div><div data-ref="chips"></div><div data-ref="tabs"></div><div class="dms-sheet" role="tabpanel" id="dms-panel" data-ref="sheet"><div data-ref="banner"></div><div class="dms-content" data-ref="content"></div></div>' +
+      '<div class="dms-tip" data-ref="tip" role="tooltip" hidden></div></div><div data-ref="overlay"></div>';
+    built = true;
+  }
+  function renderHeaderState() {
+    var b = $('[data-ref="refresh"]'), s = $('[data-ref="stamp"]'), bz = busy();
+    if (b) { b.classList.toggle('dms-busy', bz); b.setAttribute('aria-busy', String(bz)); }
+    if (s) { s.textContent = (APP.stamp ? APP.stamp() : tr('Read-only', 'للقراءة فقط')) + (LOADED ? ' · ' + tr('Updated ', 'آخر تحديث ') + LOADED : '') + (bz ? ' · ' + tr('loading…', 'جارٍ التحميل…') : ''); }
+    paint($('[data-ref="pendwrap"]'), pendingBtnHTML());
+    paint($('[data-ref="tabs"]'), tabsHTML());
+  }
+  function renderToolbar() { paint($('[data-ref="tb"]'), toolbarHTML()); paint($('[data-ref="chips"]'), chipsHTML()); renderHeaderState(); }
+  function contentHTML() {
+    if (!BOOTED) {
+      return '<div class="dms-grid dms-kpis dms-ov-kpis" aria-busy="true">' + skel(CFG.kpiCount || 6, 'dms-skel-kpi') + '</div><div class="dms-main2"><div class="dms-skel dms-skel-panel"></div><div class="dms-skel dms-skel-panel"></div></div>' +
+        note(esc(tr('Loading from ERPNext…', 'جارٍ التحميل من ERPNext…')));
     }
-    draw('');
-    $w.find('.ahd-q').on('input', frappe.utils.debounce(function () { draw(($w.find('.ahd-q').val() || '').toLowerCase()); }, 250));
-    if (sp.route) d.set_primary_action('Open in ERPNext list', function () { d.hide(); goList(sp.route); });
-    d.show();
+    if (APP.period !== false && (!PERIOD[0] || PERIOD[0] > PERIOD[1])) { return alertBox('err', esc(tr('Choose a valid date range.', 'اختر نطاق تاريخ صحيحًا.'))); }
+    return APP.content(tab, AMC);
+  }
+  function renderSoft() {
+    PERIOD = curPeriod(); AMC = APP.actions ? APP.actions() : null;
+    var keep = {}; Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { keep[k] = TBL[k]; } }); TBL = keep;
+    var b = $('[data-ref="banner"]'), c = $('[data-ref="content"]'), sh = $('[data-ref="sheet"]');
+    if (b) { b.innerHTML = BOOTED && APP.banner ? APP.banner() : ''; }
+    if (c) { paint(c, contentHTML()); c.classList.remove('dms-enter'); if (ANIM) { void c.offsetWidth; c.classList.add('dms-enter'); } ANIM = false; fillTables(c); fitChartLabels(); if (APP.afterRender) { APP.afterRender(c); } }
+    if (sh) { sh.setAttribute('aria-labelledby', 'dms-tab-' + tab); }
+    renderHeaderState();
+  }
+  function renderAll() {
+    HOST.setAttribute('dir', LANG === 'ar' ? 'rtl' : 'ltr'); HOST.setAttribute('lang', LANG);
+    if (!built) { skeleton(); }
+    PERIOD = curPeriod(); renderToolbar(); renderSoft();
+  }
+  /* Full reload (filters, refresh): new generation, empty store, tables back to page 1. */
+  function reload() {
+    setToday(); PERIOD = curPeriod(); GEN++; D = {}; LOADED = STAMP;
+    Object.keys(SS).forEach(function (k) { SS[k].dirty = true; SS[k].page = 1; }); Object.keys(TS).forEach(function (k) { TS[k].page = 1; });
+    APP.load(); ANIM = true; renderAll();
   }
 
-  /* ---------------- tabs ---------------- */
-  function legend() {
-    return '<div class="hb" style="gap:8px;font-size:12px">' +
-      '<div>' + badge('actual') + ' Calculated from complete ERPNext records.</div>' +
-      '<div>' + badge('partial') + ' Real records, but some source data is missing/conflicting or a dependency (holiday list, auto-attendance) is incomplete.</div>' +
-      '<div>' + badge('missing') + ' The source DocType exists but has no records for this filter.</div>' +
-      '<div>' + badge('unavailable') + ' Cannot be calculated reliably, or your role cannot read the source DocType.</div>' +
-      '<div><span class="b b-lock">&#128274;</span> Employee-level drill-downs are returned by the server only to HR Manager / HR User.</div></div>';
+  /* ---------- navigation and popovers ---------- */
+  function goTab(id, focusTab, force) {
+    if (tab !== id || force) { tab = id; ANIM = true; if (APP.onTab) { APP.onTab(id); } renderAll(); }
+    var t = $('#dms-tab-' + id); if (!t) { return; }
+    try { t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) { /* ignore */ }
+    if (focusTab) { t.focus(); }
   }
-  function trendChart(t) {
-    var m = 0; t.forEach(function (x) { if (x.count > m) m = x.count; });
-    return '<div class="vb">' + t.map(function (x) { return '<div class="c" title="' + esc(x.date + ': ' + x.count) + '"><span class="y">' + x.count + '</span><div class="bar" style="height:' + (m ? Math.max(2, 82 * x.count / m) : 2) + '%"></div><span class="x">' + esc(x.label) + '</span></div>'; }).join('') + '</div>';
+  function openPop(w) {
+    POP = w; CAL = null;
+    if (w === 'filters') { FD = {}; APP.filters.forEach(function (f) { FD[f.k] = F[f.k]; }); FS = {}; }
+    else if (F.period === 'custom' && F.from && F.to) { CAL = { from: F.from, to: F.to, view: monthStart(F.from), focus: F.from }; }
+    renderToolbar(); focusFk(w === 'filters' ? 'fd:' + APP.filters[0].k : CAL ? 'day:' + CAL.focus : 'preset:' + F.period);
   }
-  function dqRows(key) { return rows('dq_' + key).length ? rows('dq_' + key) : rows(key); }
-  function dqTable(list) {
-    return table([['label', 'Issue'], [function (r) { return '<span class="sev-' + r.severity + '">' + esc(r.severity) + '</span>'; }, 'Severity'], [function (r) { return num(r.count); }, 'Employees', 1], [function (r) { return pctTxt(r.pct); }, '% of active', 1]],
-      list, { empty: 'No issues found.', rowSpec: function (r) { var rs = dqRows(r.key); return rs.length ? spec(r.label, rs, routeFor(r.key === 'leave_status_mismatch' ? 'Leave Application' : 'Employee', rs)) : null; } });
+  function closePop(restore) { var w = POP; if (!w) { return; } POP = null; CAL = null; renderToolbar(); if (restore) { focusFk('pop:' + w); } }
+  function applyFilters(next) {
+    var prev = {}; APP.filters.forEach(function (f) { prev[f.k] = F[f.k]; F[f.k] = (next && next[f.k]) || ''; }); POP = null;
+    if (APP.onFilters) { APP.onFilters(prev); }
+    reload();
   }
-  function vOverview(d) {
-    var h = '';
-    if (!d.attendance.absence_reliable) h += '<div class="alert w"><b>Attendance reliability:</b> ' + esc(d.system_status.holiday_lists.note) + ' ' + esc(d.system_status.auto_attendance.note) + ' Missing punches are therefore <b>not</b> counted as absences.</div>';
-    h += '<div class="grid">' + d.overview.map(function (k) { if (k.key === 'absent') { var p = attendancePolicy(d); return card('Absent today', p.count, p.available ? (p.friday ? 'actual' : 'partial') : 'unavailable', p.note, 'Approved leave & weekoffs excluded', absenceSpec(p)); } return card(k.label, k.value, k.state, k.note, k.sub, kspec(k), k.key === 'training' && k.value !== null ? '%' : ''); }).join('') + '</div>';
-    h += '<div class="g2">' + panel('Biometric punch activity — last 14 days', trendChart(d.attendance.trend), 'Distinct employees with ≥1 Employee Checkin per day (current filter).');
-    h += panel('Document expiry summary', table([['label', 'Document'], [function (r) { return num(r.buckets.expired); }, 'Expired', 1], [function (r) { return num(r.buckets.d30); }, '≤30d', 1], [function (r) { return num(r.buckets.d60); }, '31–60d', 1], [function (r) { return num(r.buckets.missing); }, 'Missing', 1], [function (r) { return num(r.conflicts); }, 'Conflicts', 1]], d.compliance,
-      { rowSpec: function (r) { var rs = rows('exp_' + r.key).filter(function (x) { return x.days_left <= 60; }); return spec(r.label + ' — expired or due ≤60 days', rs, routeFor('Employee', rs)); } }), 'See Documents & Compliance for rules and details.') + '</div>';
-    var sv = { high: 0, medium: 1, low: 2 };
-    var dq = d.data_quality.filter(function (x) { return x.count > 0; }).sort(function (a, b) { return (sv[a.severity] - sv[b.severity]) || (b.count - a.count); }).slice(0, 8);
-    h += '<div class="g2">' + panel('HR data quality — top issues', dqTable(dq), 'Full list: HR Analytics tab.') + panel('How to read this dashboard', legend()) + '</div>';
-    return h;
+  function applyPeriod(key, from, to) {
+    F.period = key; if (key === 'custom') { F.from = from; F.to = to; }
+    POP = null; CAL = null; setToday(); PERIOD = curPeriod();
+    Object.keys(SS).forEach(function (k) { if (TBL[k] && TBL[k].period) { SS[k].dirty = true; SS[k].page = 1; } });
+    if (APP.onPeriod) { APP.onPeriod(); } else { reload(); return; }
+    ANIM = true; renderAll(); focusFk('pop:period');
   }
-  function empLink(r) { return '<a href="/app/employee/' + encodeURIComponent(r.employee) + '" target="_blank">' + esc(r.employee) + '</a>'; }
-  /* ---------------- Employees tab: Employee Management (Phase 3) ---------------- */
-  var DIR = { f: { search: '', company: '', department: '', designation: '', branch: '', job_location: '', nationality: '', status: 'Active' },
-    page: 1, pl: 25, sort: 'employee_name', order: 'asc', data: null, opts: null, busy: false, err: null, seq: 0 };
-  var DIR_COLS = [['employee', 'Employee ID', 'name'], ['employee_name', 'Employee Name', 'employee_name'], ['company', 'Company', 'company'],
-    ['department', 'Department', 'department'], ['designation', 'Designation', 'designation'], ['branch', 'Branch', 'branch'],
-    ['job_location', 'Job Location', 'job_location'], ['nationality', 'Nationality', 'nationality'],
-    ['date_of_joining', 'Date of Joining', 'date_of_joining'], ['status', 'Status', 'status']];
-  var STATUS_CLS = { Active: 'ok', Inactive: 'warn', Suspended: 'warn', Left: 'muted' };
+  function calPick(d) {
+    if (!CAL.from || CAL.to) { CAL.from = d; CAL.to = null; } else if (d < CAL.from) { CAL.to = CAL.from; CAL.from = d; } else { CAL.to = d; }
+    CAL.focus = d;
+  }
+  function calMove(d) { CAL.focus = d; if (d.slice(0, 7) !== CAL.view.slice(0, 7)) { CAL.view = monthStart(d); } renderToolbar(); focusFk('day:' + d); }
 
-  function dirLoad(withOpts) {
-    if (!detail()) return;
-    DIR.busy = true; DIR.err = null; dirRender();
-    var seq = ++DIR.seq;
-    var args = Object.assign({}, DIR.f, { company: DIR.f.company || S.d.meta.company, page: DIR.page, page_length: DIR.pl,
-      sort_by: DIR.sort, sort_order: DIR.order, with_options: (withOpts || !DIR.opts) ? 1 : 0 });
-    frappe.call({ method: 'admin_hr_employee_directory', args: args, freeze: false,
-      callback: function (r) { if (seq !== DIR.seq) return; DIR.busy = false; DIR.data = r.message || null;
-        if (DIR.data && DIR.data.options) DIR.opts = DIR.data.options; if (DIR.data) DIR.page = DIR.data.page; dirRender(); },
-      error: function () { if (seq !== DIR.seq) return; DIR.busy = false; DIR.err = 'Could not load the employee directory. You may not have permission.'; dirRender(); } });
+  /* ---------- tooltip (one shared element; positioned against the dashboard, clamped to its width) ---------- */
+  function showTip(n) {
+    var tip = $('[data-ref="tip"]'), app = $('.dms-app'); if (!tip || !app) { return; }
+    tip.textContent = n.getAttribute('data-tip'); tip.hidden = false;
+    var a = app.getBoundingClientRect(), r = n.getBoundingClientRect(), w = tip.offsetWidth, hgt = tip.offsetHeight;
+    var x = Math.max(4, Math.min(r.left - a.left + r.width / 2 - w / 2, a.width - w - 4)), y = r.top - a.top - hgt - 8;
+    if (y < 0) { y = r.bottom - a.top + 8; }
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
   }
-  function dirSel(key, label, list, cur, all, lab) {
-    return '<label>' + esc(label) + '<select data-dirf="' + key + '">' + (all ? '<option value="">' + esc(all) + '</option>' : '') +
-      (list || []).map(function (x) { return '<option value="' + esc(x) + '"' + (x === cur ? ' selected' : '') + '>' + esc(lab ? lab(x) : x) + '</option>'; }).join('') + '</select></label>';
-  }
-  function dirRender() {
-    var root = host.querySelector('[data-dir-root]');
-    if (!root) return;
-    var active = document.activeElement, keepSearch = active && active.dataset && active.dataset.dirf === 'search', caret = keepSearch ? active.selectionStart : 0;
-    var o = DIR.opts || {}, d = DIR.data, comp = DIR.f.company || (S.d && S.d.meta.company);
-    var h = '<div class="dirbar"><label class="dsearch">Search<input type="search" data-dirf="search" placeholder="Employee ID or name…" value="' + esc(DIR.f.search) + '"></label>' +
-      dirSel('company', 'Company', o.companies || [comp], comp) +
-      dirSel('department', 'Department', o.department, DIR.f.department, 'All departments') +
-      dirSel('designation', 'Designation', o.designation, DIR.f.designation, 'All designations') +
-      dirSel('branch', 'Branch', o.branch, DIR.f.branch, 'All branches') +
-      dirSel('job_location', 'Job Location', o.job_location, DIR.f.job_location, 'All locations', locName) +
-      dirSel('nationality', 'Nationality', o.nationality, DIR.f.nationality, 'All nationalities') +
-      dirSel('status', 'Status', o.statuses || ['Active', 'Inactive', 'Suspended', 'Left', 'All'], DIR.f.status) +
-      '<button class="btn s" data-export="dir">Export CSV</button><button class="btn s" data-dira="reset">Clear</button></div>';
-    if (DIR.err) h += '<div class="alert e">' + esc(DIR.err) + '</div>';
-    if (!d && DIR.busy) h += '<div class="ld">Loading employees…</div>';
-    else if (d) {
-      var from = d.total ? (d.page - 1) * d.page_length + 1 : 0, to = Math.min(d.total, d.page * d.page_length);
-      h += '<div class="dirmeta"><span>' + (DIR.busy ? '<span class="spin"></span> Loading… ' : '') + 'Showing <b>' + from + '–' + to + '</b> of <b>' + num(d.total) + '</b> employees</span>' +
-        '<label class="pl">Rows<select data-dirpl="1">' + [25, 50, 100].map(function (n) { return '<option' + (n === DIR.pl ? ' selected' : '') + '>' + n + '</option>'; }).join('') + '</select></label></div>';
-      if (!d.rows.length) h += '<div class="empty">No employees match these filters.<br><button class="btn s" data-dira="reset" style="margin-top:8px">Clear filters</button></div>';
-      else {
-        h += '<div class="tw dtw' + (DIR.busy ? ' dim' : '') + '"><table class="dirtable"><thead><tr>' + DIR_COLS.map(function (c) {
-          var on = DIR.sort === c[2]; return '<th class="sort' + (on ? ' on' : '') + '" data-dirsort="' + c[2] + '" title="Sort by ' + esc(c[1]) + '">' + esc(c[1]) + (on ? (DIR.order === 'asc' ? ' ▲' : ' ▼') : ' <span class="muted">↕</span>') + '</th>';
-        }).join('') + '<th>Action</th></tr></thead><tbody>';
-        d.rows.forEach(function (r) {
-          h += '<tr class="click" data-dirview="' + esc(r.employee) + '">' + DIR_COLS.map(function (c) {
-            var v = r[c[0]];
-            if (c[0] === 'status') return '<td><span class="b b-' + (STATUS_CLS[v] || 'muted') + '">' + esc(v) + '</span></td>';
-            if (c[0] === 'employee') return '<td class="mono">' + esc(v) + '</td>';
-            if (c[0] === 'job_location') return '<td>' + esc(v ? locName(v) : '—') + '</td>';
-            return '<td>' + esc(v || '—') + '</td>';
-          }).join('') + '<td><button class="btn s sm" data-dirview="' + esc(r.employee) + '">View</button></td></tr>';
-        });
-        h += '</tbody></table></div>';
-        h += '<div class="pager"><button class="btn s sm" data-dirpage="first"' + (d.page <= 1 ? ' disabled' : '') + '>«</button>' +
-          '<button class="btn s sm" data-dirpage="prev"' + (d.page <= 1 ? ' disabled' : '') + '>‹ Prev</button>' +
-          '<span>Page <b>' + d.page + '</b> of <b>' + d.pages + '</b></span>' +
-          '<button class="btn s sm" data-dirpage="next"' + (d.page >= d.pages ? ' disabled' : '') + '>Next ›</button>' +
-          '<button class="btn s sm" data-dirpage="last"' + (d.page >= d.pages ? ' disabled' : '') + '>»</button></div>';
-      }
+  function hideTip() { var tip = $('[data-ref="tip"]'); if (tip) { tip.hidden = true; } }
+  function onOver(ev) { var n = ev.target.closest ? ev.target.closest('[data-tip]') : null; if (n && HOST.contains(n)) { showTip(n); } else { hideTip(); } }
+
+  /* ---------- events (single delegated set, removed on destroy) ---------- */
+  function onClick(ev) {
+    var n = ev.target.closest ? ev.target.closest('[data-act]') : null;
+    if (POP && !(ev.target.closest && ev.target.closest('.dms-anchor'))) { closePop(false); }
+    if (!n || !HOST.contains(n)) { return; }
+    var a = n.getAttribute('data-act'), v = n.getAttribute('data-v'), id = n.getAttribute('data-id');
+    if (APP.onAct && APP.onAct(a, v, n, id) === true) { return; }
+    if (a === 'ovbg') { if (ev.target === n) { closeOverlay(); } return; }
+    if (a === 'closeov') { closeOverlay(); return; }
+    if (a === 'ovback' && OVL && OVL.prev) { var pv = OVL.prev; delete SS.drill; delete TS.drill; OVL = pv; if (OVL.spec) { regTable(OVL.spec); } renderOverlay(); return; }
+    if (a === 'tab') { goTab(v); return; }
+    if (a === 'lang') { if (LANG !== v) { LANG = v; try { G.localStorage.setItem('dms_lang', LANG); } catch (e) { /* ignore */ } POP = null; CAL = null; renderAll(); if (OVL) { var o = OVL; OVL = null; renderOverlay(); openDrill(o.id); } focusFk('lang:' + v); } return; }
+    if (a === 'refresh') { if (APP.onRefresh) { APP.onRefresh(); } reload(); return; }
+    if (a === 'pop') { if (POP === v) { closePop(true); } else { openPop(v); } return; }
+    if (a === 'popclose') { closePop(true); return; }
+    if (a === 'preset') {
+      if (v !== 'custom') { applyPeriod(v); return; }
+      var r0 = PERIOD[0] || TODAY, r1 = PERIOD[1] || TODAY; CAL = { from: r0, to: r1, view: monthStart(r1 > TODAY ? TODAY : r1), focus: r1 > TODAY ? TODAY : r1 };
+      renderToolbar(); focusFk('day:' + CAL.focus); return;
     }
-    root.innerHTML = h;
-    if (keepSearch) { var inp = root.querySelector('[data-dirf="search"]'); if (inp) { inp.focus(); try { inp.setSelectionRange(caret, caret); } catch (e) {} } }
+    if (a === 'calnav' && CAL) { CAL.view = addMonths(CAL.view, +v); CAL.focus = CAL.view; renderToolbar(); return; }
+    if (a === 'calday' && CAL) { calPick(v); renderToolbar(); focusFk('day:' + v); return; }
+    if (a === 'calapply' && CAL && CAL.from && CAL.to) { applyPeriod('custom', CAL.from, CAL.to); return; }
+    if (a === 'fapply') { applyFilters(FD); focusFk('pop:filters'); return; }
+    if (a === 'fclear') { applyFilters(null); focusFk('pop:filters'); return; }
+    if (a === 'rmf') { var nf = {}; APP.filters.forEach(function (f) { nf[f.k] = F[f.k]; }); nf[v] = ''; applyFilters(nf); focusFk('pop:filters'); return; }
+    if (a === 'pending') {
+      goTab(APP.tabs[0].id); var p = $('#dms-pending');
+      if (p) { var still = G.matchMedia && G.matchMedia('(prefers-reduced-motion: reduce)').matches; try { p.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' }); } catch (e) { p.scrollIntoView(); } p.focus({ preventScroll: true }); }
+      return;
+    }
+    if (a === 'kpi') { openDrill(v); return; }
+    if (a === 'tpage') { TS[id].page = Math.max(1, TS[id].page + (+v)); fillTable(id); return; }
+    if (a === 'tsort') { var st = TS[id]; if (st.sk === v) { st.dir = -st.dir; } else { st.sk = v; st.dir = 1; } st.page = 1; fillTable(id); focusHead(id, v); return; }
+    if (a === 'spage') { var ss = SS[id]; ss.page = Math.max(1, ss.page + (+v)); ss.dirty = true; fillTable(id); return; }
+    if (a === 'ssort') { var s2 = SS[id]; if (s2.sk === v) { s2.dir = -s2.dir; } else { s2.sk = v; s2.dir = 1; } s2.page = 1; s2.dirty = true; fillTable(id); focusHead(id, v); return; }
+    if (a === 'sretry') { SS[id].dirty = true; fillTable(id); return; }
+    if (a === 'csv') { var sp = TBL[id]; download(sp.file || id, sp, clientRows(sp, TS[id])); return; }
+    if (a === 'csvall') { exportServer(id); return; }
   }
-  function dirAfterRender() { if (!detail()) return; if (!DIR.data && !DIR.busy) dirLoad(true); else dirRender(); }
-
-  /* ----- employee detail panel ----- */
-  function pill(text, color) { return '<span class="indicator-pill ' + color + '" style="white-space:nowrap">' + esc(text) + '</span>'; }
-  function kv(pairs) { return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px 16px">' + pairs.map(function (p) { return '<div><div class="text-muted small">' + esc(p[0]) + '</div><div style="font-weight:600">' + (p[2] ? p[1] : esc(p[1] === null || p[1] === undefined || p[1] === '' ? '—' : p[1])) + '</div></div>'; }).join('') + '</div>'; }
-  function sect(title, body, note) { return '<div style="border:1px solid var(--border-color);border-radius:10px;padding:12px;margin-bottom:12px"><div style="font-weight:700;margin-bottom:8px">' + esc(title) + '</div>' + body + (note ? '<div class="text-muted small" style="margin-top:8px">' + esc(note) + '</div>' : '') + '</div>'; }
-  function tbl(cols, rows, empty) {
-    if (!rows || !rows.length) return '<div class="text-muted">' + esc(empty || 'No records.') + '</div>';
-    return '<div style="overflow-x:auto"><table class="table table-sm" style="font-size:12px;margin:0"><thead><tr>' + cols.map(function (c) { return '<th>' + esc(c[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' +
-      rows.map(function (r) { return '<tr>' + cols.map(function (c) { var v = typeof c[0] === 'function' ? c[0](r) : esc(r[c[0]] === null || r[c[0]] === undefined || r[c[0]] === '' ? '—' : r[c[0]]); return '<td>' + v + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>';
+  function focusHead(id, v) { var th = HOST.querySelector('[data-tbl="' + id + '"] th[data-v="' + v + '"]'); if (th) { th.focus(); } }
+  function onInput(ev) {
+    var n = ev.target; if (!n || !n.getAttribute || !HOST.contains(n)) { return; }
+    var fs = n.getAttribute('data-fs'), fd = n.getAttribute('data-fd'), tq = n.getAttribute('data-tq');
+    if (APP.onInput && APP.onInput(n, ev) === true) { return; }
+    if (fs) { if (FS[fs] === n.value) { return; } FS[fs] = n.value; renderToolbar(); return; }
+    if (fd) { if (!FD || FD[fd] === n.value) { return; } FD[fd] = n.value; if (n.type === 'search') { return; } if (APP.filters.some(function (f) { return f.dependsOn === fd; })) { APP.filters.forEach(function (f) { if (f.dependsOn === fd && FD[f.k] && !optList(f, FD).some(function (x) { return x.v === FD[f.k]; })) { FD[f.k] = ''; } }); renderToolbar(); } return; }
+    if (tq) {
+      focusId = tq; var spx = TBL[tq]; if (!spx) { return; }
+      if (spx.server) { var s2 = SS[tq]; if (s2.q === n.value) { return; } s2.q = n.value; s2.page = 1; clearTimeout(onInput.t); onInput.t = later(function () { s2.dirty = true; fillTable(tq); }, 350); }
+      else { var s1 = TS[tq] || (TS[tq] = { q: '', page: 1, sk: spx.sk || '', dir: spx.dir || 1 }); if (s1.q === n.value) { return; } s1.q = n.value; s1.page = 1; fillTable(tq); }
+    }
   }
-  var DOC_PILL = { expired: ['Expired', 'red'], due_30: ['≤ 30 days', 'orange'], due_60: ['≤ 60 days', 'yellow'], due_90: ['≤ 90 days', 'blue'], valid: ['Valid', 'green'], missing: ['Missing', 'gray'] };
-  function counts(o) { var k = Object.keys(o || {}); return k.length ? k.map(function (s) { return esc(s) + ': <b>' + o[s] + '</b>'; }).join(' · ') : '<span class="text-muted">No submitted Attendance records</span>'; }
-  function openEmployee(id) {
-    if (!detail() || !id) return;
-    var dlg = new AHDDialog({ title: 'Employee details', size: 'extra-large', fields: [{ fieldtype: 'HTML', fieldname: 'h' }] });
-    var $w = dlg.fields_dict.h.$wrapper;
-    $w.html('<div class="text-muted" style="padding:30px;text-align:center">Loading employee details…</div>');
-    dlg.show();
-    frappe.call({ method: 'admin_hr_employee_detail', args: { employee: id }, freeze: false,
-      callback: function (r) {
-        var m = r.message; if (!m) { $w.html('<div class="text-muted">No data.</div>'); return; }
-        var b = m.basic, a = m.attendance, l = m.leave, t = m.training, q = m.requests;
-        dlg.set_title(b.employee_name + ' · ' + b.employee);
-        var h = '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">' + pill(b.status, b.status === 'Active' ? 'green' : 'gray') +
-          (b.service_years !== null ? pill(b.service_years + ' yrs service', 'blue') : '') +
-          '<a class="btn btn-xs btn-default" href="/app/employee/' + encodeURIComponent(b.employee) + '" target="_blank">Open Employee record ↗</a></div>';
-        h += sect('A · Basic information', kv([['Employee', b.employee_name + ' (' + b.employee + ')'], ['Company', b.company], ['Department', b.department], ['Designation', b.designation],
-          ['Branch', b.branch], ['Job location', locName(b.job_location)], ['Nationality', b.nationality], ['Date of joining', b.date_of_joining], ['Employment status', b.status],
-          ['Employment type', b.employment_type], ['Reports to', b.reports_to], ['Default shift', b.default_shift]]));
-        var ah = a.available ? kv([['Attendance records (30 days)', counts(a.last_30_days), 1], ['Attendance records (90 days)', counts(a.last_90_days), 1],
-          ['Late entries (30 days)', a.late_entries_30d], ['Days with biometric/mobile punches (30 days)', a.punch_days_30d === undefined ? 'Unavailable' : a.punch_days_30d],
-          ['Last punch', a.last_punch || '—'], ['Last attendance record', a.last_record || '—']]) : '<div class="text-muted">Attendance not readable with your permissions.</div>';
-        h += sect('B · Attendance summary', ah, a.note);
-        var lh = '';
-        if (!l.available) lh = '<div class="text-muted">Leave Applications not readable with your permissions.</div>';
-        else {
-          lh += '<div style="margin-bottom:6px"><b>Leave balance</b> ' + pill(l.balance_state === 'actual' ? 'Actual' : l.balance_state === 'partial' ? 'Partial' : 'Unavailable', l.balance_state === 'actual' ? 'green' : l.balance_state === 'partial' ? 'orange' : 'gray') + '</div>' +
-            ((l.balance_state === 'actual' || l.balance_state === 'partial') ? tbl([['leave_type', 'Leave type'], ['allocated', 'Allocated'], ['balance', 'Balance (approved only)'], ['pending_deducted', 'Pending (not subtracted)'], ['period', 'Allocation period']], l.balances) : '') +
-            '<div class="text-muted small" style="margin:4px 0 10px">' + esc(l.balance_note) + '' + '</div>';
-          lh += '<div style="margin-bottom:6px"><b>Pending applications</b> (' + l.pending.length + ')' + (l.drafts ? ' · ' + l.drafts + ' draft(s) not yet sent' : '') + '</div>' +
-            tbl([[function (x) { return '<a href="/app/leave-application/' + encodeURIComponent(x.name) + '" target="_blank">' + esc(x.name) + '</a>'; }, 'Application'], ['leave_type', 'Type'], ['from_date', 'From'], ['to_date', 'To'], ['days', 'Days'], ['workflow_state', 'State']], l.pending, 'No pending applications.');
-          lh += '<div style="margin:10px 0 6px"><b>Approved leave history</b> (' + l.approved_total + ' total, latest ' + l.approved_history.length + ')</div>' +
-            tbl([[function (x) { return '<a href="/app/leave-application/' + encodeURIComponent(x.name) + '" target="_blank">' + esc(x.name) + '</a>'; }, 'Application'], ['leave_type', 'Type'], ['from_date', 'From'], ['to_date', 'To'], ['days', 'Days']], l.approved_history, 'No approved leave.');
-        }
-        h += sect('C · Leave information', lh);
-        h += sect('D · Documents & compliance', tbl([['document', 'Document'], ['date', 'Expiry date'], [function (x) { return x.days_left === null ? '—' : String(x.days_left); }, 'Days left'],
-          [function (x) { var p = DOC_PILL[x.status] || ['—', 'gray']; return pill(p[0], p[1]); }, 'Status'], ['attachment', 'Copy on file'], [function (x) { return x.warning ? '<span style="color:var(--red-600,#b91c1c)">' + esc(x.warning) + '</span>' : ''; }, 'Check']], m.documents),
-          'Only expiry dates and status are shown. ID, Iqama and passport numbers, bank, salary and medical details are never returned by this panel.');
-        var th = !t.available ? '<div class="text-muted">Training progress not readable with your permissions.</div>' :
-          kv([['Assigned', t.assigned], ['Completed', t.completed], ['Pending', t.pending], ['Overdue', t.overdue]]) + '<div style="margin-top:8px">' +
-          tbl([['training', 'Training'], ['status', 'Status'], ['due_date', 'Due'], ['completed_on', 'Completed']], t.items, 'No training assigned.') + '</div>';
-        h += sect('E · Training progress', th);
-        h += sect('F · HR requests', tbl([['doctype', 'Type'], [function (x) { return '<a href="/app/' + frappe.router.slug(x.doctype) + '/' + encodeURIComponent(x.name) + '" target="_blank">' + esc(x.name) + '</a>'; }, 'Document'],
-          ['state', 'State'], [function (x) { return x.open ? pill('Open', 'orange') : pill('Closed', 'gray'); }, ''], ['created', 'Created']], q.items, 'No HR requests linked to this employee.'),
-          q.unavailable.length ? 'Not readable with your permissions: ' + q.unavailable.join(', ') : 'Sources: Leave Request Form, DM Letter Forms, Attendance Request, Employee Clearance, Qiwa contract renewal request, IT Help Desk Request, Resignation Letter.');
-        $w.html(h);
-      },
-      error: function () { $w.html('<div class="text-muted" style="padding:20px">Employee details are not available (not permitted or not found).</div>'); } });
+  function onKey(ev) {
+    var t = ev.target, act = t && t.getAttribute ? t.getAttribute('data-act') : null, rtl = LANG === 'ar', k = ev.key;
+    if (k === 'Escape') {
+      if (POP) { ev.preventDefault(); closePop(true); return; }
+      if (OVL) { closeOverlay(); }
+      return;
+    }
+    if ((k === 'Enter' || k === ' ') && (act === 'tsort' || act === 'ssort')) { ev.preventDefault(); t.click(); return; }
+    if (k === 'Tab' && OVL) {
+      var modal = $('.dms-modal'), controls = Array.prototype.filter.call(modal.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), [tabindex="0"]'), function (el) { return el.getClientRects().length; });
+      var first = controls[0], last = controls[controls.length - 1];
+      if (ev.shiftKey && t === first) { ev.preventDefault(); last.focus(); }
+      else if (!ev.shiftKey && t === last) { ev.preventDefault(); first.focus(); }
+    }
+    if (act === 'tab' && /^(ArrowLeft|ArrowRight|Home|End)$/.test(k)) {
+      var ids = APP.tabs.map(function (x) { return x.id; }), i = ids.indexOf(t.getAttribute('data-v')), L = ids.length;
+      var d = k === 'Home' ? -i : k === 'End' ? L - 1 - i : ((k === 'ArrowRight') !== rtl ? 1 : -1);
+      ev.preventDefault(); goTab(ids[(i + d + L) % L], true); return;
+    }
+    if (act === 'calday' && CAL) {
+      var cur = t.getAttribute('data-v'), step = { ArrowRight: rtl ? -1 : 1, ArrowLeft: rtl ? 1 : -1, ArrowUp: -7, ArrowDown: 7 }[k];
+      if (step) { ev.preventDefault(); calMove(addDays(cur, step)); return; }
+      if (k === 'PageUp' || k === 'PageDown') { ev.preventDefault(); calMove(shiftMonths(cur, k === 'PageUp' ? -1 : 1)); return; }
+      if (k === 'Home' || k === 'End') { ev.preventDefault(); calMove(k === 'Home' ? weekStartOf(cur) : addDays(weekStartOf(cur), 6)); }
+    }
   }
-
-  function vEmployees(d) {
-    var e = d.employees,
-        mon = d.meta.date.slice(0, 7),
-        since = frappe.datetime.add_months(d.meta.date, -12);
-
-    var h = '<div class="sh">Employee management</div>';
-    h += '<div class="grid kpi-row employee-kpi-grid" style="--cols:11">';
-
-    h += card(
-        'Total Active Employees',
-        e.active,
-        'actual',
-        'Employee.status = Active (current filters)',
-        '',
-        spec('Active employees', rows('active'), routeFor('Employee', rows('active')))
-    );
-
-    h += card(
-        'Total Departments',
-        e.departments_count,
-        'actual',
-        'Distinct departments with active employees',
-        '',
-        spec('Department headcount',
-            e.by_department.map(function (x) {
-                return { department: x.label, active_employees: x.count };
-            }),
-            { doctype: 'Department', options: {} }
-        )
-    );
-
-    h += card(
-        'New Joiners This Month',
-        e.joined_this_month,
-        'actual',
-        'date_of_joining in ' + mon,
-        '',
-        spec('Joined this month', rows('joined_month'), routeFor('Employee', rows('joined_month')))
-    );
-
-    var ol = ov('on_leave');
-    h += card('On Approved Leave Today', ol.value, ol.state, ol.note, '', kspec(ol));
-
-    h += card(
-        'Saudi Employees',
-        e.saudi,
-        'actual',
-        'custom_employee_nationality = Saudi Arabia',
-        '',
-        spec('Saudi employees', rows('saudi'), routeFor('Employee', rows('saudi')))
-    );
-
-    h += card(
-        'Non-Saudi Employees',
-        e.non_saudi,
-        e.nationality_missing ? 'partial' : 'actual',
-        'custom_employee_nationality set and not Saudi Arabia',
-        e.nationality_missing ? e.nationality_missing + ' without nationality' : '',
-        spec('Non-Saudi employees', rows('non_saudi'), routeFor('Employee', rows('non_saudi')))
-    );
-
-    h += card(
-        'Employees with Expiring Documents',
-        e.expiring_employees,
-        'partial',
-        'Iqama/ID, passport, contract or insurance expired or due within 60 days. Missing dates are not counted.',
-        '',
-        spec('Employees with expiring documents', rows('expiring_employees'), routeFor('Employee', rows('expiring_employees')))
-    );
-
-    h += card(
-        'Joiners (12 months)',
-        e.joiners_12m,
-        'actual',
-        'Active + left employees by date_of_joining',
-        '',
-        empListSpec('Joiners', {
-            status: ['in', ['Active', 'Left', 'Inactive', 'Suspended']],
-            date_of_joining: ['>=', since]
-        })
-    );
-
-    h += card(
-        'Leavers (12 months)',
-        e.leavers_12m,
-        'actual',
-        'Status Left with relieving_date in last 12 months',
-        '',
-        empListSpec('Leavers', {
-            status: 'Left',
-            relieving_date: ['>=', since]
-        })
-    );
-
-    h += card(
-        'Linked to ERPNext user',
-        e.with_user,
-        e.with_user === e.active ? 'actual' : 'partial',
-        (e.active - e.with_user) + ' without user_id',
-        '',
-        spec('Employees without ERPNext user', dqRows('missing_user'), routeFor('Employee', dqRows('missing_user')))
-    );
-
-    h += card(
-        'Left / Inactive / Suspended',
-        e.inactive_or_left_in_filter,
-        'actual',
-        'All time, same company and filters',
-        '',
-        empListSpec('Not active', {
-            status: ['in', ['Left', 'Inactive', 'Suspended']]
-        })
-    );
-
-    h += '</div>';
-    h += '<div class="sh">Employee analytics</div><div class="g2 analytics-row employee-analytics-row" style="--cols:8">';
-    function by(field) { return function (x) { var o = {}; o[field] = x.label === '(Not set)' ? ['is', 'not set'] : (x.code !== undefined ? x.code : x.label); return empListSpec(x.label, o); }; }
-    h += panel('Department-wise headcount', hbars(e.by_department, by('department')), detail() ? 'Click a bar to open the filtered Employee list.' : '');
-    h += panel('Branch-wise headcount', hbars(e.by_branch, by('branch')));
-    h += panel('Nationality distribution', hbars(d.analytics.nationality, by('custom_employee_nationality')), 'Source: custom_employee_nationality.');
-    h += panel('Monthly joining trend (12 months)', trendChart(e.joining_trend.map(function (x) { return { date: x.label, label: x.label.slice(2), count: x.count }; })), 'Active and former employees by date_of_joining.');
-    h += panel('Employment status distribution', hbars(e.status_distribution, function (x) { return { title: x.label, rows: null, route: { doctype: 'Employee', options: Object.assign(baseEmp(), { status: x.label }) } }; }), 'All statuses for the selected company and filters.');
-    h += panel('By job location', hbars(locList(e.by_location), by('custom_job_location')));
-    h += panel('Top designations', hbars(e.by_designation, by('designation')));
-    h += panel('By employment type', hbars(e.by_employment_type, by('employment_type')), 'employment_type is often blank. See Data Quality.');
-    h += '</div>';
-    h += '<div class="sh">Employee directory</div>';
-    if (detail()) h += '<div class="panel"><div data-dir-root></div><div class="ph" style="margin:8px 0 0">Server-side search, filters, sorting and pages. Results respect your ERPNext permissions and Employee User Permissions. Click a row for the employee detail panel.</div></div>';
-    else h += '<div class="alert i">&#128274; The employee directory and employee details are available to HR Manager / HR User only. Your view shows aggregate figures.</div>';
-    return h;
+  /* Start: wire events, render the skeleton, run APP.boot (reference lists), then the first load. */
+  function start() {
+    HOST.addEventListener('click', onClick, SIG);
+    HOST.addEventListener('input', onInput, SIG);
+    HOST.addEventListener('change', onInput, SIG);
+    HOST.addEventListener('keydown', onKey, SIG);
+    HOST.addEventListener('pointerover', onOver, SIG);
+    HOST.addEventListener('pointerleave', hideTip, SIG);
+    HOST.addEventListener('focusin', function (ev) { var n = ev.target.closest && ev.target.closest('[data-tip]'); if (n) { showTip(n); } }, SIG);
+    HOST.addEventListener('focusout', hideTip, SIG);
+    document.addEventListener('pointerdown', function (ev) {
+      if (!POP) { return; } var p = ev.composedPath ? ev.composedPath() : [];
+      for (var i = 0; i < p.length; i++) { if (p[i] === HOST) { return; } }
+      closePop(false);
+    }, SIG);
+    if (!G.frappe || !frappe.call) { HOST.innerHTML = '<div class="dms-empty">Frappe client API not available.</div>'; return; }
+    setToday(); PERIOD = curPeriod();
+    var chartResize = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fitChartLabels) : null;
+    if (chartResize) { chartResize.observe(HOST); if (abort) { abort.signal.addEventListener('abort', function () { chartResize.disconnect(); }); } }
+    if (document.fonts) { document.fonts.ready.then(function () { if (!destroyed) { fitChartLabels(); } }); }
+    renderAll();
+    var g = GEN, chk = function () { return g === GEN && !destroyed; };
+    Promise.resolve(APP.boot ? APP.boot(chk) : null).catch(function (e) { if (G.console) { console.error(APP.key, 'boot', e); } }).then(function () { if (destroyed) { return; } BOOTED = true; reload(); });
   }
-  // Business weekoff policy: Friday for all; Saturday additionally for Saudi nationals.
-  // Only complete permission-filtered row sets can support distinct-person totals.
+  /* ==== end DMS kit ==== */
+
+  /* ============================================================ arguments (as v3) */
+  function mainArgs() { return { company: F.company, department: F.department, branch: F.branch, job_location: F.job_location, from_date: PERIOD[0], to_date: PERIOD[1] }; }
+  function gf(extra) { var o = { company: F.company || (D.ov && D.ov.meta.company) || '' }; if (F.department) { o.g_department = F.department; } if (F.branch) { o.g_branch = F.branch; } if (F.job_location) { o.g_job_location = F.job_location; } return Object.assign(o, extra || {}); }
+  function isDetail() { return !!(D.ov && D.ov.meta.tier === 'detail'); }
+  function R(k) { return (D.ov && D.ov.rows && D.ov.rows[k]) || []; }
+  function nn(v) { return v === null || v === undefined || v === '' ? null : Number(v); }
+  function nv(v, sfx) { var x = nn(v); return x === null || isNaN(x) ? '—' : num(x) + (sfx || ''); }
+  function sumOf(list, f) { var t = 0, ok = false; (list || []).forEach(function (x) { var v = nn(f(x)); if (v !== null && !isNaN(v)) { t += v; ok = true; } }); return ok ? t : null; }
+  function pctOf(a, b) { return a === null || a === undefined || !b ? null : Math.round(1000 * a / b) / 10; }
+  var ST = { actual: ['Actual', 'ok'], partial: ['Partial', 'warn'], missing: ['Missing data', 'n'], unavailable: ['Unavailable', 'bad'] };
+  function stTag(s) { var x = ST[s] || ST.unavailable; return stat(x[1], L(x[0])); }
+  function sevTag(s) { return stat(s === 'high' ? 'bad' : s === 'medium' ? 'warn' : 'n', L(s === 'high' ? 'High' : s === 'medium' ? 'Medium' : 'Low')); }
+  function two(a, b) { return '<div class="dms-cols-2 dms-grid">' + a + b + '</div>'; }
+  function three(a, b, c) { return '<div class="dms-grid ah-cols-3">' + a + b + c + '</div>'; }
+  function need(key, what, f) { if (D[key + 'Err']) { return srcErr(D[key + 'Err'], what); } if (D[key] == null) { return '<div class="dms-grid dms-kpis" aria-busy="true">' + skel(4, 'dms-skel-kpi') + '</div><div class="dms-skel dms-skel-panel"></div>'; } return f(D[key]); }
+  function lbl(x) { return x.suppressed ? L('(fewer than 3)') : (x.label == null || x.label === '' ? L('(Not set)') : x.label); }
+  function bars(list, key, fmt, max) { var it = (list || []).filter(function (x) { return nn(x[key]) !== null || x.suppressed; }).map(function (x) { return { label: lbl(x), value: x.suppressed ? 0 : nn(x[key]) }; }); return it.length ? hbars(it.slice(0, max || 12), fmt || num) : empty(L('No records.')); }
+  function facts(rows) { return '<div class="dms-facts ah-facts">' + rows.map(function (r) { return '<div' + (r[3] ? ' class="ah-fact-act"' : '') + '><span class="dms-sm">' + esc(L(r[0])) + '</span><b class="dms-num">' + (r[3] ? '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="' + esc(r[3]) + '">' + r[1] + '</button>' : r[1]) + '</b>' + (r[2] ? '<span class="dms-sm">' + esc(L(r[2])) + '</span>' : '') + '</div>'; }).join('') + '</div>'; }
+  function mini(cols, rows, emptyTxt) { return rows.length ? '<div class="dms-tablewrap"><table class="dms-table dms-table-sm ah-mini"><thead><tr>' + cols.map(function (c) { return '<th scope="col"' + (c[2] ? ' class="dms-num"' : '') + '>' + esc(L(c[0])) + '</th>'; }).join('') + '</tr></thead><tbody>' + rows.map(function (r) { return '<tr>' + cols.map(function (c) { return '<td' + (c[2] ? ' class="dms-num"' : '') + '>' + c[1](r) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>' : empty(L(emptyTxt || 'No records.')); }
+  function empBtn(r) { return isDetail() && r.employee ? '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="emp:' + esc(r.employee) + '">' + bdi(r.employee_name || r.employee) + '</button>' : bdi(r.employee_name || r.employee || '—'); }
+  function lockNote() { return alertBox('info', esc(L('Employee-level lists are available to HR Manager / HR User only. Your view shows aggregate figures.'))); }
+  function rowsDrill(id, title, rows, dt, cols) { DRL[id] = { title: title, rows: rows, dt: dt || 'Employee', cols: cols }; return 'rows:' + id; }
+  var DRL = {};
+
+  /* ============================================================ attendance policy (v3, unchanged rule) */
   function attendancePolicy(d) {
     var a = d.attendance || {}, rr = d.rows || {}, e = d.employees || {};
     function list(k) { return rr[k] || []; }
-    function distinct(rs) {
-      var seen = Object.create(null);
-      return rs.filter(function (r) { if (!r.employee || seen[r.employee]) return false; seen[r.employee] = true; return true; });
-    }
+    function distinct(rs) { var seen = Object.create(null); return rs.filter(function (r) { if (!r.employee || seen[r.employee]) { return false; } seen[r.employee] = true; return true; }); }
     function complete(rs, count) { return typeof count === 'number' && distinct(rs).length === count; }
-    var date = d.meta.date, day = /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? new Date(date + 'T12:00:00Z').getUTCDay() : NaN;
-    var friday = day === 5, saturday = day === 6;
-    var saudi = Object.create(null), nationals = list('saudi');
-    nationals.forEach(function (r) { saudi[r.employee] = true; });
+    var date = d.meta.date, day = /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? new Date(date + 'T12:00:00Z').getUTCDay() : NaN, friday = day === 5, saturday = day === 6;
+    var saudi = Object.create(null), nationals = list('saudi'); nationals.forEach(function (r) { saudi[r.employee] = true; });
     var saudiComplete = complete(nationals, e.saudi);
-    function nationality(r) {
-      return String(r.custom_employee_nationality || r.nationality || r.custom_nationality || '').trim().toLowerCase();
-    }
+    function nationality(r) { return String(r.custom_employee_nationality || r.nationality || r.custom_nationality || '').trim().toLowerCase(); }
     function isSaudi(r) { return !!saudi[r.employee] || ['saudi arabia', 'saudi', 'saudi arabian', 'المملكة العربية السعودية', 'السعودية'].indexOf(nationality(r)) >= 0; }
     function knownNationality(r) { return saudiComplete || !!nationality(r) || !!saudi[r.employee]; }
     function working(r) { return !friday && !(saturday && isSaudi(r)); }
-    var noPunch = distinct(list('no_punch')), recorded = distinct(list('absent_recorded'));
-    var leave = Object.create(null);
-    list('on_leave').forEach(function (r) { leave[r.employee] = true; });
-    var leaveKpi = (d.overview || []).filter(function (k) { return k.key === 'on_leave'; })[0] || {};
-    var leaveCount = typeof a.on_leave === 'number' ? a.on_leave : leaveKpi.value;
-    // Never classify employees as absent when the approved-leave exclusion set is incomplete.
+    /* v3 read rows "absent_recorded", which the API never sends; the API's list of recorded absences is "absent_today" */
+    var noPunch = distinct(list('no_punch')), recorded = distinct(list('absent_recorded').length ? list('absent_recorded') : list('absent_today'));
+    var leave = Object.create(null); list('on_leave').forEach(function (r) { leave[r.employee] = true; });
+    var leaveKpi = (d.overview || []).filter(function (k) { return k.key === 'on_leave'; })[0] || {}, leaveCount = typeof a.on_leave === 'number' ? a.on_leave : leaveKpi.value;
     var leaveComplete = typeof leaveCount === 'number' ? complete(list('on_leave'), leaveCount) : Array.isArray(rr.on_leave);
-    var noPunchComplete = complete(noPunch, a.no_punch_unconfirmed);
-    var recordedComplete = complete(recorded, a.absent_recorded);
-    var candidates = distinct(noPunch.concat(recorded));
-    var nationalityKnown = !saturday || candidates.every(knownNationality);
+    var noPunchComplete = complete(noPunch, a.no_punch_unconfirmed), recordedComplete = complete(recorded, a.absent_recorded);
+    var candidates = distinct(noPunch.concat(recorded)), nationalityKnown = !saturday || candidates.every(knownNationality);
     var available = !!a.ok && !isNaN(day) && (friday || (noPunchComplete && recordedComplete && nationalityKnown && leaveComplete));
-    var missing = noPunch.filter(function (r) { return working(r) && !leave[r.employee]; });
-    var confirmed = recorded.filter(function (r) { return working(r) && !leave[r.employee]; });
-    var absent = distinct(confirmed.concat(missing)).map(function (r) {
-      return Object.assign({}, r, { attendance_date: date, absence_basis: confirmed.some(function (c) { return c.employee === r.employee; }) ? 'Recorded Attendance = Absent' : 'Inferred: no punch and no approved leave' });
-    });
+    var missing = noPunch.filter(function (r) { return working(r) && !leave[r.employee]; }), confirmed = recorded.filter(function (r) { return working(r) && !leave[r.employee]; });
+    var absent = distinct(confirmed.concat(missing)).map(function (r) { return Object.assign({}, r, { attendance_date: date, absence_basis: confirmed.some(function (c) { return c.employee === r.employee; }) ? 'Recorded Attendance = Absent' : 'Inferred: no punch and no approved leave' }); });
     var recordedAvailable = !isNaN(day) && (friday || (recordedComplete && leaveComplete && (!saturday || recorded.every(knownNationality))));
     var note = 'Approved leave always takes precedence over both missing punches and recorded Absent attendance. No punch without approved leave is treated as inferred absence. Fridays are excluded for everyone; Saturdays are also excluded for Saudi nationals. Counts can change as punches or leave approvals arrive.';
-    if (!available && !friday) note += ' Complete employee-level absence and approved-leave rows (and Saturday nationality data) are required; an unavailable count is never shown as zero.';
-    return { count: available ? absent.length : null, rows: available ? absent : [],
-      recorded: recordedAvailable ? confirmed.length : null, recordedRows: recordedAvailable ? confirmed : [],
-      inferred: available ? absent.filter(function (r) { return !confirmed.some(function (c) { return c.employee === r.employee; }); }).length : null,
-      friday: friday, saturday: saturday, note: note, available: available };
+    if (!available && !friday) { note += ' Complete employee-level absence and approved-leave rows (and Saturday nationality data) are required; an unavailable count is never shown as zero.'; }
+    return { count: available ? absent.length : null, rows: available ? absent : [], recorded: recordedAvailable ? confirmed.length : null, recordedRows: recordedAvailable ? confirmed : [], inferred: available ? absent.filter(function (r) { return !confirmed.some(function (c) { return c.employee === r.employee; }); }).length : null, friday: friday, saturday: saturday, note: note, available: available };
   }
-  function absenceSpec(p, recorded) {
-    if (!(recorded ? p.recorded !== null : p.available)) return null;
-    var rs = recorded ? p.recordedRows : p.rows;
-    return spec(recorded ? 'Recorded absences · approved leave and weekoffs excluded' : 'Absent today · approved leave and weekoffs excluded', rs, routeFor('Employee', rs));
-  }
-  function vAttendance(d) {
-    var a = d.attendance, s = d.system_status, dt = d.meta.date, p = attendancePolicy(d);
-    var h = '<div class="sh">Attendance overview</div><div class="alert i attendance-policy">' + esc(p.note) + '</div>';
-    h += '<div class="grid kpi-row attendance-kpi-row" style="--cols:6">';
-    h += card('Checked-in today', a.ok ? a.checked_in : null, a.ok ? 'actual' : 'unavailable', 'Distinct employees with at least one punch on ' + dt, '', spec('Checked-in today', rows('checked_in'), routeFor('Employee Checkin', rows('checked_in'), [['time', 'between', [dt + ' 00:00:00', dt + ' 23:59:59']]])));
-    h += card('Punches today', a.ok ? a.punches_today : null, a.ok ? 'actual' : 'unavailable', 'All biometric and mobile punches today.', (a.mobile_punches == null ? '—' : a.mobile_punches) + ' mobile · ' + (a.other_punches == null ? '—' : a.other_punches) + ' device/untagged', { title: 'Punches', rows: null, route: { doctype: 'Employee Checkin', options: { time: ['Between', [dt + ' 00:00:00', dt + ' 23:59:59']], employee: ['in', ids(rows('active'))] } } });
-    h += card('Absent today', p.count, p.available ? (p.friday ? 'actual' : 'partial') : 'unavailable', p.note, p.inferred === null ? 'Employee-level data required' : p.inferred + ' inferred · ' + p.recorded + ' recorded', absenceSpec(p));
-    h += card('Recorded absences', p.recorded, p.recorded === null ? 'unavailable' : 'actual', 'Submitted Attendance marked Absent, excluding approved leave and weekly days off. Already included in Absent today.', 'Weekoffs excluded', absenceSpec(p, true));
-    ['on_leave', 'late'].forEach(function (key) { var k = ov(key); if (k) h += card(k.label, k.value, k.state, k.note, k.sub, kspec(k)); });
-    h += '</div><div class="sh">Attendance analytics</div><div class="g2 analytics-row attendance-analytics-row" style="--cols:' + (detail() ? 4 : 3) + '">';
-    h += panel('Daily check-ins · 14 days', trendChart(a.trend || []), 'Distinct employees with punches. Friday is a weekoff for all; Saturday is also a weekoff for Saudi nationals.');
-    h += panel('Submitted attendance today', (a.attendance_docs_today || []).length ? hbars(a.attendance_docs_today) : '<div class="muted">No submitted Attendance records for this date.</div>', 'Raw submitted records; the absence KPIs apply the weekoff policy.');
-    var ss = (s.auto_attendance && s.auto_attendance.stale_shifts) || [];
-    h += panel('Auto-attendance sync', s.auto_attendance && s.auto_attendance.readable === false ? '<div class="muted">Shift Type not readable with your permissions.</div>' : table([['shift', 'Shift type'], ['last_sync', 'Last check-in sync']], ss, { empty: 'All auto-attendance shifts synced recently.' }), 'Enabled shifts with no sync in the last 2 days.');
-    if (detail()) h += panel('Late check-ins', table([[empLink, 'ID'], ['employee_name', 'Name'], ['shift', 'Shift'], ['first_punch', 'First punch'], [function (r) { return num(r.late_by_min); }, 'Late (min)', 1]], rows('late'), { empty: 'No late check-ins.' }), 'First punch after shift start plus entry grace.');
-    return h + '</div>';
-  }
-  /* ---------------- Leave & Approvals tab (Phase 4) ---------------- */
-  var LV = { sum: null, busy: false, err: null, seq: 0, f: { company: '', from_date: '', to_date: '' }, cal: '',
-    L: { data: null, busy: false, err: null, seq: 0, preset: '', title: 'All leave applications', extra: {},
-      f: { search: '', department: '', employee: '', leave_type: '', status: '', workflow_state: '', range_from: '', range_to: '' },
-      page: 1, pl: 25, sort: 'from_date', order: 'desc' } };
-  var LV_COLS = [['name', 'Application', 'name'], ['employee_name', 'Employee', 'employee_name'], ['department', 'Department', 'department'],
-    ['company', 'Company', 'company'], ['leave_type', 'Leave Type', 'leave_type'], ['from_date', 'From', 'from_date'], ['to_date', 'To', 'to_date'],
-    ['days', 'Days', 'days'], ['workflow_state', 'Workflow State', 'workflow_state'], ['status', 'Application Status', 'status'],
-    ['approver', 'Approver', 'approver'], ['age_label', 'Approval Age', 'age_days']];
-  var LV_CLS = { approved: ['Approved', 'ok'], pending: ['Pending', 'warn'], rejected: ['Rejected', 'bad'], cancelled: ['Cancelled', 'muted'],
-    draft: ['Draft', 'muted'], conflict: ['Conflict', 'bad'], other: ['Other', 'muted'] };
-  var LV_PILL = { approved: 'green', pending: 'orange', rejected: 'red', cancelled: 'gray', draft: 'gray', conflict: 'red', other: 'gray' };
-  function lvArgs(a) {
-    return gfArgs(Object.assign({ from_date: LV.f.from_date, to_date: LV.f.to_date }, a || {}));
-  }
-  function lvLoad() {
-    LV.busy = true; LV.err = null; lvRender();
-    var seq = ++LV.seq;
-    frappe.call({ method: 'admin_hr_leave_data', args: lvArgs({ mode: 'summary', cal_month: LV.cal }), freeze: false,
-      callback: function (r) { if (seq !== LV.seq) return; LV.busy = false; LV.sum = r.message || null;
-        if (LV.sum) { LV.f.company = LV.sum.meta.company; LV.f.from_date = LV.sum.meta.from_date; LV.f.to_date = LV.sum.meta.to_date; LV.cal = LV.sum.analytics.calendar.month; }
-        lvRender(); if (LV.sum && LV.sum.meta.tier === 'detail' && !LV.L.data) lvList(); },
-      error: function () { if (seq !== LV.seq) return; LV.busy = false; LV.err = 'Could not load leave data. You may not have permission.'; lvRender(); } });
-  }
-  function lvList() {
-    var L = LV.L; if (!LV.sum || LV.sum.meta.tier !== 'detail') return;
-    L.busy = true; L.err = null; lvRenderList();
-    var seq = ++L.seq;
-    frappe.call({ method: 'admin_hr_leave_data', args: lvArgs(Object.assign({ mode: 'list', preset: L.preset, page: L.page, page_length: L.pl, sort_by: L.sort, sort_order: L.order }, L.f, L.extra)), freeze: false,
-      callback: function (r) { if (seq !== L.seq) return; L.busy = false; L.data = r.message || null; if (L.data) L.page = L.data.page; lvRenderList(); },
-      error: function () { if (seq !== L.seq) return; L.busy = false; L.err = 'Could not load leave applications.'; lvRenderList(); } });
-  }
-  function lvPreset(preset, title, extra, filters) {
-    var L = LV.L; L.preset = preset || ''; L.title = title || 'All leave applications'; L.extra = extra || {}; L.page = 1;
-    L.f = Object.assign({ search: '', department: '', employee: '', leave_type: '', status: '', workflow_state: '', range_from: '', range_to: '' }, filters || {});
-    if (preset && preset.indexOf('age') === 0 || preset === 'kpi_pending' || preset === 'kpi_pending_old' || preset.indexOf('q_') === 0) { L.sort = 'age_days'; L.order = 'desc'; }
-    else { L.sort = 'from_date'; L.order = 'desc'; }
-    lvList();
-    var el = host.querySelector('[data-lv-dir]'); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-  function lvSel(key, label, list, cur, all) {
-    return '<label>' + esc(label) + '<select data-lvf="' + key + '">' + (all !== undefined ? '<option value="">' + esc(all) + '</option>' : '') +
-      (list || []).map(function (x) { return '<option value="' + esc(x) + '"' + (x === cur ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('') + '</select></label>';
-  }
-  function lvCard(label, value, sub, note, attr, state) {
-    var click = !!attr;
-    return '<div class="card' + (click ? ' click' : '') + '"' + (attr || '') + '><div class="lb"><span>' + esc(label) + '</span>' + badge(state || (value === null || value === undefined ? 'unavailable' : 'actual')) + '</div>' +
-      (value === null || value === undefined ? '<div class="v na">Not available</div>' : '<div class="v">' + num(value) + '</div>') +
-      (sub ? '<div class="sub">' + esc(sub) + '</div>' : '') + (note ? '<div class="nt" title="' + esc(note) + '">' + esc(note) + '</div>' : '') +
-      (click ? '<div class="ft">View applications &rarr;</div>' : (LV.sum && LV.sum.meta.tier !== 'detail' ? '<div class="ft muted">&#128274; Details: HR Manager / HR User</div>' : '')) + '</div>';
-  }
-  function lvBars(list, valKey, attrFn, fmt) {
-    if (!list || !list.length) return '<div class="muted">No records.</div>';
-    var m = 0; list.forEach(function (x) { if ((x[valKey] || 0) > m) m = x[valKey] || 0; });
-    var dt = LV.sum && LV.sum.meta.tier === 'detail';
-    return '<div class="lvbars">' + list.slice(0, 40).map(function (x) {
-      var w = m ? Math.max(2, Math.round((x[valKey] || 0) / m * 100)) : 0;
-      return '<div class="lvbr' + (dt && attrFn ? ' click' : '') + '"' + (dt && attrFn ? attrFn(x) : '') + ' title="' + esc(x.label) + '"><span class="lvbl">' + esc(x.label) + '</span><span class="lvbt"><span style="width:' + w + '%"></span></span><span class="lvbv">' + (fmt ? fmt(x) : num(x[valKey])) + '</span></div>';
-    }).join('') + '</div>';
-  }
-  function lvAttr(o) { return Object.keys(o).map(function (k) { return ' data-' + k + '="' + esc(o[k]) + '"'; }).join(''); }
-  function lvMonthChart(list) {
-    var m = 0; list.forEach(function (x) { if (x.paid + x.lwp > m) m = x.paid + x.lwp; });
-    var dt = LV.sum && LV.sum.meta.tier === 'detail';
-    return '<div class="lvmc">' + list.map(function (x) {
-      var hp = m ? Math.round(x.paid / m * 100) : 0, hl = m ? Math.round(x.lwp / m * 100) : 0;
-      return '<div class="lvmcol' + (dt ? ' click' : '') + '"' + (dt ? lvAttr({ lvmonth: x.month }) : '') + ' title="' + esc(x.month + ': ' + x.paid + ' paid + ' + x.lwp + ' unpaid days, ' + x.apps + ' applications') + '">' +
-        '<div class="lvmv">' + num(Math.round(x.paid + x.lwp)) + '</div><div class="lvmbar"><span class="lwp" style="height:' + hl + '%"></span><span class="paid" style="height:' + hp + '%"></span></div><div class="lvml">' + esc(x.month.slice(2)) + '</div></div>';
-    }).join('') + '</div><div class="lvlegend"><span><i class="paid"></i>Paid leave days</span><span><i class="lwp"></i>Unpaid (LWP) days</span></div>';
-  }
-  function lvCalendar(c) {
-    var days = c.days || [], m = 0; days.forEach(function (x) { if (x.count > m) m = x.count; });
-    var first = new Date(c.month + '-01T00:00:00'), pad = first.getDay(), dt = LV.sum && LV.sum.meta.tier === 'detail', today = LV.sum.meta.today;
-    var h = '<div class="lvcalh"><button class="btn s sm" data-lvcal="-1">‹</button><b>' + esc(window.moment ? moment(c.month + '-01').format('MMMM YYYY') : c.month) + '</b><button class="btn s sm" data-lvcal="1">›</button></div>';
-    h += '<div class="lvcal">' + ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(function (d) { return '<div class="lvcd">' + d + '</div>'; }).join('');
-    for (var i = 0; i < pad; i++) h += '<div></div>';
-    days.forEach(function (x) {
-      var a = m ? (0.12 + 0.88 * x.count / m) : 0;
-      h += '<div class="lvcc' + (x.count && dt ? ' click' : '') + (x.date === today ? ' today' : '') + '"' + (x.count && dt ? lvAttr({ lvday: x.date }) : '') + ' title="' + esc(x.date + ': ' + x.count + ' employee(s) on approved leave') + '" style="' + (x.count ? 'background:rgba(37,99,235,' + a.toFixed(2) + ');color:' + (a > 0.55 ? '#fff' : 'inherit') : '') + '"><span>' + parseInt(x.date.slice(8), 10) + '</span><b>' + (x.count || '') + '</b></div>';
-    });
-    return h + '</div>';
-  }
-  function vLeave(d) {
-    return '<div data-lv-root></div>';
-  }
-  function lvAfterRender() { if (!LV.sum && !LV.busy) lvLoad(); else lvRender(); }
-  function lvRender() {
-    var root = host.querySelector('[data-lv-root]'); if (!root) return;
-    var s = LV.sum, h = '';
-    var comps = (s && s.meta.companies) || (S.d && S.d.meta.companies) || [];
-    h += scopeLine('leave') + '<div class="dirbar lvperiod">' +
-      '<label>Period from<input type="date" data-lvp-from value="' + esc(LV.f.from_date) + '"></label><label>Period to<input type="date" data-lvp-to value="' + esc(LV.f.to_date) + '"></label>' +
-      '<button class="btn s" data-lva="apply">Apply</button><button class="btn s" data-lva="ytd">Year to date</button><button class="btn s" data-lva="month">This month</button>' +
-      (LV.busy ? '<span class="muted"><span class="spin"></span> Loading…</span>' : '') + '</div>';
-    if (LV.err) h += '<div class="alert e">' + esc(LV.err) + '</div>';
-    if (!s) { root.innerHTML = h + (LV.busy ? '<div class="ld">Loading leave data…</div>' : ''); return; }
-    var dt = s.meta.tier === 'detail', K = {};
-    s.kpis.forEach(function (k) { K[k.key] = k; });
-    function kc(k) { return lvCard(k.label, k.value, k.sub, k.basis, dt && k.preset ? (k.preset === 'no_alloc_emp' ? lvAttr({ lvnoalloc: '' }) : lvAttr({ lvpre: k.preset, lvt: k.label })) : ''); }
-    h += '<div class="sh">Leave dashboard <span class="muted" style="font-weight:400;text-transform:none">· period ' + esc(s.meta.from_date) + ' → ' + esc(s.meta.to_date) + ' · ' + num(s.meta.total_applications) + ' applications in scope</span></div>';
-    h += '<div class="grid kpi-row leave-kpi-row" style="--cols:8">' + ['pending', 'approved', 'rejected', 'on_leave', 'upcoming', 'used', 'pending_old', 'no_alloc'].map(function (k) { return kc(K[k]); }).join('') + '</div>';
-    h += '<div class="ph">Approved = ' + esc(s.definitions.approved) + '. Pending = ' + esc(s.definitions.pending) + '. Drafts and workflow-pending applications are never counted as approved.</div>';
-    // analytics
-    var A = s.analytics;
-    h += '<div class="sh">Leave analytics</div><div class="g2 analytics-row leave-analytics-row" style="--cols:6">';
-    h += panel('Monthly leave usage (12 months)', lvMonthChart(A.monthly), 'Approved applications by start month (days). ' + (dt ? 'Click a month to list them.' : ''));
-    h += panel('Leave utilisation by department', lvBars(A.by_dept, 'days', function (x) { return lvAttr({ lvpre: 'kpi_used', lvt: 'Leave used · ' + x.label, lvdept: x.label }); }, function (x) { return num(x.days) + 'd' + (x.per_head !== null ? ' · ' + x.per_head + '/head' : ''); }), 'Approved days starting in the selected period; per head = days ÷ current active headcount.');
-    h += panel('Leave types distribution', lvBars(A.by_type, 'count', function (x) { return lvAttr({ lvpre: 'kpi_used', lvt: 'Leave used · ' + x.label, lvtype: x.label }); }, function (x) { return num(x.count) + 'd'; }), 'Approved days in the selected period.');
-    h += panel('Pending approvals by age', lvBars(A.pending_by_age, 'count', function (x) { return lvAttr({ lvpre: 'age', lvt: 'Pending ' + x.label + ' days', lvage: x.label }); }), 'Days in the current workflow state.');
-    h += panel('Approved leave calendar', lvCalendar(A.calendar), 'Employees on approved leave per day. ' + (dt ? 'Click a day to list them.' : ''));
-    h += panel('Employees without current allocation', lvBars(A.no_alloc_by_dept, 'count', function (x) { return lvAttr({ lvnoalloc: x.label }); }), 'Active employees, by department. Most allocations in this system are created per leave request, so many employees have none between leaves.');
-    h += '</div>';
-    // directory
-    h += '<div class="sh" data-lv-dir>Leave application directory</div>';
-    if (dt) h += '<div class="panel"><div data-lv-list></div></div>';
-    else h += '<div class="alert i">&#128274; The application directory, approval queues and employee-level leave details are available to HR Manager / HR User only. Your view shows aggregate figures.</div>';
-    // data quality
-    h += '<div class="sh">Leave data quality · HR review</div><div class="panel"><div class="tw"><table class="dirtable"><thead><tr><th>Issue</th><th>Severity</th><th>Records</th><th>Detail</th><th></th></tr></thead><tbody>' +
-      s.dq.map(function (x) { return '<tr><td>' + esc(x.label) + '</td><td><span class="lvs ' + (x.severity === 'high' ? 'bad' : x.severity === 'medium' ? 'warn' : 'muted') + '">' + esc(x.severity) + '</span></td><td><b>' + num(x.count) + '</b></td><td class="muted">' + esc(x.extra || '') + '</td><td>' +
-        (dt && x.count ? '<button class="btn s sm"' + lvAttr({ lvpre: x.preset, lvt: 'Data quality · ' + x.label }) + '>Review</button>' : '') + '</td></tr>'; }).join('') +
-      '</tbody></table></div><div class="ph" style="margin-top:8px">Issues are displayed only. No historical record is changed by the dashboard; fix records in ERPNext after HR review.</div></div>';
-    h += '<div class="ph">Generated ' + esc(s.meta.generated) + ' · source: Leave Application, Leave Allocation, Leave Ledger Entry, Workflow "' + esc(s.meta.workflow || '') + '". ' +
-      (s.meta.unreadable && s.meta.unreadable.length ? 'Not readable: ' + esc(s.meta.unreadable.join(', ')) : '') + '</div>';
-    root.innerHTML = h;
-    if (dt) lvRenderList();
-  }
-  function lvRenderList() {
-    var root = host.querySelector('[data-lv-list]'); if (!root) return;
-    var L = LV.L, d = L.data, o = (LV.sum && LV.sum.options) || {};
-    var active = document.activeElement, keep = active && active.dataset && active.dataset.lvf === 'search', caret = keep ? active.selectionStart : 0;
-    var h = '<div class="lvhead"><b>' + esc(L.title) + '</b> <button class="btn s sm" data-export="leave">Export CSV</button>' + (L.preset || Object.keys(L.extra).length ? ' <button class="btn s sm" data-lva="clearpreset">× Show all applications</button>' : '') + '</div>';
-    h += '<div class="dirbar"><label class="dsearch">Search<input type="search" data-lvf="search" placeholder="Application, employee ID or name…" value="' + esc(L.f.search) + '"></label>' +
-      lvSel('department', 'Department', o.departments, L.f.department, 'All departments') +
-      '<label>Employee ID<input type="text" data-lvf="employee" placeholder="exact ID" value="' + esc(L.f.employee) + '"></label>' +
-      lvSel('leave_type', 'Leave type', o.leave_types, L.f.leave_type, 'All types') +
-      lvSel('status', 'Application status', o.statuses, L.f.status, 'All statuses') +
-      lvSel('workflow_state', 'Workflow state', o.workflow_states, L.f.workflow_state, 'All states') +
-      '<label>Dates from<input type="date" data-lvf="range_from" value="' + esc(L.f.range_from) + '"></label><label>Dates to<input type="date" data-lvf="range_to" value="' + esc(L.f.range_to) + '"></label>' +
-      '<button class="btn s" data-lva="clearf">Clear</button></div>';
-    if (L.err) h += '<div class="alert e">' + esc(L.err) + '</div>';
-    if (!d && L.busy) h += '<div class="ld">Loading leave applications…</div>';
-    else if (d) {
-      var from = d.total ? (d.page - 1) * d.page_length + 1 : 0, to = Math.min(d.total, d.page * d.page_length);
-      h += '<div class="dirmeta"><span>' + (L.busy ? '<span class="spin"></span> Loading… ' : '') + 'Showing <b>' + from + '–' + to + '</b> of <b>' + num(d.total) + '</b> applications · <b>' + num(d.days_total) + '</b> days</span>' +
-        '<label class="pl">Rows<select data-lvpl="1">' + [25, 50, 100].map(function (n) { return '<option' + (n === L.pl ? ' selected' : '') + '>' + n + '</option>'; }).join('') + '</select></label></div>';
-      if (!d.rows.length) h += '<div class="empty">No leave applications match these filters.<br><button class="btn s sm" data-lva="clearf" style="margin-top:8px">Clear filters</button></div>';
-      else {
-        h += '<div class="tw dtw' + (L.busy ? ' dim' : '') + '"><table class="dirtable"><thead><tr>' + LV_COLS.map(function (c) {
-          var on = L.sort === c[2]; return '<th class="sort' + (on ? ' on' : '') + '" data-lvsort="' + c[2] + '">' + esc(c[1]) + (on ? (L.order === 'asc' ? ' ▲' : ' ▼') : ' <span class="muted">↕</span>') + '</th>';
-        }).join('') + '<th>Action</th></tr></thead><tbody>';
-        d.rows.forEach(function (r) {
-          var c = LV_CLS[r.cls] || ['', 'muted'];
-          h += '<tr class="click" data-lvview="' + esc(r.name) + '">' + LV_COLS.map(function (col) {
-            var v = r[col[0]];
-            if (col[0] === 'name') return '<td class="mono">' + esc(v) + (r.note ? '<div class="lvnote">' + esc(r.note) + '</div>' : '') + '</td>';
-            if (col[0] === 'employee_name') return '<td>' + esc(v || '—') + '<div class="muted mono" style="font-size:11px">' + esc(r.employee) + '</div></td>';
-            if (col[0] === 'workflow_state') return '<td><span class="lvs ' + c[1] + '">' + esc(v || '—') + '</span>' + (r.docstatus === 1 && r.cls === 'pending' ? '<div class="lvnote">submitted</div>' : '') + '</td>';
-            if (col[0] === 'status') return '<td>' + esc(v || '—') + (r.cls === 'conflict' ? ' <span class="lvs bad">conflict</span>' : '') + '</td>';
-            if (col[0] === 'days') return '<td style="text-align:right">' + num(v) + '</td>';
-            if (col[0] === 'age_label') return '<td>' + (r.age_days !== null && r.age_days > 3 ? '<span class="lvs warn">' + esc(v) + '</span>' : esc(v || '—')) + '</td>';
-            return '<td>' + esc(v || '—') + '</td>';
-          }).join('') + '<td style="white-space:nowrap"><button class="btn s sm" data-lvview="' + esc(r.name) + '">View</button> <a class="btn s sm" href="/app/leave-application/' + encodeURIComponent(r.name) + '" target="_blank" title="Open the ERPNext form' + (r.can_act ? ' to act (the workflow checks your role)' : '') + '">' + (r.can_act ? 'Act ↗' : 'Open ↗') + '</a></td></tr>';
-        });
-        h += '</tbody></table></div>';
-        h += '<div class="pager"><button class="btn s sm" data-lvpage="first"' + (d.page <= 1 ? ' disabled' : '') + '>«</button><button class="btn s sm" data-lvpage="prev"' + (d.page <= 1 ? ' disabled' : '') + '>‹ Prev</button>' +
-          '<span>Page <b>' + d.page + '</b> of <b>' + d.pages + '</b></span><button class="btn s sm" data-lvpage="next"' + (d.page >= d.pages ? ' disabled' : '') + '>Next ›</button><button class="btn s sm" data-lvpage="last"' + (d.page >= d.pages ? ' disabled' : '') + '>»</button></div>';
-      }
-      h += '<div class="ph" style="margin-top:6px">"Act ↗" opens the ERPNext form, where the existing workflow decides if your role may approve, reject or hold. The dashboard never changes applications. Approval age = days in the current pending state, or posting → final decision.</div>';
-    }
-    root.innerHTML = h;
-    if (keep) { var inp = root.querySelector('[data-lvf="search"]'); if (inp) { inp.focus(); try { inp.setSelectionRange(caret, caret); } catch (e) {} } }
-  }
-  function lvNoAlloc(dept) {
-    var rowsA = ((LV.sum && LV.sum.no_alloc_rows) || []).filter(function (x) { return !dept || (x.department || '(Not set)') === dept; });
-    var dlg = new AHDDialog({ title: 'Active employees without a current leave allocation' + (dept ? ' · ' + dept : '') + ' (' + rowsA.length + ')', size: 'large', fields: [{ fieldtype: 'HTML', fieldname: 'h' }] });
-    dlg.fields_dict.h.$wrapper.html(tbl([[function (x) { return '<a href="/app/employee/' + encodeURIComponent(x.employee) + '" target="_blank">' + esc(x.employee) + '</a>'; }, 'Employee'], ['employee_name', 'Name'], ['department', 'Department'],
-      [function (x) { return '<a href="/app/leave-allocation?employee=' + encodeURIComponent(x.employee) + '" target="_blank">Allocations ↗</a>'; }, '']], rowsA, 'None.') +
-      '<div class="text-muted small" style="margin-top:8px">No submitted Leave Allocation of any type covers today. Balances cannot be calculated for these employees.</div>');
-    dlg.show();
-  }
-  function openLeave(name) {
-    if (!name) return;
-    var dlg = new AHDDialog({ title: 'Leave application ' + name, size: 'extra-large', fields: [{ fieldtype: 'HTML', fieldname: 'h' }] });
-    var $w = dlg.fields_dict.h.$wrapper; $w.html('<div class="text-muted" style="padding:30px;text-align:center">Loading leave application…</div>'); dlg.show();
-    frappe.call({ method: 'admin_hr_leave_data', args: lvArgs({ mode: 'detail', name: name }), freeze: false,
-      callback: function (r) {
-        var m = r.message; if (!m) { $w.html('<div class="text-muted">No data.</div>'); return; }
-        var a = m.application, e = m.employee, b = m.balance, rel = m.related, wf = m.workflow;
-        dlg.set_title(a.name + ' · ' + (e ? e.employee_name : ''));
-        var h = '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">' + pill(a.workflow_state || '—', LV_PILL[a.cls] || 'gray') + pill('Status: ' + (a.status || '—'), 'gray') +
-          pill(['Draft', 'Submitted', 'Cancelled'][a.docstatus || 0], a.docstatus === 1 ? 'blue' : 'gray') + (a.conflict ? pill(a.conflict, 'red') : '') +
-          '<a class="btn btn-xs btn-primary" href="/app/leave-application/' + encodeURIComponent(a.name) + '" target="_blank">' + (wf.your_actions && wf.your_actions.length ? 'Open in ERPNext to act ↗' : 'Open in ERPNext ↗') + '</a></div>';
-        h += sect('A · Leave request', kv([['Leave type', a.leave_type], ['From', a.from_date], ['To', a.to_date], ['Total leave days', a.days + (a.half_day ? ' (half day ' + (a.half_day_date || '') + ')' : '')],
-          ['Workflow state', a.workflow_state], ['Application status', a.status], ['Leave approver', a.approver], ['Line manager', a.line_manager], ['Replacement employee', a.replacement || '—'],
-          ['Destination', a.destination], ['Re-entry date (exit/entry)', a.reentry_date], ['Posting date', a.posting_date], ['Attachment', a.attachment], ['Salary slip', a.salary_slip || '—']]) +
-          (a.reason ? '<div style="margin-top:8px"><div class="text-muted small">Reason</div>' + esc(a.reason) + '</div>' : ''));
-        h += sect('B · Employee', e ? kv([['Employee', e.employee_name + ' (' + e.employee + ')'], ['Company', e.company], ['Department', e.department], ['Designation', e.designation],
-          ['Branch', e.branch], ['Job location', locName(e.job_location)], ['Status', e.status], ['Date of joining', e.date_of_joining], ['Employment type', e.employment_type]]) : '<div class="text-muted">Employee record not visible with your permissions.</div>',
-          'ID, Iqama and passport numbers, date of birth and nationality-document fields on the application are not shown.');
-        var act = wf.your_actions && wf.your_actions.length ? '<div style="margin-bottom:8px">Actions the workflow lists for your roles in this state: ' + wf.your_actions.map(function (x) { return pill(x, 'blue'); }).join(' ') + '</div>' : '';
-        h += sect('C · Workflow & approval history', act + tbl([['state', 'Moved to state'], ['by', 'By'], ['on', 'On']], m.history, 'No workflow history recorded for this application.'), wf.note);
-        var bh = '';
-        var BS = { actual: ['Actual', 'green'], partial: ['Partial', 'orange'], no_allocation: ['No allocation', 'gray'], not_applicable: ['Not applicable', 'gray'], unavailable: ['Unavailable', 'gray'] }[b.state] || ['Unavailable', 'gray'];
-        bh += '<div style="margin-bottom:8px"><b>' + esc(b.leave_type || '') + '</b> ' + pill(BS[0], BS[1]) + '</div>';
-        if (b.state === 'actual' || b.state === 'partial') bh += kv([['Allocation', b.allocation], ['Allocation period', b.period], ['Allocated', b.allocated], ['Ledger credits/adjustments', b.other_credits],
-          ['Approved leave used', b.approved_used], ['Deducted by pending applications (not subtracted)', b.pending_deducted], ['Balance (approved usage only)', b.balance_approved_only]]);
-        bh += '<div class="text-muted small" style="margin-top:6px">' + esc(b.note || '') + (b.recorded_on_application !== null && b.recorded_on_application !== undefined ? ' Balance recorded on the application by ERPNext at entry: ' + b.recorded_on_application + '.' : '') + '</div>';
-        h += sect('D · Leave allocation & balance', bh);
-        var rh = '';
-        if (rel.overlapping && rel.overlapping.length) rh += '<div class="alert alert-warning" style="padding:6px 10px">Overlaps with: ' + rel.overlapping.map(function (x) { return esc(x.name) + ' (' + esc(x.workflow_state || '') + ')'; }).join(', ') + '</div>';
-        rh += '<div style="margin-bottom:6px"><b>Attendance in this period</b>: ' + (rel.attendance_in_period === null ? 'not readable' : counts(rel.attendance_in_period)) + '</div>';
-        rh += '<div style="margin:8px 0 6px"><b>Other leave applications</b> (latest 12)</div>' + tbl([[function (x) { return '<a href="/app/leave-application/' + encodeURIComponent(x.name) + '" target="_blank">' + esc(x.name) + '</a>'; }, 'Application'],
-          ['leave_type', 'Type'], ['from_date', 'From'], ['to_date', 'To'], ['days', 'Days'], [function (x) { return pill(x.workflow_state || '—', LV_PILL[x.cls] || 'gray'); }, 'State']], rel.other_applications, 'No other applications.');
-        if (rel.leave_request_forms && rel.leave_request_forms.length) rh += '<div style="margin:8px 0 6px"><b>Leave Request Forms</b></div>' + tbl([[function (x) { return '<a href="/app/leave-request-form/' + encodeURIComponent(x.name) + '" target="_blank">' + esc(x.name) + '</a>'; }, 'Document'], ['state', 'State']], rel.leave_request_forms);
-        if (e) rh += '<div style="margin-top:8px"><button class="btn btn-xs btn-default" data-lvemp="' + esc(e.employee) + '">Open employee detail panel</button></div>';
-        h += sect('E · Related HR documents', rh);
-        $w.html(h);
-        $w.find('[data-lvemp]').on('click', function () { dlg.hide(); openEmployee(this.getAttribute('data-lvemp')); });
-      },
-      error: function () { $w.html('<div class="text-muted" style="padding:20px">This leave application is not available (not permitted or not found).</div>'); } });
-  }
-  function lvMonthRange(ym) { var d = new Date(ym + '-01T00:00:00'), e = new Date(d.getFullYear(), d.getMonth() + 1, 0); return [ym + '-01', ym + '-' + String(e.getDate()).padStart(2, '0')]; }
-  /* ---------------- Documents & Compliance tab (Phase 5) ---------------- */
-  var CP = { sum: null, busy: false, err: null, seq: 0, company: '',
-    L: { data: null, busy: false, err: null, seq: 0, preset: '', title: 'All required documents',
-      f: { search: '', department: '', branch: '', job_location: '', doc: '', status: '', range_from: '', range_to: '' }, page: 1, pl: 25, sort: 'days', order: 'asc' } };
-  var CP_COLS = [['employee', 'Employee ID', 'employee'], ['employee_name', 'Employee Name', 'employee_name'], ['company', 'Company', 'company'],
-    ['department', 'Department', 'department'], ['branch', 'Branch', 'branch'], ['job_location', 'Job Location', 'job_location'],
-    ['document', 'Document', 'document'], ['expiry_date', 'Expiry Date', 'expiry_date'], ['days', 'Days Remaining', 'days'], ['status_label', 'Compliance Status', 'status']];
-  var CP_ST = { expired: 'bad', due_30: 'bad', due_60: 'warn', due_90: 'warn', valid: 'ok', missing: 'muted', not_required: 'muted' };
-  var CP_PILL = { expired: 'red', due_30: 'red', due_60: 'orange', due_90: 'yellow', valid: 'green', missing: 'gray', not_required: 'gray' };
-  var CP_DOCS = [['iqama', 'Iqama / Saudi ID'], ['passport', 'Passport'], ['contract', 'Employment Contract'], ['insurance', 'Medical Insurance']];
-  var CP_STATUSES = [['expired', 'Expired'], ['due_30', 'Expiring ≤30 days'], ['due_60', 'Expiring 31–60 days'], ['due_90', 'Expiring 61–90 days'], ['valid', 'Valid (>90 days)'], ['missing', 'Missing expiry date'], ['conflict', 'Conflicting information']];
-  var CP_EMPTY_F = function () { return { search: '', department: '', branch: '', job_location: '', doc: '', status: '', range_from: '', range_to: '' }; };
-  function cpDt() { return CP.sum && CP.sum.meta.tier === 'detail'; }
-  function cpArgs(a) { return gfArgs(Object.assign({ as_of: S.f && S.f.to_date }, a || {})); }
-  function cpAttr(o) { return Object.keys(o).map(function (k) { return ' data-' + k + '="' + esc(o[k]) + '"'; }).join(''); }
-  function cpLoad() {
-    CP.busy = true; CP.err = null; cpRender();
-    var seq = ++CP.seq;
-    frappe.call({ method: 'admin_hr_compliance_data', args: cpArgs({ mode: 'summary' }), freeze: false,
-      callback: function (r) { if (seq !== CP.seq) return; CP.busy = false; CP.sum = r.message || null; if (CP.sum) CP.company = CP.sum.meta.company; cpRender(); if (cpDt() && !CP.L.data) cpList(); },
-      error: function () { if (seq !== CP.seq) return; CP.busy = false; CP.err = 'Could not load compliance data. You may not have permission.'; cpRender(); } });
-  }
-  function cpList() {
-    var L = CP.L; if (!cpDt()) return;
-    L.busy = true; L.err = null; cpRenderList();
-    var seq = ++L.seq;
-    frappe.call({ method: 'admin_hr_compliance_data', args: cpArgs(Object.assign({ mode: 'list', preset: L.preset, page: L.page, page_length: L.pl, sort_by: L.sort, sort_order: L.order }, L.f)), freeze: false,
-      callback: function (r) { if (seq !== L.seq) return; L.busy = false; L.data = r.message || null; if (L.data) L.page = L.data.page; cpRenderList(); },
-      error: function () { if (seq !== L.seq) return; L.busy = false; L.err = 'Could not load the compliance directory.'; cpRenderList(); } });
-  }
-  function cpPreset(preset, title, filters) {
-    var L = CP.L; L.preset = preset || ''; L.title = title || 'All required documents'; L.page = 1;
-    L.f = Object.assign(CP_EMPTY_F(), filters || {}); L.sort = 'days'; L.order = 'asc';
-    cpList();
-    var el = host.querySelector('[data-cp-dir]'); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-  function cpSel(key, label, list, cur, all) {
-    return '<label>' + esc(label) + '<select data-cpf="' + key + '">' + (all !== undefined ? '<option value="">' + esc(all) + '</option>' : '') +
-      (list || []).map(function (x) { var v = Array.isArray(x) ? x[0] : x, t = Array.isArray(x) ? x[1] : x; return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') + '</select></label>';
-  }
-  function cpBars(list, valKey, attrFn, fmt) {
-    if (!list || !list.length) return '<div class="muted">No records.</div>';
-    var m = 0; list.forEach(function (x) { if ((x[valKey] || 0) > m) m = x[valKey] || 0; });
-    var dt = cpDt();
-    return '<div class="lvbars">' + list.slice(0, 40).map(function (x) {
-      var w = m ? Math.max(2, Math.round((x[valKey] || 0) / m * 100)) : 0, at = dt && attrFn ? attrFn(x) : '';
-      return '<div class="lvbr' + (at ? ' click' : '') + '"' + at + ' title="' + esc(x.label) + '"><span class="lvbl">' + esc(x.label) + '</span><span class="lvbt"><span style="width:' + w + '%"></span></span><span class="lvbv">' + (fmt ? fmt(x) : num(x[valKey])) + '</span></div>';
-    }).join('') + '</div>';
-  }
-  function cpCard(k) {
-    var dt = cpDt() && k.preset, unitEmp = k.unit === 'employees';
-    return '<div class="card' + (dt ? ' click' : '') + '"' + (dt ? cpAttr({ cppre: k.preset, cpt: k.label }) : '') + '><div class="lb"><span>' + esc(k.label) + '</span>' + badge(k.value === null ? 'unavailable' : 'actual') + '</div>' +
-      '<div class="v">' + num(k.value) + ' <span class="cpunit">' + (unitEmp ? 'employees' : 'documents') + '</span></div>' +
-      (!unitEmp ? '<div class="sub"><b>' + num(k.employees) + '</b> employees affected</div>' : '') + (k.sub ? '<div class="sub">' + esc(k.sub) + '</div>' : '') +
-      '<div class="nt" title="' + esc(k.basis) + '">' + esc(k.basis) + '</div>' + (dt ? '<div class="ft">View records &rarr;</div>' : (!cpDt() && k.preset !== null && k.key !== 'active' ? '<div class="ft muted">&#128274; Details: HR Manager / HR User</div>' : '')) + '</div>';
-  }
-  function cpCat(c, letter) {
-    var dt = cpDt();
-    function chip(lbl, val, st, cls) {
-      var a = dt && val ? cpAttr(st === 'conflict' ? { cppre: '', cpt: c.label + ' · ' + lbl, cpdoc: c.key, cpst: 'conflict' } : { cppre: '', cpt: c.label + ' · ' + lbl, cpdoc: c.key, cpst: st }) : '';
-      return '<div class="cpchip ' + cls + (a ? ' click' : '') + '"' + a + '><b>' + num(val) + '</b><span>' + esc(lbl) + '</span></div>';
-    }
-    return '<div class="panel"><div class="cppt">' + letter + ' · ' + esc(c.label) + ' <span class="muted" style="font-weight:400">· ' + esc(c.field) + (c.secondary ? ' (compared with ' + esc(c.secondary) + ')' : c.key === 'insurance' ? ' (compared with insurance_status)' : '') + '</span></div>' +
-      '<div class="cpchips">' + chip('Valid', c.valid, 'valid', 'ok') + chip('Expired', c.expired, 'expired', 'bad') + chip('≤30 days', c.due_30, 'due_30', 'bad') + chip('31–60 days', c.due_60, 'due_60', 'warn') +
-      chip('61–90 days', c.due_90, 'due_90', 'warn') + chip('Missing date', c.missing, 'missing', 'muted') + chip('Conflicting', c.conflict, 'conflict', 'bad') + '</div>' +
-      '<div class="cpbar" title="Complete & current: ' + c.completion_pct + '%"><span style="width:' + c.completion_pct + '%"></span></div>' +
-      '<div class="ph">' + c.completion_pct + '% of ' + c.required + ' required records have a current, non-conflicting date · ' + c.attached + ' with a copy attached' + (c.not_required ? ' · ' + c.not_required + ' Saudi nationals: not required' : '') + '</div></div>';
-  }
-  function cpForecast(fc, overdue) {
-    var cols = [['iqama', '#2563eb'], ['passport', '#7c3aed'], ['contract', '#0891b2'], ['insurance', '#f59e0b']], m = overdue || 0;
-    fc.forEach(function (x) { var t = x.iqama + x.passport + x.contract + x.insurance; if (t > m) m = t; });
-    var dt = cpDt();
-    var h = '<div class="lvmc"><div class="lvmcol' + (dt && overdue ? ' click' : '') + '"' + (dt && overdue ? cpAttr({ cppre: 'st_expired', cpt: 'Expired documents' }) : '') + ' title="Already expired: ' + overdue + '"><div class="lvmv">' + num(overdue) + '</div><div class="lvmbar"><span style="height:' + (m ? Math.round(overdue / m * 100) : 0) + '%;background:#dc2626;display:block"></span></div><div class="lvml">Overdue</div></div>';
-    fc.forEach(function (x) {
-      var t = x.iqama + x.passport + x.contract + x.insurance, mr = x.month;
-      var last = new Date(parseInt(mr.slice(0, 4), 10), parseInt(mr.slice(5, 7), 10), 0).getDate();
-      h += '<div class="lvmcol' + (dt && t ? ' click' : '') + '"' + (dt && t ? cpAttr({ cppre: '', cpt: 'Expiring in ' + mr, cpfrom: (CP.sum && mr === CP.sum.meta.today.slice(0, 7) ? CP.sum.meta.today : mr + '-01'), cpto: mr + '-' + String(last).padStart(2, '0') }) : '') + ' title="' + esc(mr + ': ' + cols.map(function (c) { return c[0] + ' ' + x[c[0]]; }).join(', ')) + '"><div class="lvmv">' + (t || '') + '</div><div class="lvmbar">' +
-        cols.map(function (c) { return '<span style="height:' + (m ? Math.round(x[c[0]] / m * 100) : 0) + '%;background:' + c[1] + ';display:block"></span>'; }).join('') + '</div><div class="lvml">' + esc(mr.slice(2)) + '</div></div>';
-    });
-    return h + '</div><div class="lvlegend">' + [['Iqama/ID', '#2563eb'], ['Passport', '#7c3aed'], ['Contract', '#0891b2'], ['Insurance', '#f59e0b'], ['Already expired', '#dc2626']].map(function (c) { return '<span><i style="background:' + c[1] + '"></i>' + c[0] + '</span>'; }).join('') + '</div>';
-  }
-  function vCompliance(d) { return '<div data-cp-root></div>'; }
-  function cpAfterRender() { if (!CP.sum && !CP.busy) cpLoad(); else cpRender(); }
-  function cpRender() {
-    var root = host.querySelector('[data-cp-root]'); if (!root) return;
-    var s = CP.sum, h = '', comps = (s && s.meta.companies) || (S.d && S.d.meta.companies) || [];
-    h += scopeLine('compliance') + '<div class="dirbar lvperiod">' +
-      '<button class="btn s" data-cpa="refresh">Refresh</button>' + (CP.busy ? '<span class="muted"><span class="spin"></span> Loading…</span>' : '') +
-      '<span class="muted" style="align-self:center">Active employees only · as of ' + esc(s ? s.meta.today : '') + '</span></div>';
-    if (CP.err) h += '<div class="alert e">' + esc(CP.err) + '</div>';
-    if (!s) { root.innerHTML = h + (CP.busy ? '<div class="ld">Loading compliance data…</div>' : ''); return; }
-    var dt = cpDt(), id = s.identity;
-    h += '<div class="sh">Compliance overview</div><div class="grid kpi-row compliance-kpi-row" style="--cols:' + Math.max(1, s.kpis.length) + '">' + s.kpis.map(cpCard).join('') + '</div>';
-    h += '<div class="ph">Document counts: ' + num(id.documents) + ' required documents = ' + num(id.valid) + ' valid + ' + num(id.within_90) + ' expiring within 90 days + ' + num(id.expired) + ' expired + ' + num(id.missing) + ' missing ' + (id.check ? '✓' : '✗') +
-      '. The 30/60/90-day cards are cumulative windows. Employee counts are distinct people; an employee with several affected documents is counted once. ' + esc(s.rules.buckets) + '.</div>';
-    h += '<div class="sh">Document categories</div><div class="g2">' + s.categories.map(function (c, i) { return cpCat(c, 'ABCD'[i]); }).join('') + '</div>';
-    var A = s.analytics, C = A.completion;
-    h += '<div class="sh">Compliance analytics</div><div class="g2 analytics-row compliance-analytics-row" style="--cols:6">';
-    h += panel('Expiry forecast by month', cpForecast(A.forecast, A.overdue_now), 'Required documents expiring per month (next 12 months). ' + (dt ? 'Click a month to list them.' : ''));
-    h += panel('Expired / expiring ≤90 days by department', cpBars(A.by_department, 'count', function (x) { return cpAttr({ cppre: 'attention', cpt: 'Needs attention · ' + x.label, cpdept: x.label }); }, function (x) { return x.expired + ' exp · ' + x.due + ' due'; }));
-    h += panel('Expired / expiring ≤90 days by branch', cpBars(A.by_branch, 'count', function (x) { return cpAttr({ cppre: 'attention', cpt: 'Needs attention · ' + x.label, cpbranch: x.label }); }, function (x) { return x.expired + ' exp · ' + x.due + ' due'; }));
-    h += panel('Document status distribution', cpBars(A.distribution, 'count', function (x) { return x.key === 'not_required' ? '' : cpAttr({ cppre: '', cpt: x.label, cpst: x.key }); }), 'All tracked documents, including Saudi passports marked not required.');
-    h += panel('Compliance completion', '<div class="cpcomp"><div><b>' + C.documents_pct + '%</b><span>documents current &amp; consistent<br>' + num(C.documents_ok) + ' of ' + num(C.documents) + '</span></div><div><b>' + C.employees_pct + '%</b><span>employees with no issue<br>' + num(C.employees_ok) + ' of ' + num(C.employees) + '</span></div></div>' +
-      cpBars(s.categories.map(function (c) { return { label: c.label, pct: c.completion_pct }; }), 'pct', null, function (x) { return x.pct + '%'; }), '"Current" = has a primary date that is not expired and does not conflict with the secondary field.');
-    h += panel('Employees by number of documents with issues', cpBars(A.multi_issue.map(function (x) { return { label: x.label + (x.label === '1' ? ' document' : ' documents'), count: x.count, raw: x.label }; }), 'count', function (x) { return x.raw === '0' ? '' : cpAttr({ cppre: x.raw === '1' ? 'emp_issues' : 'multi', cpt: x.raw === '1' ? 'Employees with compliance issues' : 'Employees with 2+ documents affected' }); }), 'Issue = expired, expiring ≤60 days, missing or conflicting.');
-    h += '</div>';
-    h += '<div class="sh" data-cp-dir>Compliance directory</div>';
-    if (dt) h += '<div class="panel"><div data-cp-list></div></div>';
-    else h += '<div class="alert i">&#128274; The compliance directory and employee-level details are available to HR Manager / HR User only. Your view shows aggregate figures.</div>';
-    h += '<div class="sh">Compliance data quality · HR review queue</div><div class="panel"><div class="tw"><table class="dirtable"><thead><tr><th>Issue</th><th>Severity</th><th>Records</th><th></th></tr></thead><tbody>' +
-      s.dq.map(function (x) { return '<tr><td>' + esc(x.label) + '</td><td><span class="lvs ' + (x.severity === 'high' ? 'bad' : x.severity === 'medium' ? 'warn' : 'muted') + '">' + esc(x.severity) + '</span></td><td><b>' + num(x.count) + '</b></td><td>' +
-        (dt && x.count ? '<button class="btn s sm"' + cpAttr({ cppre: x.preset, cpt: 'Data quality · ' + x.label }) + '>Review</button>' : '') + '</td></tr>'; }).join('') +
-      '</tbody></table></div><div class="ph" style="margin-top:8px">Displayed only. No Employee field is overwritten by the dashboard. Duplicate checks compare ID numbers on the server; the numbers themselves are never sent to the browser.</div></div>';
-    // alerts
-    var al = s.alerts;
-    h += '<div class="sh">Expiry alerts</div><div class="g2">';
-    h += panel('Existing notifications (Employee)', '<div class="tw"><table class="dirtable"><thead><tr><th>Notification</th><th>Field</th><th>Timing</th><th>Recipients</th><th>Status</th></tr></thead><tbody>' +
-      (s.notifications || []).map(function (n) { return '<tr><td>' + esc(n.name) + '</td><td class="mono">' + esc(n.field || '') + '</td><td>' + esc((n.days || 0) + ' days ' + (n.event === 'Days Before' ? 'before' : 'after')) + '</td><td>' + esc(n.recipients || '—') + (n.has_condition ? '' : '<div class="lvnote">no condition (also Left employees)</div>') + '</td><td><span class="lvs ' + (n.enabled ? 'ok' : 'muted') + '">' + (n.enabled ? 'Enabled' : 'Disabled') + '</span></td></tr>'; }).join('') +
-      '</tbody></table></div>', 'Read-only view of ERPNext Notification settings. Nothing is enabled or changed from the dashboard.');
-    h += panel('Threshold preview (documents per alert window)', '<div class="tw"><table class="dirtable"><thead><tr><th>Document</th><th>Expired</th><th>0–7</th><th>8–15</th><th>16–30</th><th>31–60</th><th>61–90</th></tr></thead><tbody>' +
-      al.map(function (a) { return '<tr><td>' + esc(a.label) + '</td>' + ['expired', 'd0_7', 'd8_15', 'd16_30', 'd31_60', 'd61_90'].map(function (k) { return '<td style="text-align:right">' + (a[k] ? '<b>' + a[k] + '</b>' : '<span class="muted">0</span>') + '</td>'; }).join('') + '</tr>'; }).join('') +
-      '</tbody></table></div>', 'How many documents would fall into each proposed 90 / 60 / 30 / 15 / 7 / expired window today. Proposed alerts await HR approval; none are active from this dashboard.');
-    h += '</div><div class="ph">Generated ' + esc(s.meta.generated) + ' · source: Employee (active), Notification, Qiwa contract renewal request.</div>';
-    root.innerHTML = h;
-    if (dt) cpRenderList();
-  }
-  function cpRenderList() {
-    var root = host.querySelector('[data-cp-list]'); if (!root) return;
-    var L = CP.L, d = L.data, o = (CP.sum && CP.sum.options) || {};
-    var active = document.activeElement, keep = active && active.dataset && active.dataset.cpf === 'search', caret = keep ? active.selectionStart : 0;
-    var h = '<div class="lvhead"><b>' + esc(L.title) + '</b> <button class="btn s sm" data-export="cp">Export CSV</button>' + (L.preset ? ' <button class="btn s sm" data-cpa="clearpreset">× Show all documents</button>' : '') + '</div>';
-    h += '<div class="dirbar"><label class="dsearch">Employee search<input type="search" data-cpf="search" placeholder="Employee ID or name…" value="' + esc(L.f.search) + '"></label>' +
-      cpSel('department', 'Department', o.department, L.f.department, 'All departments') + cpSel('branch', 'Branch', o.branch, L.f.branch, 'All branches') +
-      cpSel('job_location', 'Job location', locPairs(o.job_location), L.f.job_location, 'All locations') + cpSel('doc', 'Document type', CP_DOCS, L.f.doc, 'All documents') +
-      cpSel('status', 'Compliance status', CP_STATUSES, L.f.status, 'All statuses') +
-      '<label>Expiry from<input type="date" data-cpf="range_from" value="' + esc(L.f.range_from) + '"></label><label>Expiry to<input type="date" data-cpf="range_to" value="' + esc(L.f.range_to) + '"></label>' +
-      '<button class="btn s" data-cpa="clearf">Clear</button></div>';
-    if (L.err) h += '<div class="alert e">' + esc(L.err) + '</div>';
-    if (!d && L.busy) h += '<div class="ld">Loading documents…</div>';
-    else if (d) {
-      var from = d.total ? (d.page - 1) * d.page_length + 1 : 0, to = Math.min(d.total, d.page * d.page_length);
-      h += '<div class="dirmeta"><span>' + (L.busy ? '<span class="spin"></span> Loading… ' : '') + 'Showing <b>' + from + '–' + to + '</b> of <b>' + num(d.total) + '</b> documents · <b>' + num(d.employees) + '</b> employees</span>' +
-        '<label class="pl">Rows<select data-cppl="1">' + [25, 50, 100].map(function (n) { return '<option' + (n === L.pl ? ' selected' : '') + '>' + n + '</option>'; }).join('') + '</select></label></div>';
-      if (!d.rows.length) h += '<div class="empty">No documents match these filters.<br><button class="btn s sm" data-cpa="clearf" style="margin-top:8px">Clear filters</button></div>';
-      else {
-        h += '<div class="tw dtw' + (L.busy ? ' dim' : '') + '"><table class="dirtable"><thead><tr>' + CP_COLS.map(function (c) {
-          var on = L.sort === c[2]; return '<th class="sort' + (on ? ' on' : '') + '" data-cpsort="' + c[2] + '">' + esc(c[1]) + (on ? (L.order === 'asc' ? ' ▲' : ' ▼') : ' <span class="muted">↕</span>') + '</th>';
-        }).join('') + '<th>Action</th></tr></thead><tbody>';
-        d.rows.forEach(function (r) {
-          h += '<tr class="click" data-cpview="' + esc(r.employee) + '" data-cpd="' + esc(r.doc) + '">' + CP_COLS.map(function (col) {
-            var v = r[col[0]];
-            if (col[0] === 'employee') return '<td class="mono">' + esc(v) + '</td>';
-            if (col[0] === 'job_location') return '<td>' + esc(v ? locName(v) : '—') + '</td>';
-            if (col[0] === 'days') return '<td style="text-align:right">' + (v === null ? '—' : num(v)) + '</td>';
-            if (col[0] === 'status_label') return '<td><span class="lvs ' + (CP_ST[r.status] || 'muted') + '">' + esc(v) + '</span>' + (r.conflict ? '<div class="lvnote">⚠ ' + esc(r.conflict) + '</div>' : '') + (r.unusual ? '<div class="lvnote">⚠ ' + esc(r.unusual) + '</div>' : '') + (r.note && r.note !== r.conflict && r.note !== r.unusual ? '<div class="lvnote">' + esc(r.note) + '</div>' : '') + '</td>';
-            return '<td>' + esc(v || '—') + '</td>';
-          }).join('') + '<td style="white-space:nowrap"><button class="btn s sm" data-cpview="' + esc(r.employee) + '" data-cpd="' + esc(r.doc) + '">View</button> <a class="btn s sm" href="/app/employee/' + encodeURIComponent(r.employee) + '" target="_blank">Employee ↗</a></td></tr>';
-        });
-        h += '</tbody></table></div>';
-        h += '<div class="pager"><button class="btn s sm" data-cppage="first"' + (d.page <= 1 ? ' disabled' : '') + '>«</button><button class="btn s sm" data-cppage="prev"' + (d.page <= 1 ? ' disabled' : '') + '>‹ Prev</button>' +
-          '<span>Page <b>' + d.page + '</b> of <b>' + d.pages + '</b></span><button class="btn s sm" data-cppage="next"' + (d.page >= d.pages ? ' disabled' : '') + '>Next ›</button><button class="btn s sm" data-cppage="last"' + (d.page >= d.pages ? ' disabled' : '') + '>»</button></div>';
-      }
-      h += '<div class="ph" style="margin-top:6px">One row per employee document. Saudi passports (not required) are excluded. Results respect your ERPNext and Employee User Permissions. Renewals are done in ERPNext; the dashboard never edits Employee records.</div>';
-    }
-    root.innerHTML = h;
-    if (keep) { var inp = root.querySelector('[data-cpf="search"]'); if (inp) { inp.focus(); try { inp.setSelectionRange(caret, caret); } catch (e) {} } }
-  }
-  function openCompliance(emp, focusDoc) {
-    if (!emp) return;
-    var dlg = new AHDDialog({ title: 'Employee compliance', size: 'extra-large', fields: [{ fieldtype: 'HTML', fieldname: 'h' }] });
-    var $w = dlg.fields_dict.h.$wrapper; $w.html('<div class="text-muted" style="padding:30px;text-align:center">Loading compliance details…</div>'); dlg.show();
-    frappe.call({ method: 'admin_hr_compliance_data', args: cpArgs({ mode: 'detail', employee: emp }), freeze: false,
-      callback: function (r) {
-        var m = r.message; if (!m) { $w.html('<div class="text-muted">No data.</div>'); return; }
-        var b = m.basic;
-        dlg.set_title(b.employee_name + ' · ' + b.employee);
-        var h = '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">' + pill(b.status, b.status === 'Active' ? 'green' : 'gray') + (b.nationality ? pill(b.nationality, 'blue') : '') +
-          '<a class="btn btn-xs btn-default" href="/app/employee/' + encodeURIComponent(b.employee) + '" target="_blank">Open Employee record ↗</a></div>';
-        h += sect('A · Employee', kv([['Employee', b.employee_name + ' (' + b.employee + ')'], ['Company', b.company], ['Department', b.department], ['Designation', b.designation],
-          ['Branch', b.branch], ['Job location', locName(b.job_location)], ['Nationality', b.nationality], ['Date of joining', b.date_of_joining], ['Employment type', b.employment_type]]));
-        h += sect('B · Documents', tbl([[function (x) { return (x.doc === focusDoc ? '▶ ' : '') + esc(x.document); }, 'Document'],
-          [function (x) { return '<span class="text-muted small">' + esc(x.primary_field) + '</span><br><b>' + esc(x.expiry_date || '—') + '</b>'; }, 'Verified expiry (primary)'],
-          [function (x) { return x.days === null ? '—' : String(x.days); }, 'Days left'],
-          [function (x) { return pill(x.status_label, CP_PILL[x.status] || 'gray'); }, 'Status'],
-          [function (x) { return x.secondary_field ? '<span class="text-muted small">' + esc(x.secondary_field) + '</span><br>' + esc(x.secondary_value || '—') : '—'; }, 'Secondary field'],
-          [function (x) { return (x.conflict ? '<div style="color:var(--red-600,#b91c1c)">' + esc(x.conflict) + '</div>' : '') + (x.unusual ? '<div style="color:var(--orange-600,#c2410c)">' + esc(x.unusual) + '</div>' : '') + (!x.conflict && !x.unusual ? '<span class="text-muted">—</span>' : ''); }, 'Checks'],
-          [function (x) { return esc(x.attached) + (x.provider ? '<br><span class="text-muted small">Provider: ' + esc(x.provider) + (x.provided_by ? ' · by ' + esc(x.provided_by) : '') + '</span>' : '') + (x.contract_type ? '<br><span class="text-muted small">' + esc(x.contract_type) + '</span>' : ''); }, 'Copy / details']], m.documents), m.note);
-        var rn = m.renewals;
-        h += sect('C · Renewal requests', rn.qiwa === null ? '<div class="text-muted">Qiwa contract renewal requests not readable with your permissions.</div>' :
-          tbl([[function (x) { return '<a href="/app/qiwa-contract-renewal-request/' + encodeURIComponent(x.name) + '" target="_blank">' + esc(x.name) + '</a>'; }, 'Qiwa renewal request'], ['state', 'State'], ['contract_end_date', 'Contract end'], ['created', 'Created']], rn.qiwa, 'No Qiwa contract renewal request for this employee.'), rn.note);
-        var rl = m.related, rh = '';
-        rh += '<div style="margin-bottom:6px"><b>Health insurance provider record</b>: ' + (rl.health_insurance_provider ? '<a href="/app/employee-health-insurance/' + encodeURIComponent(rl.health_insurance_provider) + '" target="_blank">' + esc(rl.health_insurance_provider) + '</a>' : '—') + '</div>';
-        rh += '<div style="margin-bottom:6px"><b>Employee Clearance</b>: ' + (rl.clearance === null ? 'not readable' : rl.clearance.length ? rl.clearance.map(function (x) { return '<a href="/app/employee-clearance/' + encodeURIComponent(x.name) + '" target="_blank">' + esc(x.name) + '</a> (' + esc(x.state) + ')'; }).join(', ') : 'none') + '</div>';
-        rh += '<div style="margin-bottom:6px"><b>Resignation Letter</b>: ' + (rl.resignation === null ? 'not readable' : rl.resignation.length ? rl.resignation.map(function (x) { return '<a href="/app/resignation-letter/' + encodeURIComponent(x.name) + '" target="_blank">' + esc(x.name) + '</a> (' + esc(x.state) + ')'; }).join(', ') : 'none') + '</div>';
-        rh += '<div style="margin-top:8px"><button class="btn btn-xs btn-default" data-cpemp="' + esc(b.employee) + '">Open full employee detail panel</button></div>';
-        h += sect('D · Related ERPNext records', rh);
-        $w.html(h);
-        $w.find('[data-cpemp]').on('click', function () { dlg.hide(); openEmployee(this.getAttribute('data-cpemp')); });
-      },
-      error: function () { $w.html('<div class="text-muted" style="padding:20px">Compliance details are not available for this employee (not permitted or not found).</div>'); } });
-  }
-  /* ---------------- Training tab (Phase 6) ---------------- */
-  var TR = { sum: null, busy: false, err: null, seq: 0, company: '',
-    L: { data: null, busy: false, err: null, seq: 0, preset: '', title: 'All training assignments', f: null, page: 1, pl: 25, sort: 'due_date', order: 'asc' } };
-  var TR_EMPTY_F = function () { return { search: '', department: '', designation: '', employee: '', item: '', mandatory: '', status: '', timing: '', date_field: 'assigned_date', range_from: '', range_to: '' }; };
-  TR.L.f = TR_EMPTY_F();
-  var TR_COLS = [['employee', 'Employee ID', 'employee'], ['employee_name', 'Employee Name', 'employee_name'], ['company', 'Company', 'company'],
-    ['department', 'Department', 'department'], ['designation', 'Designation', 'designation'], ['title', 'Training Video / Course', 'title'],
-    ['mandatory', 'Mandatory', 'mandatory'], ['assigned_date', 'Assigned', 'assigned_date'], ['due_date', 'Due', 'due_date'], ['started_on', 'Started', 'started_on'],
-    ['completed_on', 'Completed', 'completed_on'], ['status', 'Status', 'status'], ['progress', 'Progress', 'progress']];
-  var TR_ST = { 'Completed': 'ok', 'In Progress': 'warn', 'Not Started': 'muted', 'Not assigned': 'bad', 'No user': 'muted' };
-  var TR_PILL = { 'Completed': 'green', 'In Progress': 'orange', 'Not Started': 'gray' };
-  function trDt() { return TR.sum && TR.sum.meta.tier === 'detail'; }
-  function trArgs(a) { return gfArgs(a); }
-  function trAttr(o) { return Object.keys(o).map(function (k) { return ' data-' + k + '="' + esc(o[k]) + '"'; }).join(''); }
-  function trLoad() {
-    TR.busy = true; TR.err = null; trRender();
-    var seq = ++TR.seq;
-    frappe.call({ method: 'admin_hr_training_data', args: trArgs({ mode: 'summary' }), freeze: false,
-      callback: function (r) { if (seq !== TR.seq) return; TR.busy = false; TR.sum = r.message || null; if (TR.sum) TR.company = TR.sum.meta.company; trRender(); if (trDt() && !TR.L.data) trList(); },
-      error: function () { if (seq !== TR.seq) return; TR.busy = false; TR.err = 'Could not load training data. You may not have permission.'; trRender(); } });
-  }
-  function trList() {
-    var L = TR.L; if (!trDt()) return;
-    L.busy = true; L.err = null; trRenderList();
-    var seq = ++L.seq;
-    frappe.call({ method: 'admin_hr_training_data', args: trArgs(Object.assign({ mode: 'list', preset: L.preset, page: L.page, page_length: L.pl, sort_by: L.sort, sort_order: L.order }, L.f)), freeze: false,
-      callback: function (r) { if (seq !== L.seq) return; L.busy = false; L.data = r.message || null; if (L.data) L.page = L.data.page; trRenderList(); },
-      error: function () { if (seq !== L.seq) return; L.busy = false; L.err = 'Could not load training assignments.'; trRenderList(); } });
-  }
-  function trPreset(preset, title, filters) {
-    var L = TR.L; L.preset = preset || ''; L.title = title || 'All training assignments'; L.page = 1;
-    L.f = Object.assign(TR_EMPTY_F(), filters || {}); L.sort = 'due_date'; L.order = 'asc';
-    trList();
-    var el = host.querySelector('[data-tr-dir]'); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-  function trSel(key, label, list, cur, all) {
-    return '<label>' + esc(label) + '<select data-trf="' + key + '">' + (all !== undefined ? '<option value="">' + esc(all) + '</option>' : '') +
-      (list || []).map(function (x) { var v = Array.isArray(x) ? x[0] : x, t = Array.isArray(x) ? x[1] : x; return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') + '</select></label>';
-  }
-  function trBars(list, valKey, attrFn, fmt) {
-    if (!list || !list.length) return '<div class="muted">No records.</div>';
-    var m = 0; list.forEach(function (x) { if ((x[valKey] || 0) > m) m = x[valKey] || 0; });
-    var dt = trDt();
-    return '<div class="lvbars">' + list.slice(0, 40).map(function (x) {
-      var w = !x.suppressed && m ? Math.max(2, Math.round((x[valKey] || 0) / m * 100)) : 0, at = dt && !x.suppressed && attrFn ? attrFn(x) : '';
-      return '<div class="lvbr' + (at ? ' click' : '') + '"' + at + ' title="' + esc(x.label) + '"><span class="lvbl">' + esc(x.label) + '</span><span class="lvbt"><span style="width:' + w + '%"></span></span><span class="lvbv">' + (x.suppressed ? '&lt;3' : fmt ? fmt(x) : num(x[valKey])) + '</span></div>';
-    }).join('') + '</div>';
-  }
-  function trPctBars(list, attrFn) {
-    if (!list || !list.length) return '<div class="muted">No records.</div>';
-    var dt = trDt();
-    return '<div class="lvbars">' + list.slice(0, 40).map(function (x) {
-      var at = dt && !x.suppressed && attrFn ? attrFn(x) : '', p = x.pct || 0;
-      return '<div class="lvbr' + (at ? ' click' : '') + '"' + at + ' title="' + esc(x.label) + '"><span class="lvbl">' + esc(x.label) + '</span><span class="lvbt"><span style="width:' + (x.suppressed ? 0 : Math.max(p ? 2 : 0, p)) + '%;background:' + (p >= 80 ? '#16a34a' : p >= 50 ? '#f59e0b' : '#dc2626') + '"></span></span><span class="lvbv">' + (x.suppressed ? '&lt;3' : x.pct == null ? '—' : p + '%') + ' <span class="muted">(' + (x.suppressed ? 'hidden' : x.done + '/' + x.total) + ')</span></span></div>';
-    }).join('') + '</div>';
-  }
-  function trCard(k) {
-    var dt = trDt() && k.preset, unit = k.unit === '%' ? '' : k.unit;
-    return '<div class="card' + (dt ? ' click' : '') + '"' + (dt ? trAttr({ trpre: k.preset === 'all' ? '' : k.preset, trt: k.label }) : '') + '><div class="lb"><span>' + esc(k.label) + '</span>' + badge(k.value === null ? 'unavailable' : k.state) + '</div>' +
-      (k.value === null ? '<div class="v na">Not available</div>' : '<div class="v">' + num(k.value) + (k.unit === '%' ? '%' : ' <span class="cpunit">' + esc(unit) + '</span>') + '</div>') +
-      (k.sub ? '<div class="sub">' + esc(k.sub) + '</div>' : '') + '<div class="nt" title="' + esc(k.basis) + '">' + esc(k.basis) + '</div>' +
-      (dt ? '<div class="ft">View assignments &rarr;</div>' : (!trDt() && k.preset ? '<div class="ft muted">&#128274; Details: HR Manager / HR User</div>' : '')) + '</div>';
-  }
-  function trTrend(list) {
-    var m = 0; list.forEach(function (x) { if (x.completed > m) m = x.completed; if (x.assigned > m) m = x.assigned; });
-    var dt = trDt();
-    return '<div class="lvmc">' + list.map(function (x) {
-      var last = new Date(parseInt(x.month.slice(0, 4), 10), parseInt(x.month.slice(5, 7), 10), 0).getDate();
-      var at = dt && x.completed ? trAttr({ trpre: 'st_Completed', trt: 'Completed in ' + x.month, trdf: 'completed_on', trfrom: x.month + '-01', trto: x.month + '-' + String(last).padStart(2, '0') }) : '';
-      return '<div class="lvmcol' + (at ? ' click' : '') + '"' + at + ' title="' + esc(x.month + ': ' + x.assigned + ' assigned, ' + x.completed + ' completed') + '"><div class="lvmv">' + (x.completed || '') + '</div>' +
-        '<div class="lvmbar" style="flex-direction:row;align-items:flex-end;gap:2px"><span style="width:45%;height:' + (m ? Math.round(x.assigned / m * 100) : 0) + '%;background:#94a3b8;display:block"></span><span style="width:45%;height:' + (m ? Math.round(x.completed / m * 100) : 0) + '%;background:#16a34a;display:block"></span></div><div class="lvml">' + esc(x.month.slice(5)) + '</div></div>';
-    }).join('') + '</div><div class="lvlegend"><span><i style="background:#94a3b8"></i>Assigned</span><span><i style="background:#16a34a"></i>Completed</span></div>';
-  }
-  function vTraining(d) { return '<div data-tr-root></div>'; }
-  function trAfterRender() { if (!TR.sum && !TR.busy) trLoad(); else trRender(); }
-  function trRender() {
-    var root = host.querySelector('[data-tr-root]'); if (!root) return;
-    var s = TR.sum, h = '', comps = (s && s.meta.companies) || (S.d && S.d.meta.companies) || [];
-    h += scopeLine('training') + '<div class="dirbar lvperiod">' +
-      '<button class="btn s" data-tra="refresh">Refresh</button>' + (TR.busy ? '<span class="muted"><span class="spin"></span> Loading…</span>' : '') +
-      '<a class="btn s" href="/app/training-dashboard" target="_blank">Training Dashboard ↗</a><a class="btn s" href="/app/my-training" target="_blank">My Training ↗</a><a class="btn s" href="/app/training-video" target="_blank">Manage videos ↗</a></div>';
-    if (TR.err) h += '<div class="alert e">' + esc(TR.err) + '</div>';
-    if (!s) { root.innerHTML = h + (TR.busy ? '<div class="ld">Loading training data…</div>' : '<div class="alert i">Training data is unavailable. Check the admin_hr_training_data API.</div>'); return; }
-    var dt = trDt(), A = s.analytics, K = s.kpis;
-    if (!A || !Array.isArray(K)) { root.innerHTML = h + '<div class="alert e">Training API response is missing analytics or kpis. Check admin_hr_training_data.</div>'; return; }
-    h += '<div class="sh">Training overview</div><div class="grid kpi-row training-kpi-row" style="--cols:' + Math.max(1, K.length) + '">' + K.map(trCard).join('') + '</div>';
-    h += '<div class="ph">Counts are labelled videos, courses, employees or assignments. One assignment = one employee × one video or course. ' + esc(s.notes.overdue) + ' ' + esc(s.notes.progress) + ' ' + esc(s.assessments.note) + '</div>';
-    h += '<div class="sh">Training analytics</div><div class="g2 analytics-row training-analytics-row" style="--cols:6">';
-    h += panel('Completion by department', trPctBars(A.by_department, function (x) { return trAttr({ trpre: '', trt: 'Department · ' + x.label, trdept: x.label }); }), 'Completed ÷ assignments.');
-    h += panel('Completion by designation', trPctBars(A.by_designation, function (x) { return trAttr({ trpre: '', trt: 'Designation · ' + x.label, trdesig: x.label }); }));
-    h += panel('Monthly assignments and completions', trTrend(A.trend), 'By assigned date and completion date (12 months). Training records start in October 2026.');
-    h += panel('Mandatory training compliance', trPctBars(A.mandatory_items, function (x) { return trAttr({ trpre: 'mand_incomplete', trt: 'Incomplete · ' + x.label, tritem: 'video:' + x.item }); }) +
-      '<div class="ph" style="margin-top:8px"><b>' + num(A.mandatory_incomplete_employees) + '</b> employees have incomplete mandatory training. ' + (dt ? '<button class="btn s sm"' + trAttr({ trpre: 'mand_incomplete', trt: 'Incomplete mandatory training' }) + '>List them</button>' : '') + '</div>');
-    h += panel('Overdue training by department', A.overdue_by_department.length ? trBars(A.overdue_by_department, 'overdue', function (x) { return trAttr({ trpre: 'overdue', trt: 'Overdue · ' + x.label, trdept: x.label }); }) : '<div class="muted">Nothing overdue.</div>');
-    h += panel('Most assigned videos and courses', trBars(A.most_assigned, 'count', function (x) { return trAttr({ trpre: '', trt: x.label, tritem: x.kind + ':' + x.item }); }, function (x) { return x.count + ' · ' + x.done + ' done' + (x.mandatory ? ' · mandatory' : ''); }));
-    h += '</div>';
-    h += '<div class="sh" data-tr-dir>Training directory</div>';
-    if (dt) h += '<div class="panel"><div data-tr-list></div></div>';
-    else h += '<div class="alert i">&#128274; The training directory and employee training details are available to HR Manager / HR User only. Employees see their own training in My Training. Your view shows aggregate figures.</div>';
-    // catalog + eligibility
-    var cat = s.catalog;
-    h += '<div class="sh">Training catalogue</div><div class="g2">';
-    h += panel('Training videos', '<div class="tw"><table class="dirtable"><thead><tr><th>Video</th><th>Category</th><th>Type</th><th>Days to complete</th><th>Assigned</th><th>Status</th></tr></thead><tbody>' +
-      cat.videos.map(function (v) { return '<tr><td><a href="/app/training-video/' + encodeURIComponent(v.name) + '" target="_blank">' + esc(v.title || v.name) + '</a></td><td>' + esc(v.category || '—') + '</td><td><span class="lvs ' + (v.mandatory ? 'bad' : 'muted') + '">' + (v.mandatory ? 'Mandatory' : 'Optional') + '</span></td><td>' + esc(v.completion_days || '—') + '</td><td>' + num(v.assigned) + '</td><td>' + (v.active ? 'Active' : 'Inactive') + '</td></tr>'; }).join('') +
-      '</tbody></table></div>' + (cat.courses.length ? '' : '<div class="ph" style="margin-top:6px">No Training Course has been created, so course metrics are 0 (not missing).</div>'));
-    h += panel('Mandatory assignment rule check', s.eligibility.length ? '<div class="tw"><table class="dirtable"><thead><tr><th>Video</th><th>Rule</th><th>Eligible</th><th>Assigned</th><th>Eligible, not assigned</th><th>Assigned, not eligible</th></tr></thead><tbody>' +
-      s.eligibility.map(function (x) { return '<tr><td>' + esc(x.title) + '</td><td>' + esc(x.rule) + '</td><td>' + num(x.eligible) + '</td><td>' + num(x.assigned) + '</td><td>' + (x.eligible_not_assigned ? '<b>' + x.eligible_not_assigned + '</b>' : '0') + '</td><td>' + num(x.assigned_not_eligible) + '</td></tr>'; }).join('') +
-      '</tbody></table></div>' : '<div class="muted">No active mandatory video.</div>', 'Recomputes the daily job\'s rule (Active employee, has a user, holds an allowed role) and compares it with the actual assignments.');
-    h += '</div>';
-    // reminders
-    var R = s.reminders;
-    h += '<div class="sh">Training reminders</div><div class="g2">';
-    h += panel('Reminder jobs', '<div class="tw"><table class="dirtable"><thead><tr><th>Job</th><th>Schedule</th><th>Last run</th><th>Runs (30 days)</th><th>Status</th></tr></thead><tbody>' +
-      R.jobs.map(function (j) { var rn = Object.keys(j.runs_30d || {}).map(function (k) { return k + ' ' + j.runs_30d[k]; }).join(', '); return '<tr><td>' + esc(j.name) + '</td><td class="mono">' + esc(j.cron || '—') + '</td><td>' + esc(j.last_run || '—') + '</td><td>' + esc(rn || '—') + (j.last_failure ? '<div class="lvnote">Last failure ' + esc(j.last_failure) + '</div>' : '') + '</td><td><span class="lvs ' + (!j.exists ? 'bad' : j.disabled || j.stopped ? 'warn' : 'ok') + '">' + (!j.exists ? 'Missing' : j.disabled ? 'Disabled' : j.stopped ? 'Stopped' : 'Active') + '</span></td></tr>'; }).join('') +
-      '</tbody></table></div>', R.schedule);
-    h += panel('Reminder activity', kvLite([['Reminder emails recorded', R.sent_total], ['Assignments reminded at least once', R.reminded_assignments], ['Escalated to managers', R.escalated], ['Last reminder', R.last_reminder || '—'], ['Open optional assignments (no reminders by design)', R.optional_without_reminders]]), 'Read-only. No reminder is created, changed or enabled from the dashboard.');
-    h += '</div>';
-    h += '<div class="sh">Training data quality · HR review</div><div class="panel"><div class="tw"><table class="dirtable"><thead><tr><th>Issue</th><th>Severity</th><th>Records</th><th></th></tr></thead><tbody>' +
-      s.dq.map(function (x) { return '<tr><td>' + esc(x.label) + '</td><td><span class="lvs ' + (x.severity === 'high' ? 'bad' : x.severity === 'medium' ? 'warn' : 'muted') + '">' + esc(x.severity) + '</span></td><td><b>' + num(x.count) + '</b></td><td>' +
-        (dt && x.count ? '<button class="btn s sm"' + trAttr({ trpre: x.preset, trt: 'Data quality · ' + x.label }) + '>Review</button>' : '') + '</td></tr>'; }).join('') +
-      '</tbody></table></div><div class="ph" style="margin-top:8px">Displayed only. Assignments and completions are never changed by the dashboard.</div></div>';
-    h += '<div class="ph">Generated ' + esc(s.meta.generated) + ' · source: Training Video, Training Course, Employee Training Progress, Employee Course Progress.' + (s.meta.unreadable.length ? ' Not readable: ' + esc(s.meta.unreadable.join(', ')) : '') + '</div>';
-    root.innerHTML = h;
-    if (dt) trRenderList();
-  }
-  function kvLite(pairs) { return '<div class="cpcomp" style="flex-wrap:wrap">' + pairs.map(function (p) { return '<div style="min-width:130px"><b>' + esc(p[1]) + '</b><span>' + esc(p[0]) + '</span></div>'; }).join('') + '</div>'; }
-  function trRenderList() {
-    var root = host.querySelector('[data-tr-list]'); if (!root) return;
-    var L = TR.L, d = L.data, o = (TR.sum && TR.sum.options) || {};
-    var active = document.activeElement, keep = active && active.dataset && active.dataset.trf === 'search', caret = keep ? active.selectionStart : 0;
-    var h = '<div class="lvhead"><b>' + esc(L.title) + '</b> <button class="btn s sm" data-export="tr">Export CSV</button>' + (L.preset ? ' <button class="btn s sm" data-tra="clearpreset">× Show all assignments</button>' : '') + '</div>';
-    h += '<div class="dirbar"><label class="dsearch">Search<input type="search" data-trf="search" placeholder="Employee ID, name or training…" value="' + esc(L.f.search) + '"></label>' +
-      trSel('department', 'Department', o.department, L.f.department, 'All departments') + trSel('designation', 'Designation', o.designation, L.f.designation, 'All designations') +
-      '<label>Employee ID<input type="text" data-trf="employee" placeholder="exact ID" value="' + esc(L.f.employee) + '"></label>' +
-      trSel('item', 'Video / course', o.items, L.f.item, 'All training') + trSel('mandatory', 'Mandatory', [['1', 'Mandatory'], ['0', 'Optional']], L.f.mandatory, 'All') +
-      trSel('status', 'Status', ['Completed', 'In Progress', 'Not Started'], L.f.status, 'All statuses') +
-      trSel('timing', 'Overdue / due soon', [['overdue', 'Overdue'], ['due_soon', 'Due in ≤' + ((TR.sum && TR.sum.meta.due_soon_days) || 3) + ' days'], ['on_track', 'On track'], ['no_due', 'No due date']], L.f.timing, 'Any') +
-      trSel('date_field', 'Date range on', [['assigned_date', 'Assigned date'], ['due_date', 'Due date'], ['completed_on', 'Completion date']], L.f.date_field) +
-      '<label>From<input type="date" data-trf="range_from" value="' + esc(L.f.range_from) + '"></label><label>To<input type="date" data-trf="range_to" value="' + esc(L.f.range_to) + '"></label>' +
-      '<button class="btn s" data-tra="clearf">Clear</button></div>';
-    if (L.err) h += '<div class="alert e">' + esc(L.err) + '</div>';
-    if (!d && L.busy) h += '<div class="ld">Loading training assignments…</div>';
-    else if (d) {
-      var from = d.total ? (d.page - 1) * d.page_length + 1 : 0, to = Math.min(d.total, d.page * d.page_length);
-      h += '<div class="dirmeta"><span>' + (L.busy ? '<span class="spin"></span> Loading… ' : '') + 'Showing <b>' + from + '–' + to + '</b> of <b>' + num(d.total) + '</b> records · <b>' + num(d.employees) + '</b> employees</span>' +
-        '<label class="pl">Rows<select data-trpl="1">' + [25, 50, 100].map(function (n) { return '<option' + (n === L.pl ? ' selected' : '') + '>' + n + '</option>'; }).join('') + '</select></label></div>';
-      if (!d.rows.length) h += '<div class="empty">No training assignments match these filters.<br><button class="btn s sm" data-tra="clearf" style="margin-top:8px">Clear filters</button></div>';
-      else {
-        h += '<div class="tw dtw' + (L.busy ? ' dim' : '') + '"><table class="dirtable"><thead><tr>' + TR_COLS.map(function (c) {
-          var on = L.sort === c[2]; return '<th class="sort' + (on ? ' on' : '') + '" data-trsort="' + c[2] + '">' + esc(c[1]) + (on ? (L.order === 'asc' ? ' ▲' : ' ▼') : ' <span class="muted">↕</span>') + '</th>';
-        }).join('') + '<th>Action</th></tr></thead><tbody>';
-        d.rows.forEach(function (r) {
-          h += '<tr class="click" data-trview="' + esc(r.employee) + '">' + TR_COLS.map(function (col) {
-            var v = r[col[0]];
-            if (col[0] === 'employee') return '<td class="mono">' + esc(v) + '</td>';
-            if (col[0] === 'title') return '<td>' + esc(v || '—') + (r.kind ? ' <span class="muted">(' + esc(r.kind) + ')</span>' : '') + (r.note ? '<div class="lvnote">' + esc(r.note) + '</div>' : '') + '</td>';
-            if (col[0] === 'mandatory') return '<td>' + (r.status === 'No user' ? '—' : v ? '<span class="lvs bad">Mandatory</span>' : '<span class="lvs muted">Optional</span>') + '</td>';
-            if (col[0] === 'due_date') return '<td>' + esc(v || '—') + (r.overdue ? '<div class="lvnote">overdue ' + (-r.days_to_due) + 'd</div>' : r.due_soon ? '<div class="lvnote">due in ' + r.days_to_due + 'd</div>' : '') + '</td>';
-            if (col[0] === 'status') return '<td><span class="lvs ' + (TR_ST[v] || 'muted') + '">' + esc(v) + '</span></td>';
-            if (col[0] === 'progress') return '<td style="text-align:right">' + (v === null || v === undefined ? (r.status === 'In Progress' ? '<span class="muted" title="Videos record status only">started</span>' : '—') : v + '%') + '</td>';
-            return '<td>' + esc(v || '—') + '</td>';
-          }).join('') + '<td style="white-space:nowrap"><button class="btn s sm" data-trview="' + esc(r.employee) + '">View</button>' + (r.name ? ' <a class="btn s sm" href="/app/' + (r.kind === 'course' ? 'employee-course-progress' : 'employee-training-progress') + '/' + encodeURIComponent(r.name) + '" target="_blank">Record ↗</a>' : '') + '</td></tr>';
-        });
-        h += '</tbody></table></div>';
-        h += '<div class="pager"><button class="btn s sm" data-trpage="first"' + (d.page <= 1 ? ' disabled' : '') + '>«</button><button class="btn s sm" data-trpage="prev"' + (d.page <= 1 ? ' disabled' : '') + '>‹ Prev</button>' +
-          '<span>Page <b>' + d.page + '</b> of <b>' + d.pages + '</b></span><button class="btn s sm" data-trpage="next"' + (d.page >= d.pages ? ' disabled' : '') + '>Next ›</button><button class="btn s sm" data-trpage="last"' + (d.page >= d.pages ? ' disabled' : '') + '>»</button></div>';
-      }
-      h += '<div class="ph" style="margin-top:6px">One row per assignment. Results respect your ERPNext and Employee User Permissions. Due dates and assignments are managed in the Training Center; the dashboard never changes them.</div>';
-    }
-    root.innerHTML = h;
-    if (keep) { var inp = root.querySelector('[data-trf="search"]'); if (inp) { inp.focus(); try { inp.setSelectionRange(caret, caret); } catch (e) {} } }
-  }
-  function openTraining(emp) {
-    if (!emp) return;
-    var dlg = new AHDDialog({ title: 'Employee training', size: 'extra-large', fields: [{ fieldtype: 'HTML', fieldname: 'h' }] });
-    var $w = dlg.fields_dict.h.$wrapper; $w.html('<div class="text-muted" style="padding:30px;text-align:center">Loading training details…</div>'); dlg.show();
-    frappe.call({ method: 'admin_hr_training_data', args: trArgs({ mode: 'detail', employee: emp }), freeze: false,
-      callback: function (r) {
-        var m = r.message; if (!m) { $w.html('<div class="text-muted">No data.</div>'); return; }
-        var b = m.basic, s = m.summary;
-        dlg.set_title(b.employee_name + ' · ' + b.employee);
-        var h = '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">' + pill(b.status, b.status === 'Active' ? 'green' : 'gray') + (b.has_user ? '' : pill('No ERPNext user', 'red')) +
-          pill(s.completed + '/' + s.total + ' completed', s.total && s.completed === s.total ? 'green' : 'orange') + (s.overdue ? pill(s.overdue + ' overdue', 'red') : '') +
-          '<a class="btn btn-xs btn-default" href="/app/employee-training-progress?employee=' + encodeURIComponent(b.employee) + '" target="_blank">Training records ↗</a>' +
-          '<a class="btn btn-xs btn-default" href="/app/training-dashboard" target="_blank">Training Dashboard ↗</a></div>';
-        h += sect('A · Employee', kv([['Employee', b.employee_name + ' (' + b.employee + ')'], ['Company', b.company], ['Department', b.department], ['Designation', b.designation], ['Date of joining', b.date_of_joining], ['ERPNext user', b.has_user ? 'Yes' : 'No (cannot open My Training)']]));
-        h += sect('B · Summary', kv([['Assigned', s.total], ['Completed', s.completed], ['In progress', s.in_progress], ['Not started', s.not_started], ['Mandatory', s.mandatory], ['Mandatory still open', s.mandatory_open], ['Overdue', s.overdue]]) +
-          (m.not_yet_assigned.length ? '<div class="alert alert-warning" style="margin-top:8px;padding:6px 10px">Eligible but not yet assigned: ' + m.not_yet_assigned.map(function (x) { return esc(x.title); }).join(', ') + '</div>' : ''));
-        var cols = [[function (x) { return (x.name ? '<a href="/app/' + (x.kind === 'course' ? 'employee-course-progress' : 'employee-training-progress') + '/' + encodeURIComponent(x.name) + '" target="_blank">' + esc(x.title) + '</a>' : esc(x.title)) + ' <span class="text-muted small">(' + esc(x.kind) + ')</span>'; }, 'Training'],
-          [function (x) { return x.mandatory ? pill('Mandatory', 'red') : pill('Optional', 'gray'); }, 'Type'], ['assigned_date', 'Assigned'],
-          [function (x) { return esc(x.due_date || '—') + (x.overdue ? ' ' + pill('overdue ' + (-x.days_to_due) + 'd', 'red') : x.due_soon ? ' ' + pill('due in ' + x.days_to_due + 'd', 'orange') : ''); }, 'Due'],
-          ['started_on', 'Started'], ['completed_on', 'Completed'], [function (x) { return pill(x.status, TR_PILL[x.status] || 'gray'); }, 'Status'],
-          [function (x) { return x.progress === null || x.progress === undefined ? (x.status === 'In Progress' ? 'started' : '—') : x.progress + '%'; }, 'Progress'], ['reminders_sent', 'Reminders']];
-        var grp = function (f) { return m.items.filter(f); };
-        h += sect('C · Assigned training', tbl(cols, m.items, 'No training assigned.'));
-        h += sect('D · By status', '<div style="margin-bottom:4px"><b>Completed</b> (' + grp(function (x) { return x.status === 'Completed'; }).length + ')</div>' + tbl(cols, grp(function (x) { return x.status === 'Completed'; }), 'None.') +
-          '<div style="margin:8px 0 4px"><b>In progress</b> (' + grp(function (x) { return x.status === 'In Progress'; }).length + ')</div>' + tbl(cols, grp(function (x) { return x.status === 'In Progress'; }), 'None.') +
-          '<div style="margin:8px 0 4px"><b>Not started</b> (' + grp(function (x) { return x.status === 'Not Started'; }).length + ')</div>' + tbl(cols, grp(function (x) { return x.status === 'Not Started'; }), 'None.') +
-          '<div style="margin:8px 0 4px"><b>Mandatory</b> (' + grp(function (x) { return x.mandatory; }).length + ') · <b>Overdue</b> (' + grp(function (x) { return x.overdue; }).length + ')</div>' + tbl(cols, grp(function (x) { return x.mandatory || x.overdue; }), 'None.'));
-        h += sect('E · Progress history', tbl([['date', 'Date'], ['event', 'Event'], ['item', 'Training']], m.history, 'No history recorded.'), 'Built from the assignment dates and reminder fields. Videos do not record a percentage watched.');
-        h += sect('F · Assessment results', '<div class="text-muted">' + esc(m.assessments.note) + '</div>' + (m.other_training && m.other_training.length ? '<div style="margin-top:8px"><b>Other "Training" requests</b>: ' + m.other_training.map(function (x) { return '<a href="/app/training/' + encodeURIComponent(x.name) + '" target="_blank">' + esc(x.name) + '</a> (' + esc(x.state || '—') + ', ' + esc(x.date) + ')'; }).join(', ') + '</div>' : ''));
-        $w.html(h);
-      },
-      error: function () { $w.html('<div class="text-muted" style="padding:20px">Training details are not available for this employee (not permitted or not found).</div>'); } });
-  }
-  /* ---------------- HR Requests & Service Desk tab (Phase 7) ---------------- */
-  var RQ = { sum: null, busy: false, err: null, seq: 0, company: '',
-    L: { data: null, busy: false, err: null, seq: 0, preset: '', title: 'All HR requests', f: null, page: 1, pl: 25, sort: 'created', order: 'desc' } };
-  var RQ_EMPTY_F = function () { return { search: '', department: '', branch: '', type: '', employee: '', status: '', approver: '', range_from: '', range_to: '', age_bucket: '' }; };
-  RQ.L.f = RQ_EMPTY_F();
-  var RQ_COLS = [['name', 'Request ID', 'name'], ['type', 'Request Type', 'type'], ['employee_name', 'Employee', 'employee_name'], ['department', 'Department', 'department'],
-    ['company', 'Company', 'company'], ['branch', 'Branch', 'branch'], ['created', 'Created', 'created'], ['approver', 'Assigned / Approver', 'approver'],
-    ['priority', 'Priority', null], ['status', 'Status', 'status'], ['age_days', 'Age / Overdue', 'age_days']];
-  var RQ_ST = { draft: 'muted', pending: 'warn', on_hold: 'warn', in_progress: 'warn', completed: 'ok', rejected: 'bad', cancelled: 'muted', unclear: 'bad' };
-  var RQ_PILL = { draft: 'gray', pending: 'orange', on_hold: 'yellow', in_progress: 'blue', completed: 'green', rejected: 'red', cancelled: 'gray', unclear: 'red' };
-  function rqDt() { return RQ.sum && RQ.sum.meta.tier === 'detail'; }
-  function rqArgs(a) { return gfArgs(a); }
-  function rqAttr(o) { return Object.keys(o).map(function (k) { return ' data-' + k + '="' + esc(o[k]) + '"'; }).join(''); }
-  function rqLoad() {
-    RQ.busy = true; RQ.err = null; rqRender();
-    var seq = ++RQ.seq;
-    frappe.call({ method: 'admin_hr_requests_data', args: rqArgs({ mode: 'summary' }), freeze: false,
-      callback: function (r) { if (seq !== RQ.seq) return; RQ.busy = false; RQ.sum = r.message || null; if (RQ.sum) RQ.company = RQ.sum.meta.company; rqRender(); if (rqDt() && !RQ.L.data) rqList(); },
-      error: function () { if (seq !== RQ.seq) return; RQ.busy = false; RQ.err = 'Could not load HR requests. You may not have permission.'; rqRender(); } });
-  }
-  function rqList() {
-    var L = RQ.L; if (!rqDt()) return;
-    L.busy = true; L.err = null; rqRenderList();
-    var seq = ++L.seq;
-    frappe.call({ method: 'admin_hr_requests_data', args: rqArgs(Object.assign({ mode: 'list', preset: L.preset, page: L.page, page_length: L.pl, sort_by: L.sort, sort_order: L.order }, L.f)), freeze: false,
-      callback: function (r) { if (seq !== L.seq) return; L.busy = false; L.data = r.message || null; if (L.data) L.page = L.data.page; rqRenderList(); },
-      error: function () { if (seq !== L.seq) return; L.busy = false; L.err = 'Could not load HR requests.'; rqRenderList(); } });
-  }
-  function rqPreset(preset, title, filters) {
-    var L = RQ.L; L.preset = preset || ''; L.title = title || 'All HR requests'; L.page = 1;
-    L.f = Object.assign(RQ_EMPTY_F(), filters || {});
-    if (preset === 'overdue' || preset === 'age' || preset === 'dq_stuck' || preset.indexOf('q_') === 0 && preset !== 'q_recent') { L.sort = 'age_days'; L.order = 'desc'; } else { L.sort = 'created'; L.order = 'desc'; }
-    rqList();
-    var el = host.querySelector('[data-rq-dir]'); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-  function rqSel(key, label, list, cur, all) {
-    return '<label>' + esc(label) + '<select data-rqf="' + key + '">' + (all !== undefined ? '<option value="">' + esc(all) + '</option>' : '') +
-      (list || []).map(function (x) { var v = Array.isArray(x) ? x[0] : x, t = Array.isArray(x) ? x[1] : x; return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') + '</select></label>';
-  }
-  function rqBars(list, valKey, attrFn, fmt) {
-    if (!list || !list.length) return '<div class="muted">No records.</div>';
-    var m = 0; list.forEach(function (x) { if ((x[valKey] || 0) > m) m = x[valKey] || 0; });
-    var dt = rqDt();
-    return '<div class="lvbars">' + list.slice(0, 30).map(function (x) {
-      var w = !x.suppressed && m ? Math.max(x[valKey] ? 2 : 0, Math.round((x[valKey] || 0) / m * 100)) : 0, at = dt && !x.suppressed && attrFn ? attrFn(x) : '';
-      return '<div class="lvbr' + (at ? ' click' : '') + '"' + at + ' title="' + esc(x.label) + '"><span class="lvbl">' + esc(x.label) + '</span><span class="lvbt"><span style="width:' + w + '%"></span></span><span class="lvbv">' + (x.suppressed ? '&lt;3' : fmt ? fmt(x) : num(x[valKey])) + '</span></div>';
-    }).join('') + '</div>';
-  }
-  function rqCard(k) {
-    var dt = rqDt() && k.preset;
-    return '<div class="card' + (dt ? ' click' : '') + '"' + (dt ? rqAttr({ rqpre: k.preset === 'all' ? '' : k.preset, rqt: k.label }) : '') + '><div class="lb"><span>' + esc(k.label) + '</span>' + badge(k.value === null ? 'unavailable' : k.state) + '</div>' +
-      (k.value === null ? '<div class="v na">Unavailable</div>' : '<div class="v">' + num(k.value) + ' <span class="cpunit">' + esc(k.unit) + '</span></div>') +
-      (k.sub ? '<div class="sub">' + esc(k.sub) + '</div>' : '') + '<div class="nt" title="' + esc(k.basis) + '">' + esc(k.basis) + '</div>' +
-      (dt ? '<div class="ft">View requests &rarr;</div>' : (!rqDt() && k.preset ? '<div class="ft muted">&#128274; Details: HR Manager / HR User</div>' : '')) + '</div>';
-  }
-  function rqQueue(label, value, sub, preset) {
-    var dt = rqDt();
-    return '<div class="card' + (dt ? ' click' : '') + '"' + (dt ? rqAttr({ rqpre: preset, rqt: label }) : '') + '><div class="lb"><span>' + esc(label) + '</span></div><div class="v">' + num(value) + '</div><div class="sub">' + esc(sub) + '</div>' + (dt ? '<div class="ft">Open queue &rarr;</div>' : '') + '</div>';
-  }
-  function rqTrend(list) {
-    var m = 0; list.forEach(function (x) { if (x.created > m) m = x.created; if (x.closed > m) m = x.closed; });
-    var dt = rqDt();
-    return '<div class="lvmc">' + list.map(function (x) {
-      var last = new Date(parseInt(x.month.slice(0, 4), 10), parseInt(x.month.slice(5, 7), 10), 0).getDate();
-      var at = dt && x.created ? rqAttr({ rqpre: '', rqt: 'Created in ' + x.month, rqfrom: x.month + '-01', rqto: x.month + '-' + String(last).padStart(2, '0') }) : '';
-      return '<div class="lvmcol' + (at ? ' click' : '') + '"' + at + ' title="' + esc(x.month + ': ' + x.created + ' created, ' + x.closed + ' closed (with a recorded closure date)') + '"><div class="lvmv">' + (x.created || '') + '</div>' +
-        '<div class="lvmbar" style="flex-direction:row;align-items:flex-end;gap:2px"><span style="width:45%;height:' + (m ? Math.round(x.created / m * 100) : 0) + '%;background:#2563eb;display:block"></span><span style="width:45%;height:' + (m ? Math.round(x.closed / m * 100) : 0) + '%;background:#16a34a;display:block"></span></div><div class="lvml">' + esc(x.month.slice(5)) + '</div></div>';
-    }).join('') + '</div><div class="lvlegend"><span><i style="background:#2563eb"></i>Created</span><span><i style="background:#16a34a"></i>Closed (recorded date)</span></div>';
-  }
-  function vRequests(d) { return '<div data-rq-root></div>'; }
-  function rqAfterRender() { if (!RQ.sum && !RQ.busy) rqLoad(); else rqRender(); }
-  function rqRender() {
-    var root = host.querySelector('[data-rq-root]'); if (!root) return;
-    var s = RQ.sum, h = '', comps = (s && s.meta.companies) || (S.d && S.d.meta.companies) || [];
-    h += scopeLine('requests') + '<div class="dirbar lvperiod">' +
-      '<button class="btn s" data-rqa="refresh">Refresh</button>' + (RQ.busy ? '<span class="muted"><span class="spin"></span> Loading…</span>' : '') + '</div>';
-    if (RQ.err) h += '<div class="alert e">' + esc(RQ.err) + '</div>';
-    if (!s) { root.innerHTML = h + (RQ.busy ? '<div class="ld">Loading HR requests…</div>' : ''); return; }
-    var dt = rqDt(), A = s.analytics, Q = s.queues;
-    if (s.meta.unreadable.length) h += '<div class="alert i">Not readable with your roles, so not counted: <b>' + esc(s.meta.unreadable.join(', ')) + '</b>. Permissions are not bypassed.</div>';
-    h += '<div class="sh">HR service desk</div><div class="grid kpi-row requests-kpi-row" style="--cols:' + Math.max(1, s.kpis.length) + '">' + s.kpis.map(rqCard).join('') + '</div>';
-    h += '<div class="ph">Leave Applications (Leave tab) and IT Help Desk tickets are not included. Overdue uses a provisional ' + s.meta.sla_days + '-day SLA because no SLA is configured. Priority is not recorded on any source DocType.</div>';
-    h += '<div class="sh">Action queues</div><div class="grid kpi-row request-queue-row" style="--cols:5">' +
-      rqQueue('Pending My Approval', Q.my, 'where the workflow lets one of your roles act, or you are the named approver', 'q_my') +
-      rqQueue('Pending HR Review', Q.hr_review, 'states naming HR or Review', 'q_hr_review') +
-      rqQueue('Awaiting Employee Information', Q.awaiting_info, 'On-Hold / clarification states', 'q_awaiting_info') +
-      rqQueue('Overdue Requests', Q.overdue, 'open > ' + s.meta.sla_days + ' days', 'overdue') +
-      rqQueue('Recently Completed', Q.recent, 'closed in the last 30 days (recorded date)', 'q_recent') + '</div>';
-    h += '<div class="ph">&#128274; ' + esc(Q.note) + '</div>';
-    h += '<div class="sh">HR request analytics</div><div class="g2 analytics-row request-analytics-row" style="--cols:8">';
-    var src = function (x) { return (s.options && s.options.types || []).filter(function (t) { return t[1] === x.label; }).map(function (t) { return t[0]; })[0]; };
-    h += panel('Requests by type', rqBars(A.by_type, 'count', function (x) { var k = src(x); return k ? rqAttr({ rqpre: '', rqt: x.label, rqtype: k }) : ''; }, function (x) { return x.count + ' · ' + x.open + ' open'; }));
-    h += panel('Requests by department', rqBars(A.by_department, 'count', function (x) { return rqAttr({ rqpre: '', rqt: 'Department · ' + x.label, rqdept: x.label }); }, function (x) { return x.count + ' · ' + x.open + ' open'; }));
-    h += panel('Requests by branch', rqBars(A.by_branch, 'count', function (x) { return rqAttr({ rqpre: '', rqt: 'Branch · ' + x.label, rqbranch: x.label }); }, function (x) { return x.count + ' · ' + x.open + ' open'; }));
-    h += panel('Monthly request trend', rqTrend(A.trend), '12 months by creation date; closed only where a workflow closure date exists.');
-    h += panel('Open requests by age', rqBars(A.pending_by_age, 'count', function (x) { return rqAttr({ rqpre: 'age', rqt: 'Open ' + x.label + ' days', rqage: x.label }); }), 'Days in the current state (or since creation).');
-    h += panel('Status distribution', rqBars(A.status, 'count', function (x) { return rqAttr({ rqpre: '', rqt: x.label, rqst: x.key }); }), 'Normalised across DocTypes (rules below).');
-    h += panel('Average resolution time by type', rqBars(A.resolution_by_type.map(function (x) { return { label: x.label, avg: x.avg || 0, raw: x }; }), 'avg', null, function (x) { return x.raw.avg === null ? 'Unavailable (' + x.raw.closed + ' closed, no closure date)' : x.raw.avg + ' days · ' + x.raw.timed + '/' + x.raw.closed; }), 'Creation → workflow comment for the final state.');
-    h += panel('Oldest unresolved requests', A.oldest_open.length ? '<div class="lvbars">' + A.oldest_open.map(function (x) { return '<div class="lvbr' + (dt && x.id ? ' click' : '') + '"' + (dt && x.id ? rqAttr({ rqview: x.id }) : '') + '><span class="lvbl">' + esc(x.label) + '</span><span></span><span class="lvbv">' + num(x.age) + ' days</span></div>'; }).join('') + '</div>' : '<div class="muted">No open requests.</div>');
-    h += '</div>';
-    h += '<div class="sh" data-rq-dir>Unified request directory</div>';
-    if (dt) h += '<div class="panel"><div data-rq-list></div></div>';
-    else h += '<div class="alert i">&#128274; The request directory and request details are available to HR Manager / HR User only. Your view shows aggregate figures.</div>';
-    h += '<div class="sh">Sources & status rules</div><div class="g2">';
-    h += panel('Source DocTypes', '<div class="tw"><table class="dirtable"><thead><tr><th>DocType</th><th>Shown as</th><th>Records</th><th>Open</th><th>Workflow</th></tr></thead><tbody>' +
-      s.sources.map(function (x) { return '<tr><td>' + esc(x.doctype) + '</td><td>' + esc(x.label) + '</td><td>' + (x.readable ? num(x.count) : '<span class="lvs warn">not readable</span>') + '</td><td>' + (x.readable ? num(x.open) : '—') + '</td><td>' + esc(x.workflow || 'none / inactive') + '</td></tr>'; }).join('') +
-      '</tbody></table></div><div class="ph" style="margin-top:6px">Not included: ' + s.excluded.map(function (x) { return esc(x.doctype) + ' (' + esc(x.reason) + ')'; }).join('; ') + '.</div>');
-    h += panel('How each DocType\'s status is normalised', '<div class="tw"><table class="dirtable"><thead><tr><th>DocType</th><th>Rule</th><th>Closure date</th></tr></thead><tbody>' +
-      s.status_rules.map(function (x) { return '<tr><td>' + esc(x.doctype) + '</td><td>' + esc(x.rule) + '</td><td>' + esc(x.closure_date) + '</td></tr>'; }).join('') + '</tbody></table></div>', 'The DocTypes do not share one status model; these rules are the dashboard\'s mapping.');
-    h += '</div>';
-    h += '<div class="sh">HR request data quality</div><div class="panel"><div class="tw"><table class="dirtable"><thead><tr><th>Issue</th><th>Severity</th><th>Records</th><th></th></tr></thead><tbody>' +
-      s.dq.map(function (x) { return '<tr><td>' + esc(x.label) + '</td><td><span class="lvs ' + (x.severity === 'high' ? 'bad' : x.severity === 'medium' ? 'warn' : 'muted') + '">' + esc(x.severity) + '</span></td><td><b>' + num(x.count) + '</b></td><td>' +
-        (dt && x.count ? '<button class="btn s sm"' + rqAttr({ rqpre: x.preset, rqt: 'Data quality · ' + x.label }) + '>Review</button>' : '') + '</td></tr>'; }).join('') +
-      '</tbody></table></div><div class="ph" style="margin-top:8px">Displayed only. No request is changed by the dashboard.</div></div>';
-    h += '<div class="ph">Generated ' + esc(s.meta.generated) + '.</div>';
-    root.innerHTML = h;
-    if (dt) rqRenderList();
-  }
-  function rqRenderList() {
-    var root = host.querySelector('[data-rq-list]'); if (!root) return;
-    var L = RQ.L, d = L.data, o = (RQ.sum && RQ.sum.options) || {};
-    var active = document.activeElement, keep = active && active.dataset && active.dataset.rqf === 'search', caret = keep ? active.selectionStart : 0;
-    var h = '<div class="lvhead"><b>' + esc(L.title) + '</b> <button class="btn s sm" data-export="rq">Export CSV</button>' + (L.preset ? ' <button class="btn s sm" data-rqa="clearpreset">× Show all requests</button>' : '') + '</div>';
-    h += '<div class="dirbar"><label class="dsearch">Search<input type="search" data-rqf="search" placeholder="Request ID, employee or type…" value="' + esc(L.f.search) + '"></label>' +
-      rqSel('department', 'Department', o.department, L.f.department, 'All departments') + rqSel('branch', 'Branch', o.branch, L.f.branch, 'All branches') +
-      rqSel('type', 'Request type', o.types, L.f.type, 'All types') + '<label>Employee ID<input type="text" data-rqf="employee" placeholder="exact ID" value="' + esc(L.f.employee) + '"></label>' +
-      rqSel('status', 'Status', o.status, L.f.status, 'All statuses') + rqSel('approver', 'Assigned to', o.approver, L.f.approver, 'Anyone') +
-      '<label>Created from<input type="date" data-rqf="range_from" value="' + esc(L.f.range_from) + '"></label><label>Created to<input type="date" data-rqf="range_to" value="' + esc(L.f.range_to) + '"></label>' +
-      '<button class="btn s" data-rqa="clearf">Clear</button></div>';
-    if (L.err) h += '<div class="alert e">' + esc(L.err) + '</div>';
-    if (!d && L.busy) h += '<div class="ld">Loading requests…</div>';
-    else if (d) {
-      var from = d.total ? (d.page - 1) * d.page_length + 1 : 0, to = Math.min(d.total, d.page * d.page_length);
-      h += '<div class="dirmeta"><span>' + (L.busy ? '<span class="spin"></span> Loading… ' : '') + 'Showing <b>' + from + '–' + to + '</b> of <b>' + num(d.total) + '</b> requests</span>' +
-        '<label class="pl">Rows<select data-rqpl="1">' + [25, 50, 100].map(function (n) { return '<option' + (n === L.pl ? ' selected' : '') + '>' + n + '</option>'; }).join('') + '</select></label></div>';
-      if (!d.rows.length) h += '<div class="empty">No HR requests match these filters.<br><button class="btn s sm" data-rqa="clearf" style="margin-top:8px">Clear filters</button></div>';
-      else {
-        h += '<div class="tw dtw' + (L.busy ? ' dim' : '') + '"><table class="dirtable"><thead><tr>' + RQ_COLS.map(function (c) {
-          if (!c[2]) return '<th>' + esc(c[1]) + '</th>';
-          var on = L.sort === c[2]; return '<th class="sort' + (on ? ' on' : '') + '" data-rqsort="' + c[2] + '">' + esc(c[1]) + (on ? (L.order === 'asc' ? ' ▲' : ' ▼') : ' <span class="muted">↕</span>') + '</th>';
-        }).join('') + '<th>Action</th></tr></thead><tbody>';
-        d.rows.forEach(function (r) {
-          h += '<tr class="click" data-rqview="' + esc(r.id) + '">' + RQ_COLS.map(function (col) {
-            var v = r[col[0]];
-            if (col[0] === 'name') return '<td class="mono">' + esc(v) + (r.note ? '<div class="lvnote">' + esc(r.note) + '</div>' : '') + '</td>';
-            if (col[0] === 'employee_name') return '<td>' + esc(v || '—') + '<div class="muted mono" style="font-size:11px">' + esc(r.employee || 'no employee link') + '</div></td>';
-            if (col[0] === 'priority') return '<td class="muted">—</td>';
-            if (col[0] === 'status') return '<td><span class="lvs ' + (RQ_ST[r.cat] || 'muted') + '">' + esc(v) + '</span><div class="muted" style="font-size:11px">' + esc(r.state) + '</div></td>';
-            if (col[0] === 'age_days') return '<td>' + (v === null ? '—' : v + 'd' + (r.overdue_days ? '<div class="lvnote">' + r.overdue_days + 'd overdue</div>' : '')) + '</td>';
-            return '<td>' + esc(v || '—') + '</td>';
-          }).join('') + '<td style="white-space:nowrap"><button class="btn s sm" data-rqview="' + esc(r.id) + '">View</button></td></tr>';
-        });
-        h += '</tbody></table></div>';
-        h += '<div class="pager"><button class="btn s sm" data-rqpage="first"' + (d.page <= 1 ? ' disabled' : '') + '>«</button><button class="btn s sm" data-rqpage="prev"' + (d.page <= 1 ? ' disabled' : '') + '>‹ Prev</button>' +
-          '<span>Page <b>' + d.page + '</b> of <b>' + d.pages + '</b></span><button class="btn s sm" data-rqpage="next"' + (d.page >= d.pages ? ' disabled' : '') + '>Next ›</button><button class="btn s sm" data-rqpage="last"' + (d.page >= d.pages ? ' disabled' : '') + '>»</button></div>';
-      }
-      h += '<div class="ph" style="margin-top:6px">One row per source record. Results respect your ERPNext DocType and User Permissions for every source.</div>';
-    }
-    root.innerHTML = h;
-    if (keep) { var inp = root.querySelector('[data-rqf="search"]'); if (inp) { inp.focus(); try { inp.setSelectionRange(caret, caret); } catch (e) {} } }
-  }
-  function openRequest(id) {
-    if (!id) return;
-    var dlg = new AHDDialog({ title: 'HR request', size: 'extra-large', fields: [{ fieldtype: 'HTML', fieldname: 'h' }] });
-    var $w = dlg.fields_dict.h.$wrapper; $w.html('<div class="text-muted" style="padding:30px;text-align:center">Loading request…</div>'); dlg.show();
-    frappe.call({ method: 'admin_hr_requests_data', args: rqArgs({ mode: 'detail', id: id }), freeze: false,
-      callback: function (r) {
-        var m = r.message; if (!m) { $w.html('<div class="text-muted">No data.</div>'); return; }
-        var q = m.request, e = m.employee;
-        dlg.set_title(q.type + ' · ' + q.name);
-        var h = '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">' + pill(q.status, RQ_PILL[q.cat] || 'gray') + pill(q.state, 'gray') +
-          (q.days_pending !== null ? pill(q.days_pending + ' days in this state', q.days_pending > 7 ? 'red' : 'orange') : '') +
-          '<a class="btn btn-xs btn-primary" href="' + esc(q.route) + '" target="_blank">' + (m.actions.length ? 'Open in ERPNext to act ↗' : 'Open in ERPNext ↗') + '</a></div>';
-        h += sect('A · Request', kv([['Request ID', q.name], ['Type', q.type + ' (' + q.doctype + ')'], ['Created', q.created], ['Created by', q.created_by], ['Status', q.status + ' — ' + q.state],
-          ['Assigned / approver', q.approver || '—'], ['In current state since', q.since], ['Workflow', q.workflow || 'none / inactive']].concat(q.safe_fields)));
-        h += sect('B · Employee', e ? kv([['Employee', e.employee_name + ' (' + e.employee + ')'], ['Company', e.company], ['Department', e.department], ['Branch', e.branch], ['Designation', e.designation], ['Status', e.status]]) : '<div class="text-muted">No employee linked, or not visible with your permissions.</div>');
-        h += sect('C · Workflow history', tbl([['state', 'Moved to'], ['by', 'By'], ['on', 'On']], m.history, 'No workflow history recorded for this request.'));
-        h += sect('D · Available action', m.actions.length ? 'The workflow lists these actions for your roles: ' + m.actions.map(function (x) { return pill(x, 'blue'); }).join(' ') + '<div class="text-muted small" style="margin-top:6px">Use them in the original form; the dashboard never applies them.</div>' : '<div class="text-muted">No workflow action is available to your roles in this state.</div>');
-        h += sect('E · Related requests (same employee)', tbl([['type', 'Type'], [function (x) { return '<a href="/app/' + x.doctype.toLowerCase().replace(/ /g, '-') + '/' + encodeURIComponent(x.name) + '" target="_blank">' + esc(x.name) + '</a>'; }, 'Request'], ['state', 'State'], ['created', 'Created']], m.related, 'No other requests.'), m.note);
-        $w.html(h);
-      },
-      error: function () { $w.html('<div class="text-muted" style="padding:20px">This request is not available (not permitted or not found).</div>'); } });
-  }
-  function moveChart(mv) {
-    var m = 0; mv.forEach(function (x) { m = Math.max(m, x.joiners, x.leavers); });
-    return '<div class="vb">' + mv.map(function (x) { return '<div class="c" title="' + esc(x.month + ': +' + x.joiners + ' joiners / ' + x.leavers + ' leavers') + '"><div class="pair"><div class="bar" style="height:' + (m ? Math.max(2, 85 * x.joiners / m) : 2) + '%;max-width:12px"></div><div class="bar b2" style="height:' + (m ? Math.max(2, 85 * x.leavers / m) : 2) + '%;max-width:12px"></div></div><span class="x">' + esc(x.month.slice(2)) + '</span></div>'; }).join('') + '</div><div class="leg"><span><i style="background:var(--acc)"></i>Joiners</span><span><i style="background:var(--acc2)"></i>Leavers</span></div>';
-  }
-  /* ---------------- HR Analytics tab (Phase 8) ---------------- */
-  var AN = { data: null, busy: false, err: null, seq: 0, key: '' };
-  function gfArgs(extra) {
-    var o = { company: (S.f && S.f.company) || (S.d && S.d.meta.company) || '' };
-    if (S.f && S.f.department) o.g_department = S.f.department;
-    if (S.f && S.f.branch) o.g_branch = S.f.branch;
-    if (S.f && S.f.job_location) o.g_job_location = S.f.job_location;
-    if (S.f && S.f.preview_tier) o.preview_tier = S.f.preview_tier;
-    return Object.assign(o, extra || {});
-  }
-  function scopeLine(kind) {
-    var f = S.f || {}, parts = [esc(f.company || (S.d && S.d.meta.company) || '')];
-    if (f.department) parts.push('Department: ' + esc(f.department));
-    if (f.branch) parts.push('Branch: ' + esc(f.branch));
-    if (f.job_location) parts.push('Job location: ' + esc(locName(f.job_location)));
-    var when = { overview: 'Headcount as of ' + esc(f.to_date || ''), employees: 'Headcount as of ' + esc(f.to_date || ''),
-      attendance: 'Check-in activity up to ' + esc(f.to_date || '') + ' (period shown on each panel)',
-      leave: 'Leave activity in the period selected below; "today" figures use today\'s date',
-      compliance: 'Document status as of ' + esc(f.to_date || ''),
-      training: 'All assignments; overdue / due soon as of today; directory date range on assignment, due or completion date',
-      requests: 'All requests by creation date; age and overdue as of today',
-      analytics: 'Headcount as of ' + esc(f.to_date || '') + ' · leave over the last 12 months · documents as of ' + esc(f.to_date || '') + ' · training and requests: all records' }[kind] || '';
-    return '<div class="scope">Scope: ' + parts.join(' · ') + ' · <b>' + when + '</b>. Change company, department, branch or job location in the filter bar above.</div>';
-  }
-  function anState(s) { return badge(s || 'actual'); }
-  function anPanel(title, state, body, def) {
-    return '<div class="panel av-panel"><div class="anh"><b>' + esc(title.replace(/^\d+[a-z]?(?:[–-]\d+)? · /, '')) + '</b>' + anState(state) + '</div><div class="av-chart-body">' + body + '</div>' + (def ? '<details class="av-method"><summary>Source &amp; calculation</summary><div class="andef">' + esc(def) + '</div></details>' : '') + '</div>';
-  }
-  var AV_COLORS = ['#3b82f6', '#0d9488', '#8b5cf6', '#f59e0b', '#e11d48', '#06b6d4'];
-  function avNumber(v) { return typeof v === 'number' && isFinite(v) && v >= 0; }
-  function anBars(list, valKey, fmt, attrFn) {
-    if (!list || !list.length) return '<div class="muted">No records.</div>';
-    var shown = list.slice(0, 25), m = 0;
-    shown.forEach(function (x) { if (!x.suppressed && avNumber(x[valKey])) m = Math.max(m, x[valKey]); });
-    return '<div class="lvbars av-ranked">' + shown.map(function (x, i) {
-      var v = x[valKey], hidden = !!x.suppressed, known = !hidden && avNumber(v);
-      var w = known && m ? Math.max(v ? 2 : 0, v / m * 100) : 0;
-      var at = !hidden && attrFn ? attrFn(x) : '';
-      var display = hidden ? '&lt;3' : !known ? 'Unavailable' : fmt ? fmt(x) : num(v);
-      return '<div class="lvbr' + (at ? ' click' : '') + '"' + at + ' title="' + esc(x.label) + '"><span class="lvbl"><i class="av-dot" style="background:' + AV_COLORS[i % AV_COLORS.length] + '"></i>' + esc(x.label) + '</span><span class="lvbt"><span style="width:' + w + '%;background:' + AV_COLORS[i % AV_COLORS.length] + '"></span></span><span class="lvbv">' + display + '</span></div>';
-    }).join('') + '</div>';
-  }
-  // Native SVG charts keep zero distinct from missing or privacy-suppressed values.
-  function anCols(list, series, labelKey) {
-    if (!list || !list.length) return '<div class="muted">No trend data.</div>';
-    var W = 420, H = 220, L = 35, R = 8, T = 12, B = 34, max = 0;
-    list.forEach(function (x) { if (!x.suppressed) series.forEach(function (v) { if (avNumber(x[v[0]])) max = Math.max(max, x[v[0]]); }); });
-    var top = max ? (max <= 4 ? Math.ceil(max) : Math.ceil(max / 4) * 4) : 1;
-    var plot = H - T - B, group = (W - L - R) / list.length;
-    var out = '<div class="av-svg-wrap"><svg class="av-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(series.map(function (v) { return v[1]; }).join(' and ') + ' by month; values are available below the chart') + '">';
-    for (var tick = 0; tick <= 4; tick++) {
-      var y = T + plot * tick / 4, val = top * (1 - tick / 4);
-      out += '<line class="av-gridline" x1="' + L + '" x2="' + (W - R) + '" y1="' + y + '" y2="' + y + '"/><text class="av-axis" x="' + (L - 5) + '" y="' + (y + 3) + '" text-anchor="end">' + Math.round(val * 10) / 10 + '</text>';
-    }
-    list.forEach(function (x, i) {
-      var label = String(x[labelKey] || ''), tip = label + ': ' + series.map(function (v) { return v[1] + ' ' + (x.suppressed ? '<3' : avNumber(x[v[0]]) ? x[v[0]] : 'Unavailable'); }).join(', ');
-      out += '<g><title>' + esc(tip) + '</title>';
-      var slot = group * .74 / series.length;
-      series.forEach(function (v, j) {
-        if (x.suppressed || !avNumber(x[v[0]])) return;
-        var height = plot * x[v[0]] / top, bx = L + group * i + group * .13 + j * slot;
-        out += '<rect x="' + bx.toFixed(2) + '" y="' + (T + plot - height).toFixed(2) + '" width="' + Math.max(1, slot - 2).toFixed(2) + '" height="' + height.toFixed(2) + '" rx="2" fill="' + v[2] + '"/>';
-      });
-      out += '<text class="av-axis" x="' + (L + group * (i + .5)).toFixed(2) + '" y="' + (H - 16) + '" text-anchor="middle">' + esc(label.slice(5) || label) + '</text></g>';
-    });
-    out += '</svg></div><div class="lvlegend">' + series.map(function (v) { return '<span><i style="background:' + v[2] + '"></i>' + esc(v[1]) + '</span>'; }).join('') + '</div>';
-    out += '<details class="av-values"><summary>View chart values</summary><div class="tw"><table><thead><tr><th>Month</th>' + series.map(function (v) { return '<th>' + esc(v[1]) + '</th>'; }).join('') + '</tr></thead><tbody>';
-    out += list.map(function (x) { return '<tr><td>' + esc(x[labelKey]) + '</td>' + series.map(function (v) { return '<td>' + (x.suppressed ? '&lt;3' : avNumber(x[v[0]]) ? num(x[v[0]]) : 'Unavailable') + '</td>'; }).join('') + '</tr>'; }).join('');
-    return out + '</tbody></table></div></details>';
-  }
-  function avRing(label, value, note, color) {
-    var known = avNumber(value) && value <= 100, pct = known ? value : 0, circumference = 2 * Math.PI * 44;
-    return '<div class="av-ring-layout"><svg class="av-ring" viewBox="0 0 112 112" role="img" aria-label="' + esc(label + ': ' + (known ? value + '%' : 'Unavailable')) + '"><circle class="av-ring-track" cx="56" cy="56" r="44"/><circle cx="56" cy="56" r="44" fill="none" stroke="' + color + '" stroke-width="10" stroke-linecap="' + (pct ? 'round' : 'butt') + '" stroke-dasharray="' + (pct / 100 * circumference) + ' ' + circumference + '" transform="rotate(-90 56 56)"/><text class="av-ring-value" x="56" y="60" text-anchor="middle">' + (known ? Math.round(value * 10) / 10 + '%' : '—') + '</text></svg><div><b>' + esc(label) + '</b><p>' + esc(note || (known ? 'Current filtered scope' : 'No available percentage')) + '</p></div></div>';
-  }
-  function avSummary(d, A) {
-    var E = d.employees || {}, AA = d.analytics || {};
-    function k(area, key) { var source = A && A[area]; return source && !source.error ? (source.kpis || []).filter(function (x) { return x.key === key; })[0] || {} : {}; }
-    var mandatory = k('training', 'mandatory'), pending = k('leave', 'pending');
-    var compliance = A && A.compliance && !A.compliance.error ? A.compliance.analytics.completion : null;
-    var saud = AA.saudization || {}, pct = avNumber(E.saudi) && avNumber(E.active) && E.active > 0 ? E.saudi / E.active * 100 : null;
-    var h = '<div class="av-intro"><div><span class="av-eyebrow">PEOPLE INTELLIGENCE</span><h3>HR analytics</h3><p>Workforce, development and operational health in one view.</p></div><div class="av-shortcuts"><button class="btn s" data-tab="employees">Employees ↗</button><button class="btn s" data-tab="requests">Requests ↗</button><button class="btn s" data-tab="training">Training ↗</button></div></div>';
-    h += '<div class="grid kpi-row analytics-kpi-row" style="--cols:6">';
-    h += card('Active employees', E.active, 'actual', 'Active Employee records under the selected company and filters.');
-    h += card('Joiners · 12 months', E.joiners_12m, 'actual', 'Employees across statuses, by joining date.');
-    h += card('Leavers · 12 months', E.leavers_12m, AA.left_without_relieving_date ? 'partial' : 'actual', 'Status Left and a recorded relieving date.');
-    h += card('Pending leave', pending.value, pending.state || (pending.value == null ? 'unavailable' : 'actual'), pending.basis || 'Pending applications from the leave summary.');
-    h += card('Mandatory training', mandatory.value, mandatory.state || (mandatory.value == null ? 'unavailable' : 'actual'), mandatory.basis || 'Completed mandatory assignments divided by mandatory assignments.', mandatory.sub, null, mandatory.value == null ? '' : '%');
-    h += card('Documents current', compliance ? compliance.documents_pct : null, compliance ? 'actual' : 'unavailable', 'Required documents that are current and consistent.', '', null, compliance && compliance.documents_pct != null ? '%' : '');
-    h += '</div><div class="sh">At a glance</div><div class="g2 analytics-row av-spotlights" style="--cols:4">';
-    h += panel('Saudi workforce share', avRing('Saudi nationals', pct, E.nationality_missing ? E.nationality_missing + ' employees have no nationality recorded.' : 'Saudi employees / all active employees.', '#0d9488'), saud.rule || 'Current active headcount; unknown nationality remains in the denominator.');
-    h += panel('Workforce movement · 12 months', anCols(AA.movement || [], [['joiners', 'Joined', '#3b82f6'], ['leavers', 'Left', '#e11d48']], 'month'), 'Joining and relieving dates; employees across statuses.');
-    h += panel('Learning compliance', avRing('Mandatory completion', mandatory.value, mandatory.sub, '#8b5cf6'), 'Assignment-based completion; not employee coverage.');
-    h += panel('Document health', avRing('Current & consistent', compliance ? compliance.documents_pct : null, compliance ? compliance.documents_ok + ' of ' + compliance.documents + ' required documents' : 'Compliance summary unavailable', '#3b82f6'), 'Required documents with a current, non-conflicting expiry date.');
-    return h + '</div>';
-  }
-  function vAnalytics(d) { return '<div data-an-root></div>'; }
-  function anAfterRender() {
-    var key = JSON.stringify(gfArgs({ as_of: S.f && S.f.to_date }));
-    if (AN.key !== key) { AN.data = null; anLoad(key); }
-    else if (!AN.data && !AN.busy) anLoad(key); else anRender();
-  }
-  function anLoad(key) {
-    AN.busy = true; AN.err = null; AN.key = key; anRender();
-    var seq = ++AN.seq, out = {}, pending = 4, t0 = Date.now();
-    var td = (S.f && S.f.to_date) || frappe.datetime.get_today();
-    function done(k) { return function (r) { out[k] = r && r.message ? r.message : null; if (--pending === 0 && seq === AN.seq) { AN.busy = false; AN.data = out; AN.ms = Date.now() - t0; anRender(); } }; }
-    function fail(k) { return function () { out[k] = { error: true }; if (--pending === 0 && seq === AN.seq) { AN.busy = false; AN.data = out; anRender(); } }; }
-    frappe.call({ method: 'admin_hr_leave_data', args: gfArgs({ mode: 'summary', from_date: frappe.datetime.add_months(td, -12), to_date: td }), freeze: false, callback: done('leave'), error: fail('leave') });
-    frappe.call({ method: 'admin_hr_compliance_data', args: gfArgs({ mode: 'summary', as_of: td }), freeze: false, callback: done('compliance'), error: fail('compliance') });
-    frappe.call({ method: 'admin_hr_training_data', args: gfArgs({ mode: 'summary' }), freeze: false, callback: done('training'), error: fail('training') });
-    frappe.call({ method: 'admin_hr_requests_data', args: gfArgs({ mode: 'summary' }), freeze: false, callback: done('requests'), error: fail('requests') });
-  }
-  function anRender() {
-    var root = host.querySelector('[data-an-root]'); if (!root) return;
-    var d = S.d, A = AN.data, h = scopeLine('analytics');
-    if (!d) { root.innerHTML = h; return; }
-    if (AN.busy && !A) { root.innerHTML = h + '<div class="ld"><span class="spin"></span> Loading leave, compliance, training and request summaries…</div>'; return; }
-    var E = d.employees, AA = d.analytics, dt = detail();
-    var unavailable = function (k) { return !A || !A[k] || A[k].error; };
-    var mk = function (title, state, body, def) { return anPanel(title, state, body, def); };
-    h += avSummary(d, A);
-    h += '<div class="sh">Workforce analytics</div><div class="g2 analytics-row av-detail-row" style="--cols:9">';
-    h += mk('1 · Active headcount by department', 'actual', anBars(E.by_department, 'count'), 'Employees with status Active in the selected filters, grouped by Employee.department. Source: Employee.');
-    h += mk('2 · Active headcount by branch', 'actual', anBars(E.by_branch, 'count'), 'Active employees by Employee.branch.');
-    h += mk('3 · Active headcount by job location', 'actual', anBars(locList(E.by_location), 'count'), 'Active employees by Employee.custom_job_location.');
-    h += mk('4 · Nationality distribution', E.nationality_missing ? 'partial' : 'actual', anBars(AA.nationality, 'count'), 'Active employees by custom_employee_nationality. ' + (E.nationality_missing ? E.nationality_missing + ' without nationality.' : ''));
-    var sz = AA.saudization || {};
-    h += mk('5 · Saudi / non-Saudi ratio', 'partial', '<div class="cpcomp"><div><b>' + num(sz.saudi) + '</b><span>Saudi</span></div><div><b>' + num((sz.total || 0) - (sz.saudi || 0)) + '</b><span>Non-Saudi (incl. not set)</span></div><div><b>' + (sz.pct === null || sz.pct === undefined ? '–' : sz.pct + '%') + '</b><span>Saudi share</span></div></div>', sz.rule || 'Saudi = custom_employee_nationality "Saudi Arabia" / active headcount.');
-    h += mk('6 · Monthly new joiners', 'actual', anCols(AA.movement, [['joiners', 'Joiners', '#2563eb']], 'month'), 'Employees (any status) by date_of_joining month, last 12 months.');
-    h += mk('7 · Monthly separations', AA.left_without_relieving_date ? 'partial' : 'actual', anCols(AA.movement, [['leavers', 'Separations', '#dc2626']], 'month'), 'Status Left with relieving_date in the month. ' + (AA.left_without_relieving_date ? AA.left_without_relieving_date + ' Left employees have no relieving date and are not counted.' : ''));
-    var tn = AA.turnover_note || {};
-    h += mk('8 · Monthly turnover rate', tn.state || 'partial', AA.turnover ? anCols(AA.turnover.map(function (x) { return { month: x.month, rate: x.rate, separations: x.separations }; }), [['rate', 'Turnover %', '#f59e0b']], 'month') +
-      '<div class="ph">' + AA.turnover.slice(-3).map(function (x) { return esc(x.month) + ': ' + x.separations + ' / avg ' + ((x.headcount_start + x.headcount_end) / 2) + ' = ' + (x.rate === null ? '–' : x.rate + '%'); }).join(' · ') + '</div>' : '<div class="muted">Unavailable</div>', tn.basis || '');
-    h += mk('9 · Employment type distribution', 'partial', anBars(E.by_employment_type, 'count'), 'Active employees by employment_type; many records are blank (shown as Not set).');
-    h += '</div><div class="sh">Leave analytics</div><div class="g2 analytics-row av-detail-row" style="--cols:' + (unavailable('leave') ? 1 : 2) + '">';
-    if (unavailable('leave')) h += mk('10–11 · Leave', 'unavailable', '<div class="muted">Leave summary not available with your permissions.</div>', '');
-    else {
-      var L = A.leave;
-      h += mk('10 · Leave utilisation trend (12 months)', 'actual', anCols(L.analytics.monthly, [['paid', 'Paid days', '#2563eb'], ['lwp', 'Unpaid (LWP) days', '#f59e0b']], 'month'), 'Approved applications (submitted + workflow Approved) by start month; days = total_leave_days. Pending excluded.');
-      h += mk('11 · Pending leave approvals by department', 'actual', anBars(L.analytics.pending_by_department, 'count'), 'Applications in a Pending / On-Hold workflow state, by department on the application. Total pending: ' + num((L.kpis.filter(function (k) { return k.key === 'pending'; })[0] || {}).value) + '.');
-    }
-    h += '</div><div class="sh">HR request analytics</div><div class="g2 analytics-row av-detail-row" style="--cols:' + (unavailable('requests') ? 1 : 3) + '">';
-    if (unavailable('requests')) h += mk('12–13 · HR requests', 'unavailable', '<div class="muted">HR request summary not available.</div>', '');
-    else {
-      var R = A.requests;
-      h += mk('12 · HR requests by type', R.meta.unreadable.length ? 'partial' : 'actual', anBars(R.analytics.by_type, 'count', function (x) { return x.suppressed ? '' : x.count + ' · ' + x.open + ' open'; }), 'Readable request DocTypes only' + (R.meta.unreadable.length ? '; not readable for your roles: ' + R.meta.unreadable.join(', ') : '') + '.');
-      h += mk('12b · HR requests by department', R.meta.unreadable.length ? 'partial' : 'actual', anBars(R.analytics.type_by_department, 'count', function (x) { var t = x.types || {}; return x.count + ' · ' + Object.keys(t).filter(function (k) { return t[k] !== null; }).slice(0, 2).map(function (k) { return k.split(' ')[0] + ' ' + t[k]; }).join(', '); }), 'Department of the requesting employee (current Employee record).');
-      var rk = {}; R.kpis.forEach(function (k) { rk[k.key] = k; });
-      h += mk('13 · HR request resolution performance', rk.resolution ? rk.resolution.state : 'unavailable',
-        '<div class="cpcomp"><div><b>' + (rk.resolution && rk.resolution.value !== null ? rk.resolution.value + ' d' : '–') + '</b><span>average resolution</span></div><div><b>' + num(rk.overdue ? rk.overdue.value : null) + '</b><span>overdue (> ' + R.meta.sla_days + ' days, provisional)</span></div></div>' +
-        anBars(R.analytics.resolution_by_type.map(function (x) { return { label: x.label, avg: x.avg, timed: x.timed, closed: x.closed, suppressed: x.suppressed }; }), 'avg', function (x) { return x.avg === null ? 'unavailable' : x.avg + ' d (' + x.timed + '/' + x.closed + ')'; }),
-        (rk.resolution ? rk.resolution.sub + '. ' : '') + 'Resolution = creation → workflow comment for the final state; only workflow-tracked types have a reliable closure date.');
-    }
-    h += '</div><div class="sh">Training &amp; compliance analytics</div><div class="g2 analytics-row av-detail-row" style="--cols:' + (unavailable('training') ? 2 : 3) + '">';
-    if (unavailable('training')) h += mk('14–15 · Training', 'unavailable', '<div class="muted">Training summary not available.</div>', '');
-    else {
-      var T = A.training, tk = {}; T.kpis.forEach(function (k) { tk[k.key] = k; });
-      h += mk('14 · Training completion by department', 'actual', anBars(T.analytics.by_department, 'pct', function (x) { return x.pct === null ? '–' : x.pct + '% (' + x.done + '/' + x.total + ')'; }), 'Completed ÷ video/course assignments, by the employee\'s department.');
-      h += mk('15 · Mandatory training compliance', tk.mandatory ? tk.mandatory.state : 'unavailable', '<div class="cpcomp"><div><b>' + (tk.mandatory && tk.mandatory.value !== null ? tk.mandatory.value + '%' : '–') + '</b><span>' + esc(tk.mandatory ? tk.mandatory.sub : '') + '</span></div></div>' +
-        anBars(T.analytics.mandatory_items, 'pct', function (x) { return x.pct === null ? '–' : x.pct + '% (' + x.done + '/' + x.total + ')'; }), 'Completed mandatory assignments ÷ mandatory assignments (flag on the assignment).');
-    }
-    if (unavailable('compliance')) h += mk('16 · Compliance', 'unavailable', '<div class="muted">Compliance summary not available.</div>', '');
-    else {
-      var C = A.compliance;
-      h += mk('16 · Document expiry forecast', 'partial', anCols(C.analytics.forecast.map(function (x) { return { month: x.month, total: x.iqama + x.passport + x.contract + x.insurance, iqama: x.iqama, contract: x.contract }; }), [['total', 'All documents', '#7c3aed'], ['iqama', 'Iqama / ID', '#2563eb'], ['contract', 'Contract', '#0891b2']], 'month') +
-        '<div class="ph">Already expired as of ' + esc(C.meta.as_of || C.meta.today) + ': <b>' + num(C.analytics.overdue_now) + '</b> documents. ' + num((C.kpis.filter(function (k) { return k.key === 'missing'; })[0] || {}).value) + ' required documents have no expiry date.</div>',
-        'Required documents (Iqama/ID, non-Saudi passport, contract, insurance) by primary expiry month, next 12 months. Partial because of missing dates.');
-    }
-    h += '</div><div class="sh">HR data-quality summary</div><div class="panel"><div class="tw"><table class="dirtable"><thead><tr><th>Area</th><th>Issue</th><th>Severity</th><th>Records</th></tr></thead><tbody>';
-    var rows = [];
-    (d.data_quality || []).forEach(function (x) { if (x.count) rows.push(['Employees', x.label, x.severity, x.count]); });
-    [['leave', 'Leave'], ['compliance', 'Documents'], ['training', 'Training'], ['requests', 'HR requests']].forEach(function (p) { if (!unavailable(p[0])) (A[p[0]].dq || []).forEach(function (x) { if (x.count) rows.push([p[1], x.label, x.severity, x.count]); }); });
-    var SEV = { high: 0, medium: 1, low: 2 };
-    rows.sort(function (a, b) { return (SEV[a[2]] - SEV[b[2]]) || (b[3] - a[3]); });
-    h += rows.map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td><td><span class="lvs ' + (r[2] === 'high' ? 'bad' : r[2] === 'medium' ? 'warn' : 'muted') + '">' + esc(r[2]) + '</span></td><td><b>' + num(r[3]) + '</b></td></tr>'; }).join('') +
-      '</tbody></table></div><div class="ph" style="margin-top:6px">Open each tab for the matching review list' + (dt ? ' and drill-downs' : '') + '. Nothing is corrected automatically.</div></div>';
-    h += '<div class="ph">Data generated: main ' + esc(d.meta.generated_at || '') + (A ? ' · summaries loaded in ' + (AN.ms || 0) + ' ms' : '') + '. Groups smaller than 3 are shown as "&lt;3" in the aggregate view.</div>';
-    root.innerHTML = h;
-  }
-  function opts(list, cur, all, lab) { return (all ? '<option value="">' + all + '</option>' : '') + (list || []).map(function (x) { return '<option value="' + esc(x) + '"' + (x === cur ? ' selected' : '') + '>' + esc(lab ? lab(x) : x) + '</option>'; }).join(''); }
-    /* ---------------- Overview: executive redesign (Phase 10, 2026-10-27) ----------------
-     Presentation only. Reads the same S.d fields as the classic vOverview (kept below, unused)
-     and registers drill-downs with the same reg/spec/kspec/routeFor/empListSpec helpers,
-     so counts, permissions and drill targets are unchanged. */
-  var XI = {
-    users: '<path d="M16 19v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1"/><circle cx="9" cy="7" r="3.5"/><path d="M22 19v-1a4 4 0 0 0-3-3.8M16 3.2a3.5 3.5 0 0 1 0 7.6"/>',
-    check: '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.6 2.6L16 9.8"/>',
-    userx: '<path d="M15 19v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1"/><circle cx="8.5" cy="7" r="3.5"/><path d="M17 8l5 5M22 8l-5 5"/>',
-    cal: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
-    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-    clip: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM9 12h6M9 16h4"/>',
-    cap: '<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c3 2 9 2 12 0v-5M22 9v6"/>',
-    alert: '<path d="M12 3l10 18H2z"/><path d="M12 10v4M12 17.5v.5"/>',
-    file: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/>',
-    inbox: '<path d="M3 13l3-8h12l3 8v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M3 13h5l1.5 3h5L16 13h5"/>',
-    plus: '<circle cx="9" cy="7" r="3.5"/><path d="M15 19v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M19 8v6M16 11h6"/>',
-    minus: '<circle cx="9" cy="7" r="3.5"/><path d="M15 19v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M16 11h6"/>',
-    badge: '<circle cx="12" cy="9" r="6"/><path d="M8.5 14l-1.5 7 5-3 5 3-1.5-7"/>',
-    chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
-    shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>',
-    finger: '<path d="M12 11v3a6 6 0 0 1-1 3.5M8.5 9a4 4 0 0 1 7 2.5V14M6 12a6 6 0 0 1 10.5-4M17.5 17a10 10 0 0 0 .5-3M9 20a9 9 0 0 0 1.5-3"/>',
-    gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 1.2 14H1a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 2.6 7a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 7 2.6 1.7 1.7 0 0 0 10 1.1V1a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0 1.2 2.9H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
-    chev: '<path d="M9 6l6 6-6 6"/>'
+
+  /* ============================================================ modules (leave, compliance, requests, training): summary + paged list */
+  var MOD = {
+    leave: { api: 'admin_hr_leave_data', key: 'lv', title: 'Leave', listTitle: 'All leave applications', args: function () { return { from_date: PERIOD[0], to_date: PERIOD[1] }; }, sort: 'from_date desc',
+      order: ['pending', 'approved', 'rejected', 'on_leave', 'upcoming', 'used', 'pending_old', 'no_alloc'],
+      panels: [['Leave types distribution', 'by_type', 'count', 'Approved days in the selected period.'], ['Leave utilisation by department', 'by_dept', 'days', 'Approved days starting in the selected period.'], ['Pending approvals by age', 'pending_by_age', 'count', 'Days in the current workflow state.'], ['Employees without current allocation', 'no_alloc_by_dept', 'count', 'Active employees, by department.']],
+      month: ['Monthly leave usage (12 months)', 'monthly', [['paid', 'Paid', 'var(--dms-royal)'], ['lwp', 'Unpaid (LWP)', 'var(--dms-age3)']]],
+      cols: [['name', 'Application', 'name', function (r) { return docLink('Leave Application', r.name); }], ['employee_name', 'Employee', 'employee_name', empBtn], ['department', 'Department', 'department'], ['leave_type', 'Leave Type', 'leave_type'], ['from_date', 'From', 'from_date', function (r) { return dtc(r.from_date); }], ['to_date', 'To', 'to_date', function (r) { return dtc(r.to_date); }], ['days', 'Days', 'days', null, 1], ['workflow_state', 'Workflow State', 'workflow_state', function (r) { return stat({ approved: 'ok', pending: 'warn', rejected: 'bad', conflict: 'bad' }[r.cls] || 'n', r.workflow_state || '—') + (r.docstatus === 1 && r.cls === 'pending' ? ' <span class="dms-sm">' + esc(L('submitted')) + '</span>' : ''); }], ['approver', 'Approver', 'approver'], ['age_label', 'Approval Age', 'age_days', function (r) { return r.age_days !== null && r.age_days > 3 ? stat('warn', r.age_label) : esc(r.age_label || '—'); }]],
+      foot: 'Approve or reject only inside the ERPNext Leave Application form, where the workflow checks your role. The dashboard never changes applications.' },
+    compliance: { api: 'admin_hr_compliance_data', key: 'cp', title: 'Documents & Compliance', listTitle: 'All required documents', args: function () { return { as_of: PERIOD[1] }; }, sort: 'days asc',
+      order: ['active', 'valid', 'expired', 'd30', 'd60', 'd90', 'missing', 'issues'],
+      panels: [['Expired / expiring ≤90 days by department', 'by_department', 'count'], ['Expired / expiring ≤90 days by branch', 'by_branch', 'count'], ['Document status distribution', 'distribution', 'count'], ['Employees by number of documents with issues', 'multi_issue', 'count']],
+      month: ['Expiry forecast by month', 'forecast', [['iqama', 'Iqama / Saudi ID', 'var(--dms-royal)'], ['passport', 'Passport', '#7c3aed'], ['contract', 'Employment Contract', '#0891b2'], ['insurance', 'Medical Insurance', 'var(--dms-age3)']]],
+      cols: [['employee_name', 'Employee Name', 'employee_name', empBtn], ['department', 'Department', 'department'], ['branch', 'Branch', 'branch'], ['document', 'Document', 'document'], ['expiry_date', 'Expiry Date', 'expiry_date', function (r) { return r.expiry_date ? dtc(r.expiry_date) : '<span class="dms-sm">—</span>'; }], ['days', 'Days Remaining', 'days', null, 1], ['status_label', 'Compliance Status', 'status', function (r) { return stat({ expired: 'bad', due_30: 'bad', due_60: 'warn', due_90: 'warn', valid: 'ok' }[r.status] || 'n', r.status_label) + (r.conflict ? '<div class="dms-sm">⚠ ' + esc(r.conflict) + '</div>' : '') + (r.unusual ? '<div class="dms-sm">⚠ ' + esc(r.unusual) + '</div>' : ''); }]],
+      foot: 'One row per employee document. Saudi passports (not required) are excluded. Only expiry dates and status are shown; document numbers never are. Renewals are done in ERPNext.' },
+    requests: { api: 'admin_hr_requests_data', key: 'rq', title: 'HR Requests', listTitle: 'All HR requests', args: function () { return {}; }, sort: 'created desc', order: null,
+      panels: [['Requests by type', 'by_type', 'count'], ['Requests by department', 'by_department', 'count'], ['Open requests by age', 'pending_by_age', 'count'], ['Status distribution', 'status', 'count'], ['Average resolution time by type', 'resolution_by_type', 'avg', null, function (v) { return num(v) + ' d'; }]],
+      month: ['Monthly request trend', 'trend', [['created', 'Created', 'var(--dms-royal)'], ['closed', 'Closed', 'var(--dms-ok)']]],
+      cols: [['name', 'Request ID', 'name', function (r) { return r.doctype && r.name ? docLink(r.doctype, r.name) : esc(r.name || '—'); }], ['type', 'Request Type', 'type'], ['employee_name', 'Employee', 'employee_name', empBtn], ['department', 'Department', 'department'], ['created', 'Created', 'created', function (r) { return dtc(String(r.created || '').slice(0, 10)); }], ['approver', 'Assigned / Approver', 'approver'], ['status', 'Status', 'status', function (r) { return stat({ pending: 'warn', on_hold: 'warn', in_progress: 'warn', completed: 'ok', rejected: 'bad', unclear: 'bad' }[r.cat] || 'n', r.status) + (r.state ? '<div class="dms-sm">' + esc(r.state) + '</div>' : ''); }], ['age_days', 'Age / Overdue', 'age_days', function (r) { return r.age_days === null || r.age_days === undefined ? '—' : '<span class="dms-num">' + num(r.age_days) + ' d</span>' + (r.overdue_days ? '<div class="dms-sm">' + esc(num(r.overdue_days) + ' ' + L('d overdue')) + '</div>' : ''); }]],
+      foot: 'One row per source record. Results respect your ERPNext DocType and User Permissions for every source.' },
+    training: { api: 'admin_hr_training_data', key: 'tr', title: 'Training', listTitle: 'All training assignments', args: function () { return {}; }, sort: 'due_date asc', order: null,
+      panels: [['Completion by department', 'by_department', 'pct', null, pct], ['Completion by designation', 'by_designation', 'pct', null, pct], ['Overdue training by department', 'overdue_by_department', 'overdue'], ['Most assigned videos and courses', 'most_assigned', 'count']],
+      month: ['Monthly assignments and completions', 'trend', [['assigned', 'Assigned', 'var(--dms-royal)'], ['completed', 'Completed', 'var(--dms-ok)']]],
+      cols: [['employee_name', 'Employee Name', 'employee_name', empBtn], ['department', 'Department', 'department'], ['title', 'Training Video / Course', 'title', function (r) { return bdi(r.title || '—') + (r.kind ? ' <span class="dms-sm">(' + esc(r.kind) + ')</span>' : ''); }], ['mandatory', 'Mandatory', 'mandatory', function (r) { return r.mandatory ? stat('warn', L('Mandatory')) : '<span class="dms-sm">—</span>'; }], ['assigned_date', 'Assigned', 'assigned_date', function (r) { return dtc(r.assigned_date); }], ['due_date', 'Due', 'due_date', function (r) { return dtc(r.due_date) + (r.overdue ? '<div class="dms-sm">' + esc(L('overdue') + ' ' + num(-r.days_to_due) + ' d') + '</div>' : ''); }], ['completed_on', 'Completed', 'completed_on', function (r) { return dtc(r.completed_on); }], ['status', 'Status', 'status', function (r) { return stat({ Completed: 'ok', 'In Progress': 'warn' }[r.status] || 'n', r.status || '—'); }]],
+      foot: 'Completion is the employee marking the video complete in My Training. No quiz, assessment or certificate records exist.' }
   };
-  function xi(name, tone) {
-    return '<span class="xi t-' + tone + '"><svg viewBox="0 0 24 24" aria-hidden="true">' + (XI[name] || XI.chart) + '</svg></span>';
+  var MOD_KEYS = Object.keys(MOD);
+  function loadTab(id) {
+    var m = MOD[id];
+    if (m && !((m.key + 'Tok') in D)) { run(m.key, function () { return callP(m.api, gf(Object.assign({ mode: 'summary' }, m.args()))); }); }
+    if (id === 'employees' && isDetail() && !EMP) { EMP = true; }
   }
-  function xn(v, suffix) { var t = num(v); return t === null ? '<span class="xna">—</span>' : t + (suffix || ''); }
-  function xpct(a, b) { return (a === null || a === undefined || !b) ? null : Math.round(1000 * a / b) / 10; }
-  function xsum(list, f) { var t = 0, ok = true; list.forEach(function (x) { var v = f(x); if (v === null || v === undefined) ok = false; else t += v; }); return ok ? t : null; }
-  function xtag(state) { var x = STATE[state] || STATE.unavailable; return '<span class="xtag x-' + x[1] + '">' + x[0] + '</span>'; }
-  function xpill(text, tone) { return '<span class="xpill x-' + tone + '">' + esc(text) + '</span>'; }
-  // Clickable wrapper: a registered drill (data-dr) or a tab jump (data-tab). Locked/aggregate -> plain.
-  function xact(sp, tab) {
-    var i = sp ? reg(sp) : null;
-    if (i !== null) return { cls: ' click', attr: ' data-dr="' + i + '"' };
-    if (tab) return { cls: ' click', attr: ' data-tab="' + tab + '"' };
-    return { cls: '', attr: '' };
+  function modKpis(m, s, id) {
+    var K = {}; (s.kpis || []).forEach(function (k) { K[k.key] = k; }); var order = m.order ? m.order.filter(function (k) { return K[k]; }) : (s.kpis || []).map(function (k) { return k.key; });
+    return kpis(order.map(function (k) { var x = K[k], v = x.value, u = x.unit === '%' || x.unit === 'pct' ? '%' : ''; return kpi({ label: L(x.label), val: v === null || v === undefined ? '—' : num(v) + (u ? '<small>%</small>' : ''), sub: esc(L(x.sub || '')), tip: L(x.basis || ''), dot: x.state && x.state !== 'actual' ? (x.state === 'unavailable' ? 'var(--dms-bad)' : 'var(--dms-age3)') : null, act: x.preset && s.meta.tier === 'detail' ? 'pre:' + id + ':' + x.preset + ':' + x.label : null }); }));
   }
-  function xpanel(title, body, tab, sub) {
-    return '<section class="xp"><div class="xph"><h4>' + esc(title) + '</h4>' +
-      (tab ? '<button class="xva" data-tab="' + tab + '">View all</button>' : '') + '</div>' +
-      (sub ? '<div class="xps">' + esc(sub) + '</div>' : '') + '<div class="xpb">' + body + '</div></section>';
+  function monthPanel(def, list) {
+    if (!list || !list.length) { return panel(L(def[0]), empty(L('No records.'))); }
+    var by = {}; list.forEach(function (x) { by[String(x.month).slice(0, 7)] = x; }); var keys = Object.keys(by).sort();
+    return panel(L(def[0]), barChart(keys, 'month', def[2].map(function (s) { return { label: L(s[1]), color: s[2], val: function (k) { return nn((by[k] || {})[s[0]]) || 0; } }; }), num));
   }
-  function xun(text) { return '<div class="xun">' + xpill('Unavailable', 'bad') + '<span>' + esc(text) + '</span></div>'; }
-  var XKPI = {
-    active: ['users', 'blue', 'Active employees in scope'],
-    checked_in: ['check', 'green', 'Distinct employees with a punch today'],
-    absent: ['userx', 'red', 'Absences recorded in ERPNext today'],
-    on_leave: ['cal', 'orange', 'On approved leave today'],
-    late: ['clock', 'purple', 'Late against their shift today'],
-    leave_pending: ['clip', 'indigo', 'Leave applications awaiting approval'],
-    training: ['cap', 'teal', 'Assignments completed'],
-    expiring: ['alert', 'amber', 'Expired or due within 60 days']
-  };
-  function xKpis(d) {
-    return '<div class="xkpis">' + d.overview.map(function (k) {
-      var m = XKPI[k.key] || ['chart', 'blue', ''];
-      if (k.key === 'absent') { var p = attendancePolicy(d); k = Object.assign({}, k, { label: 'Absent today', value: p.count, state: p.available ? (p.friday ? 'actual' : 'partial') : 'unavailable', note: p.note, sub: 'Approved leave & weekoffs excluded' }); }
-      var a = xact(k.key === 'absent' ? absenceSpec(p) : kspec(k));
-      var sfx = (k.key === 'training' && k.value !== null && k.value !== undefined) ? '<small>%</small>' : '';
-      return '<div class="xk' + a.cls + '"' + a.attr + ' title="' + esc(k.note || '') + '">' + xi(m[0], m[1]) +
-        '<div class="xkb"><div class="xkl">' + esc(k.label) + '</div><div class="xkv">' + xn(k.value) + sfx + '</div>' +
-        '<div class="xks">' + xtag(k.state) + '<span>' + esc(k.sub || m[2]) + '</span></div></div></div>';
-    }).join('') + '</div>';
+  function vMod(AM, id) {
+    var m = MOD[id];
+    return need(m.key, m.api, function (s) {
+      var dt = s.meta.tier === 'detail', A = s.analytics || {}, h = '';
+      if (s.meta.unreadable && s.meta.unreadable.length) { h += alertBox('warn', esc(L('Not readable with your permissions') + ': ' + s.meta.unreadable.join(', '))); }
+      h += modKpis(m, s, id);
+      if (s.definitions) { h += note(esc(L('Approved') + ' = ' + s.definitions.approved + '. ' + L('Pending') + ' = ' + s.definitions.pending + '.')); }
+      if (s.queues && id === 'leave') { h += panel(L('Approval queues'), facts([['Pending My Approval', nv(s.queues.my), '', dt && s.queues.my ? 'pre:leave:q_my:Pending My Approval' : null], ['Pending HR Review', nv(s.queues.hr_review), '', dt && s.queues.hr_review ? 'pre:leave:q_hr:Pending HR Review' : null], ['Awaiting approval', nv(s.queues.awaiting)]]) + note(esc(L(s.queues.note || '')))); }
+      if (s.queues && id === 'requests') { var Q = s.queues; h += panel(L('Request queues'), facts([['Pending My Approval', nv(Q.my), '', dt && Q.my ? 'pre:requests:q_my:Pending My Approval' : null], ['Pending HR Review', nv(Q.hr_review), '', dt && Q.hr_review ? 'pre:requests:q_hr_review:Pending HR Review' : null], ['Awaiting Employee Information', nv(Q.awaiting_info), '', dt && Q.awaiting_info ? 'pre:requests:q_awaiting_info:Awaiting Employee Information' : null], ['Overdue Requests', nv(Q.overdue), 'open > ' + s.meta.sla_days + ' days', dt && Q.overdue ? 'pre:requests:overdue:Overdue Requests' : null], ['Recently Completed', nv(Q.recent), '', dt && Q.recent ? 'pre:requests:q_recent:Recently Completed' : null]])); }
+      if (s.analytics && s.analytics.completion && id === 'compliance') { var C = A.completion; h += note(esc(L('Compliance completion') + ': ' + C.documents_pct + '% ' + L('of documents current') + ' (' + num(C.documents_ok) + ' / ' + num(C.documents) + ') · ' + C.employees_pct + '% ' + L('of employees without issues') + ' (' + num(C.employees_ok) + ' / ' + num(C.employees) + ')')); }
+      var ps = m.panels.filter(function (p) { return A[p[1]] && A[p[1]].length; }).map(function (p) { return panel(L(p[0]), bars(A[p[1]], p[2], p[4]), '', p[3] ? esc(L(p[3])) : ''); });
+      ps.unshift(monthPanel(m.month, A[m.month[1]]));
+      for (var i = 0; i < ps.length; i += 2) { h += ps[i + 1] ? two(ps[i], ps[i + 1]) : ps[i]; }
+      if (dt) { h += modList(id, m, s); } else { h += lockNote(); }
+      var dq = s.dq || [];
+      if (dq.length) { h += panel(L('Data quality · HR review'), mini([['Issue', function (x) { return esc(L(x.label)) + (x.extra ? '<div class="dms-sm">' + esc(x.extra) + '</div>' : ''); }], ['Severity', function (x) { return sevTag(x.severity); }], ['Records', function (x) { return dt && x.count && x.preset ? '<button type="button" class="dms-linkbtn dms-num" data-act="kpi" data-v="' + esc('pre:' + id + ':' + x.preset + ':' + x.label) + '">' + num(x.count) + '</button>' : '<span class="dms-num">' + nv(x.count) + '</span>'; }, 1]], dq), '', esc(L('Issues are displayed only; fix records in ERPNext after HR review.'))); }
+      return h + note(esc(L('Generated') + ' ' + (s.meta.generated || '') + '. ' + L(m.foot)));
+    });
   }
-  function xAttChart(t) {
-    if (!t || !t.length) return '<div class="muted">No punch data for this filter.</div>';
-    var W = 420, H = 170, L = 30, B = 22, T = 8, max = 0, tot = 0;
-    t.forEach(function (x) { if (x.count > max) max = x.count; tot += x.count; });
-    var step = max > 200 ? 50 : (max > 80 ? 25 : (max > 20 ? 10 : 5)), top = Math.max(step, Math.ceil(max / step) * step);
-    var cw = (W - L - 6) / t.length, bw = Math.max(6, cw * 0.58), avg = tot / t.length;
-    var y = function (v) { return T + (H - T - B) * (1 - v / top); };
-    var g = '';
-    for (var v = 0; v <= top; v += step) g += '<line class="xg" x1="' + L + '" x2="' + (W - 4) + '" y1="' + y(v) + '" y2="' + y(v) + '"/><text class="xax" x="' + (L - 6) + '" y="' + (y(v) + 3) + '" text-anchor="end">' + v + '</text>';
-    var bars = t.map(function (x, i) {
-      var cx = L + cw * i + (cw - bw) / 2, last = i === t.length - 1;
-      return '<rect class="xbar' + (last ? ' xbar-l' : '') + '" x="' + cx.toFixed(1) + '" y="' + y(x.count).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + (H - B - y(x.count)).toFixed(1) + '" rx="2"><title>' + esc(x.date + ': ' + x.count) + '</title></rect>' +
-        (((i % 2 === 0 && i < t.length - 2) || last) ? '<text class="xax" x="' + (cx + bw / 2).toFixed(1) + '" y="' + (H - 7) + '" text-anchor="middle">' + esc(x.label) + '</text>' : '');
-    }).join('');
-    var line = '<polyline class="xln" points="' + t.map(function (x, i) { return (L + cw * i + cw / 2).toFixed(1) + ',' + y(x.count).toFixed(1); }).join(' ') + '"/>';
-    var al = '<line class="xavg" x1="' + L + '" x2="' + (W - 4) + '" y1="' + y(avg).toFixed(1) + '" y2="' + y(avg).toFixed(1) + '"/>';
-    return '<div class="xleg"><span><i class="sw t-blue"></i>Employees with a punch</span><span><i class="sw ln"></i>Daily trend</span><span><i class="sw av"></i>14-day average ' + Math.round(avg) + '</span></div>' +
-      '<svg class="xchart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Distinct employees with a punch per day">' + g + bars + line + al + '</svg>';
+  function modList(id, m, s) {
+    var st = LST[id] || (LST[id] = { preset: '', title: '' }), args = gf(m.args());
+    var chips = '<div class="ah-preset">' + (st.preset ? '<span class="dms-sm">' + esc(L('Showing')) + ':</span> <b>' + esc(L(st.title)) + '</b> <button type="button" class="dms-btn dms-btn-sm" data-act="clrpre" data-v="' + id + '">' + esc(L('Show all')) + '</button>' : '<span class="dms-sm">' + esc(L(m.listTitle)) + ' · ' + esc(L('click a card or a data-quality count to narrow the list')) + '</span>') + '</div>';
+    var sk = m.sort.split(' ');
+    return '<div id="ah-list-' + id + '">' + panel(L(m.listTitle), chips + regTable({ id: 'tl_' + id, server: true, period: true, dt: 'x', fields: [], filters: [st.preset, args], pageSize: 25, file: id + '_list', order: m.sort, searchHint: L('Search'),
+      loader: function (p, size, q, order) { var o = String(order || m.sort).split(' '); return callP(m.api, Object.assign({}, args, { mode: 'list', preset: st.preset, page: p + 1, page_length: Math.min(size, 100), sort_by: o[0], sort_order: o[1] || 'asc', search: q || '' })).then(function (r) { return { total: r ? r.total : 0, rows: (r && r.rows) || [] }; }); },
+      cols: m.cols.map(function (c) { return { k: c[0], h: L(c[1]), sf: c[2] || undefined, num: c[4], r: c[3] || (c[4] ? function (r) { return '<span class="dms-num">' + nv(r[c[0]]) + '</span>'; } : function (r) { return r[c[0]] === null || r[c[0]] === undefined || r[c[0]] === '' ? '<span class="dms-sm">—</span>' : bdi(r[c[0]]); }), c: function (r) { return r[c[0]]; } }; }) }), '', '') + '</div>';
   }
-  function xMini(icon, tone, label, value, sub, sp) {
-    var a = xact(sp);
-    return '<div class="xm' + a.cls + '"' + a.attr + '>' + xi(icon, tone) + '<div><div class="xmv">' + xn(value) + '</div><div class="xml">' + esc(label) + '</div>' + (sub ? '<div class="xmsub">' + esc(sub) + '</div>' : '') + '</div></div>';
+
+  /* ============================================================ actions pending (from the main API rows; counts only for the aggregate tier) */
+  var ACT = [
+    ['a_expired', 'high', 'Expired documents', 'Iqama/ID, passport, contract or insurance already expired', 'Employee'],
+    ['a_holiday', 'high', 'Assigned holiday list does not cover today', 'Absence cannot be judged until a holiday list covers today', 'Employee'],
+    ['a_natconf', 'high', 'Nationality fields disagree', 'Saudization and weekoff rules depend on nationality', 'Employee'],
+    ['a_leave', 'med', 'Pending leave approvals', 'Workflow state Pending* or On-Hold; oldest first', 'Leave Application'],
+    ['a_due30', 'med', 'Documents due within 30 days', 'Start renewal before the expiry date', 'Employee'],
+    ['a_absent', 'med', 'Absent today', 'Approved leave and weekoffs excluded', 'Employee'],
+    ['a_mismatch', 'med', 'Leave status mismatches', 'Status and workflow state disagree', 'Leave Application'],
+    ['a_training', 'low', 'Training overdue', 'Assigned and past the due date', 'Employee'],
+    ['a_requests', 'low', 'Open HR requests', 'Across the request types you can read; oldest first', null]
+  ];
+  function actSpecs() { return ACT.map(function (a) { return { id: a[0], client: true, short: L(a[2]), title: L(a[2]), why: L(a[3]) }; }); }
+  function expRows(f) { var out = []; ((D.ov && D.ov.compliance) || []).forEach(function (c) { R('exp_' + c.key).forEach(function (x) { if (f(x.days_left)) { out.push(x); } }); }); return out.sort(function (a, b) { return a.days_left - b.days_left; }); }
+  function actClient() {
+    if (D.ovErr) { return 'ERR:' + D.ovErr; } if (!D.ov) { return null; }
+    var d = D.ov, det = isDetail(), comp = d.compliance || [], p = attendancePolicy(d), dqc = function (k) { var x = (d.data_quality || []).filter(function (y) { return y.key === k; })[0]; return x ? x.count : 0; };
+    var E = function (x, pr, desc, due, tone) { return { p: pr, score: score(pr, 0, 0), dt: 'Employee', name: x.employee, title: x.employee_name || x.employee, desc: desc, who: x.department || '', due: due || '', tone: tone || (pr === 'high' ? 'bad' : 'warn') }; };
+    var o = {};
+    o.a_expired = det ? { rows: expRows(function (v) { return v !== null && v !== undefined && v < 0; }), item: function (x) { return E(x, 'high', x.document + ' · ' + x.expiry_date, (x.days_left === -1 ? tr('expired yesterday', 'انتهى أمس') : L('expired') + ' ' + num(-x.days_left) + ' ' + L('days ago')), 'bad'); } } : { count: sumOf(comp, function (c) { return c.buckets && c.buckets.expired; }) || 0, rows: [], item: null };
+    o.a_holiday = det ? { rows: R('dq_holiday_list_expired'), item: function (x) { return E(x, 'high', L('Holiday list') + ': ' + (x.holiday_list || '—'), ''); } } : { count: dqc('holiday_list_expired'), rows: [], item: null };
+    o.a_natconf = det ? { rows: R('dq_nat_conflict'), item: function (x) { return E(x, 'high', (x.custom_nationality || '—') + ' ≠ ' + (x.custom_employee_nationality || '—'), ''); } } : { count: dqc('nat_conflict'), rows: [], item: null };
+    o.a_leave = det ? { rows: R('leave_pending'), item: function (x) { var pr = (x.age_days || 0) > 3 ? 'med' : 'low'; return { p: pr, score: score(pr, 0, x.age_days), dt: 'Leave Application', name: x.leave_application, title: x.employee_name || x.employee, desc: (x.leave_type || '') + ' · ' + x.from_date + ' → ' + x.to_date + ' · ' + (x.workflow_state || ''), who: x.workflow_state || '', due: x.age_days === 1 ? tr('1 day', 'يوم واحد') : num(x.age_days || 0) + ' ' + L('days'), tone: pr === 'med' ? 'warn' : 'n' }; } } : { count: (d.leave && d.leave.pending) || 0, rows: [], item: null };
+    o.a_due30 = det ? { rows: expRows(function (v) { return v !== null && v !== undefined && v >= 0 && v <= 30; }), item: function (x) { return E(x, 'med', x.document + ' · ' + x.expiry_date, (x.days_left === 0 ? tr('expires today', 'ينتهي اليوم') : x.days_left === 1 ? tr('expires tomorrow', 'ينتهي غداً') : L('in') + ' ' + num(x.days_left) + ' ' + L('days'))); } } : { count: sumOf(comp, function (c) { return c.buckets && c.buckets.d30; }) || 0, rows: [], item: null };
+    o.a_absent = p.available ? { rows: p.rows, item: function (x) { return E(x, 'med', L(x.absence_basis), d.meta.date); } } : 'ERR:tech';
+    o.a_mismatch = det ? { rows: R('dq_leave_status_mismatch'), item: function (x) { return { p: 'med', score: score('med', 0, 0), dt: 'Leave Application', name: x.leave_application, title: x.employee_name || x.employee, desc: (x.workflow_state || '—') + ' · ' + (x.status || '—'), who: x.leave_type || '', due: '', tone: 'warn' }; } } : { count: (d.leave && d.leave.status_mismatch) || 0, rows: [], item: null };
+    o.a_training = det ? { rows: R('training_overdue'), item: function (x) { return E(x, 'low', x.training || '', L('due') + ' ' + (x.due_date || ''), 'n'); } } : { count: (d.training && d.training.overdue) || 0, rows: [], item: null };
+    o.a_requests = det ? { rows: R('requests_open'), item: function (x) { var pr = x.age_days > 30 ? 'med' : 'low'; return { p: pr, score: score(pr, 0, x.age_days), dt: x.doctype, name: x.name, title: x.name, desc: x.doctype + ' · ' + (x.state || ''), who: x.employee || '', due: x.age_days === 1 ? tr('1 day', 'يوم واحد') : num(x.age_days) + ' ' + L('days'), tone: pr === 'med' ? 'warn' : 'n' }; } } : { count: sumOf((d.requests || []).filter(function (r) { return r.state !== 'unavailable'; }), function (r) { return r.open; }) || 0, rows: [], item: null };
+    if (!det) { Object.keys(o).forEach(function (k) { if (o[k] && typeof o[k] === 'object' && !o[k].item) { o[k].item = function () { return null; }; } }); }
+    return o;
   }
-  function xRowSpec(title, key, doctype) { var rs = rows(key); return spec(title, rs, routeFor(doctype || 'Employee', rs)); }
-  function xAttendance(d) {
-    var a = d.attendance, p = attendancePolicy(d);
-    if (!a || !a.ok) return xpanel('Attendance Overview', xun('Attendance data could not be read with your permissions.'), 'attendance');
-    var act = (ov('active') || {}).value;
-    var mini = '<div class="xminis">' +
-      xMini('check', 'green', 'Checked in', a.checked_in, xpct(a.checked_in, act) !== null ? xpct(a.checked_in, act) + '% of active' : '', xRowSpec('Checked in today', 'checked_in')) +
-      xMini('userx', 'red', 'Absent today', p.count, p.friday ? 'Friday · weekoff' : 'Approved leave & weekoffs excluded', absenceSpec(p)) +
-      xMini('clock', 'orange', 'Late', a.late, a.late_evaluated !== null && a.late_evaluated !== undefined ? 'of ' + a.late_evaluated + ' evaluated' : '', xRowSpec('Late check-ins today', 'late')) +
-      xMini('cal', 'purple', 'On leave', a.on_leave, 'Approved leave', xRowSpec('On approved leave today', 'on_leave')) +
-      xMini('userx', 'red', 'Recorded absences', p.recorded, 'Leave & weekoffs excluded · included above', absenceSpec(p, true)) +
-      xMini('finger', 'blue', 'Mobile punches', a.mobile_punches, a.punches_today !== null && a.punches_today !== undefined ? 'of ' + a.punches_today + ' punches' : '', null) +
-      '</div>';
-    return xpanel('Attendance Overview', xAttChart(a.trend) + mini, 'attendance', 'Biometric and mobile punches, last ' + (a.trend || []).length + ' days');
+
+  /* ============================================================ overview */
+  var KPIDOT = { checked_in: 'var(--dms-ok)', absent: 'var(--dms-bad)', on_leave: 'var(--dms-age3)', late: '#7c3aed', leave_pending: 'var(--dms-royal)', expiring: 'var(--dms-age3)' };
+  var TABOF = { active: 'employees', checked_in: 'attendance', absent: 'attendance', on_leave: 'leave', late: 'attendance', leave_pending: 'leave', training: 'training', expiring: 'compliance' };
+  function vOverview(AM) {
+    if (D.ovErr) { return srcErr(D.ovErr, 'admin_hr_dashboard_data') + actionsPanel(AM); }
+    if (!D.ov) { return '<div class="dms-grid dms-kpis dms-ov-kpis" aria-busy="true">' + skel(8, 'dms-skel-kpi') + '</div><div class="dms-main2">' + actionsPanel(AM) + '<div class="dms-skel dms-skel-panel"></div></div>'; }
+    var d = D.ov, p = attendancePolicy(d), a = d.attendance || {}, l = d.leave || {}, t = d.training || {}, e = d.employees || {}, h = '';
+    if (!a.absence_reliable && d.system_status) { h += alertBox('warn', '<b>' + esc(L('Attendance reliability')) + ':</b> ' + esc(L(d.system_status.holiday_lists.note) + ' ' + L(d.system_status.auto_attendance.note))); }
+    h += kpis(d.overview.map(function (k) {
+      if (k.key === 'absent') { k = Object.assign({}, k, { label: 'Absent today', value: p.count, state: p.available ? (p.friday ? 'actual' : 'partial') : 'unavailable', note: p.note, sub: 'Approved leave & weekoffs excluded' }); }
+      var v = k.value === null || k.value === undefined ? '—' : num(k.value) + (k.key === 'training' ? '<small>%</small>' : '');
+      return kpi({ label: L(k.label), dot: k.state === 'unavailable' ? 'var(--dms-bad)' : KPIDOT[k.key] || null, val: v, sub: esc(L(k.sub || '')) || stTag(k.state), tip: L(k.note || ''), act: 'goto:' + (TABOF[k.key] || 'overview') });
+    }), true);
+    var att = !a.ok ? alertBox('warn', esc(L('Attendance data could not be read with your permissions.'))) : barChart((a.trend || []).map(function (x) { return x.date; }), 'day', [{ label: L('Employees with a punch'), color: 'var(--dms-royal)', val: function (k) { var x = (a.trend || []).filter(function (y) { return y.date === k; })[0]; return x ? x.count : 0; } }], num) +
+      facts([['Checked in', nv(a.checked_in), pctOf(a.checked_in, e.active) !== null ? pctOf(a.checked_in, e.active) + '% ' + L('of active') : '', isDetail() ? rowsDrill('ci', 'Checked in today', R('checked_in')) : null], ['Absent today', nv(p.count), p.friday ? 'Friday · weekoff' : 'Approved leave & weekoffs excluded', p.available && isDetail() ? rowsDrill('ab', 'Absent today', p.rows) : null], ['Late', nv(a.late), a.late_evaluated != null ? 'of ' + a.late_evaluated + ' evaluated' : '', isDetail() ? rowsDrill('late', 'Late check-ins today', R('late')) : null], ['Mobile punches', nv(a.mobile_punches), a.punches_today != null ? 'of ' + a.punches_today + ' punches' : '']]);
+    h += '<div class="dms-main2">' + actionsPanel(AM) + '<div class="dms-stackcol">' + panel(L('Attendance Overview'), att, '', esc(L('Biometric and mobile punches, last ' + (a.trend || []).length + ' days'))) + '</div></div>';
+    var bt = (l.by_type_days_ytd || []).slice().sort(function (x, y) { return y.count - x.count; });
+    var leaveP = !l.ok ? alertBox('warn', esc(L('Leave Application is not readable with your permissions.'))) : facts([['On leave today', nv(l.on_leave_today), '', 'goto:leave'], ['Pending approval', nv(l.pending), '', 'goto:leave'], ['Starting in 30 days', nv(l.upcoming_30d)], ['Drafts not submitted', nv(l.drafts)]]) + (bt.length ? '<h4 class="ah-h">' + esc(L('Leave days by type, year to date')) + '</h4>' + bars(bt, 'count', function (v) { return num(v) + ' ' + tr('d', 'ي'); }, 6) : empty(L('No approved leave days this year.')));
+    var notDue = t.assignments != null && t.completed != null && t.overdue != null ? Math.max(0, t.assignments - t.completed - t.overdue) : null;
+    var trainP = !t.ok ? alertBox('warn', esc(L('Training records are not readable with your permissions.'))) : (t.assignments ? mixBar([{ label: L('Completed'), value: t.completed || 0, color: 'var(--dms-ok)' }, { label: L('Open, not yet due'), value: notDue || 0, color: 'var(--dms-royal)' }, { label: L('Overdue'), value: t.overdue || 0, color: 'var(--dms-bad)' }]) : '') + facts([['Assignments', nv(t.assignments)], ['Completed', nv(t.completed), t.pct != null ? t.pct + '%' : ''], ['Overdue', nv(t.overdue)], ['Employees not assigned', nv(t.employees_not_assigned)]]);
+    h += two(panel(L('Leave & Approvals'), leaveP), panel(L('Training & Development'), trainP, '', esc('Employee Training Progress')));
+    var comp = d.compliance || [];
+    var compP = mini([['Document', function (r) { return esc(L(r.label)); }], ['Expired', function (r) { return nv(r.buckets && r.buckets.expired); }, 1], ['≤30d', function (r) { return nv(r.buckets && r.buckets.d30); }, 1], ['31–60d', function (r) { return nv(r.buckets && r.buckets.d60); }, 1], ['Missing', function (r) { return nv(r.buckets && r.buckets.missing); }, 1], ['Status', function (r) { var b = r.buckets || {}; return r.state === 'unavailable' ? stat('bad', L('Unavailable')) : b.expired ? stat('bad', L('Expired')) : b.d30 ? stat('warn', L('Due ≤30d')) : stat('ok', L('OK')); }]], comp);
+    var rq = d.requests || [], rd = rq.filter(function (x) { return x.state !== 'unavailable'; });
+    var reqP = mini([['Request type', function (x) { return esc(x.doctype); }], ['Open', function (x) { return nv(x.open); }, 1], ['Oldest', function (x) { return x.open ? nv(x.oldest_days, ' d') : '—'; }, 1], ['Status', function (x) { return x.state === 'unavailable' ? stat('n', L('Unavailable')) : x.open ? stat('warn', L('Open')) : stat('ok', L('Clear')); }]], rq) + (rq.length > rd.length ? note(esc(L((rq.length - rd.length) + ' request type' + (rq.length - rd.length > 1 ? 's are' : ' is') + ' not readable with your permissions and not counted.'))) : '');
+    h += two(panel(L('Documents & Compliance'), compP, '', esc(L('Counts only. Document numbers are never shown here.'))), panel(L('HR Requests / Employee Relations'), reqP, '', esc(L('Counts and ages only — no request contents'))));
+    var pr = e.probation || {}, jt = e.joining_trend || [];
+    var life = facts([['New joiners', nv(e.joined_this_month), 'This month', isDetail() ? rowsDrill('jm', 'Joined this month', R('joined_month')) : null], ['Probation', pr.state === 'unavailable' ? stat('bad', L('Unavailable')) : nv(pr.count), pr.state === 'unavailable' ? 'No reliable data' : 'In progress'], ['Active', nv(e.active), 'On roll'], ['Leavers', nv(e.leavers_12m), 'Last 12 months']]) +
+      (jt.length ? '<h4 class="ah-h">' + esc(L('Joiners per month, last 12 months')) + '</h4>' + barChart(jt.map(function (x) { return String(x.label).slice(0, 7); }), 'month', [{ label: L('Joiners'), color: 'var(--dms-royal)', val: function (k) { var x = jt.filter(function (y) { return String(y.label).slice(0, 7) === k; })[0]; return x ? x.count : 0; } }], num) : '') + (pr.state === 'unavailable' ? note(esc(L(pr.note || 'Probation data is not reliable.'))) : '');
+    var sv0 = { high: 0, medium: 1, low: 2 }, dq = (d.data_quality || []).filter(function (x) { return x.count > 0; }).sort(function (x, y) { return (sv0[x.severity] - sv0[y.severity]) || (y.count - x.count); }).slice(0, 6);
+    var ops = facts([['Linked to a user', nv(e.with_user) + ' / ' + nv(e.active)], ['Punches today', nv(a.punches_today)], ['Departments', nv(e.departments_count)]]) + (dq.length ? '<h4 class="ah-h">' + esc(L('Top data-quality issues')) + '</h4>' + mini([['Issue', function (x) { return esc(L(x.label)); }], ['Count', function (x) { return R('dq_' + x.key).length ? '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="' + rowsDrill('dq_' + x.key, x.label, R('dq_' + x.key), x.key === 'leave_status_mismatch' ? 'Leave Application' : 'Employee') + '">' + num(x.count) + '</button>' : num(x.count); }, 1], ['Level', function (x) { return sevTag(x.severity); }]], dq) : empty(L('No data-quality issues found.')));
+    return h + two(panel(L('Employee Lifecycle'), life), panel(L('HR Operations Summary'), ops));
   }
-  function xNeedRow(icon, tone, title, sub, count, sp, tab) {
-    var a = xact(sp, tab);
-    return '<div class="xn-r' + a.cls + '"' + a.attr + '>' + xi(icon, tone) + '<div class="xn-t"><b>' + esc(title) + '</b><span>' + esc(sub) + '</span></div>' +
-      '<div class="xn-c t-' + tone + '">' + xn(count) + '</div>' + (a.attr ? '<svg class="xchev" viewBox="0 0 24 24">' + XI.chev + '</svg>' : '<span class="xchev"></span>') + '</div>';
+
+  /* ============================================================ employees */
+  function vEmployees() {
+    if (D.ovErr) { return srcErr(D.ovErr, 'admin_hr_dashboard_data'); } if (!D.ov) { return skel(1, 'dms-skel-panel'); }
+    var d = D.ov, e = d.employees || {}, det = isDetail(), ol = (d.overview || []).filter(function (k) { return k.key === 'on_leave'; })[0] || {};
+    var dr = function (id, title, key) { return det ? rowsDrill(id, title, R(key)) : null; };
+    var h = kpis([
+      kpi({ label: L('Total Active Employees'), dot: 'var(--dms-royal)', val: nv(e.active), sub: esc(L('Employee.status = Active (current filters)')), act: dr('act', 'Active employees', 'active') }),
+      kpi({ label: L('Total Departments'), val: nv(e.departments_count), sub: esc(L('Distinct departments with active employees')) }),
+      kpi({ label: L('New Joiners This Month'), val: nv(e.joined_this_month), act: dr('jm', 'Joined this month', 'joined_month') }),
+      kpi({ label: L('On Approved Leave Today'), val: nv(ol.value), act: dr('ol', 'On approved leave today', 'on_leave') }),
+      kpi({ label: L('Saudi Employees'), val: nv(e.saudi), act: dr('sa', 'Saudi employees', 'saudi') }),
+      kpi({ label: L('Non-Saudi Employees'), val: nv(e.non_saudi), sub: e.nationality_missing ? esc(L(e.nationality_missing + ' without nationality')) : '', act: dr('ns', 'Non-Saudi employees', 'non_saudi') }),
+      kpi({ label: L('Employees with Expiring Documents'), dot: e.expiring_employees ? 'var(--dms-age3)' : null, val: nv(e.expiring_employees), sub: esc(L('Expired or due within 60 days')), act: dr('ex', 'Employees with expiring documents', 'expiring_employees') }),
+      kpi({ label: L('Joiners (12 months)'), val: nv(e.joiners_12m) }),
+      kpi({ label: L('Leavers (12 months)'), val: nv(e.leavers_12m) }),
+      kpi({ label: L('Linked to ERPNext user'), val: nv(e.with_user), sub: e.active != null && e.with_user != null ? esc(L((e.active - e.with_user) + ' without user_id')) : '', act: dr('nu', 'Employees without ERPNext user', 'dq_missing_user') })
+    ]);
+    h += two(panel(L('Headcount by department'), bars(e.by_department, 'count')), panel(L('Headcount by branch'), bars(e.by_branch, 'count')));
+    h += two(panel(L('Headcount by job location'), bars(e.by_location, 'count')), panel(L('Headcount by designation'), bars(e.by_designation, 'count')));
+    h += two(panel(L('Employment type'), bars(e.by_employment_type, 'count')), panel(L('Gender'), bars(e.by_gender, 'count')));
+    if (!det) { return h + lockNote(); }
+    var SORT = { employee: 'name', employee_name: 'employee_name', department: 'department', designation: 'designation', branch: 'branch', job_location: 'job_location', nationality: 'nationality', date_of_joining: 'date_of_joining', status: 'status' };
+    return h + panel(L('Employee directory'), regTable({ id: 't_dir', server: true, dt: 'Employee', fields: [], filters: [F.company, F.department, F.branch, F.job_location], pageSize: 25, file: 'employee_directory', order: 'employee_name asc', searchHint: L('Employee ID or name'),
+      loader: function (p, size, q, order) { var o = String(order || 'employee_name asc').split(' '); return callP('admin_hr_employee_directory', { company: F.company || d.meta.company, department: F.department, branch: F.branch, job_location: F.job_location, status: 'Active', page: p + 1, page_length: Math.min(size, 100), sort_by: o[0], sort_order: o[1] || 'asc', search: q || '' }).then(function (r) { return { total: r ? r.total : 0, rows: (r && r.rows) || [] }; }); },
+      cols: [{ k: 'employee', h: L('Employee ID'), sf: SORT.employee, r: function (r) { return docLink('Employee', r.employee); }, c: function (r) { return r.employee; } }, { k: 'employee_name', h: L('Employee Name'), sf: SORT.employee_name, r: empBtn, c: function (r) { return r.employee_name; } }].concat(['department', 'designation', 'branch', 'job_location', 'nationality'].map(function (k) { return { k: k, h: L({ department: 'Department', designation: 'Designation', branch: 'Branch', job_location: 'Job Location', nationality: 'Nationality' }[k]), sf: SORT[k], r: function (r) { return r[k] ? bdi(r[k]) : '<span class="dms-sm">—</span>'; }, c: function (r) { return r[k]; } }; })).concat([{ k: 'doj', h: L('Date of Joining'), sf: 'date_of_joining', r: function (r) { return dtc(r.date_of_joining); }, c: function (r) { return r.date_of_joining; } }]) }), '', esc(L('Active employees only · as of ' + d.meta.date)));
   }
-  function xNeeds(d) {
-    var exp = [], expN = xsum(d.compliance, function (c) { return c.buckets ? c.buckets.expired : null; });
-    d.compliance.forEach(function (c) { exp = exp.concat(rows('exp_' + c.key).filter(function (x) { return x.days_left !== null && x.days_left !== undefined && x.days_left < 0; })); });
-    var reqOpen = xsum(d.requests.filter(function (r) { return r.state !== 'unavailable'; }), function (r) { return r.open; });
-    var dqHigh = xsum(d.data_quality.filter(function (x) { return x.severity === 'high'; }), function (x) { return x.count; });
-    var l = d.leave || {}, t = d.training || {}, a = d.attendance || {};
-    var h = '<div class="xneed">' +
-      xNeedRow('clip', 'indigo', 'Pending leave approvals', 'Submitted or in workflow, awaiting a decision', l.pending, xRowSpec('Pending leave applications', 'leave_pending', 'Leave Application'), 'leave') +
-      xNeedRow('file', 'red', 'Expired documents', 'Iqama/ID, passport, contract, insurance', expN, spec('Expired documents', exp, routeFor('Employee', exp)), 'compliance') +
-      xNeedRow('cap', 'orange', 'Training overdue', 'Assigned and past the due date', t.ok ? t.overdue : null, xRowSpec('Training overdue', 'training_overdue'), null) +
-      xNeedRow('inbox', 'purple', 'Open HR requests', 'Across the request types you can read', reqOpen, null, 'requests') +
-      xNeedRow('alert', 'amber', 'Leave status mismatches', 'Status and workflow state disagree', l.status_mismatch, xRowSpec('Leave status mismatches', 'dq_leave_status_mismatch', 'Leave Application'), 'leave') +
-      xNeedRow('shield', 'blue', 'High-severity data issues', 'Total count across high-severity checks', dqHigh, null, 'analytics') +
-      '</div>';
-    return xpanel('Needs Attention', h, null, 'Items that need an HR action');
-  }
-  function xDonut(parts, center, sub) {
-    var tot = 0; parts.forEach(function (p) { tot += p.v || 0; });
-    var acc = 0, stops = parts.map(function (p) { var s = acc; acc += tot ? 360 * (p.v || 0) / tot : 0; return 'var(--' + p.c + ') ' + s.toFixed(1) + 'deg ' + acc.toFixed(1) + 'deg'; });
-    var bg = tot ? 'conic-gradient(' + stops.join(',') + ')' : 'var(--xline)';
-    return '<div class="xdn"><div class="xdr" style="background:' + bg + '"><div class="xdc"><b>' + center + '</b><span>' + esc(sub) + '</span></div></div>' +
-      '<div class="xdl">' + parts.map(function (p) { return '<div><i class="sw" style="background:var(--' + p.c + ')"></i><span>' + esc(p.l) + '</span><b>' + xn(p.v) + '</b><em>' + (tot ? Math.round(100 * (p.v || 0) / tot) + '%' : '') + '</em></div>'; }).join('') + '</div></div>';
-  }
-  var XC = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'];
-  function xLeave(d) {
-    var l = d.leave;
-    if (!l || !l.ok) return xpanel('Leave & Approvals', xun('Leave Application is not readable with your permissions.'), 'leave');
-    function tile(icon, tone, v, label, sp) { var a = xact(sp); return '<div class="xt' + a.cls + '"' + a.attr + '>' + xi(icon, tone) + '<b class="t-' + tone + '">' + xn(v) + '</b><span>' + esc(label) + '</span></div>'; }
-    var tiles = '<div class="xtiles">' +
-      tile('cal', 'blue', l.on_leave_today, 'On leave today', xRowSpec('On approved leave today', 'on_leave')) +
-      tile('clip', 'indigo', l.pending, 'Pending approval', xRowSpec('Pending leave applications', 'leave_pending', 'Leave Application')) +
-      tile('clock', 'orange', l.upcoming_30d, 'Starting in 30 days', xRowSpec('Approved leave starting in the next 30 days', 'leave_upcoming', 'Leave Application')) +
-      tile('file', 'mut', l.drafts, 'Drafts not submitted', xRowSpec('Draft leave applications', 'leave_drafts', 'Leave Application')) + '</div>';
-    var bt = (l.by_type_days_ytd || []).slice().sort(function (a, b) { return b.count - a.count; }), parts = bt.slice(0, 4).map(function (x, i) { return { l: x.label, v: Math.round(x.count * 10) / 10, c: XC[i] }; });
-    if (bt.length > 4) parts.push({ l: 'Other', v: Math.round(xsum(bt.slice(4), function (x) { return x.count; }) * 10) / 10, c: 'c6' });
-    var tot = xsum(bt, function (x) { return x.count; });
-    var donut = bt.length ? '<div class="xsub-h">Leave days by type, year to date</div>' + xDonut(parts, num(Math.round(tot || 0)), 'days') : '<div class="muted">No approved leave days this year.</div>';
-    return xpanel('Leave & Approvals', tiles + donut, 'leave');
-  }
-  function xLifecycle(d) {
-    var e = d.employees || {}, since = frappe.datetime.add_months(d.meta.date, -12), pr = e.probation || {};
-    function step(icon, tone, v, label, sub, sp) {
-      var a = xact(sp);
-      return '<div class="xls' + a.cls + '"' + a.attr + '>' + xi(icon, tone) + '<b>' + (v === 'U' ? xpill('Unavailable', 'bad') : xn(v)) + '</b><span>' + esc(label) + '</span><em>' + esc(sub) + '</em></div>';
+
+  /* ============================================================ attendance */
+  function vAttendance() {
+    if (D.ovErr) { return srcErr(D.ovErr, 'admin_hr_dashboard_data'); } if (!D.ov) { return skel(1, 'dms-skel-panel'); }
+    var d = D.ov, a = d.attendance || {}, s = d.system_status || {}, p = attendancePolicy(d), ov = function (k) { return (d.overview || []).filter(function (x) { return x.key === k; })[0] || {}; }, det = isDetail();
+    var h = alertBox('info', esc(L(p.note)));
+    h += kpis([
+      kpi({ label: L('Checked-in today'), dot: 'var(--dms-ok)', val: a.ok ? nv(a.checked_in) : '—', sub: esc(L('Distinct employees with at least one punch')), act: det ? rowsDrill('ci', 'Checked in today', R('checked_in')) : null }),
+      kpi({ label: L('Punches today'), val: a.ok ? nv(a.punches_today) : '—', sub: esc((a.mobile_punches == null ? '—' : a.mobile_punches) + ' ' + L('mobile') + ' · ' + (a.other_punches == null ? '—' : a.other_punches) + ' ' + L('device/untagged')) }),
+      kpi({ label: L('Absent today'), dot: p.count ? 'var(--dms-bad)' : null, val: nv(p.count), sub: p.inferred === null ? esc(L('Employee-level data required')) : esc(p.inferred + ' ' + L('inferred') + ' · ' + p.recorded + ' ' + L('recorded')), act: p.available && det ? rowsDrill('ab', 'Absent today', p.rows) : null }),
+      kpi({ label: L('Recorded absences'), val: nv(p.recorded), sub: esc(L('Weekoffs excluded')), act: p.recorded !== null && det ? rowsDrill('rab', 'Recorded absences', p.recordedRows) : null }),
+      kpi({ label: L(ov('on_leave').label || 'On Approved Leave Today'), val: nv(ov('on_leave').value), act: det ? rowsDrill('ol', 'On approved leave today', R('on_leave'), 'Leave Application') : null }),
+      kpi({ label: L(ov('late').label || 'Late Check-ins'), dot: ov('late').value ? '#7c3aed' : null, val: nv(ov('late').value), sub: esc(L(ov('late').sub || '')), act: det ? rowsDrill('late', 'Late check-ins today', R('late')) : null })
+    ]);
+    if (!a.ok) { return h + alertBox('warn', esc(L('Attendance data could not be read with your permissions.'))); }
+    var pt = a.period_trend || [];
+    h += two(panel(L('Daily check-ins · 14 days'), barChart((a.trend || []).map(function (x) { return x.date; }), 'day', [{ label: L('Present'), color: 'var(--dms-ok)', val: function (k) { var x = (a.trend || []).filter(function (y) { return y.date === k; })[0]; return x ? x.present : 0; } }, { label: L('Absent'), color: 'var(--dms-bad)', val: function (k) { var x = (a.trend || []).filter(function (y) { return y.date === k; })[0]; return x ? x.absent : 0; } }], num), '', esc(L('Friday is a weekoff for all; Saturday is also a weekoff for Saudi nationals.'))),
+      panel(L('Auto-attendance sync'), s.auto_attendance && s.auto_attendance.readable === false ? empty(L('Shift Type not readable with your permissions.')) : mini([['Shift type', function (x) { return bdi(x.shift); }], ['Last check-in sync', function (x) { return esc(x.last_sync); }]], (s.auto_attendance && s.auto_attendance.stale_shifts) || [], 'All auto-attendance shifts synced recently.') + facts([['Holiday lists', s.holiday_lists && s.holiday_lists.ok ? stat('ok', L('OK')) : stat('warn', L('Check'))], ['Employees without a valid list', nv(s.holiday_lists && s.holiday_lists.employees_without_valid_list)]]), '', esc(L('Enabled shifts with no sync in the last 2 days.'))));
+    if (pt.length) { h += panel(L('Attendance in the selected period'), barChart(pt.map(function (x) { return x.date; }), pt.length > 45 ? 'week' : 'day', [{ label: L('Present'), color: 'var(--dms-ok)', val: function (k) { var x = pt.filter(function (y) { return y.date === k; })[0]; return x ? x.present : 0; } }, { label: L('Absent'), color: 'var(--dms-bad)', val: function (k) { var x = pt.filter(function (y) { return y.date === k; })[0]; return x ? x.absent : 0; } }, { label: L('On leave'), color: 'var(--dms-age3)', val: function (k) { var x = pt.filter(function (y) { return y.date === k; })[0]; return x ? x.on_leave : 0; } }], num), '', esc(a.period ? a.period.from + ' → ' + a.period.to + (a.period.capped ? ' · ' + L('capped') : '') : '')); }
+    if (det) {
+      h += two(panel(L('Late check-ins'), mini([['Employee', empBtn], ['Shift', function (r) { return bdi(r.shift || ''); }], ['First punch', function (r) { return esc(r.first_punch || ''); }], ['Late (min)', function (r) { return num(r.late_by_min); }, 1]], R('late'), 'No late check-ins.'), '', esc(L('First punch after shift start plus entry grace.'))),
+        panel(L('Absent today'), p.available ? mini([['Employee', empBtn], ['Department', function (r) { return bdi(r.department || '—'); }], ['Basis', function (r) { return '<span class="dms-sm">' + esc(L(r.absence_basis)) + '</span>'; }]], p.rows, 'No absences.') : alertBox('warn', esc(L('Employee-level data required'))), '', esc(L('Approved leave & weekoffs excluded'))));
+      if (R('att_period').length) { h += panel(L('Attendance by employee in the period'), tblRows('t_attp', R('att_period'), [['employee_name', 'Employee', empBtn], ['department', 'Department'], ['present_days', 'Present', null, 1], ['absent_days', 'Absent', null, 1], ['leave_days', 'Leave', null, 1], ['attendance_pct', 'Attendance %', function (r) { return r.attendance_pct == null ? '—' : '<span class="dms-num">' + pct(r.attendance_pct) + '</span>'; }, 1]], 'attendance_period')); }
     }
-    var arrow = '<svg class="xarr" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
-    var steps = '<div class="xlife">' +
-      step('plus', 'blue', e.joined_this_month, 'New joiners', 'This month', xRowSpec('Joined this month', 'joined_month')) + arrow +
-      step('badge', 'orange', pr.state === 'unavailable' ? 'U' : pr.count, 'Probation', pr.state === 'unavailable' ? 'No reliable data' : 'In progress', null) + arrow +
-      step('users', 'green', e.active, 'Active', 'On roll', xRowSpec('Active employees', 'active')) + arrow +
-      step('minus', 'red', e.leavers_12m, 'Leavers', 'Last 12 months', empListSpec('Leavers', { status: 'Left', relieving_date: ['>=', since] })) + '</div>';
-    var jt = e.joining_trend || [], m = 0; jt.forEach(function (x) { if (x.count > m) m = x.count; });
-    var trend = jt.length ? '<div class="xsub-h">Joiners per month, last 12 months · ' + xn(e.joiners_12m) + ' total</div><div class="xcols">' + jt.map(function (x) {
-      return '<div title="' + esc(x.label + ': ' + x.count) + '"><span>' + x.count + '</span><i style="height:' + (m ? Math.max(3, 70 * x.count / m) : 3) + 'px"></i><em>' + esc(String(x.label).slice(5)) + '</em></div>';
-    }).join('') + '</div>' : '';
-    var note = pr.state === 'unavailable' ? '<div class="xnote">' + esc(pr.note || 'Probation data is not reliable.') + '</div>' : '';
-    return xpanel('Employee Lifecycle', steps + trend + note, 'employees');
-  }
-  function xTraining(d) {
-    var t = d.training;
-    if (!t || !t.ok) return xpanel('Training & Development', xun('Training records are not readable with your permissions.'), null);
-    var notDue = (t.assignments !== null && t.completed !== null && t.overdue !== null) ? Math.max(0, t.assignments - t.completed - t.overdue) : null;
-    var parts = [{ l: 'Completed', v: t.completed, c: 'ok' }, { l: 'Open, not yet due', v: notDue, c: 'acc' }, { l: 'Overdue', v: t.overdue, c: 'bad' }];
-    function tile(icon, tone, v, label, sp) { var a = xact(sp); return '<div class="xt' + a.cls + '"' + a.attr + '>' + xi(icon, tone) + '<b class="t-' + tone + '">' + xn(v) + '</b><span>' + esc(label) + '</span></div>'; }
-    return xpanel('Training & Development', xDonut(parts, t.pct === null || t.pct === undefined ? '—' : t.pct + '%', 'completion') +
-      '<div class="xtiles">' + tile('cap', 'blue', t.assignments, 'Assignments', xRowSpec('All training assignments', 'training_all')) +
-      tile('check', 'green', t.completed, 'Completed', null) + tile('alert', 'red', t.overdue, 'Overdue', xRowSpec('Training overdue', 'training_overdue')) +
-      tile('users', 'mut', t.employees_not_assigned, 'Employees not assigned', null) + '</div>', null, 'Employee Training Progress');
-  }
-  function xAnalytics(d) {
-    var an = d.analytics || {}, sz = an.saudization, e = d.employees || {};
-    var h = '';
-    if (sz && sz.pct !== null && sz.pct !== undefined) {
-      h += '<div class="xsz"><div><div class="xsub-h">Saudization (provisional)</div><b>' + sz.pct + '%</b><span>' + xn(sz.saudi) + ' Saudi of ' + xn(sz.total) + ' active</span></div>' +
-        '<div class="xbarh"><i style="width:' + Math.min(100, sz.pct) + '%"></i></div></div>';
-    } else h += xun('Saudization cannot be calculated for this filter.');
-    var g = e.by_gender || [], gt = xsum(g, function (x) { return x.count; });
-    if (g.length && gt) h += '<div class="xsub-h">Gender</div><div class="xstack">' + g.map(function (x, i) { return '<i class="' + XC[i] + '" style="width:' + (100 * x.count / gt) + '%" title="' + esc(x.label + ': ' + x.count) + '"></i>'; }).join('') + '</div>' +
-      '<div class="xleg">' + g.map(function (x, i) { return '<span><i class="sw ' + XC[i] + '"></i>' + esc(x.label) + ' ' + x.count + ' (' + Math.round(100 * x.count / gt) + '%)</span>'; }).join('') + '</div>';
-    var dep = (e.by_department || []).slice(0, 5), m = 0; dep.forEach(function (x) { if (x.count > m) m = x.count; });
-    if (dep.length) h += '<div class="xsub-h">Largest departments (active headcount)</div><div class="xhb">' + dep.map(function (x) {
-      var a = xact(empListSpec('Department: ' + x.label, { department: x.label }));
-      return '<div class="xhr' + a.cls + '"' + a.attr + ' title="' + esc(x.label) + '"><span>' + esc(String(x.label).replace(/ - DMG$/, '')) + '</span><i><b style="width:' + (m ? 100 * x.count / m : 0) + '%"></b></i><em>' + x.count + '</em></div>';
-    }).join('') + '</div>';
-    return xpanel('HR Analytics Snapshot', h, 'analytics');
-  }
-  function xCompliance(d) {
-    var c = d.compliance || [];
-    var ex = xsum(c, function (x) { return x.buckets ? x.buckets.expired : null; }), d30 = xsum(c, function (x) { return x.buckets ? x.buckets.d30 : null; }), d60 = xsum(c, function (x) { return x.buckets ? x.buckets.d60 : null; });
-    var stats = '<div class="xtiles x3">' +
-      '<div class="xt">' + xi('alert', 'red') + '<b class="t-red">' + xn(ex) + '</b><span>Expired</span></div>' +
-      '<div class="xt">' + xi('clock', 'orange') + '<b class="t-orange">' + xn(d30) + '</b><span>Due in 30 days</span></div>' +
-      '<div class="xt">' + xi('cal', 'amber') + '<b class="t-amber">' + xn(d60) + '</b><span>Due in 31–60 days</span></div></div>';
-    var tb = '<div class="xtw"><table class="xtb"><thead><tr><th>Document</th><th class="r">Expired</th><th class="r">≤30d</th><th class="r">31–60d</th><th class="r">Missing</th><th>Status</th></tr></thead><tbody>' +
-      c.map(function (r) {
-        var b = r.buckets || {}, rs = rows('exp_' + r.key).filter(function (x) { return x.days_left <= 60; });
-        var a = xact(spec(r.label + ' — expired or due ≤60 days', rs, routeFor('Employee', rs)));
-        var st = r.state === 'unavailable' ? xpill('Unavailable', 'bad') : (b.expired ? xpill('Expired', 'bad') : (b.d30 ? xpill('Due ≤30d', 'warn') : xpill('OK', 'ok')));
-        return '<tr class="' + a.cls + '"' + a.attr + '><td>' + esc(r.label) + '</td><td class="r">' + xn(b.expired) + '</td><td class="r">' + xn(b.d30) + '</td><td class="r">' + xn(b.d60) + '</td><td class="r">' + xn(b.missing) + '</td><td>' + st + '</td></tr>';
-      }).join('') + '</tbody></table></div>';
-    return xpanel('Documents & Compliance', stats + tb, 'compliance', 'Counts only. Document numbers are never shown here.');
-  }
-  function xRequests(d) {
-    var r = d.requests || [], rd = r.filter(function (x) { return x.state !== 'unavailable'; }), un = r.length - rd.length;
-    var open = xsum(rd, function (x) { return x.open; }), oldest = null;
-    rd.forEach(function (x) { if (x.open && x.oldest_days !== null && x.oldest_days !== undefined && (oldest === null || x.oldest_days > oldest)) oldest = x.oldest_days; });
-    var ro = rows('requests_open');
-    var stats = '<div class="xtiles x3">' +
-      '<div class="xt">' + xi('inbox', 'purple') + '<b class="t-purple">' + xn(open) + '</b><span>Open requests</span></div>' +
-      '<div class="xt">' + xi('clock', 'orange') + '<b class="t-orange">' + xn(oldest) + '</b><span>Oldest open (days)</span></div>' +
-      '<div class="xt">' + xi('shield', 'mut') + '<b>' + xn(rd.length) + '<small>/' + r.length + '</small></b><span>Types readable</span></div></div>';
-    var tb = '<div class="xtw"><table class="xtb"><thead><tr><th>Request type</th><th class="r">Open</th><th class="r">Oldest</th><th>Status</th></tr></thead><tbody>' +
-      r.map(function (x) {
-        if (x.state === 'unavailable') return '<tr><td>' + esc(x.doctype) + '</td><td class="r">—</td><td class="r">—</td><td>' + xpill('Unavailable', 'mut') + '</td></tr>';
-        var rs = ro.filter(function (y) { return y.doctype === x.doctype; });
-        var a = x.open ? xact(spec(x.doctype + ' — open', rs, { doctype: x.doctype, options: { name: ['in', uniq(rs.map(function (y) { return y.name; }))] } })) : { cls: '', attr: '' };
-        var st = !x.open ? xpill('Clear\u200b', 'ok') : xpill('Open', 'warn');
-        return '<tr class="' + a.cls + '"' + a.attr + '><td>' + esc(x.doctype) + '</td><td class="r">' + xn(x.open) + '</td><td class="r">' + (x.open ? xn(x.oldest_days) + 'd' : '—') + '</td><td>' + st + '</td></tr>';
-      }).join('') + '</tbody></table></div>';
-    return xpanel('HR Requests / Employee Relations', stats + tb + (un ? '<div class="xnote">' + un + ' request type' + (un > 1 ? 's are' : ' is') + ' not readable with your permissions and not counted.</div>' : ''), 'requests', 'Counts and ages only — no request contents');
-  }
-  function xOps(d) {
-    var e = d.employees || {}, a = d.attendance || {}, act = e.active;
-    var sv = { high: 0, medium: 1, low: 2 };
-    var dq = d.data_quality.filter(function (x) { return x.count > 0; }).sort(function (p, q) { return (sv[p.severity] - sv[q.severity]) || (q.count - p.count); }).slice(0, 5);
-    var stats = '<div class="xtiles x3">' +
-      '<div class="xt">' + xi('users', 'blue') + '<b class="t-blue">' + xn(e.with_user) + '<small>/' + xn(act) + '</small></b><span>Linked to a user</span></div>' +
-      '<div class="xt">' + xi('finger', 'green') + '<b class="t-green">' + xn(a.punches_today) + '</b><span>Punches today</span></div>' +
-      '<div class="xt">' + xi('gear', 'mut') + '<b>' + xn(e.departments_count) + '</b><span>Departments</span></div></div>';
-    var tb = dq.length ? '<div class="xsub-h">Top data-quality issues</div><div class="xtw"><table class="xtb"><thead><tr><th>Issue</th><th class="r">Count</th><th>Level</th></tr></thead><tbody>' + dq.map(function (x) {
-      var rs = dqRows(x.key), aa = xact(rs.length ? spec(x.label, rs, routeFor(x.key === 'leave_status_mismatch' ? 'Leave Application' : 'Employee', rs)) : null);
-      return '<tr class="' + aa.cls + '"' + aa.attr + '><td>' + esc(x.label) + '</td><td class="r">' + xn(x.count) + '</td><td>' + xpill(x.severity, x.severity === 'high' ? 'bad' : (x.severity === 'medium' ? 'warn' : 'mut')) + '</td></tr>';
-    }).join('') + '</tbody></table></div>' : '<div class="muted">No data-quality issues found.</div>';
-    return xpanel('HR Operations Summary', stats + tb, 'analytics');
-  }
-  function xoOverview(d) {
-    var h = '';
-    if (!d.attendance.absence_reliable) h += '<div class="alert w"><b>Attendance reliability:</b> ' + esc(d.system_status.holiday_lists.note) + ' ' + esc(d.system_status.auto_attendance.note) + ' Missing punches are therefore <b>not</b> counted as absences.</div>';
-    h += '<div class="xo">' + xKpis(d) +
-      '<div class="xrow">' + xAttendance(d) + xNeeds(d) + xLeave(d) + '</div>' +
-      '<div class="xrow">' + xLifecycle(d) + xTraining(d) + xAnalytics(d) + '</div>' +
-      '<div class="xrow">' + xCompliance(d) + xRequests(d) + xOps(d) + '</div>' +
-      '<details class="xhelp"><summary>How to read this dashboard</summary>' + legend() + '</details></div>';
     return h;
   }
-  var VIEWS = { overview: xoOverview, employees: vEmployees, attendance: vAttendance, leave: vLeave, compliance: vCompliance, requests: vRequests, analytics: vAnalytics, training: vTraining };
-  function render() {
-    DR = [];
-    var d = S.d, h = '<div class="tabs" role="tablist">' + TABS.map(function (t) { return '<button class="tab' + (S.tab === t[0] ? ' on' : '') + '" role="tab" data-tab="' + t[0] + '">' + esc(t[1]) + '</button>'; }).join('') +
-      '<button class="tab ahd-lang" data-a="lang" type="button" aria-label="' + (S.lang === 'ar' ? 'Switch to English' : 'التبديل إلى العربية') + '">' + (S.lang === 'ar' ? 'English' : 'العربية') + '</button></div>';
-    h += '<div class="hd"><div><div class="meta">';
-    if (d) h += esc(d.meta.company) + ' · as of ' + esc(d.meta.date) + ' · updated ' + esc(d.meta.generated_at.slice(11, 16)) + '<span class="tier ' + (detail() ? 'd">Full HR view' : 'a">Aggregate view') + '</span>';
-    h += '</div></div></div>';
-    var fo = d ? d.meta.filter_options : {};
-    h += '<div class="flt"><label>Company<select data-f="company">' + opts(fo.companies || [S.f.company], S.f.company) + '</select></label>' +
-      '<label>Branch<select data-f="branch">' + opts(fo.branches, S.f.branch, 'All branches') + '</select></label>' +
-      '<label>Job location<select data-f="job_location">' + opts(fo.job_locations, S.f.job_location, 'All locations', locName) + '</select></label>' +
-      '<label>Department<select data-f="department">' + opts(fo.departments, S.f.department, 'All departments') + '</select></label>' +
-     '<label style="max-width:170px">From Date<input type="date" data-f="from_date" value="' + esc(S.f.from_date) + '" max="' + esc(S.f.to_date) + '"></label>' +
-'<label style="max-width:170px">To Date<input type="date" data-f="to_date" value="' + esc(S.f.to_date) + '" min="' + esc(S.f.from_date) + '" max="' + frappe.datetime.get_today() + '"></label>' +
-      '<button class="btn" data-a="refresh">' + (S.busy ? 'Loading…' : 'Refresh') + '</button><button class="btn s" data-a="reset">Reset</button></div>';
-    if (S.err) h += '<div class="alert e">' + esc(S.err) + '</div>';
-    if (!d) h += '<div class="ld">' + (S.busy ? 'Loading live ERPNext data…' : '') + '</div>';
-    else {
-      if (d.meta.errors && d.meta.errors.length) h += '<div class="alert i">Not readable with your permissions (shown as Unavailable): ' + esc(d.meta.errors.map(function (x) { return x.doctype; }).join(', ')) + '</div>';
-      try { if (['overview', 'employees', 'attendance'].indexOf(S.tab) >= 0) h += scopeLine(S.tab); h += (VIEWS[S.tab] || xoOverview)(d); } catch (e) { console.error(e); h += '<div class="alert e">Could not render this tab: ' + esc(e.message) + '</div>'; }
-    }
-    host.innerHTML = h;
-    applyLang();
-    if (S.d && S.tab === 'employees') dirAfterRender();
-    if (S.d && S.tab === 'leave') lvAfterRender();
-    if (S.d && S.tab === 'compliance') cpAfterRender();
-    if (S.d && S.tab === 'training') trAfterRender();
-    if (S.d && S.tab === 'requests') rqAfterRender();
-    if (S.d && S.tab === 'analytics') anAfterRender();
+  function tblRows(id, rows, cols, file) {
+    return regTable({ id: id, rows: rows, pageSize: 15, file: file, text: function (r) { return cols.map(function (c) { return r[c[0]]; }).join(' '); }, empty: L('No records.'),
+      cols: cols.map(function (c) { return { k: c[0], h: L(c[1]), num: c[3], s: function (r) { return c[3] ? +r[c[0]] || 0 : r[c[0]]; }, r: c[2] || (c[3] ? function (r) { return '<span class="dms-num">' + nv(r[c[0]]) + '</span>'; } : function (r) { return r[c[0]] ? bdi(r[c[0]]) : '<span class="dms-sm">—</span>'; }), c: function (r) { return r[c[0]]; } }; }) });
   }
-  function enhanceDashboardControls() {
-    host.querySelectorAll('.click[data-dr], .card.click, .hr.click, .lvbr.click, .lvmcol.click, .lvcc.click, .cpchip.click, .lvbr.click, .lvmcol.click').forEach(function (el) {
-      if (!el.hasAttribute('tabindex')) el.tabIndex = 0;
-      if (!el.hasAttribute('role')) el.setAttribute('role', 'button');
-    });
-    host.querySelectorAll('[role="tab"]').forEach(function (el) { el.setAttribute('aria-selected', el.classList.contains('on') ? 'true' : 'false'); });
-    host.querySelectorAll('.kpi-row, .analytics-row').forEach(function (el) {
-      el.tabIndex = 0; el.setAttribute('role', 'region');
-      el.setAttribute('aria-label', el.classList.contains('kpi-row') ? 'Key performance indicators; scroll horizontally for more' : 'Analytics; scroll horizontally for more');
-    });
+
+  /* ============================================================ analytics (main API) */
+  function vAnalytics() {
+    if (D.ovErr) { return srcErr(D.ovErr, 'admin_hr_dashboard_data'); } if (!D.ov) { return skel(1, 'dms-skel-panel'); }
+    var d = D.ov, an = d.analytics || {}, sz = an.saudization || {}, mv = an.movement || [], to = an.turnover || [];
+    var h = kpis([
+      kpi({ label: L('Saudization (provisional)'), dot: 'var(--dms-ok)', val: sz.pct == null ? '—' : pct(sz.pct), sub: esc(L(nv(sz.saudi) + ' Saudi of ' + nv(sz.total) + ' active')), tip: L(sz.rule || '') }),
+      kpi({ label: L('Attrition (12 months)'), val: an.attrition_12m_pct == null ? '—' : pct(an.attrition_12m_pct), sub: esc(L('Approximate')), tip: L(an.attrition_note || '') }),
+      kpi({ label: L('Nationality conflicts'), dot: sz.conflicts ? 'var(--dms-bad)' : null, val: nv(sz.conflicts), sub: esc(L('Nationality fields disagree')) }),
+      kpi({ label: L('Left without relieving date'), dot: an.left_without_relieving_date ? 'var(--dms-age3)' : null, val: nv(an.left_without_relieving_date) })
+    ]);
+    h += note(esc(L(sz.rule || '')));
+    h += two(panel(L('Nationality'), bars(an.nationality, 'count', null, 10)), panel(L('Tenure'), bars(an.tenure, 'count')));
+    h += two(panel(L('Saudization by branch'), bars(sz.by_branch, 'pct', pct)), panel(L('Saudization by job location'), bars(sz.by_location, 'pct', pct)));
+    h += two(panel(L('Joiners and leavers by month'), mv.length ? barChart(mv.map(function (x) { return x.month; }), 'month', [{ label: L('Joiners'), color: 'var(--dms-royal)', val: function (k) { return (mv.filter(function (x) { return x.month === k; })[0] || {}).joiners || 0; } }, { label: L('Leavers'), color: 'var(--dms-bad)', val: function (k) { return (mv.filter(function (x) { return x.month === k; })[0] || {}).leavers || 0; } }], num) : empty(L('No records.'))),
+      panel(L('Monthly turnover rate'), to.length ? barChart(to.map(function (x) { return x.month; }), 'month', [{ label: L('Turnover %'), color: 'var(--dms-age3)', val: function (k) { return (to.filter(function (x) { return x.month === k; })[0] || {}).rate || 0; } }], function (v) { return pct(v); }) : empty(L('No records.')), '', esc(an.turnover_note ? L(an.turnover_note.basis || '') : '')));
+    var dq = d.data_quality || [];
+    return h + panel(L('Data quality'), mini([['Issue', function (x) { return esc(L(x.label)); }], ['Severity', function (x) { return sevTag(x.severity); }], ['Count', function (x) { return R('dq_' + x.key).length ? '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="' + rowsDrill('dq_' + x.key, x.label, R('dq_' + x.key), x.key === 'leave_status_mismatch' ? 'Leave Application' : 'Employee') + '">' + num(x.count) + '</button>' : nv(x.count); }, 1], ['Share of active', function (x) { return x.pct == null ? '—' : pct(x.pct); }, 1]], dq.slice().sort(function (x, y) { return ({ high: 0, medium: 1, low: 2 }[x.severity] - { high: 0, medium: 1, low: 2 }[y.severity]) || y.count - x.count; })), '', esc(L('Issues are displayed only; fix records in ERPNext after HR review.')));
   }
-  host.addEventListener('keydown', function (event) {
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    var el = event.target;
-    if (el.matches && el.matches('.click[role="button"]') && !/^(INPUT|SELECT|TEXTAREA|BUTTON|A)$/.test(el.tagName)) {
-      event.preventDefault(); el.click();
-    }
-  });
-  var controlEnhancer = new MutationObserver(function (mutations) {
-    if (mutations.some(function (m) { return m.addedNodes.length; })) enhanceDashboardControls();
-  });
-  controlEnhancer.observe(host, { childList: true, subtree: true });
-  var dashboardRequestId = 0;
-  function load() {
-    if (S.f.from_date && S.f.to_date && S.f.from_date > S.f.to_date) {
-        S.err = 'From Date cannot be later than To Date.';
-        render();
-        return;
-    }
+  function vActions(AM) { return actionsTab(AM, L('Action lists are as of today and follow the company, department, branch and job location filters.')); }
 
-    try {
-        sessionStorage.setItem('ahd_f', JSON.stringify({
-            company: S.f.company,
-            branch: S.f.branch,
-            job_location: S.f.job_location,
-            department: S.f.department,
-            from_date: S.f.from_date,
-            to_date: S.f.to_date
-        }));
-    } catch (e) {}
-
-    var requestId = ++dashboardRequestId;
-    S.busy = true;
-    S.err = null;
-    render();
-
-    frappe.call({
-        method: 'admin_hr_dashboard_data',
-        args: Object.assign({}, S.f),
-        freeze: false,
-        callback: function (r) {
-            if (requestId !== dashboardRequestId) return;
-            S.busy = false;
-            S.d = r.message || null;
-            DIR.data = null;
-            DIR.opts = null;
-            RQ.sum = null;
-            RQ.L.data = null;
-            TR.sum = null;
-            TR.L.data = null;
-            LV.sum = null;
-            LV.L.data = null;
-            CP.sum = null;
-            CP.L.data = null;
-            AN.seq++; AN.busy = false; AN.data = null; AN.key = '';
-
-            if (S.d) {
-                S.f.company = S.d.meta.company;
-            }
-            render();
-        },
-        error: function () {
-            if (requestId !== dashboardRequestId) return;
-            S.busy = false;
-            S.err = 'Could not load dashboard data. Check permissions and the server script.';
-            render();
-        }
-    });
-}
-  /* ---- Phase 8: CSV export (HR Manager / HR User only; same permission-checked list APIs, max 2,000 rows) ---- */
-  function csvCell(v) { var s = v === null || v === undefined ? '' : String(v); if (/^[=+\-@]/.test(s)) s = "'" + s; return '"' + s.replace(/"/g, '""') + '"'; }
-  function exportRows(method, args, cols, fname) {
-    if (!detail()) return;
-    var all = [], page = 1;
-    frappe.show_alert({ message: T('Preparing export…'), indicator: 'blue' });
-    function next() {
-      frappe.call({ method: method, args: Object.assign({}, args, { page: page, page_length: 100 }), freeze: false,
-        callback: function (r) {
-          var m = r.message || {}; all = all.concat(m.rows || []);
-          if (page < (m.pages || 1) && page < 20) { page++; next(); return; }
-          var csv = cols.map(function (c) { return csvCell(c[1]); }).join(',') + '\n' + all.map(function (row) { return cols.map(function (c) { return csvCell(c[0] === 'job_location' ? locName(row[c[0]]) : row[c[0]]); }).join(','); }).join('\n');
-          var blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }), a = document.createElement('a');
-          a.href = URL.createObjectURL(blob); a.download = fname + '_' + frappe.datetime.get_today() + '.csv'; document.body.appendChild(a); a.click();
-          setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-          frappe.show_alert({ message: T('Exported ' + all.length + ' rows' + ((m.pages || 1) > 20 ? ' (first 2,000)' : '')), indicator: 'green' });
-        },
-        error: function () { frappe.show_alert({ message: T('Export failed or not permitted.'), indicator: 'red' }); } });
-    }
-    next();
+  /* ============================================================ employee panel (admin_hr_employee_detail) and drills */
+  var EDET = null;
+  function kvl(rows) { return '<div class="dms-facts ah-facts">' + rows.map(function (r) { return '<div><span class="dms-sm">' + esc(L(r[0])) + '</span><b>' + (r[2] ? r[1] : r[1] === '' || r[1] == null ? '<span class="dms-sm">—</span>' : esc(r[1])) + '</b></div>'; }).join('') + '</div>'; }
+  function cnts(o) { var k = Object.keys(o || {}); return k.length ? k.map(function (s) { return esc(L(s)) + ' ' + num(o[s]); }).join(' · ') : '—'; }
+  function empBody() {
+    if (!EDET) { return ''; } if (EDET.err) { return alertBox('err', esc(EDET.err)); } var m = EDET.m; if (!m) { return skel(1, 'dms-skel-panel'); }
+    var b = m.basic || {}, a = m.attendance || {}, l = m.leave || {}, t = m.training || {}, q = m.requests || {}, h = '';
+    h += '<h4 class="ah-h">' + esc(L('A · Basic information')) + '</h4>' + kvl([['Company', b.company], ['Department', b.department], ['Designation', b.designation], ['Branch', b.branch], ['Job location', b.job_location], ['Nationality', b.nationality], ['Date of joining', b.date_of_joining], ['Employment status', b.status], ['Employment type', b.employment_type], ['Reports to', b.reports_to], ['Default shift', b.default_shift]]);
+    h += '<h4 class="ah-h">' + esc(L('B · Attendance summary')) + '</h4>' + (a.available ? kvl([['Attendance records (30 days)', cnts(a.last_30_days), 1], ['Late entries (30 days)', a.late_entries_30d], ['Days with biometric/mobile punches (30 days)', a.punch_days_30d], ['Last punch', a.last_punch], ['Last attendance record', a.last_record]]) : empty(L('Attendance not readable with your permissions.')));
+    h += '<h4 class="ah-h">' + esc(L('C · Leave information')) + '</h4>' + (!l.available ? empty(L('Leave Applications not readable with your permissions.')) : mini([['Leave type', function (x) { return bdi(x.leave_type); }], ['Allocated', function (x) { return nv(x.allocated); }, 1], ['Balance (approved only)', function (x) { return nv(x.balance); }, 1], ['Pending (not subtracted)', function (x) { return nv(x.pending_deducted); }, 1]], l.balances || [], 'No allocation') + note(esc(L(l.balance_note || ''))) + mini([['Application', function (x) { return docLink('Leave Application', x.name); }], ['Type', function (x) { return bdi(x.leave_type); }], ['From', function (x) { return esc(x.from_date); }], ['To', function (x) { return esc(x.to_date); }], ['Days', function (x) { return nv(x.days); }, 1]], (l.pending || []).concat(l.approved_history || []).slice(0, 12), 'No applications'));
+    h += '<h4 class="ah-h">' + esc(L('D · Documents & compliance')) + '</h4>' + mini([['Document', function (x) { return esc(L(x.document)); }], ['Expiry date', function (x) { return esc(x.date || '—'); }], ['Days left', function (x) { return x.days_left == null ? '—' : num(x.days_left); }, 1], ['Status', function (x) { return stat({ expired: 'bad', due_30: 'bad', due_60: 'warn', due_90: 'warn', valid: 'ok' }[x.status] || 'n', L(x.status_label || x.status || '—')) + (x.warning ? '<div class="dms-sm">' + esc(x.warning) + '</div>' : ''); }]], m.documents || []) + note(esc(L('Only expiry dates and status are shown. ID, Iqama and passport numbers, bank, salary and medical details are never returned by this panel.')));
+    h += '<h4 class="ah-h">' + esc(L('E · Training progress')) + '</h4>' + (!t.available ? empty(L('Training progress not readable with your permissions.')) : kvl([['Assigned', t.assigned], ['Completed', t.completed], ['Pending', t.pending], ['Overdue', t.overdue]]));
+    h += '<h4 class="ah-h">' + esc(L('F · HR requests')) + '</h4>' + mini([['Request', function (x) { return x.doctype && x.name ? docLink(x.doctype, x.name) : esc(x.name || ''); }], ['Type', function (x) { return esc(x.type || ''); }], ['Status', function (x) { return esc(x.status || ''); }], ['Created', function (x) { return esc(String(x.created || '').slice(0, 10)); }]], q.items || [], 'No requests');
+    return h;
   }
-  host.addEventListener('click', function (ev) {
-    var t = ev.target.closest('[data-export]'); if (!t) return;
-    var k = t.dataset.export;
-    if (k === 'dir') exportRows('admin_hr_employee_directory', Object.assign({}, DIR.f, { company: DIR.f.company || S.d.meta.company, sort_by: DIR.sort, sort_order: DIR.order }), DIR_COLS.map(function (c) { return [c[0], c[1]]; }), 'employees');
-    else if (k === 'leave') exportRows('admin_hr_leave_data', lvArgs(Object.assign({ mode: 'list', preset: LV.L.preset, sort_by: LV.L.sort, sort_order: LV.L.order }, LV.L.f, LV.L.extra)), LV_COLS.map(function (c) { return [c[0], c[1]]; }).concat([['cls', 'Classification']]), 'leave_applications');
-    else if (k === 'cp') exportRows('admin_hr_compliance_data', cpArgs(Object.assign({ mode: 'list', preset: CP.L.preset, sort_by: CP.L.sort, sort_order: CP.L.order }, CP.L.f)), CP_COLS.map(function (c) { return [c[0], c[1]]; }).concat([['conflict', 'Conflict'], ['unusual', 'Unusual']]), 'compliance');
-    else if (k === 'tr') exportRows('admin_hr_training_data', trArgs(Object.assign({ mode: 'list', preset: TR.L.preset, sort_by: TR.L.sort, sort_order: TR.L.order }, TR.L.f)), TR_COLS.map(function (c) { return [c[0], c[1]]; }).concat([['kind', 'Kind']]), 'training');
-    else if (k === 'rq') exportRows('admin_hr_requests_data', rqArgs(Object.assign({ mode: 'list', preset: RQ.L.preset, sort_by: RQ.L.sort, sort_order: RQ.L.order }, RQ.L.f)), RQ_COLS.filter(function (c) { return c[0] !== 'priority'; }).map(function (c) { return [c[0], c[1]]; }).concat([['state', 'Source state'], ['doctype', 'DocType']]), 'hr_requests');
-  });
-  var rqSearchT = null;
-  host.addEventListener('input', function (ev) { var ds = ev.target.dataset || {}; if (ds.rqf === 'search') { RQ.L.f.search = ev.target.value; clearTimeout(rqSearchT); rqSearchT = setTimeout(function () { RQ.L.page = 1; rqList(); }, 350); } });
-  host.addEventListener('change', function (ev) {
-    var ds = ev.target.dataset || {};
-    if (ds.rqf === 'company') { RQ.company = ev.target.value; RQ.sum = null; RQ.L.data = null; rqLoad(); return; }
-    if (ds.rqf && ds.rqf !== 'search') { RQ.L.f[ds.rqf] = ev.target.value.trim(); RQ.L.page = 1; rqList(); }
-    if (ds.rqpl) { RQ.L.pl = parseInt(ev.target.value, 10) || 25; RQ.L.page = 1; rqList(); }
-  });
-  host.addEventListener('click', function (ev) {
-    if (ev.target.closest('a')) return;
-    var t = ev.target.closest('[data-rqpre],[data-rqsort],[data-rqpage],[data-rqview],[data-rqa]'); if (!t) return;
-    var ds = t.dataset, L = RQ.L;
-    if (ds.rqpre !== undefined) {
-      var f = {};
-      if (ds.rqtype) f.type = ds.rqtype; if (ds.rqdept) f.department = ds.rqdept; if (ds.rqbranch) f.branch = ds.rqbranch; if (ds.rqst) f.status = ds.rqst;
-      if (ds.rqage) f.age_bucket = ds.rqage; if (ds.rqfrom) f.range_from = ds.rqfrom; if (ds.rqto) f.range_to = ds.rqto;
-      rqPreset(ds.rqpre, ds.rqt, f);
-    } else if (ds.rqsort) { if (L.sort === ds.rqsort) L.order = L.order === 'asc' ? 'desc' : 'asc'; else { L.sort = ds.rqsort; L.order = 'asc'; } L.page = 1; rqList(); }
-    else if (ds.rqpage) { var p = L.page, n = L.data ? L.data.pages : 1; L.page = ds.rqpage === 'first' ? 1 : ds.rqpage === 'prev' ? Math.max(1, p - 1) : ds.rqpage === 'next' ? Math.min(n, p + 1) : n; rqList(); }
-    else if (ds.rqview) openRequest(ds.rqview);
-    else if (ds.rqa === 'clearpreset') rqPreset('', 'All HR requests', {});
-    else if (ds.rqa === 'clearf') { L.f = RQ_EMPTY_F(); L.page = 1; rqList(); }
-    else if (ds.rqa === 'refresh') { RQ.sum = null; RQ.L.data = null; rqLoad(); }
-  });
-  var trSearchT = null;
-  host.addEventListener('input', function (ev) { var ds = ev.target.dataset || {}; if (ds.trf === 'search') { TR.L.f.search = ev.target.value; clearTimeout(trSearchT); trSearchT = setTimeout(function () { TR.L.page = 1; trList(); }, 350); } });
-  host.addEventListener('change', function (ev) {
-    var ds = ev.target.dataset || {};
-    if (ds.trf === 'company') { TR.company = ev.target.value; TR.sum = null; TR.L.data = null; trLoad(); return; }
-    if (ds.trf && ds.trf !== 'search') { TR.L.f[ds.trf] = ev.target.value.trim(); TR.L.page = 1; if (ds.trf !== 'date_field' || TR.L.f.range_from || TR.L.f.range_to) trList(); }
-    if (ds.trpl) { TR.L.pl = parseInt(ev.target.value, 10) || 25; TR.L.page = 1; trList(); }
-  });
-  host.addEventListener('click', function (ev) {
-    if (ev.target.closest('a')) return;
-    var t = ev.target.closest('[data-trpre],[data-trsort],[data-trpage],[data-trview],[data-tra]'); if (!t) return;
-    var ds = t.dataset, L = TR.L;
-    if (ds.trpre !== undefined) {
-      var f = {};
-      if (ds.trdept) f.department = ds.trdept; if (ds.trdesig) f.designation = ds.trdesig; if (ds.tritem) f.item = ds.tritem;
-      if (ds.trdf) f.date_field = ds.trdf; if (ds.trfrom) f.range_from = ds.trfrom; if (ds.trto) f.range_to = ds.trto;
-      trPreset(ds.trpre, ds.trt, f);
-    } else if (ds.trsort) { if (L.sort === ds.trsort) L.order = L.order === 'asc' ? 'desc' : 'asc'; else { L.sort = ds.trsort; L.order = 'asc'; } L.page = 1; trList(); }
-    else if (ds.trpage) { var p = L.page, n = L.data ? L.data.pages : 1; L.page = ds.trpage === 'first' ? 1 : ds.trpage === 'prev' ? Math.max(1, p - 1) : ds.trpage === 'next' ? Math.min(n, p + 1) : n; trList(); }
-    else if (ds.trview) openTraining(ds.trview);
-    else if (ds.tra === 'clearpreset') trPreset('', 'All training assignments', {});
-    else if (ds.tra === 'clearf') { L.f = TR_EMPTY_F(); L.page = 1; trList(); }
-    else if (ds.tra === 'refresh') { TR.sum = null; TR.L.data = null; trLoad(); }
-  });
-  var cpSearchT = null;
-  host.addEventListener('input', function (ev) { var ds = ev.target.dataset || {}; if (ds.cpf === 'search') { CP.L.f.search = ev.target.value; clearTimeout(cpSearchT); cpSearchT = setTimeout(function () { CP.L.page = 1; cpList(); }, 350); } });
-  host.addEventListener('change', function (ev) {
-    var ds = ev.target.dataset || {};
-    if (ds.cpf === 'company') { CP.company = ev.target.value; CP.sum = null; CP.L.data = null; cpLoad(); return; }
-    if (ds.cpf && ds.cpf !== 'search') { CP.L.f[ds.cpf] = ev.target.value; CP.L.page = 1; cpList(); }
-    if (ds.cppl) { CP.L.pl = parseInt(ev.target.value, 10) || 25; CP.L.page = 1; cpList(); }
-  });
-  host.addEventListener('click', function (ev) {
-    if (ev.target.closest('a')) return;
-    var t = ev.target.closest('[data-cppre],[data-cpsort],[data-cppage],[data-cpview],[data-cpa]'); if (!t) return;
-    var ds = t.dataset, L = CP.L;
-    if (ds.cppre !== undefined) {
-      var f = {};
-      if (ds.cpdoc) f.doc = ds.cpdoc; if (ds.cpst) f.status = ds.cpst; if (ds.cpdept) f.department = ds.cpdept; if (ds.cpbranch) f.branch = ds.cpbranch;
-      if (ds.cpfrom) f.range_from = ds.cpfrom; if (ds.cpto) f.range_to = ds.cpto;
-      cpPreset(ds.cppre, ds.cpt, f);
-    } else if (ds.cpsort) { if (L.sort === ds.cpsort) L.order = L.order === 'asc' ? 'desc' : 'asc'; else { L.sort = ds.cpsort; L.order = 'asc'; } L.page = 1; cpList(); }
-    else if (ds.cppage) { var p = L.page, n = L.data ? L.data.pages : 1; L.page = ds.cppage === 'first' ? 1 : ds.cppage === 'prev' ? Math.max(1, p - 1) : ds.cppage === 'next' ? Math.min(n, p + 1) : n; cpList(); }
-    else if (ds.cpview) openCompliance(ds.cpview, ds.cpd);
-    else if (ds.cpa === 'clearpreset') cpPreset('', 'All required documents', {});
-    else if (ds.cpa === 'clearf') { L.f = CP_EMPTY_F(); L.page = 1; cpList(); }
-    else if (ds.cpa === 'refresh') { CP.sum = null; CP.L.data = null; cpLoad(); }
-  });
-  var lvSearchT = null;
-  host.addEventListener('input', function (ev) { var ds = ev.target.dataset || {}; if (ds.lvf === 'search') { LV.L.f.search = ev.target.value; clearTimeout(lvSearchT); lvSearchT = setTimeout(function () { LV.L.page = 1; lvList(); }, 350); } });
-  host.addEventListener('change', function (ev) {
-    var ds = ev.target.dataset || {};
-    if (ds.lvf && ds.lvf !== 'search' && ds.lvf !== 'company') { LV.L.f[ds.lvf] = ev.target.value.trim(); LV.L.page = 1; lvList(); }
-    if (ds.lvf === 'company') { LV.f.company = ev.target.value; LV.sum = null; LV.L.data = null; CP.sum = null; CP.L.data = null; lvLoad(); }
-    if (ds.lvpl) { LV.L.pl = parseInt(ev.target.value, 10) || 25; LV.L.page = 1; lvList(); }
-  });
-  host.addEventListener('click', function (ev) {
-    if (ev.target.closest('a')) return;
-    var t = ev.target.closest('[data-lvpre],[data-lvnoalloc],[data-lvmonth],[data-lvday],[data-lvcal],[data-lvsort],[data-lvpage],[data-lvview],[data-lva]'); if (!t) return;
-    var ds = t.dataset, L = LV.L;
-    if (ds.lvpre !== undefined) {
-      var f = {}, x = {};
-      if (ds.lvdept) f.department = ds.lvdept; if (ds.lvtype) f.leave_type = ds.lvtype; if (ds.lvws) f.workflow_state = ds.lvws; if (ds.lvage) x.age_bucket = ds.lvage;
-      lvPreset(ds.lvpre, ds.lvt, x, f);
-    } else if (ds.lvnoalloc !== undefined) lvNoAlloc(ds.lvnoalloc);
-    else if (ds.lvmonth) { var mr = lvMonthRange(ds.lvmonth); lvPreset('kpi_used', 'Approved leave starting in ' + ds.lvmonth, { from_date: mr[0], to_date: mr[1] }); }
-    else if (ds.lvday) lvPreset('day', 'On approved leave · ' + ds.lvday, { day: ds.lvday });
-    else if (ds.lvcal) { var c = new Date(LV.cal + '-01T00:00:00'); c.setMonth(c.getMonth() + parseInt(ds.lvcal, 10)); LV.cal = c.getFullYear() + '-' + String(c.getMonth() + 1).padStart(2, '0'); lvLoad(); }
-    else if (ds.lvsort) { if (L.sort === ds.lvsort) L.order = L.order === 'asc' ? 'desc' : 'asc'; else { L.sort = ds.lvsort; L.order = 'asc'; } L.page = 1; lvList(); }
-    else if (ds.lvpage) { var p = L.page, n = L.data ? L.data.pages : 1; L.page = ds.lvpage === 'first' ? 1 : ds.lvpage === 'prev' ? Math.max(1, p - 1) : ds.lvpage === 'next' ? Math.min(n, p + 1) : n; lvList(); }
-    else if (ds.lvview) openLeave(ds.lvview);
-    else if (ds.lva === 'clearpreset') lvPreset('', 'All leave applications', {}, {});
-    else if (ds.lva === 'clearf') { L.f = { search: '', department: '', employee: '', leave_type: '', status: '', workflow_state: '', range_from: '', range_to: '' }; L.page = 1; lvList(); }
-    else if (ds.lva === 'apply' || ds.lva === 'ytd' || ds.lva === 'month') {
-      var td = (LV.sum && LV.sum.meta.today) || frappe.datetime.get_today();
-      if (ds.lva === 'apply') { var a = host.querySelector('[data-lvp-from]'), b = host.querySelector('[data-lvp-to]'); LV.f.from_date = a ? a.value : ''; LV.f.to_date = b ? b.value : ''; }
-      else if (ds.lva === 'ytd') { LV.f.from_date = td.slice(0, 4) + '-01-01'; LV.f.to_date = td; }
-      else { LV.f.from_date = td.slice(0, 7) + '-01'; LV.f.to_date = lvMonthRange(td.slice(0, 7))[1]; }
-      if (LV.f.from_date && LV.f.to_date && LV.f.from_date > LV.f.to_date) { frappe.msgprint(T('Period start must be before the end.')); return; }
-      LV.L.data = null; lvLoad();
+  function drill(id) {
+    if (id.indexOf('emp:') === 0 && EDET) { return { title: EDET.m && EDET.m.basic ? EDET.m.basic.employee_name + ' · ' + EDET.id : EDET.id, sub: L('Employee details'), link: ['Employee', EDET.id, EDET.id], body: empBody(), ah: 'emp' }; }
+    if (id.indexOf('rows:') === 0) {
+      var x = DRL[id.slice(5)]; if (!x) { return null; }
+      return { title: L(x.title), sub: num(x.rows.length) + ' ' + L('records'), spec: { rows: x.rows, file: id.slice(5), text: function (r) { return [r.employee, r.employee_name, r.department].join(' '); }, cols: [{ h: L('Employee'), r: function (r) { var n = r.leave_application || r.employee; return n ? docLink(r.leave_application ? 'Leave Application' : 'Employee', n, r.employee_name || n) : '—'; }, c: function (r) { return r.employee; } }, { h: L('Department'), r: function (r) { return bdi(r.department || '—'); }, c: function (r) { return r.department; } }, { h: L('Detail'), r: function (r) { return '<span class="dms-sm">' + esc([r.status, r.first_punch, r.late_by_min != null ? r.late_by_min + ' min' : '', r.documents, r.leave_type, r.from_date && r.to_date ? r.from_date + ' → ' + r.to_date : '', r.missing, r.absence_basis ? L(r.absence_basis) : '', r.nationality].filter(Boolean).join(' · ')) + '</span>'; }, c: function (r) { return r.status || ''; } }] } };
     }
-  });
-  host.addEventListener('click', function (ev) {
-    if (ev.target.closest('a')) return;
-    var t = ev.target.closest('[data-tab],[data-dr],[data-a]');
-    if (!t) return;
-    if (t.dataset.tab) { S.tab = t.dataset.tab; try { localStorage.setItem('ahd_tab', S.tab); } catch (e) {} render(); return; }
-    if (t.dataset.dr !== undefined) { openDrill(DR[+t.dataset.dr]); return; }
-    if (t.dataset.a === 'refresh') load();
-    if (t.dataset.a === 'reset') { S.f.branch = ''; S.f.job_location = ''; S.f.department = ''; S.f.to_date = frappe.datetime.get_today(); S.f.from_date = frappe.datetime.add_months(S.f.to_date, -1); load(); }
-  });
-  host.addEventListener('change', function (ev) { var f = ev.target.dataset && ev.target.dataset.f; if (f) { S.f[f] = ev.target.value; load(); } });
-  var dirSearchT = null;
-  host.addEventListener('input', function (ev) { var ds = ev.target.dataset || {}; if (ds.dirf === 'search') { DIR.f.search = ev.target.value; clearTimeout(dirSearchT); dirSearchT = setTimeout(function () { DIR.page = 1; dirLoad(false); }, 350); } });
-  host.addEventListener('change', function (ev) { var ds = ev.target.dataset || {};
-    if (ds.dirf && ds.dirf !== 'search') { DIR.f[ds.dirf] = ev.target.value; DIR.page = 1; dirLoad(ds.dirf === 'company' || ds.dirf === 'status'); }
-    if (ds.dirpl) { DIR.pl = parseInt(ev.target.value, 10) || 25; DIR.page = 1; dirLoad(false); } });
-  host.addEventListener('click', function (ev) {
-    if (ev.target.closest('a')) return;
-    var t = ev.target.closest('[data-dirsort],[data-dirpage],[data-dirview],[data-dira]'); if (!t) return;
-    var ds = t.dataset;
-    if (ds.dirsort) { if (DIR.sort === ds.dirsort) DIR.order = DIR.order === 'asc' ? 'desc' : 'asc'; else { DIR.sort = ds.dirsort; DIR.order = 'asc'; } DIR.page = 1; dirLoad(false); }
-    else if (ds.dirpage) { var p = DIR.page, n = DIR.data ? DIR.data.pages : 1; DIR.page = ds.dirpage === 'first' ? 1 : ds.dirpage === 'prev' ? Math.max(1, p - 1) : ds.dirpage === 'next' ? Math.min(n, p + 1) : n; dirLoad(false); }
-    else if (ds.dirview) { openEmployee(ds.dirview); }
-    else if (ds.dira === 'reset') { DIR.f = { search: '', company: '', department: '', designation: '', branch: '', job_location: '', nationality: '', status: 'Active' }; DIR.page = 1; dirLoad(true); }
-  });
-  host.addEventListener('click', function (ev) {
-    var b = ev.target.closest && ev.target.closest('[data-a="lang"]'); if (!b) return;
-    var nl = S.lang === 'ar' ? 'en' : 'ar'; b.disabled = true; frappe.xcall('frappe.client.set_value', {doctype: 'User', name: frappe.session.user, fieldname: 'language', value: nl}).then(function () { location.reload(); }).catch(function () { b.disabled = false; });
-  });
-  locLoad();
-  load();
+    if (id.indexOf('cli:') === 0) {
+      var k = id.slice(4), cc = actClient(), y = cc && typeof cc === 'object' && cc[k], s = actSpecs().filter(function (z) { return z.id === k; })[0]; if (!y || !s || !y.rows) { return null; }
+      return { title: s.title, sub: s.why, spec: { rows: y.rows.map(y.item).filter(Boolean), file: k, text: function (it) { return [it.title, it.desc].join(' '); }, cols: [{ h: L('Record'), r: function (it) { return docLink(it.dt, it.name, it.title); }, c: function (it) { return it.name; } }, { h: L('Detail'), r: function (it) { return '<span class="dms-sm">' + bdi(it.desc) + '</span>'; }, c: function (it) { return it.desc; } }, { h: L('Age / due'), r: function (it) { return esc(it.due || ''); }, c: function (it) { return it.due; } }] } };
+    }
+    return null;
+  }
+  function onAct(a, v) {
+    if (a === 'kpi' && v.indexOf('goto:') === 0) { goTab(v.slice(5), false, true); return true; }
+    if (a === 'kpi' && v.indexOf('rows:') === 0) { openDrill(v); return true; }
+    if (a === 'kpi' && v.indexOf('emp:') === 0) { var id = v.slice(4); EDET = { id: id, m: null }; openDrill(v); callP('admin_hr_employee_detail', { employee: id }).then(function (m) { if (EDET && EDET.id === id) { EDET.m = m || {}; if (OVL && OVL.ah === 'emp') { OVL.title = m && m.basic ? m.basic.employee_name + ' · ' + id : id; OVL.body = empBody(); renderOverlay(); } } }, function (e) { if (EDET && EDET.id === id) { EDET.err = errKind(e) === 'perm' ? L('Not permitted') : L('Could not load employee details.'); if (OVL && OVL.ah === 'emp') { OVL.body = empBody(); renderOverlay(); } } }); return true; }
+    if (a === 'kpi' && v.indexOf('pre:') === 0) { var p = v.split(':'), mod = p[1]; LST[mod] = { preset: p[2], title: p.slice(3).join(':') }; resetList(mod); renderSoft(); later(function () { var el = HOST.querySelector('#ah-list-' + mod); if (el && el.scrollIntoView) { el.scrollIntoView({ block: 'start' }); } }); return true; }
+    if (a === 'clrpre') { LST[v] = { preset: '', title: '' }; resetList(v); renderSoft(); return true; }
+    return false;
+  }
+  function resetList(mod) { var x = SS['tl_' + mod]; if (x) { x.dirty = true; x.page = 1; } }
+
+  start();
+})();
+
+/* ==== DM theme sync (same as tools/erp/shell/dark_theme.py output; maintained here since this block is built on the standard) ==== */
+;(function () {
+  var r = typeof root_element !== 'undefined' ? root_element : null, h = r && r.host;
+  if (!h || h.__dmsTheme) return; h.__dmsTheme = 1;
+  var s = function () { h.setAttribute('data-dms-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'); };
+  s(); new MutationObserver(s).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 })();

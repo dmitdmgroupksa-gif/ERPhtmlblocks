@@ -41,6 +41,19 @@
         card.addEventListener("click", () => frappe.set_route("query-report", REPORT))
     );
 
+
+    function uniqueCustomers(rows){
+        const byId=new Map();
+        rows.filter(isDataRow).forEach(row=>{
+            const id=row.customer_id||row.customer;
+            if(!id)throw new Error('Customer ID missing from report; unique totals unavailable');
+            const old=byId.get(id);
+            if(old && ['actual_outstanding','outstanding_of_blocked_customers','is_blocked'].some(k=>Number(old[k]||0)!==Number(row[k]||0)))throw new Error('Conflicting customer balances in report');
+            if(!old)byId.set(id,row);
+        });
+        return Array.from(byId.values());
+    }
+
     frappe.call({
         method: "frappe.desk.query_report.run",
         args: {
@@ -51,7 +64,7 @@
             const rows = r.message && r.message.result;
             if (!Array.isArray(rows)) return setError();
 
-            const data = rows.filter(isDataRow);
+            let data;try{data=uniqueCustomers(rows);}catch(e){return setError();}
 
             const actualOutstanding = data.reduce((s, row) => s + (Number(row.actual_outstanding) || 0), 0);
             const blockedOutstanding = data.reduce((s, row) => s + (Number(row.outstanding_of_blocked_customers) || 0), 0);

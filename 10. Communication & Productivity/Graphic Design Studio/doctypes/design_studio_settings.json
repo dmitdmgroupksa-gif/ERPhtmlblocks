@@ -1,0 +1,67 @@
+{
+ "doctype": "DocType",
+ "name": "Design Studio Settings",
+ "module": "Custom",
+ "custom": 1,
+ "istable": 0,
+ "issingle": 1,
+ "track_changes": 1,
+ "fields": [
+  {
+   "fieldname": "designer",
+   "fieldtype": "Link",
+   "label": "Designer",
+   "options": "User"
+  },
+  {
+   "fieldname": "default_brand",
+   "fieldtype": "Link",
+   "label": "Default brand",
+   "options": "Design Brand"
+  },
+  {
+   "fieldname": "notify_designer_on_new",
+   "fieldtype": "Check",
+   "label": "Email the designer about new requests",
+   "default": "1"
+  },
+  {
+   "fieldname": "certificate_issuers",
+   "fieldtype": "Table",
+   "label": "Certificate issuers (HR)",
+   "options": "Design Studio User"
+  },
+  {
+   "fieldname": "card_operators",
+   "fieldtype": "Table",
+   "label": "Business card operators (IT)",
+   "options": "Design Studio User"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "email": 1,
+   "share": 1
+  },
+  {
+   "role": "Design Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "email": 1,
+   "share": 1
+  }
+ ]
+}
