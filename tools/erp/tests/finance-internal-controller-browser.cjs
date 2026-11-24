@@ -29,8 +29,10 @@ const PEND = { 'Payment Entry': ['Pending', 'submitted'], 'Journal Entry': ['Pen
 run({
   slug: 'finance-internal-controller', folder: '04. Finance & Credit Control/Finance Internal Controller', build, methods,
   figures: async (t, H, db) => {
-    const pend = Object.keys(PEND).reduce((s, dt) => s + db[dt].filter(x => sar(x) && inYear(x) && PEND[dt].includes(x.workflow_state) && x.docstatus !== 2).length, 0) + db['Purchase Invoice'].filter(x => sar(x) && inYear(x) && x.docstatus === 0).length;
-    H.assert.equal(await t.kpiVal(0), fmt(pend)); H.ok('pending approvals this year (SAR companies) = fixture (' + pend + ')');
+    H.assert.equal(await t.$('.dms-tab.dms-on').getAttribute('data-v'), 'approvals'); H.ok('opens on the Approvals tab (APP.defaultTab, set in ERPNext)');
+    await t.$('[data-act="tab"][data-v="overview"]').click(); await t.idle();
+    const pend = Object.keys(PEND).reduce((s, dt) => s + db[dt].filter(x => sar(x) && PEND[dt].includes(x.workflow_state) && x.docstatus !== 2).length, 0) + db['Purchase Invoice'].filter(x => sar(x) && x.docstatus === 0).length;
+    H.assert.equal(await t.kpiVal(0), fmt(pend)); H.ok('pending approvals, all open items regardless of period (live backlog rule set in ERPNext), SAR companies = fixture (' + pend + ')');
     const ar = db['Sales Invoice'].filter(x => sar(x) && x.docstatus === 1 && x.outstanding_amount > 0).reduce((s, x) => s + x.outstanding_amount, 0);
     H.assert.equal(await t.kpiVal(3), money(ar) + 'SAR'); H.ok('receivables in base currency, AED company excluded instead of failing (' + money(ar) + ')');
     const aged = Object.keys(PEND).reduce((s, dt) => s + db[dt].filter(x => sar(x) && PEND[dt].includes(x.workflow_state) && x.docstatus !== 2 && x.posting_date <= add(TODAY, -7)).length, 0);

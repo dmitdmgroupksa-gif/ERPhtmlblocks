@@ -8,3 +8,7 @@ dashboards/
 __pycache__/
 node_modules/
 .superpowers/
+
+# personal HR documents (Mohammad Danial evaluation / handover) and Office lock files
+reports/Mohammad Danial*
+~$*

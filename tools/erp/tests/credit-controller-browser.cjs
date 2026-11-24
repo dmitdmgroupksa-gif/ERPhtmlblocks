@@ -125,6 +125,7 @@ async function openPage(browser, db, opts = {}) {
     try {
       const d = ctl.delay(a, method); if (d) { await new Promise(res => setTimeout(res, d)); }
       if (ctl.fail(a, method)) { await route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ exc_type: 'PermissionError', exception: 'frappe.exceptions.PermissionError: Not permitted' }) }); return; }
+      if (method === 'frappe.utils.print_format.report_to_pdf') { await route.fulfill({ status: 200, contentType: 'application/pdf', body: '%PDF-1.4\n% mock\n' }); return; }
       const msg = method === 'frappe.desk.query_report.run' ? report(a.report_name) : getList(db, a);
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ message: msg }) });
     } catch (e) { errors.push('mock: ' + e.message); await route.fulfill({ status: 500, body: '{}' }); } finally { inflight--; }
@@ -237,9 +238,12 @@ const box = async l => (await l.boundingBox());
     ok('all 6 sections render');
     await t.$('#dms-tab-aging').click(); await t.idle();
     const foot = await t.$('[data-tbl="t_aging"] tfoot td').allInnerTexts(); assert.equal(foot[7].replace(/,/g, ''), T.toFixed(2)); ok('customer aging footer total = fixture');
-    const [dl] = await Promise.all([t.page.waitForEvent('download'), t.$('[data-tbl="t_aging"] [data-act="csv"]').click()]);
-    const csv = fs.readFileSync(await dl.path(), 'utf8').replace(/^\ufeff/, '').trim().split(/\r\n/);
-    assert.match(csv[0], /^Customer,Not yet due,1–30 days/); assert.equal(csv.length - 1, new Set(O.map(s => s.customer)).size); ok('CSV export of the aging table (' + (csv.length - 1) + ' customers)');
+    const [dl] = await Promise.all([t.page.waitForEvent('download'), t.$('[data-tbl="t_aging"] [data-act="pdf"]').click()]);
+    assert.match(dl.suggestedFilename(), /\.pdf$/); assert.match(fs.readFileSync(await dl.path(), 'latin1'), /^%PDF/);
+    const pdf = t.log.filter(x => x.method === 'frappe.utils.print_format.report_to_pdf').pop().a, html = String(pdf.html), nCust = new Set(O.map(s => s.customer)).size;
+    assert.match(html, /<img[^>]+2026-08-20/); assert.match(html, /<th>Customer<\/th><th[^>]*>Not yet due<\/th><th[^>]*>1–30 days/);
+    assert.equal((html.match(/<tbody>[\s\S]*<\/tbody>/)[0].match(/<tr>/g) || []).length, nCust); assert.equal(pdf.orientation, 'Landscape');
+    ok('PDF export of the aging table on the DM letterhead (' + nCust + ' customers)');
     await t.$('#dms-tab-limits').click(); await t.idle();
     const pairsN = Object.keys(PO.out).length; assert.match(await t.$('[data-tbl="t_lim"]').innerText(), new RegExp(pairsN + ' rows')); ok('credit-limit table lists every customer–company pair with a balance (' + pairsN + ')');
     await t.$('#dms-tab-coll').click(); await t.idle();
@@ -248,10 +252,10 @@ const box = async l => (await l.boundingBox());
     const on = await box(t.$('.dms-tab.dms-on')), off = await box(t.$('.dms-tab:not(.dms-on)').first()); assert.ok(on.y < off.y); ok('active tab raised above inactive tabs');
 
     /* 7. permission errors are states, not zeros */
-    t.ctl.fail = a => a.doctype === 'Customer Credit Limit'; await t.$('#dms-tab-overview').click(); await t.$('[data-act="refresh"]').click(); await t.idle();
+    t.ctl.fail = a => a.doctype === 'Customer Credit Limit'; await t.$('#dms-tab-overview').click(); await t.$('[data-ref="refresh"]').click(); await t.idle();
     assert.equal(await t.kpiVal(4), '—'); assert.match(await t.$('.dms-actpanel').innerText(), /Could not load: Over credit limit, Facility renewal/); ok('credit-limit permission error shows "—" and is disclosed in actions');
     await t.$('#dms-tab-limits').click(); await t.idle(); assert.match(await t.$('[data-ref="content"]').innerText(), /Source unavailable: Customer credit limits — permission denied/); await shot(t.page, 'state-limits-error-1440', { fullPage: false }); ok('limits tab names the restricted source');
-    t.ctl.fail = () => false; await t.$('[data-act="refresh"]').click(); await t.idle(); assert.match(await t.$('[data-ref="content"]').innerText(), /Credit limits and utilisation/); ok('refresh recovers');
+    t.ctl.fail = () => false; await t.$('[data-ref="refresh"]').click(); await t.idle(); assert.match(await t.$('[data-ref="content"]').innerText(), /Credit limits and utilisation/); ok('refresh recovers');
     assert.deepEqual(t.errors, []); await t.ctx.close();
 
     /* 8. Arabic / RTL / dark */

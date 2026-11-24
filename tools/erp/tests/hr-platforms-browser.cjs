@@ -23,6 +23,7 @@ function build() {
     Employee: [
       { name: 'E1', employee_name: 'Ali Hassan', status: 'Active', company: 'DM Trading', department: 'Sales', branch: 'Riyadh', expiry_date: d(-2), agreement_expiry_date: d(80), passport_expiry_date: d(45), insurance_expiry_date: null },
       { name: 'E2', employee_name: 'Omar Saleh', status: 'Active', company: 'DM Trading', department: 'Admin', branch: 'Jeddah', expiry_date: d(400), agreement_expiry_date: d(400), passport_expiry_date: d(400), insurance_expiry_date: d(7) },
+      { name: 'E4', employee_name: 'Faisal Saud', status: 'Active', company: 'DM Trading', department: 'Admin', branch: 'Riyadh', custom_nationality: 'Saudi Arabia', expiry_date: d(400), agreement_expiry_date: null, passport_expiry_date: d(400), insurance_expiry_date: d(400) },
       { name: 'E3', employee_name: 'Left Person', status: 'Left', company: 'DM Trading', expiry_date: d(-50) }],
     'IT Renewals Subscription': [
       { name: 'P1', type_renewal: 'Government', renewal_name: 'Qiwa subscription', expiry_date: d(10), next_renewal: d(10), responsible_person: 'it@dm.test', total_amount: 1200, currency: 'SAR', docstatus: 1 },
@@ -36,7 +37,7 @@ async function filter(t, k, v) { await t.$('[data-v="filters"]').click(); await 
 run({
   slug: 'hr-platforms', folder: '05. HR & Administration/Admin & HR Platform', build,
   figures: async (t, H) => {
-    H.assert.deepEqual(await Promise.all([0, 1, 2, 3, 4, 5, 6, 7].map(i => t.kpiVal(i))), ['18', '2', '2', '2', '2', '1', '5', '4']); H.ok('status buckets: 18 active items (4 inactive hidden), lease = rent counted once');
+    H.assert.deepEqual(await Promise.all([0, 1, 2, 3, 4, 5, 6, 7].map(i => t.kpiVal(i))), ['22', '2', '2', '2', '2', '1', '9', '4']); H.ok('status buckets: 22 active items (Saudi open-ended contract counted valid, not missing) (4 inactive hidden), lease = rent counted once');
     H.assert.equal((await t.$('[data-act="pending"] b').innerText()).trim(), '10'); H.ok('pending = expired 2 + 0–7 d 2 + 8–30 d 2 + not recorded 4');
     const ov = await content(t); H.assert.match(ov, /Microsoft 365|Qiwa subscription/); H.assert.match(ov, /DM Trading[\s\S]*DM Branch Jeddah/); H.ok('priority list and company summary');
     await t.$('[data-ref="content"] .dms-kpi[data-v="st:expired"]').click(); await t.$('.dms-modal').waitFor(); await t.idle();
@@ -44,15 +45,21 @@ run({
   },
   interactions: async (t, H) => {
     await t.$('[data-act="tab"][data-v="hr"]').click(); await t.idle();
-    H.assert.equal(await rowsIn(t, 't_hr'), 8); await t.$('.hp-chip[data-v="expired"]').click(); await t.idle(); H.assert.equal(await rowsIn(t, 't_hr'), 1); H.ok('HR tab: 8 employee items; the expired chip narrows to 1');
+    H.assert.equal(await rowsIn(t, 't_hr'), 12); await t.$('.hp-chip[data-v="expired"]').click(); await t.idle(); H.assert.equal(await rowsIn(t, 't_hr'), 1); H.ok('HR tab: 12 employee items; the expired chip narrows to 1');
+    await t.$('.hp-chip[data-v="expired"]').click(); await t.idle();
+    const sa = (await t.$('[data-tbl="t_hr"] tr').filter({ hasText: 'Faisal Saud' }).filter({ hasText: 'Qiwa Contract' }).innerText()).replace(/\s+/g, ' ');
+    H.assert.match(sa, new RegExp(add(TODAY, 60) + '.* 60 days Valid · Open-ended')); H.ok('Saudi contract with no expiry: today + 60 days, 60 days left, Valid · Open-ended');
     await t.$('[data-tbl="t_hr"] [data-v^="it:Employee::E1::expiry_date"]').click(); await t.$('.dms-modal').waitFor(); await t.idle();
     const det = await t.$('.dms-modal').innerText(); H.assert.match(det, /Iqama[\s\S]*2 days overdue/); H.assert.match(det, /Passport/); H.ok('details: selected expiry first, other expiries of the record listed');
     await t.page.keyboard.press('Escape');
     await t.$('[data-act="tab"][data-v="facilities"]').click(); await t.idle(); H.assert.equal(await rowsIn(t, 't_facilities'), 3); H.ok('facilities: closed facility hidden, lease end equal to rent not double counted');
-    await t.$('[data-act="tab"][data-v="platforms"]').click(); await t.idle(); H.assert.equal(await rowsIn(t, 't_platforms'), 7);
+    await t.$('[data-act="tab"][data-v="it"]').click(); await t.idle(); H.assert.equal(await rowsIn(t, 't_it'), 1);
+    const itx = await content(t); H.assert.match(itx, /Microsoft 365/); H.assert.doesNotMatch(itx, /Qiwa subscription/); H.ok('IT Subscriptions tab: IT renewals that are not government platforms');
+    await t.$('[data-act="tab"][data-v="platforms"]').click(); await t.idle(); H.assert.equal(await rowsIn(t, 't_platforms'), 6);
+    H.assert.doesNotMatch(await t.$('[data-tbl="t_platforms"]').innerText(), /Microsoft 365/); H.ok('Government Platforms: company documents + government renewals only (IT subscriptions excluded)');
     const pl = await content(t); H.assert.match(pl, /Qiwa\s*Tracked \(1\)/); H.assert.match(pl, /MISA\s*Tracked per company/); H.assert.match(pl, /Mudad\s*Not Configured/); H.ok('platform coverage chips (tracked, tracked per company, not configured)');
     await filter(t, 'inactive', '1');
-    await t.$('[data-act="tab"][data-v="overview"]').click(); await t.idle(); H.assert.equal(await t.kpiVal(0), '22'); H.ok('including inactive / historical records: 22');
+    await t.$('[data-act="tab"][data-v="overview"]').click(); await t.idle(); H.assert.equal(await t.kpiVal(0), '26'); H.ok('including inactive / historical records: 26');
     await t.$('.dms-chip-x').first().click(); await t.idle();
     t.ctl.fail = a => a.doctype === 'Employee'; await t.$('[data-ref="refresh"]').click(); await t.idle();
     H.assert.match(await t.$('[data-ref="banner"]').innerText(), /Source unavailable[\s\S]*Employee/); H.assert.equal(await t.kpiVal(0), '10'); H.ok('an Employee permission failure is reported and the other three sources still count');

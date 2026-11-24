@@ -7,6 +7,8 @@
 #   register       DM Letters + DM Official Memo (last CFG["register_days"] days, plus anything still waiting for approval)
 #   rent           unpaid rent instalments from DM Facilities Management (overdue or due within CFG["rent_horizon_days"])
 #   visitors       Daily Visitors Record for today and the next 7 days
+#   approvals      every count card on the "Approvals Pending" workspace (/app/approvals-pending), as a list of the records each card
+#                  counts, using the card's own filters; Material Requests Pending for PO and Pending PO are excluded (CFG)
 # Nothing is changed here: rows open the original record in ERPNext, where the normal workflow and permissions apply.
 #
 # Frappe Server Script rules (RestrictedPython): no imports, no "+=", no f-strings, no names starting with "_".
@@ -23,6 +25,12 @@ CFG = {
     "renewal_due_days": 30,           # "due soon" window (amber) and the KPI
     "rent_horizon_days": 45,          # unpaid rent instalments listed when due within this many days (overdue always listed)
     "register_days": 90,              # letters / memos dated within this many days
+    # approvals: every count card on this workspace (/app/approvals-pending) becomes a list, using the card's own filters,
+    # so cards added or changed there show up here too. Cards named in "approvals_exclude" are left out.
+    "approvals_workspace": "Approvals Pending",
+    "approvals_exclude": ["Material Requests Pending for PO", "Purchase Order - To Receive and Bill"],
+    "approvals_overdue_days": 3,      # waiting longer than this since the last update = "remind CEO" (red)
+    "approvals_max_rows": 500,        # per card, safety limit
 }
 U = frappe.utils
 
@@ -242,6 +250,86 @@ def get_visitors(today):
     return out
 
 
+# title / detail / person / amount / date fields, first one present on the DocType wins
+APPROVAL_TITLE = ["description_req", "memo_subject", "subject", "event_name", "applicant_name", "customer_name", "purpose_of_travel", "employee_name", "title"]
+APPROVAL_TYPE = ["request_type", "leave_type", "memo_type", "travel_type", "designation"]
+APPROVAL_AMOUNT = ["total_amount", "grand_total"]
+APPROVAL_DATE = ["date", "memo_date", "posting_date", "offer_date", "event_date", "from_date"]
+
+
+def first_col(doctype, cols):
+    for c in cols:
+        if has_col(doctype, c):
+            return c
+    return ""
+
+
+def get_approvals(today):
+    ws = frappe.get_doc("Workspace", CFG["approvals_workspace"])
+    cards = []
+    recs = {}
+    order = []
+    users = []
+    emps = []
+    for c in ws.number_cards:
+        card_name = c.number_card_name
+        if not card_name or card_name in CFG["approvals_exclude"]:
+            continue
+        label = (c.label or card_name).strip()
+        item = {"card": card_name, "label": label, "doctype": "", "count": 0, "error": ""}
+        cards.append(item)
+        try:
+            nc = frappe.get_doc("Number Card", card_name)
+            dt = nc.document_type
+            item["doctype"] = dt or ""
+            if nc.type != "Document Type" or not dt:
+                item["error"] = "Card type not supported"
+                continue
+            flt = []
+            for f in json.loads(nc.filters_json or "[]"):
+                flt.append(f[:4] if len(f) > 4 else f)
+            cols = {"title": first_col(dt, APPROVAL_TITLE), "type": first_col(dt, APPROVAL_TYPE), "amount": first_col(dt, APPROVAL_AMOUNT),
+                    "date": first_col(dt, APPROVAL_DATE), "emp": "employee" if has_col(dt, "employee") else "",
+                    "state": "workflow_state" if has_col(dt, "workflow_state") else ("status" if has_col(dt, "status") else "")}
+            fields = ["name", "owner", "creation", "modified"]
+            for k in cols:
+                if cols[k] and cols[k] not in fields:
+                    fields.append(cols[k])
+            rows = frappe.get_all(dt, filters=flt, fields=fields, order_by="modified asc", limit_page_length=U.cint(CFG["approvals_max_rows"]))
+            item["count"] = len(rows)
+            for r in rows:
+                key = dt + "::" + r.name
+                rec = recs.get(key)
+                if not rec:
+                    d = r.get(cols["date"]) if cols["date"] else None
+                    d = d or r.creation
+                    waiting = U.date_diff(today, r.modified)
+                    rec = {"doctype": dt, "name": r.name, "title": (r.get(cols["title"]) if cols["title"] else "") or r.name,
+                           "type": (r.get(cols["type"]) if cols["type"] else "") or "", "state": (r.get(cols["state"]) if cols["state"] else "") or "",
+                           "amount": U.flt(r.get(cols["amount"])) if cols["amount"] else 0, "date": str(d)[:10],
+                           "age": U.date_diff(today, r.creation), "waiting": waiting, "overdue": waiting > U.cint(CFG["approvals_overdue_days"]),
+                           "employee": (r.get("employee") if cols["emp"] else "") or "", "owner": r.owner or "", "cards": []}
+                    recs[key] = rec
+                    order.append(key)
+                    users.append(r.owner)
+                    emps.append(rec["employee"])
+                rec["cards"].append(label)
+        except Exception as e:
+            item["error"] = str(e)[:200]
+    names = employee_names(emps)
+    full = {}
+    owners = [u for u in users if u]
+    if owners:
+        for u in frappe.get_all("User", filters={"name": ["in", list(set(owners))]}, fields=["name", "full_name"], limit_page_length=0):
+            full[u.name] = u.full_name or u.name
+    out = []
+    for key in order:
+        rec = recs[key]
+        rec["by"] = names.get(rec["employee"]) or full.get(rec["owner"]) or rec["owner"]
+        out.append(rec)
+    return {"cards": cards, "items": sorted(out, key=lambda r: -r["waiting"])}
+
+
 def section(key, fn, today, data, errors):
     try:
         data[key] = fn(today)
@@ -265,12 +353,13 @@ if action == "bootstrap":
     section("register", get_register, today, res, errors)
     section("rent", get_rent, today, res, errors)
     section("visitors", get_visitors, today, res, errors)
+    section("approvals", get_approvals, today, res, errors)
     res["errors"] = errors
     res["today"] = today
     res["user"] = frappe.db.get_value("User", user, "full_name") or user
     res["cfg"] = {"due_days": U.cint(CFG["renewal_due_days"]), "overdue_days": U.cint(CFG["request_overdue_days"]),
                   "horizon_days": U.cint(CFG["renewal_horizon_days"]), "rent_days": U.cint(CFG["rent_horizon_days"]),
-                  "register_days": U.cint(CFG["register_days"])}
+                  "register_days": U.cint(CFG["register_days"]), "approvals_overdue_days": U.cint(CFG["approvals_overdue_days"])}
 else:
     frappe.throw("Unknown action: " + str(action))
 

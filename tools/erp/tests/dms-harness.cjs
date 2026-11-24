@@ -73,6 +73,8 @@ async function openPage(browser, SRC, db, opts = {}) {
     inflight++; log.push({ method, a });
     try {
       const d = ctl.delay(a, method); if (d) { await new Promise(res => setTimeout(res, d)); }
+      /* PDF export: ERPNext renders the posted HTML; the mock keeps it in the log and returns a minimal PDF */
+      if (method === 'frappe.utils.print_format.report_to_pdf' && !ctl.fail(a, method)) { await route.fulfill({ status: 200, contentType: 'application/pdf', body: '%PDF-1.4\n% mock\n' }); return; }
       if (ctl.fail(a, method)) { await route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ exc_type: 'PermissionError', exception: 'frappe.exceptions.PermissionError: Not permitted' }) }); return; }
       const msg = opts.methods && opts.methods[method] ? opts.methods[method](a, db) : getList(db, a);
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ message: msg }) });
@@ -112,7 +114,7 @@ async function run(cfg) {
     if (cfg.figures) { await cfg.figures(t, H, db); }
     const tabs = await t.$('.dms-tab').evaluateAll(b => b.map(x => x.getAttribute('data-v')));
     if (await t.$('[data-v="period"]').count()) {
-      const [pe, pr, fi, rf, la] = await Promise.all(['[data-act="pending"]', '[data-v="period"]', '[data-v="filters"]', '[data-act="refresh"]', '.dms-lang'].map(s => t.$(s).count().then(n => n ? box(t.$(s)) : null)));
+      const [pe, pr, fi, rf, la] = await Promise.all(['[data-act="pending"]', '[data-v="period"]', '[data-v="filters"]', '[data-ref="refresh"]', '.dms-lang'].map(s => t.$(s).count().then(n => n ? box(t.$(s)) : null)));
       assert.ok(la.x > rf.x && (!fi || rf.x > fi.x) && (!fi || fi.x > pr.x) && pr.x > pe.x); ok('toolbar order right→left: language, refresh, filters, period, pending');
     }
     assert.ok(await t.$('#dms-pending').count() === 1, 'actions pending panel on the first tab'); ok('actions pending section on the first tab');
@@ -142,7 +144,7 @@ async function run(cfg) {
     t = await open(db, { dpr: 2 }); await t.idle();
     await t.$('[data-act="lang"][data-v="ar"]').click(); await t.idle();
     assert.equal(await t.$('[data-dms-root]').getAttribute('dir'), 'rtl');
-    const [pe2, rf2, la2] = await Promise.all(['[data-act="pending"]', '[data-act="refresh"]', '.dms-lang'].map(s => box(t.$(s)))); assert.ok(la2.x < rf2.x && rf2.x < pe2.x); ok('Arabic switches to RTL with a mirrored toolbar');
+    const [pe2, rf2, la2] = await Promise.all(['[data-act="pending"]', '[data-ref="refresh"]', '.dms-lang'].map(s => box(t.$(s)))); assert.ok(la2.x < rf2.x && rf2.x < pe2.x); ok('Arabic switches to RTL with a mirrored toolbar');
     await shot(t.page, 'overview-ar-1440');
     await t.page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark')); await t.page.waitForTimeout(150); await shot(t.page, 'overview-ar-dark-1440');
     await t.$('[data-act="lang"][data-v="en"]').click(); await t.idle(); await shot(t.page, 'overview-en-dark-1440'); ok('dark theme follows Desk');
@@ -173,7 +175,7 @@ async function run(cfg) {
     }
     /* empty state */
     if (cfg.quiet) {
-      t = await open(cfg.quiet()); await t.idle();
+      t = await open(cfg.quiet()); await t.idle(); await t.$('[data-act="tab"]').first().click(); await t.idle();   /* a dashboard may open on another tab (APP.defaultTab) */
       assert.match(await t.$('.dms-actpanel').innerText(), /Nothing pending/); assert.equal((await t.$('[data-act="pending"] b').innerText()).trim(), '0'); await shot(t.page, 'state-empty-1440', { fullPage: false }); ok('empty state when nothing is pending');
       assert.deepEqual(t.errors, []); await t.ctx.close();
     }

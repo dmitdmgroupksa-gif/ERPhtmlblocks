@@ -187,3 +187,10 @@
 .esd.esd-rtl :is(.esd-hello h2,.esd-kpi-v,.esd-ph h3) { letter-spacing:0; }
 .esd.esd-rtl :is(.esd-kpi-v,.esd-t .n,.esd-age,.esd-ref,.esd-total b) { direction:ltr; unicode-bidi:isolate; }
 @media (prefers-reduced-motion:reduce) { .esd *, .esd *::before, .esd *::after { animation:none !important; transition:none !important; } }
+
+/* Approvals (from the Approvals Pending workspace) */
+.esd-ap-ov { margin-bottom:var(--gap); }
+.esd-ap-cards { gap:6px; }
+.esd-ap-cards .esd-chip b { font-variant-numeric:tabular-nums; margin-inline-start:2px; }
+.esd-chip.err { border-color:var(--red, #c62828); color:var(--red, #c62828); }
+.esd-btn-sm { height:32px; padding:0 14px; font-size:12.5px; margin-inline-start:auto; }

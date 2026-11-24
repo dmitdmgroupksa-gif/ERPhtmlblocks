@@ -155,7 +155,10 @@
     'Start renewal before the expiry date': 'ابدأ التجديد قبل تاريخ الانتهاء', 'Absent today': 'غائب اليوم', 'Approved leave and weekoffs excluded': 'باستثناء الإجازات المعتمدة والعطل الأسبوعية', 'Leave status mismatches': 'عدم تطابق حالة الإجازة',
     'Status and workflow state disagree': 'الحالة وحالة سير العمل غير متطابقتين', 'Training overdue': 'تدريب متأخر', 'Assigned and past the due date': 'مسند وتجاوز تاريخ الاستحقاق', 'Open HR requests': 'طلبات موارد بشرية مفتوحة',
     'Across the request types you can read; oldest first': 'عبر أنواع الطلبات التي يمكنك قراءتها؛ الأقدم أولاً', 'expired': 'منتهٍ', 'due': 'الاستحقاق', 'days': 'يوماً',
-    'Leave leave and attendance': 'الإجازات والحضور', 'Employee directory': 'دليل الموظفين', 'Employment type': 'نوع التوظيف', 'Gender': 'الجنس', 'Present': 'حاضر', 'Absent': 'غائب', 'On leave': 'في إجازة'
+    'Leave leave and attendance': 'الإجازات والحضور', 'Employee directory': 'دليل الموظفين', 'Employment type': 'نوع التوظيف', 'Gender': 'الجنس', 'Present': 'حاضر', 'Absent': 'غائب', 'On leave': 'في إجازة',
+    'Valid (>90 days)': 'سارٍ (أكثر من 90 يوماً)', 'Dates disagree': 'التواريخ غير متطابقة', 'Due soon': 'يستحق قريباً', 'as of': 'حتى',
+    'Active employees unless the status filter says otherwise': 'الموظفون النشطون ما لم يحدد مرشح الحالة غير ذلك', '# to date': '# حتى تاريخه',
+    'last 12 months': 'آخر 12 شهراً', 'Net change': 'صافي التغير', 'Approved / completed': 'معتمد / مكتمل'
   });
   function L(s) { return LANG === 'ar' ? arT(s) : s; }
   var APP = {
@@ -174,7 +177,7 @@
     stamp: function () { return D.ov ? D.ov.meta.company + ' · ' + L(D.ov.meta.tier === 'detail' ? 'Employee-level detail' : 'Aggregate figures only') : L('Permission-checked ERP data · read-only'); },
     periodNote: function () { return tr('Leave and attendance activity use this period; headcount and documents are as of its last day.', 'تستخدم الإجازات والحضور هذه الفترة؛ وعدد الموظفين والمستندات حتى آخر يوم فيها.'); },
     boot: function () { F.period = 'custom'; F.from = shiftMonths(TODAY, -1); F.to = TODAY; return Promise.resolve(); },
-    load: function () { MOD_KEYS.forEach(function (k) { LST[k] = { preset: '', title: '' }; }); EMP = null; run('ov', function (chk) { return callP('admin_hr_dashboard_data', mainArgs()).then(function (d) { if (d && d.meta) { FO = d.meta.filter_options || {}; } return d; }); }); loadTab(tab); },
+    load: function () { MOD_KEYS.forEach(function (k) { LST[k] = { preset: '', title: '' }; }); EMP = null; DIRO = null; run('ov', function (chk) { return callP('admin_hr_dashboard_data', mainArgs()).then(function (d) { if (d && d.meta) { FO = d.meta.filter_options || {}; } return d; }); }); loadTab(tab); },
     onTab: function (id) { loadTab(id); },
     actions: function () { return actModel(actSpecs(), 'act', actClient()); },
     banner: function () { var d = D.ov; return d && d.meta.errors && d.meta.errors.length ? alertBox('warn', esc(L('Not readable with your permissions') + ': ' + d.meta.errors.map(function (e) { return e.doctype || e; }).join(', '))) : ''; },
@@ -182,7 +185,7 @@
     drill: function (id) { return drill(id); },
     onAct: function (a, v) { return onAct(a, v); }
   };
-  var FO = {}, EMP = null, LST = {};
+  var FO = {}, EMP = null, LST = {}, DIRO = null;
 
   /* ==== DMS kit v1 · generated from tools/erp/kit/dms-kit.js by build_kit.py — edit the kit, not this copy ==== */
   /* Shared runtime for DM dashboards on the standard (toolbar, period, filters, tabs, tables, drill-downs, charts,
@@ -324,8 +327,8 @@
   function agoTxt(iso, en, ar) { var a = ageOf(iso); return a ? tr((en || 'Waiting') + ' ' + daysTxt(a), (ar || 'منذ') + ' ' + daysTxt(a)) : tr('Today', 'اليوم'); }
 
   /* ---------- ERP read-only API layer (bounded concurrency, one retry, cancellation) ---------- */
-  var REQ_TIMEOUT = 90000;
-  function callP(method, args) {
+  var REQ_TIMEOUT = 180000;
+  function callRaw(method, args) {
     return new Promise(function (resolve, reject) {
       var done = false, ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
       var timer = setTimeout(function () { if (done) { return; } done = true; if (ctl) { try { ctl.abort(); } catch (x) { /* ignore */ } } var te = new Error('Request timed out'); te.timeout = true; reject(te); }, REQ_TIMEOUT);
@@ -346,6 +349,18 @@
         .catch(function (err) { if (done) { return; } done = true; clearTimeout(timer); reject(err || new Error('request failed')); });
     });
   }
+  var PEND = {}, pendN = 0, PEND_T = null;
+  function pendTick() {
+    if (destroyed || !Object.keys(PEND).length) { PEND_T = null; return; }
+    var s = $('[data-ref="stamp"]'); if (s) { s.textContent = stampText(busy()); }
+    PEND_T = later(pendTick, 1000);
+  }
+  function callP(method, args) {
+    var id = ++pendN, t0 = Date.now(); PEND[id] = { m: method, t0: t0 };
+    if (!PEND_T) { PEND_T = later(pendTick, 1000); }
+    function fin(tag) { delete PEND[id]; try { console.info('[' + APP.key + '] ' + method + ' ' + tag + ' ' + ((Date.now() - t0) / 1000).toFixed(1) + 's'); } catch (x) { /* ignore */ } }
+    return callRaw(method, args).then(function (r) { fin('ok'); return r; }, function (e) { fin(e && e.timeout ? 'TIMEOUT' : 'FAILED' + (e && e.status ? ' ' + e.status : '')); if (e && typeof e === 'object') { e.method = method; } throw e; });
+  }
   var active = 0, queue = [];
   function pump() {
     while (active < CFG.conc && queue.length) {
@@ -357,10 +372,11 @@
   function guarded(chk, method, args) {
     return limited(function () {
       if (destroyed || (chk && !chk())) { return Promise.resolve(null); }
-      return callP(method, args).catch(function (e) { if (e && (e.status === 403 || e.timeout || e.status === 417)) { throw e; } return new Promise(function (r) { setTimeout(r, 400); }).then(function () { return callP(method, args); }); });
+      return callP(method, args).catch(function (e) { if (e && (e.status === 403 || e.timeout || e.status === 417 || e.status >= 500)) { throw e; } return new Promise(function (r) { setTimeout(r, 400); }).then(function () { return callP(method, args); }); });
     });
   }
   function errKind(e) {
+    if (e && e.timeout) { return 'timeout'; }
     var txt = ''; try { txt = (e && (e.responseText || e.statusText || e.message)) || ''; } catch (x) { /* ignore */ }
     return (/PermissionError|not permitted|No access|403/i.test(String(txt)) || (e && e.status === 403)) ? 'perm' : 'tech';
   }
@@ -392,8 +408,8 @@
     fn(mine).then(function (v) { if (!mine()) { return; } D[key] = v; if (APP.afterLoad) { APP.afterLoad(key); } soon(); },
       function (e) { if (!mine()) { return; } D[key + 'Err'] = e && e.tooLarge ? 'large:' + e.tooLarge : errKind(e); if (G.console && e && !e.status && !e.tooLarge) { console.error(APP.key, key, e); } soon(); });
   }
-  function busy() { return !BOOTED || (APP.sources || []).some(function (k) { return D[k] == null && D[k + 'Err'] == null; }); }
-  function errText(kind) { return /^large:/.test(String(kind)) ? tr('too many records (' + num(+String(kind).slice(6)) + ') — narrow the filters or period', 'عدد كبير من السجلات (' + num(+String(kind).slice(6)) + ') — ضيّق المرشحات أو الفترة') : kind === 'perm' ? tr('permission denied for your user', 'لا تملك صلاحية القراءة') : tr('technical error while reading', 'خطأ تقني أثناء القراءة'); }
+  function busy() { return !BOOTED || (APP.sources || []).some(function (k) { return D[k] == null && D[k + 'Err'] == null; }) || Object.keys(D).some(function (k) { return /Stale$/.test(k) && D[k] && D[k].live; }); }
+  function errText(kind) { return /^large:/.test(String(kind)) ? tr('too many records (' + num(+String(kind).slice(6)) + ') — narrow the filters or period', 'عدد كبير من السجلات (' + num(+String(kind).slice(6)) + ') — ضيّق المرشحات أو الفترة') : kind === 'timeout' ? tr('the server did not answer within ' + Math.round(REQ_TIMEOUT / 1000) + 's — the Server Script is too slow or the request was cut off (see the browser console for timings)', 'لم يرد الخادم خلال ' + Math.round(REQ_TIMEOUT / 1000) + ' ثانية — السكربت بطيء أو تم قطع الطلب (راجع وحدة تحكم المتصفح)') : kind === 'perm' ? tr('permission denied for your user', 'لا تملك صلاحية القراءة') : tr('technical error while reading', 'خطأ تقني أثناء القراءة'); }
 
   /* ---------- UI primitives ---------- */
   var ICO = {
@@ -444,7 +460,7 @@
   function note(txt) { return '<p class="dms-note">' + txt + '</p>'; }
   function alertBox(kind, html) { return '<div class="dms-alert dms-alert-' + kind + '" role="' + (kind === 'err' ? 'alert' : 'status') + '">' + html + '</div>'; }
   function empty(txt) { return '<div class="dms-empty">' + esc(txt || tr('No data for the current filters.', 'لا توجد بيانات للمرشحات الحالية.')) + '</div>'; }
-  function srcErr(kind, what) { return alertBox('err', '<b>' + esc(tr('Source unavailable', 'المصدر غير متاح')) + ':</b> ' + esc(what) + ' — ' + esc(errText(kind))); }
+  function srcErr(kind, what) { return alertBox('err', '<b>' + esc(tr('Source unavailable', 'المصدر غير متاح')) + ':</b> ' + esc(what) + ' — ' + esc(errText(kind)) + ' <button type="button" class="dms-linkbtn" data-act="refresh">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>'); }
   function skel(n, cls) { return rep('<div class="dms-skel ' + (cls || '') + '"></div>', n); }
   /* Body for a panel backed by source `key`: skeleton while loading, named error on failure, else f(data). */
   function src(key, what, f) { return D[key + 'Err'] ? srcErr(D[key + 'Err'], what) : D[key] == null ? skel(1, 'dms-skel-panel') : f(D[key]); }
@@ -570,12 +586,34 @@
   }
   var PAL = ['var(--dms-royal)', '#6b8be0', '#1f8a5b', '#d97a1e', '#8a97a8', '#a3b4ef', '#c2412d', '#d6a419', '#4b5a6e', '#b6bfca'];
 
-  /* ---------- tables: client-side (search / sort / pagination / CSV) and server-side (paginated, sortable, CSV) ---------- */
+  /* ---------- tables: client-side (search / sort / pagination / PDF) and server-side (paginated, sortable, PDF) ---------- */
   var TBL = {}, TS = {}, SS = {}, focusId = null;
   function regTable(spec) { TBL[spec.id] = spec; return '<div class="dms-tbl" data-tbl="' + esc(spec.id) + '"></div>'; }
   function fillTables(scope) { var els = (scope || HOST).querySelectorAll('[data-tbl]'); for (var i = 0; i < els.length; i++) { fillTable(els[i].getAttribute('data-tbl'), els[i]); } }
+  /* Optional column filters: spec.facets = [{k, h, get?(row), opts?: [v | [v, label]] or function}] render as selects
+     beside the search box. Client tables filter their rows (options default to the distinct values); server tables
+     pass the selected values to spec.loader as a fifth argument {k: v}, or add [dt, field || k, '=', v] filters. */
+  function facetVal(f, r) { var v = f.get ? f.get(r) : r[f.k]; return v == null || v === '' ? '(Not set)' : String(v); }
+  function facetOpts(sp, f) {
+    if (f.opts) { var o = typeof f.opts === 'function' ? f.opts() : f.opts; return (o || []).map(function (x) { return Array.isArray(x) ? [String(x[0]), String(x[1])] : [String(x), String(x)]; }); }
+    var m = {}; (sp.rows || []).forEach(function (r) { m[facetVal(f, r)] = 1; });
+    return Object.keys(m).sort(function (a, b) { return a.localeCompare(b); }).map(function (v) { return [v, v === '(Not set)' ? tr('(Not set)', '(غير محدد)') : v]; });
+  }
+  function facetsOn(st) { var fv = st.fv || {}; return Object.keys(fv).some(function (k) { return fv[k]; }); }
+  function facetsHTML(id, sp, st) {
+    if (!sp.facets || !sp.facets.length) { return ''; }
+    var fv = st.fv || {};
+    return sp.facets.map(function (f) {
+      var opts = facetOpts(sp, f), cur = fv[f.k] || '';
+      if (!opts.length && !cur) { return ''; }
+      if (cur && !opts.some(function (o) { return o[0] === cur; })) { opts = opts.concat([[cur, cur]]); }
+      return '<select class="dms-input dms-facet' + (cur ? ' dms-facet-on' : '') + '" data-tf="' + esc(id) + '" data-tfk="' + esc(f.k) + '" aria-label="' + esc(f.h) + '"><option value="">' + esc(f.all || f.h + ': ' + tr('All', 'الكل')) + '</option>' +
+        opts.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (o[0] === cur ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select>';
+    }).join('');
+  }
   function clientRows(sp, st) {
-    var rows = sp.rows, q = st.q.trim().toLowerCase();
+    var rows = sp.rows, q = st.q.trim().toLowerCase(), fv = st.fv || {};
+    (sp.facets || []).forEach(function (f) { var v = fv[f.k]; if (v) { rows = rows.filter(function (r) { return facetVal(f, r) === v; }); } });
     if (q) { rows = rows.filter(function (r) { return sp.text(r).toLowerCase().indexOf(q) >= 0; }); }
     if (st.sk) { var col = sp.cols.filter(function (c) { return c.k === st.sk; })[0]; if (col && col.s) { rows = rows.slice().sort(function (a, b) { var x = col.s(a), y = col.s(b); return (x < y ? -1 : x > y ? 1 : 0) * st.dir; }); } }
     return rows;
@@ -593,8 +631,8 @@
     var st = TS[id] || (TS[id] = { q: '', page: 1, sk: sp.sk || '', dir: sp.dir || 1 }), rows = clientRows(sp, st);
     var ps = sp.pageSize || CFG.pageSize, pages = Math.max(1, Math.ceil(rows.length / ps)); if (st.page > pages) { st.page = pages; }
     var slice = rows.slice((st.page - 1) * ps, st.page * ps);
-    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(tr('Search this table…', 'ابحث في الجدول…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search this table', 'ابحث في الجدول')) + '"><span class="dms-tb-r"><span class="dms-sm">' + num(rows.length) + ' ' + esc(rows.length === 1 ? tr('row', 'سجل') : tr('rows', 'سجل')) + (st.q ? ' / ' + num(sp.rows.length) : '') + '</span>' +
-      (rows.length ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csv" data-id="' + esc(id) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(tr('Search this table…', 'ابحث في الجدول…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search this table', 'ابحث في الجدول')) + '">' + facetsHTML(id, sp, st) + '<span class="dms-tb-r"><span class="dms-sm">' + num(rows.length) + ' ' + esc(rows.length === 1 ? tr('row', 'سجل') : tr('rows', 'سجل')) + (st.q || facetsOn(st) ? ' / ' + num(sp.rows.length) : '') + '</span>' +
+      (rows.length ? '<button type="button" class="dms-btn dms-btn-sm" data-act="pdf" data-id="' + esc(id) + '" title="' + esc(tr('PDF on the company letterhead', 'ملف PDF على ترويسة الشركة')) + '">' + ico('dl') + '<span>' + esc(tr('Export PDF', 'تصدير PDF')) + '</span></button>' : '') + '</span></div>';
     if (sp.notice) { h += sp.notice; }
     if (!rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
     h += '<div class="dms-tablewrap"><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'tsort', id) + '<tbody>' + slice.map(function (r) { return tcells(sp, r); }).join('') + '</tbody>' + (sp.foot ? '<tfoot>' + sp.foot(rows) + '</tfoot>' : '') + '</table></div>';
@@ -611,6 +649,7 @@
     var q = st.q.trim(), base = { doctype: sp.dt, filters: sp.filters };
     if (sp.parent) { base.parent = sp.parent; }
     if (q && sp.search) { base.or_filters = sp.search.map(function (f) { return [sp.dt, f, 'like', '%' + q + '%']; }); }
+    if (sp.facets && !sp.loader) { var fv = st.fv || {}; sp.facets.forEach(function (f) { if (fv[f.k]) { base.filters = (base.filters || []).concat([[sp.dt, f.field || f.k, '=', fv[f.k]]]); } }); }
     return base;
   }
   function srvOrder(sp, st) { return st.sk ? st.sk + (st.dir > 0 ? ' asc' : ' desc') : sp.order; }
@@ -622,7 +661,7 @@
     var ps = sp.pageSize || CFG.modalPage, base = srvArgs(sp, st);
     paintServer(id, el);
     var chk = function () { return !destroyed && SS[id] && SS[id].req === req; };
-    if (sp.loader) { sp.loader(st.page - 1, ps, st.q.trim(), srvOrder(sp, st)).then(function (res) { if (!chk()) { return; } st.total = res.total; st.rows = res.rows || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); }, function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } }); return; }
+    if (sp.loader) { sp.loader(st.page - 1, ps, st.q.trim(), srvOrder(sp, st), st.fv || {}).then(function (res) { if (!chk()) { return; } st.total = res.total; st.rows = res.rows || []; st.loading = false; paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); }, function (e) { if (chk()) { st.loading = false; st.err = errKind(e); paintServer(id, HOST.querySelector('[data-tbl="' + id + '"]')); } }); return; }
     var cnt = getList(Object.assign({}, base, { fields: ['count(name) as n'], limit_page_length: 1 }), chk).then(function (r) { return r ? +one(r).n || 0 : null; });
     var rows = getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: (st.page - 1) * ps, limit_page_length: ps }), chk);
     Promise.all([cnt, rows]).then(function (res) {
@@ -631,8 +670,8 @@
   }
   function paintServer(id, el) {
     if (!el) { return; } var sp = TBL[id], st = SS[id], ps = sp.pageSize || CFG.modalPage;
-    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(sp.searchHint || tr('Search…', 'بحث…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search', 'بحث')) + '"><span class="dms-tb-r"><span class="dms-sm">' + (st.total == null ? '' : num(st.total) + ' ' + esc(st.total === 1 ? tr('record', 'سجل') : tr('records', 'سجل'))) + '</span>' +
-      (st.total ? '<button type="button" class="dms-btn dms-btn-sm" data-act="csvall" data-id="' + esc(id) + '" title="' + esc(tr('Export up to 5,000 rows', 'تصدير حتى 5,000 سجل')) + '">' + ico('dl') + '<span>' + esc(tr('Export CSV', 'تصدير CSV')) + '</span></button>' : '') + '</span></div>';
+    var h = '<div class="dms-toolbar"><input type="search" class="dms-input" data-tq="' + esc(id) + '" placeholder="' + esc(sp.searchHint || tr('Search…', 'بحث…')) + '" value="' + esc(st.q) + '" aria-label="' + esc(tr('Search', 'بحث')) + '">' + facetsHTML(id, sp, st) + '<span class="dms-tb-r"><span class="dms-sm">' + (st.total == null ? '' : num(st.total) + ' ' + esc(st.total === 1 ? tr('record', 'سجل') : tr('records', 'سجل'))) + '</span>' +
+      (st.total ? '<button type="button" class="dms-btn dms-btn-sm" data-act="pdfall" data-id="' + esc(id) + '" title="' + esc(tr('PDF on the company letterhead, up to 2,000 rows', 'ملف PDF على ترويسة الشركة، حتى 2,000 سجل')) + '">' + ico('dl') + '<span>' + esc(tr('Export PDF', 'تصدير PDF')) + '</span></button>' : '') + '</span></div>';
     if (st.err) { el.innerHTML = h + alertBox('err', esc(st.err === 'perm' ? tr('Permission denied for your user.', 'لا تملك صلاحية القراءة.') : tr('Technical error while reading this list.', 'خطأ تقني أثناء قراءة القائمة.')) + ' <button type="button" class="dms-linkbtn" data-act="sretry" data-id="' + esc(id) + '">' + esc(tr('Retry', 'إعادة المحاولة')) + '</button>'); return restoreFocus(el, id); }
     if (st.loading && !st.rows) { el.innerHTML = h + '<div class="dms-skel"></div>'; return restoreFocus(el, id); }
     if (!st.rows || !st.rows.length) { el.innerHTML = h + '<div class="dms-tablewrap">' + empty(sp.empty) + '</div>'; return restoreFocus(el, id); }
@@ -640,22 +679,79 @@
     h += '<div class="dms-tablewrap" style="opacity:' + (st.loading ? .55 : 1) + '"' + (st.loading ? ' aria-busy="true"' : '') + '><table class="dms-table' + (sp.cols.length <= 3 ? ' dms-table-sm' : '') + '">' + thead(sp, st.sk, st.dir, 'ssort', id) + '<tbody>' + st.rows.map(function (r) { return tcells(sp, r); }).join('') + '</tbody></table></div>' + pager(id, 'spage', st.page, pages, st.total || 0, ps);
     el.innerHTML = h; restoreFocus(el, id);
   }
-  function csvCell(v) { v = v == null ? '' : String(v); if (/^[=+\-@\t\r]/.test(v) && !/^-?[\d.,]+$/.test(v)) { v = "'" + v; } return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
-  function download(name, sp, rows) {
-    var cols = sp.cols.filter(function (c) { return c.c; }), lines = [cols.map(function (c) { return csvCell(c.h); }).join(',')].concat(rows.map(function (r) { return cols.map(function (c) { return csvCell(c.c(r)); }).join(','); }));
-    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
-    a.download = String(name).replace(/[^\w-]+/g, '_') + '_' + TODAY + '.csv'; HOST.appendChild(a); a.click(); later(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  /* ---------- PDF export on the DM letterhead (replaces CSV) ----------
+     The table is laid out as HTML under the company Letter Head and ERPNext renders it to PDF through
+     frappe.utils.print_format.report_to_pdf (the route Desk reports use); the browser saves the file.
+     APP.letterHead names another Letter Head; the header and footer come from frappe.boot.letter_heads when Desk has them. */
+  var PDF_MAX = 2000, LH_DEF = { name: '2026 DMG - NEW', img: '/files/WhatsApp Image 2026-08-20 at 3.32.18 PM.jpeg', foot: '/files/erp footer.jpeg' };
+  function absUrl(h) { var o = G.location.origin; return String(h || '').replace(/(src|href)=(["'])\/(?!\/)/g, '$1=$2' + o + '/'); }
+  function letterHead() {
+    var b = G.frappe && frappe.boot && frappe.boot.letter_heads, lh = b && b[APP.letterHead || LH_DEF.name];
+    var head = lh && lh.header ? lh.header : '<div style="text-align:center"><img src="' + encodeURI(LH_DEF.img) + '" style="max-width:100%"></div>';
+    var foot = lh && lh.footer ? lh.footer : '<div style="text-align:center"><img src="' + encodeURI(LH_DEF.foot) + '" style="max-width:100%"></div>';
+    return { head: absUrl(head), foot: absUrl(String(foot).replace(/position\s*:\s*fixed;?/gi, '')) };
+  }
+  function pdfCell(v, isNum) { if (v == null) { return ''; } if (isNum && v !== '' && !isNaN(v)) { return Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 }); } return String(v); }
+  /* o: {title, sub, cols: [{h, c(row), num}], rows, note} or, for a report with several tables, {title, sub, facts: [[label, value]], sections: [{title, cols, rows, empty}], note} */
+  function pdfHTML(o) {
+    var lh = letterHead(), rtl = LANG === 'ar', st = rtl ? 'right' : 'left';
+    return '<!DOCTYPE html><html lang="' + LANG + '" dir="' + (rtl ? 'rtl' : 'ltr') + '"><head><meta charset="utf-8"><style>' +
+      'body{font-family:Arial,"DejaVu Sans","Noto Naskh Arabic",sans-serif;font-size:10px;color:#1b2430;margin:0}.lh img{max-width:100%}' +
+      '.t{font-size:15px;font-weight:bold;margin:12px 0 2px;color:#0f2147}.s{color:#5b6678;margin:0 0 10px;font-size:9.5px}' +
+      'table{width:100%;border-collapse:collapse}thead{display:table-header-group}tr{page-break-inside:avoid}' +
+      'th{background:#0f2147;color:#fff;font-weight:bold;text-align:' + st + ';padding:5px 6px;font-size:9.5px}td{padding:4px 6px;border-bottom:1px solid #dde2ea;vertical-align:top;text-align:' + st + '}' +
+      'tbody tr:nth-child(even) td{background:#f4f6fa}th.n,td.n{text-align:right;white-space:nowrap}.f{margin-top:16px}.h{font-size:12px;font-weight:bold;color:#0f2147;margin:14px 0 6px}table.kv{width:auto;min-width:50%;margin-bottom:6px}table.kv td{background:none}</style></head><body>' +
+      '<div class="lh">' + lh.head + '</div><div class="t">' + esc(o.title) + '</div>' + (o.sub ? '<div class="s">' + esc(o.sub) + '</div>' : '') +
+      (o.facts && o.facts.length ? '<table class="kv"><tbody>' + o.facts.map(function (f) { return '<tr><td>' + esc(f[0]) + '</td><td class="n"><b>' + esc(pdfCell(f[1])) + '</b></td></tr>'; }).join('') + '</tbody></table>' : '') +
+      (o.sections || [{ cols: o.cols, rows: o.rows }]).map(function (s) {
+        return (s.title ? '<div class="h">' + esc(s.title) + '</div>' : '') + (!s.rows.length && s.empty ? '<div class="s">' + esc(s.empty) + '</div>' :
+          '<table><thead><tr>' + s.cols.map(function (c) { return '<th' + (c.num ? ' class="n"' : '') + '>' + esc(c.h) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+          s.rows.map(function (r) { return '<tr>' + s.cols.map(function (c) { return '<td' + (c.num ? ' class="n"' : '') + '>' + esc(pdfCell(c.c(r), c.num)) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table>');
+      }).join('') + (o.note ? '<div class="s" style="margin-top:8px">' + esc(o.note) + '</div>' : '') + '<div class="f">' + lh.foot + '</div></body></html>';
+  }
+  /* Render o (see pdfHTML) to a PDF through ERPNext and save it as <name>_<today>.pdf. Usable by dashboards for their own reports. */
+  function exportPdf(name, o) {
+    toast(tr('Preparing PDF…', 'جارٍ تجهيز ملف PDF…'));
+    var body = 'html=' + encodeURIComponent(pdfHTML(o)) + '&orientation=' + (o.landscape != null ? (o.landscape ? 'Landscape' : 'Portrait') : Math.max.apply(null, (o.sections || [o]).map(function (s) { return s.cols.length; })) > 6 ? 'Landscape' : 'Portrait');
+    return fetch('/api/method/frappe.utils.print_format.report_to_pdf', { method: 'POST', credentials: 'same-origin', body: body,
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Frappe-CSRF-Token': (G.frappe && frappe.csrf_token) || '', 'Accept': 'application/pdf' } })
+      .then(function (r) { if (!r.ok) { throw new Error('HTTP ' + r.status); } return r.blob(); })
+      .then(function (b) {
+        var a = document.createElement('a'); a.href = URL.createObjectURL(b.type === 'application/pdf' ? b : new Blob([b], { type: 'application/pdf' }));
+        a.download = String(name).replace(/[^\w-]+/g, '_') + '_' + TODAY + '.pdf'; HOST.appendChild(a); a.click(); later(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+      }, function () { toast(tr('PDF export failed. Try again or narrow the list.', 'تعذر تصدير PDF. أعد المحاولة أو ضيّق القائمة.'), true); });
+  }
+  /* Title and context line of a table, taken from its panel / dialog and the active filters. */
+  function tableTitle(id) {
+    var el = HOST.querySelector('[data-tbl="' + id + '"]'), m = el && el.closest('.dms-modal'), p = el && el.closest('.dms-panelbox');
+    var h = m ? m.querySelector('#dms-dialog-title') : p ? p.querySelector('.dms-h3') : null; return h ? h.textContent.trim() : '';
+  }
+  function exportContext(id, st, n, total) {
+    var bits = [], app = APP.title ? APP.title() : '';
+    if (app && app !== tableTitle(id)) { bits.push(app); }
+    if (APP.period !== false && PERIOD[0] && PERIOD[1]) { bits.push(tr('Period', 'الفترة') + ': ' + PERIOD[0] + ' → ' + PERIOD[1]); }
+    (APP.filters || []).forEach(function (f) { if (F[f.k]) { bits.push(tr(f.en, f.ar) + ': ' + F[f.k]); } });
+    var sp = TBL[id], fv = (st && st.fv) || {}; (sp && sp.facets || []).forEach(function (f) { if (fv[f.k]) { bits.push(f.h + ': ' + fv[f.k]); } });
+    if (st && st.q && st.q.trim()) { bits.push(tr('Search', 'بحث') + ': "' + st.q.trim() + '"'); }
+    bits.push(num(n) + ' ' + tr('rows', 'سجل') + (total > n ? ' ' + tr('of', 'من') + ' ' + num(total) : ''));
+    bits.push(tr('Printed', 'طُبع') + ' ' + TODAY);
+    return bits.join(' · ');
+  }
+  function download(name, sp, rows, id, total) {
+    var cols = sp.cols.filter(function (c) { return c.c && c.h; }), st = sp.server ? SS[id] : TS[id], cut = rows.slice(0, PDF_MAX), all = total != null ? total : rows.length;
+    exportPdf(name, { title: tableTitle(id) || (APP.title ? APP.title() : name), sub: exportContext(id, st, cut.length, all), cols: cols, rows: cut,
+      note: all > cut.length ? tr('Only the first ' + num(cut.length) + ' rows are included. Narrow the filters to print the rest.', 'تم تضمين أول ' + num(cut.length) + ' سجل فقط. ضيّق المرشحات لطباعة الباقي.') : '' });
   }
   function exportServer(id) {
     var sp = TBL[id], st = SS[id], out = [], step = 500, base = srvArgs(sp, st), g = GEN;
-    if (sp.loader) { toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…')); var acc = [], pg = function (p) { return sp.loader(p, 500, st.q.trim(), srvOrder(sp, st)).then(function (res) { acc = acc.concat(res.rows || []); return (res.rows || []).length === 500 && acc.length < 5000 ? pg(p + 1) : acc; }); }; pg(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); }); return; }
+    if (sp.loader) { toast(tr('Collecting rows…', 'جارٍ جمع السجلات…')); var acc = [], pg = function (p) { return sp.loader(p, 500, st.q.trim(), srvOrder(sp, st), st.fv || {}).then(function (res) { acc = acc.concat(res.rows || []); return (res.rows || []).length === 500 && acc.length < PDF_MAX ? pg(p + 1) : acc; }); }; pg(0).then(function (rows) { download(sp.file || id, sp, rows, id, st.total); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); }); return; }
     function next(s) {
       return getList(Object.assign({}, base, { fields: sp.fields, order_by: srvOrder(sp, st), limit_start: s, limit_page_length: step }), function () { return g === GEN; }).then(function (r) {
-        out = out.concat(r || []); return (r && r.length === step && out.length < 5000) ? next(s + step) : out;
+        out = out.concat(r || []); return (r && r.length === step && out.length < PDF_MAX) ? next(s + step) : out;
       });
     }
-    toast(tr('Preparing export…', 'جارٍ تجهيز التصدير…'));
-    next(0).then(function (rows) { download(sp.file || id, sp, rows.slice(0, 5000)); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); });
+    toast(tr('Collecting rows…', 'جارٍ جمع السجلات…'));
+    next(0).then(function (rows) { download(sp.file || id, sp, rows, id, st.total); }, function () { toast(tr('Export failed.', 'تعذر التصدير.'), true); });
   }
   function toast(msg, bad) { var e = document.createElement('div'); e.className = 'dms-toast' + (bad ? ' dms-toast-err' : ''); e.setAttribute('role', 'status'); e.textContent = msg; HOST.appendChild(e); later(function () { e.remove(); }, 3500); }
   /* common cells */
@@ -764,7 +860,16 @@
     var link = OVL.link ? ' ' + docLink(OVL.link[0], OVL.link[1], OVL.link[2]) : '';
     return '<div class="dms-overlay" data-act="ovbg"><div class="dms-modal" role="dialog" aria-modal="true" aria-labelledby="dms-dialog-title"><div class="dms-dhead"><div>' + (OVL.prev ? '<button type="button" class="dms-linkbtn" data-act="ovback">‹ ' + esc(tr('Back', 'رجوع')) + '</button>' : '') + '<h3 id="dms-dialog-title">' + esc(OVL.title) + '</h3>' + (OVL.sub || link ? '<p class="dms-sm">' + esc(OVL.sub || '') + link + '</p>' : '') + '</div><button type="button" class="dms-x" data-act="closeov" aria-label="' + esc(tr('Close', 'إغلاق')) + '">×</button></div>' + (OVL.body || '') + (OVL.spec ? regTable(OVL.spec) : '') + '</div></div>';
   }
-  function renderOverlay() { var el = $('[data-ref="overlay"]'); if (!el) { return; } var app = $('.dms-app'); if (app) { app.inert = !!OVL; } if (!OVL) { Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { delete TBL[k]; } }); } else { delete TBL.drill; } el.innerHTML = overlayHTML(); fillTables(el); var x = el.querySelector('.dms-x'); if (x) { x.focus(); } }
+  function renderOverlay() { var el = $('[data-ref="overlay"]'); if (!el) { return; } var app = $('.dms-app'); if (app) { app.inert = !!OVL; } if (!OVL) { Object.keys(TBL).forEach(function (k) { if (k.indexOf('drill') === 0) { delete TBL[k]; } }); } else { delete TBL.drill; } el.innerHTML = overlayHTML(); fillTables(el); pinOverlay(); var x = el.querySelector('.dms-x'); if (x) { x.focus({ preventScroll: true }); } }
+  /* A transformed or contained ERP ancestor turns position:fixed into "fixed to that ancestor", which can be far
+     taller than the screen and put the modal out of view. Measure and shift the overlay back onto the viewport. */
+  function pinOverlay() {
+    var o = HOST.querySelector('.dms-overlay'); if (!o) { return; }
+    o.style.top = o.style.left = o.style.width = o.style.height = o.style.right = o.style.bottom = '';
+    var r = o.getBoundingClientRect(), vw = document.documentElement.clientWidth || G.innerWidth, vh = G.innerHeight;
+    if (Math.abs(r.top) < 1 && Math.abs(r.left) < 1 && Math.abs(r.height - vh) < 2 && Math.abs(r.width - vw) < 2) { return; }
+    o.style.right = o.style.bottom = 'auto'; o.style.top = (-r.top) + 'px'; o.style.left = (-r.left) + 'px'; o.style.width = vw + 'px'; o.style.height = vh + 'px';
+  }
   function closeOverlay() {
     var previous = OVL; OVL = null; renderOverlay(); delete SS.drill; delete TS.drill;
     if (!previous) { return; }
@@ -774,9 +879,9 @@
   }
 
   /* ---------- filters, period, toolbar, tabs ---------- */
-  var F = { period: APP.period || 'month', from: '', to: '' }, PERIOD = [];
+  var F = { period: APP.period || 'month', from: '', to: '', ap: APP.defaultApprovalStatus || '' }, PERIOD = [];
   (APP.filters || []).forEach(function (f) { F[f.k] = ''; });
-  var tab = APP.tabs[0].id, POP = null, FD = null, FS = {}, CAL = null, ANIM = false, built = false, AMC = null;
+  var tab = APP.defaultTab || APP.tabs[0].id, POP = null, FD = null, FS = {}, CAL = null, ANIM = false, built = false, AMC = null;
   var PERIODS = [['today', 'Today', 'اليوم'], ['yesterday', 'Yesterday', 'أمس'], ['week', 'This week', 'هذا الأسبوع'], ['lastWeek', 'Last week', 'الأسبوع الماضي'],
     ['month', 'This month', 'هذا الشهر'], ['lastMonth', 'Last month', 'الشهر الماضي'], ['quarter', 'This quarter', 'هذا الربع'], ['ytd', 'Year to date', 'السنة حتى اليوم'],
     ['year', 'This year', 'هذه السنة'], ['prevYear', 'Previous year', 'السنة الماضية'], ['custom', 'Custom range', 'نطاق مخصص']];
@@ -886,10 +991,15 @@
       '<div class="dms-tip" data-ref="tip" role="tooltip" hidden></div></div><div data-ref="overlay"></div>';
     built = true;
   }
+  function stampText(bz) {
+    var now = Date.now(), w = Object.keys(PEND).map(function (k) { return PEND[k]; }).filter(function (p) { return now - p.t0 > 5000; });
+    return (APP.stamp ? APP.stamp() : tr('Read-only', 'للقراءة فقط')) + (LOADED ? ' · ' + tr('Updated ', 'آخر تحديث ') + LOADED : '') + (bz ? ' · ' + tr('loading…', 'جارٍ التحميل…') : '') +
+      (w.length ? ' · ' + tr('waiting for ', 'بانتظار ') + w.map(function (p) { return p.m + ' ' + Math.round((now - p.t0) / 1000) + 's'; }).join(', ') : '');
+  }
   function renderHeaderState() {
     var b = $('[data-ref="refresh"]'), s = $('[data-ref="stamp"]'), bz = busy();
     if (b) { b.classList.toggle('dms-busy', bz); b.setAttribute('aria-busy', String(bz)); }
-    if (s) { s.textContent = (APP.stamp ? APP.stamp() : tr('Read-only', 'للقراءة فقط')) + (LOADED ? ' · ' + tr('Updated ', 'آخر تحديث ') + LOADED : '') + (bz ? ' · ' + tr('loading…', 'جارٍ التحميل…') : ''); }
+    if (s) { s.textContent = stampText(bz); }
     paint($('[data-ref="pendwrap"]'), pendingBtnHTML());
     paint($('[data-ref="tabs"]'), tabsHTML());
   }
@@ -994,7 +1104,7 @@
     if (a === 'fclear') { applyFilters(null); focusFk('pop:filters'); return; }
     if (a === 'rmf') { var nf = {}; APP.filters.forEach(function (f) { nf[f.k] = F[f.k]; }); nf[v] = ''; applyFilters(nf); focusFk('pop:filters'); return; }
     if (a === 'pending') {
-      goTab(APP.tabs[0].id); var p = $('#dms-pending');
+      goTab(APP.defaultTab || APP.tabs[0].id); var p = $('#dms-pending');
       if (p) { var still = G.matchMedia && G.matchMedia('(prefers-reduced-motion: reduce)').matches; try { p.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' }); } catch (e) { p.scrollIntoView(); } p.focus({ preventScroll: true }); }
       return;
     }
@@ -1004,14 +1114,23 @@
     if (a === 'spage') { var ss = SS[id]; ss.page = Math.max(1, ss.page + (+v)); ss.dirty = true; fillTable(id); return; }
     if (a === 'ssort') { var s2 = SS[id]; if (s2.sk === v) { s2.dir = -s2.dir; } else { s2.sk = v; s2.dir = 1; } s2.page = 1; s2.dirty = true; fillTable(id); focusHead(id, v); return; }
     if (a === 'sretry') { SS[id].dirty = true; fillTable(id); return; }
-    if (a === 'csv') { var sp = TBL[id]; download(sp.file || id, sp, clientRows(sp, TS[id])); return; }
-    if (a === 'csvall') { exportServer(id); return; }
+    if (a === 'pdf') { var sp = TBL[id]; download(sp.file || id, sp, clientRows(sp, TS[id]), id); return; }
+    if (a === 'pdfall') { exportServer(id); return; }
   }
   function focusHead(id, v) { var th = HOST.querySelector('[data-tbl="' + id + '"] th[data-v="' + v + '"]'); if (th) { th.focus(); } }
   function onInput(ev) {
     var n = ev.target; if (!n || !n.getAttribute || !HOST.contains(n)) { return; }
     var fs = n.getAttribute('data-fs'), fd = n.getAttribute('data-fd'), tq = n.getAttribute('data-tq');
     if (APP.onInput && APP.onInput(n, ev) === true) { return; }
+    var tf = n.getAttribute('data-tf');
+    if (tf) {
+      var spf = TBL[tf], tfk = n.getAttribute('data-tfk'); if (!spf) { return; }
+      var stf = spf.server ? SS[tf] : (TS[tf] || (TS[tf] = { q: '', page: 1, sk: spf.sk || '', dir: spf.dir || 1 })); if (!stf) { return; }
+      stf.fv = stf.fv || {}; if ((stf.fv[tfk] || '') === n.value) { return; }
+      stf.fv[tfk] = n.value; stf.page = 1; if (spf.server) { stf.dirty = true; } focusId = null; fillTable(tf);
+      var again = HOST.querySelector('[data-tf="' + tf + '"][data-tfk="' + tfk + '"]'); if (again) { again.focus(); }
+      return;
+    }
     if (fs) { if (FS[fs] === n.value) { return; } FS[fs] = n.value; renderToolbar(); return; }
     if (fd) { if (!FD || FD[fd] === n.value) { return; } FD[fd] = n.value; if (n.type === 'search') { return; } if (APP.filters.some(function (f) { return f.dependsOn === fd; })) { APP.filters.forEach(function (f) { if (f.dependsOn === fd && FD[f.k] && !optList(f, FD).some(function (x) { return x.v === FD[f.k]; })) { FD[f.k] = ''; } }); renderToolbar(); } return; }
     if (tq) {
@@ -1052,6 +1171,13 @@
     HOST.addEventListener('input', onInput, SIG);
     HOST.addEventListener('change', onInput, SIG);
     HOST.addEventListener('keydown', onKey, SIG);
+    /* Keys typed in a dashboard field stop here: past the shadow root Frappe sees the block, not the field, and its
+       global shortcuts would send the keystrokes to the ERP search bar. */
+    ['keydown', 'keypress', 'keyup'].forEach(function (type) {
+      HOST.addEventListener(type, function (ev) { var n = ev.composedPath ? ev.composedPath()[0] : ev.target; if (n && (/^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName) || n.isContentEditable)) { ev.stopPropagation(); } }, SIG);
+    });
+    G.addEventListener('scroll', function () { if (OVL) { pinOverlay(); } }, Object.assign({ capture: true, passive: true }, SIG || {}));
+    G.addEventListener('resize', function () { if (OVL) { pinOverlay(); } }, SIG);
     HOST.addEventListener('pointerover', onOver, SIG);
     HOST.addEventListener('pointerleave', hideTip, SIG);
     HOST.addEventListener('focusin', function (ev) { var n = ev.target.closest && ev.target.closest('[data-tip]'); if (n) { showTip(n); } }, SIG);
@@ -1079,6 +1205,13 @@
   function R(k) { return (D.ov && D.ov.rows && D.ov.rows[k]) || []; }
   function nn(v) { return v === null || v === undefined || v === '' ? null : Number(v); }
   function nv(v, sfx) { var x = nn(v); return x === null || isNaN(x) ? '—' : num(x) + (sfx || ''); }
+  /* The APIs send percentages already computed (e.g. 24.8). The kit's pct(n, d) divides a count by a total and shows
+     N/A without one, so already-computed values are formatted here. */
+  function pc(v) { var x = nn(v); return x === null || isNaN(x) ? '—' : String(Math.round(x * 10) / 10) + '%'; }
+  /* Column filters for a table (kit facets). opts: list of values or [value, label] pairs; omit to use the row values. */
+  function fc(k, h, opts, all) { return { k: k, h: L(h), opts: opts, all: all }; }
+  function fcRows(rows, defs) { return defs.filter(function (d) { return (rows || []).some(function (r) { return r[d[0]] != null && r[d[0]] !== ''; }); }).map(function (d) { return fc(d[0], d[1]); }); }
+  function fvArgs(fv) { var o = {}; Object.keys(fv || {}).forEach(function (k) { if (fv[k]) { o[k] = fv[k]; } }); return o; }
   function sumOf(list, f) { var t = 0, ok = false; (list || []).forEach(function (x) { var v = nn(f(x)); if (v !== null && !isNaN(v)) { t += v; ok = true; } }); return ok ? t : null; }
   function pctOf(a, b) { return a === null || a === undefined || !b ? null : Math.round(1000 * a / b) / 10; }
   var ST = { actual: ['Actual', 'ok'], partial: ['Partial', 'warn'], missing: ['Missing data', 'n'], unavailable: ['Unavailable', 'bad'] };
@@ -1132,22 +1265,26 @@
       panels: [['Leave types distribution', 'by_type', 'count', 'Approved days in the selected period.'], ['Leave utilisation by department', 'by_dept', 'days', 'Approved days starting in the selected period.'], ['Pending approvals by age', 'pending_by_age', 'count', 'Days in the current workflow state.'], ['Employees without current allocation', 'no_alloc_by_dept', 'count', 'Active employees, by department.']],
       month: ['Monthly leave usage (12 months)', 'monthly', [['paid', 'Paid', 'var(--dms-royal)'], ['lwp', 'Unpaid (LWP)', 'var(--dms-age3)']]],
       cols: [['name', 'Application', 'name', function (r) { return docLink('Leave Application', r.name); }], ['employee_name', 'Employee', 'employee_name', empBtn], ['department', 'Department', 'department'], ['leave_type', 'Leave Type', 'leave_type'], ['from_date', 'From', 'from_date', function (r) { return dtc(r.from_date); }], ['to_date', 'To', 'to_date', function (r) { return dtc(r.to_date); }], ['days', 'Days', 'days', null, 1], ['workflow_state', 'Workflow State', 'workflow_state', function (r) { return stat({ approved: 'ok', pending: 'warn', rejected: 'bad', conflict: 'bad' }[r.cls] || 'n', r.workflow_state || '—') + (r.docstatus === 1 && r.cls === 'pending' ? ' <span class="dms-sm">' + esc(L('submitted')) + '</span>' : ''); }], ['approver', 'Approver', 'approver'], ['age_label', 'Approval Age', 'age_days', function (r) { return r.age_days !== null && r.age_days > 3 ? stat('warn', r.age_label) : esc(r.age_label || '—'); }]],
+      facets: function (o) { return [fc('workflow_state', 'Workflow State', o.workflow_states || []), fc('status', 'Status', o.statuses || []), fc('leave_type', 'Leave Type', o.leave_types || []), fc('department', 'Department', o.departments || [])]; },
       foot: 'Approve or reject only inside the ERPNext Leave Application form, where the workflow checks your role. The dashboard never changes applications.' },
     compliance: { api: 'admin_hr_compliance_data', key: 'cp', title: 'Documents & Compliance', listTitle: 'All required documents', args: function () { return { as_of: PERIOD[1] }; }, sort: 'days asc',
       order: ['active', 'valid', 'expired', 'd30', 'd60', 'd90', 'missing', 'issues'],
       panels: [['Expired / expiring ≤90 days by department', 'by_department', 'count'], ['Expired / expiring ≤90 days by branch', 'by_branch', 'count'], ['Document status distribution', 'distribution', 'count'], ['Employees by number of documents with issues', 'multi_issue', 'count']],
       month: ['Expiry forecast by month', 'forecast', [['iqama', 'Iqama / Saudi ID', 'var(--dms-royal)'], ['passport', 'Passport', '#7c3aed'], ['contract', 'Employment Contract', '#0891b2'], ['insurance', 'Medical Insurance', 'var(--dms-age3)']]],
       cols: [['employee_name', 'Employee Name', 'employee_name', empBtn], ['department', 'Department', 'department'], ['branch', 'Branch', 'branch'], ['document', 'Document', 'document'], ['expiry_date', 'Expiry Date', 'expiry_date', function (r) { return r.expiry_date ? dtc(r.expiry_date) : '<span class="dms-sm">—</span>'; }], ['days', 'Days Remaining', 'days', null, 1], ['status_label', 'Compliance Status', 'status', function (r) { return stat({ expired: 'bad', due_30: 'bad', due_60: 'warn', due_90: 'warn', valid: 'ok' }[r.status] || 'n', r.status_label) + (r.conflict ? '<div class="dms-sm">⚠ ' + esc(r.conflict) + '</div>' : '') + (r.unusual ? '<div class="dms-sm">⚠ ' + esc(r.unusual) + '</div>' : ''); }]],
+      facets: function (o) { return [fc('doc', 'Document', [['iqama', L('Iqama / Saudi ID')], ['passport', L('Passport')], ['contract', L('Employment Contract')], ['insurance', L('Medical Insurance')]]), fc('status', 'Compliance Status', [['expired', L('Expired')], ['due_30', L('Expiring ≤30 days')], ['due_60', L('Expiring 31–60 days')], ['due_90', L('Expiring 61–90 days')], ['valid', L('Valid (>90 days)')], ['missing', L('Missing expiry date')], ['conflict', L('Dates disagree')]]), fc('department', 'Department', o.department || []), fc('branch', 'Branch', o.branch || []), fc('job_location', 'Job Location', o.job_location || [])]; },
       foot: 'One row per employee document. Saudi passports (not required) are excluded. Only expiry dates and status are shown; document numbers never are. Renewals are done in ERPNext.' },
     requests: { api: 'admin_hr_requests_data', key: 'rq', title: 'HR Requests', listTitle: 'All HR requests', args: function () { return {}; }, sort: 'created desc', order: null,
       panels: [['Requests by type', 'by_type', 'count'], ['Requests by department', 'by_department', 'count'], ['Open requests by age', 'pending_by_age', 'count'], ['Status distribution', 'status', 'count'], ['Average resolution time by type', 'resolution_by_type', 'avg', null, function (v) { return num(v) + ' d'; }]],
       month: ['Monthly request trend', 'trend', [['created', 'Created', 'var(--dms-royal)'], ['closed', 'Closed', 'var(--dms-ok)']]],
       cols: [['name', 'Request ID', 'name', function (r) { return r.doctype && r.name ? docLink(r.doctype, r.name) : esc(r.name || '—'); }], ['type', 'Request Type', 'type'], ['employee_name', 'Employee', 'employee_name', empBtn], ['department', 'Department', 'department'], ['created', 'Created', 'created', function (r) { return dtc(String(r.created || '').slice(0, 10)); }], ['approver', 'Assigned / Approver', 'approver'], ['status', 'Status', 'status', function (r) { return stat({ pending: 'warn', on_hold: 'warn', in_progress: 'warn', completed: 'ok', rejected: 'bad', unclear: 'bad' }[r.cat] || 'n', r.status) + (r.state ? '<div class="dms-sm">' + esc(r.state) + '</div>' : ''); }], ['age_days', 'Age / Overdue', 'age_days', function (r) { return r.age_days === null || r.age_days === undefined ? '—' : '<span class="dms-num">' + num(r.age_days) + ' d</span>' + (r.overdue_days ? '<div class="dms-sm">' + esc(num(r.overdue_days) + ' ' + L('d overdue')) + '</div>' : ''); }]],
+      facets: function (o) { return [fc('type', 'Request Type', o.types || []), fc('status', 'Status', (o.status || []).map(function (x) { return [x[0], L(x[1])]; })), fc('department', 'Department', o.department || []), fc('branch', 'Branch', o.branch || []), fc('approver', 'Assigned / Approver', o.approver || [])]; },
       foot: 'One row per source record. Results respect your ERPNext DocType and User Permissions for every source.' },
     training: { api: 'admin_hr_training_data', key: 'tr', title: 'Training', listTitle: 'All training assignments', args: function () { return {}; }, sort: 'due_date asc', order: null,
-      panels: [['Completion by department', 'by_department', 'pct', null, pct], ['Completion by designation', 'by_designation', 'pct', null, pct], ['Overdue training by department', 'overdue_by_department', 'overdue'], ['Most assigned videos and courses', 'most_assigned', 'count']],
+      panels: [['Completion by department', 'by_department', 'pct', null, pc], ['Completion by designation', 'by_designation', 'pct', null, pc], ['Overdue training by department', 'overdue_by_department', 'overdue'], ['Most assigned videos and courses', 'most_assigned', 'count']],
       month: ['Monthly assignments and completions', 'trend', [['assigned', 'Assigned', 'var(--dms-royal)'], ['completed', 'Completed', 'var(--dms-ok)']]],
       cols: [['employee_name', 'Employee Name', 'employee_name', empBtn], ['department', 'Department', 'department'], ['title', 'Training Video / Course', 'title', function (r) { return bdi(r.title || '—') + (r.kind ? ' <span class="dms-sm">(' + esc(r.kind) + ')</span>' : ''); }], ['mandatory', 'Mandatory', 'mandatory', function (r) { return r.mandatory ? stat('warn', L('Mandatory')) : '<span class="dms-sm">—</span>'; }], ['assigned_date', 'Assigned', 'assigned_date', function (r) { return dtc(r.assigned_date); }], ['due_date', 'Due', 'due_date', function (r) { return dtc(r.due_date) + (r.overdue ? '<div class="dms-sm">' + esc(L('overdue') + ' ' + num(-r.days_to_due) + ' d') + '</div>' : ''); }], ['completed_on', 'Completed', 'completed_on', function (r) { return dtc(r.completed_on); }], ['status', 'Status', 'status', function (r) { return stat({ Completed: 'ok', 'In Progress': 'warn' }[r.status] || 'n', r.status || '—'); }]],
+      facets: function (o) { return [fc('status', 'Status', ['Completed', 'In Progress', 'Not Started', 'Not assigned', 'No user'].map(function (x) { return [x, L(x)]; })), fc('timing', 'Due', [['overdue', L('Overdue')], ['due_soon', L('Due soon')], ['on_track', L('On track')], ['no_due', L('No due date')]]), fc('mandatory', 'Mandatory', [['1', L('Mandatory')], ['0', L('Optional')]]), fc('item', 'Training Video / Course', o.items || []), fc('department', 'Department', o.department || []), fc('designation', 'Designation', o.designation || [])]; },
       foot: 'Completion is the employee marking the video complete in My Training. No quiz, assessment or certificate records exist.' }
   };
   var MOD_KEYS = Object.keys(MOD);
@@ -1188,8 +1325,8 @@
     var st = LST[id] || (LST[id] = { preset: '', title: '' }), args = gf(m.args());
     var chips = '<div class="ah-preset">' + (st.preset ? '<span class="dms-sm">' + esc(L('Showing')) + ':</span> <b>' + esc(L(st.title)) + '</b> <button type="button" class="dms-btn dms-btn-sm" data-act="clrpre" data-v="' + id + '">' + esc(L('Show all')) + '</button>' : '<span class="dms-sm">' + esc(L(m.listTitle)) + ' · ' + esc(L('click a card or a data-quality count to narrow the list')) + '</span>') + '</div>';
     var sk = m.sort.split(' ');
-    return '<div id="ah-list-' + id + '">' + panel(L(m.listTitle), chips + regTable({ id: 'tl_' + id, server: true, period: true, dt: 'x', fields: [], filters: [st.preset, args], pageSize: 25, file: id + '_list', order: m.sort, searchHint: L('Search'),
-      loader: function (p, size, q, order) { var o = String(order || m.sort).split(' '); return callP(m.api, Object.assign({}, args, { mode: 'list', preset: st.preset, page: p + 1, page_length: Math.min(size, 100), sort_by: o[0], sort_order: o[1] || 'asc', search: q || '' })).then(function (r) { return { total: r ? r.total : 0, rows: (r && r.rows) || [] }; }); },
+    return '<div id="ah-list-' + id + '">' + panel(L(m.listTitle), chips + regTable({ id: 'tl_' + id, server: true, period: true, dt: 'x', fields: [], filters: [st.preset, args], pageSize: 25, file: id + '_list', order: m.sort, searchHint: L('Search'), facets: m.facets ? m.facets(s.options || {}) : null,
+      loader: function (p, size, q, order, fv) { var o = String(order || m.sort).split(' '); return callP(m.api, Object.assign({}, args, fvArgs(fv), { mode: 'list', preset: st.preset, page: p + 1, page_length: Math.min(size, 100), sort_by: o[0], sort_order: o[1] || 'asc', search: q || '' })).then(function (r) { return { total: r ? r.total : 0, rows: (r && r.rows) || [] }; }); },
       cols: m.cols.map(function (c) { return { k: c[0], h: L(c[1]), sf: c[2] || undefined, num: c[4], r: c[3] || (c[4] ? function (r) { return '<span class="dms-num">' + nv(r[c[0]]) + '</span>'; } : function (r) { return r[c[0]] === null || r[c[0]] === undefined || r[c[0]] === '' ? '<span class="dms-sm">—</span>' : bdi(r[c[0]]); }), c: function (r) { return r[c[0]]; } }; }) }), '', '') + '</div>';
   }
 
@@ -1281,9 +1418,10 @@
     h += two(panel(L('Employment type'), bars(e.by_employment_type, 'count')), panel(L('Gender'), bars(e.by_gender, 'count')));
     if (!det) { return h + lockNote(); }
     var SORT = { employee: 'name', employee_name: 'employee_name', department: 'department', designation: 'designation', branch: 'branch', job_location: 'job_location', nationality: 'nationality', date_of_joining: 'date_of_joining', status: 'status' };
-    return h + panel(L('Employee directory'), regTable({ id: 't_dir', server: true, dt: 'Employee', fields: [], filters: [F.company, F.department, F.branch, F.job_location], pageSize: 25, file: 'employee_directory', order: 'employee_name asc', searchHint: L('Employee ID or name'),
-      loader: function (p, size, q, order) { var o = String(order || 'employee_name asc').split(' '); return callP('admin_hr_employee_directory', { company: F.company || d.meta.company, department: F.department, branch: F.branch, job_location: F.job_location, status: 'Active', page: p + 1, page_length: Math.min(size, 100), sort_by: o[0], sort_order: o[1] || 'asc', search: q || '' }).then(function (r) { return { total: r ? r.total : 0, rows: (r && r.rows) || [] }; }); },
-      cols: [{ k: 'employee', h: L('Employee ID'), sf: SORT.employee, r: function (r) { return docLink('Employee', r.employee); }, c: function (r) { return r.employee; } }, { k: 'employee_name', h: L('Employee Name'), sf: SORT.employee_name, r: empBtn, c: function (r) { return r.employee_name; } }].concat(['department', 'designation', 'branch', 'job_location', 'nationality'].map(function (k) { return { k: k, h: L({ department: 'Department', designation: 'Designation', branch: 'Branch', job_location: 'Job Location', nationality: 'Nationality' }[k]), sf: SORT[k], r: function (r) { return r[k] ? bdi(r[k]) : '<span class="dms-sm">—</span>'; }, c: function (r) { return r[k]; } }; })).concat([{ k: 'doj', h: L('Date of Joining'), sf: 'date_of_joining', r: function (r) { return dtc(r.date_of_joining); }, c: function (r) { return r.date_of_joining; } }]) }), '', esc(L('Active employees only · as of ' + d.meta.date)));
+    var DO = DIRO || {}, dirF = [fc('status', 'Status', [['All', L('All statuses')], ['Inactive', L('Inactive')], ['Suspended', L('Suspended')], ['Left', L('Left')]], L('Status') + ': ' + L('Active'))].concat([['department', 'Department'], ['designation', 'Designation'], ['branch', 'Branch'], ['job_location', 'Job Location'], ['nationality', 'Nationality']].map(function (x) { return fc(x[0], x[1], DO[x[0]] || []); }));
+    return h + panel(L('Employee directory'), regTable({ id: 't_dir', server: true, dt: 'Employee', fields: [], filters: [F.company, F.department, F.branch, F.job_location], pageSize: 25, file: 'employee_directory', order: 'employee_name asc', searchHint: L('Employee ID or name'), facets: dirF,
+      loader: function (p, size, q, order, fv) { var o = String(order || 'employee_name asc').split(' '); return callP('admin_hr_employee_directory', Object.assign({ company: F.company || d.meta.company, department: F.department, branch: F.branch, job_location: F.job_location, status: 'Active' }, fvArgs(fv), { with_options: DIRO ? 0 : 1, page: p + 1, page_length: Math.min(size, 100), sort_by: o[0], sort_order: o[1] || 'asc', search: q || '' })).then(function (r) { if (r && r.options && !DIRO) { DIRO = r.options; later(renderSoft, 0); } return { total: r ? r.total : 0, rows: (r && r.rows) || [] }; }); },
+      cols: [{ k: 'employee', h: L('Employee ID'), sf: SORT.employee, r: function (r) { return docLink('Employee', r.employee); }, c: function (r) { return r.employee; } }, { k: 'employee_name', h: L('Employee Name'), sf: SORT.employee_name, r: empBtn, c: function (r) { return r.employee_name; } }].concat(['department', 'designation', 'branch', 'job_location', 'nationality'].map(function (k) { return { k: k, h: L({ department: 'Department', designation: 'Designation', branch: 'Branch', job_location: 'Job Location', nationality: 'Nationality' }[k]), sf: SORT[k], r: function (r) { return r[k] ? bdi(r[k]) : '<span class="dms-sm">—</span>'; }, c: function (r) { return r[k]; } }; })).concat([{ k: 'doj', h: L('Date of Joining'), sf: 'date_of_joining', r: function (r) { return dtc(r.date_of_joining); }, c: function (r) { return r.date_of_joining; } }, { k: 'status', h: L('Status'), sf: 'status', r: function (r) { return stat(r.status === 'Active' ? 'ok' : r.status === 'Left' ? 'bad' : 'warn', L(r.status || '—')); }, c: function (r) { return r.status; } }]) }), '', esc(L('Active employees unless the status filter says otherwise') + ' · ' + L('as of') + ' ' + d.meta.date));
   }
 
   /* ============================================================ attendance */
@@ -1305,14 +1443,15 @@
       panel(L('Auto-attendance sync'), s.auto_attendance && s.auto_attendance.readable === false ? empty(L('Shift Type not readable with your permissions.')) : mini([['Shift type', function (x) { return bdi(x.shift); }], ['Last check-in sync', function (x) { return esc(x.last_sync); }]], (s.auto_attendance && s.auto_attendance.stale_shifts) || [], 'All auto-attendance shifts synced recently.') + facts([['Holiday lists', s.holiday_lists && s.holiday_lists.ok ? stat('ok', L('OK')) : stat('warn', L('Check'))], ['Employees without a valid list', nv(s.holiday_lists && s.holiday_lists.employees_without_valid_list)]]), '', esc(L('Enabled shifts with no sync in the last 2 days.'))));
     if (pt.length) { h += panel(L('Attendance in the selected period'), barChart(pt.map(function (x) { return x.date; }), pt.length > 45 ? 'week' : 'day', [{ label: L('Present'), color: 'var(--dms-ok)', val: function (k) { var x = pt.filter(function (y) { return y.date === k; })[0]; return x ? x.present : 0; } }, { label: L('Absent'), color: 'var(--dms-bad)', val: function (k) { var x = pt.filter(function (y) { return y.date === k; })[0]; return x ? x.absent : 0; } }, { label: L('On leave'), color: 'var(--dms-age3)', val: function (k) { var x = pt.filter(function (y) { return y.date === k; })[0]; return x ? x.on_leave : 0; } }], num), '', esc(a.period ? a.period.from + ' → ' + a.period.to + (a.period.capped ? ' · ' + L('capped') : '') : '')); }
     if (det) {
-      h += two(panel(L('Late check-ins'), mini([['Employee', empBtn], ['Shift', function (r) { return bdi(r.shift || ''); }], ['First punch', function (r) { return esc(r.first_punch || ''); }], ['Late (min)', function (r) { return num(r.late_by_min); }, 1]], R('late'), 'No late check-ins.'), '', esc(L('First punch after shift start plus entry grace.'))),
-        panel(L('Absent today'), p.available ? mini([['Employee', empBtn], ['Department', function (r) { return bdi(r.department || '—'); }], ['Basis', function (r) { return '<span class="dms-sm">' + esc(L(r.absence_basis)) + '</span>'; }]], p.rows, 'No absences.') : alertBox('warn', esc(L('Employee-level data required'))), '', esc(L('Approved leave & weekoffs excluded'))));
-      if (R('att_period').length) { h += panel(L('Attendance by employee in the period'), tblRows('t_attp', R('att_period'), [['employee_name', 'Employee', empBtn], ['department', 'Department'], ['present_days', 'Present', null, 1], ['absent_days', 'Absent', null, 1], ['leave_days', 'Leave', null, 1], ['attendance_pct', 'Attendance %', function (r) { return r.attendance_pct == null ? '—' : '<span class="dms-num">' + pct(r.attendance_pct) + '</span>'; }, 1]], 'attendance_period')); }
+      h += two(panel(L('Late check-ins'), tblRows('t_late', R('late'), [['employee_name', 'Employee', empBtn], ['department', 'Department'], ['shift', 'Shift'], ['first_punch', 'First punch'], ['late_by_min', 'Late (min)', null, 1]], 'late_checkins'), '', esc(L('First punch after shift start plus entry grace.'))),
+        panel(L('Absent today'), p.available ? tblRows('t_abs', p.rows, [['employee_name', 'Employee', empBtn], ['department', 'Department'], ['absence_basis', 'Basis', function (r) { return '<span class="dms-sm">' + esc(L(r.absence_basis)) + '</span>'; }]], 'absent_today') : alertBox('warn', esc(L('Employee-level data required'))), '', esc(L('Approved leave & weekoffs excluded'))));
+      if (R('att_period').length) { h += panel(L('Attendance by employee in the period'), tblRows('t_attp', R('att_period'), [['employee_name', 'Employee', empBtn], ['department', 'Department'], ['present_days', 'Present', null, 1], ['absent_days', 'Absent', null, 1], ['leave_days', 'Leave', null, 1], ['attendance_pct', 'Attendance %', function (r) { return r.attendance_pct == null ? '—' : '<span class="dms-num">' + pc(r.attendance_pct) + '</span>'; }, 1]], 'attendance_period')); }
     }
     return h;
   }
+  var ROWF = [['department', 'Department'], ['branch', 'Branch'], ['job_location', 'Job Location'], ['nationality', 'Nationality'], ['designation', 'Designation'], ['leave_type', 'Leave Type'], ['workflow_state', 'Workflow State'], ['shift', 'Shift'], ['document', 'Document'], ['status', 'Status']];
   function tblRows(id, rows, cols, file) {
-    return regTable({ id: id, rows: rows, pageSize: 15, file: file, text: function (r) { return cols.map(function (c) { return r[c[0]]; }).join(' '); }, empty: L('No records.'),
+    return regTable({ id: id, rows: rows, pageSize: 15, file: file, facets: fcRows(rows, ROWF), text: function (r) { return cols.map(function (c) { return r[c[0]]; }).join(' '); }, empty: L('No records.'),
       cols: cols.map(function (c) { return { k: c[0], h: L(c[1]), num: c[3], s: function (r) { return c[3] ? +r[c[0]] || 0 : r[c[0]]; }, r: c[2] || (c[3] ? function (r) { return '<span class="dms-num">' + nv(r[c[0]]) + '</span>'; } : function (r) { return r[c[0]] ? bdi(r[c[0]]) : '<span class="dms-sm">—</span>'; }), c: function (r) { return r[c[0]]; } }; }) });
   }
 
@@ -1321,18 +1460,22 @@
     if (D.ovErr) { return srcErr(D.ovErr, 'admin_hr_dashboard_data'); } if (!D.ov) { return skel(1, 'dms-skel-panel'); }
     var d = D.ov, an = d.analytics || {}, sz = an.saudization || {}, mv = an.movement || [], to = an.turnover || [];
     var h = kpis([
-      kpi({ label: L('Saudization (provisional)'), dot: 'var(--dms-ok)', val: sz.pct == null ? '—' : pct(sz.pct), sub: esc(L(nv(sz.saudi) + ' Saudi of ' + nv(sz.total) + ' active')), tip: L(sz.rule || '') }),
-      kpi({ label: L('Attrition (12 months)'), val: an.attrition_12m_pct == null ? '—' : pct(an.attrition_12m_pct), sub: esc(L('Approximate')), tip: L(an.attrition_note || '') }),
+      kpi({ label: L('Saudization (provisional)'), dot: 'var(--dms-ok)', val: sz.pct == null ? '—' : pc(sz.pct), sub: esc(L(nv(sz.saudi) + ' Saudi of ' + nv(sz.total) + ' active')), tip: L(sz.rule || '') }),
+      kpi({ label: L('Attrition (12 months)'), val: an.attrition_12m_pct == null ? '—' : pc(an.attrition_12m_pct), sub: esc(L('Approximate')), tip: L(an.attrition_note || '') }),
       kpi({ label: L('Nationality conflicts'), dot: sz.conflicts ? 'var(--dms-bad)' : null, val: nv(sz.conflicts), sub: esc(L('Nationality fields disagree')) }),
       kpi({ label: L('Left without relieving date'), dot: an.left_without_relieving_date ? 'var(--dms-age3)' : null, val: nv(an.left_without_relieving_date) })
     ]);
     h += note(esc(L(sz.rule || '')));
     h += two(panel(L('Nationality'), bars(an.nationality, 'count', null, 10)), panel(L('Tenure'), bars(an.tenure, 'count')));
-    h += two(panel(L('Saudization by branch'), bars(sz.by_branch, 'pct', pct)), panel(L('Saudization by job location'), bars(sz.by_location, 'pct', pct)));
-    h += two(panel(L('Joiners and leavers by month'), mv.length ? barChart(mv.map(function (x) { return x.month; }), 'month', [{ label: L('Joiners'), color: 'var(--dms-royal)', val: function (k) { return (mv.filter(function (x) { return x.month === k; })[0] || {}).joiners || 0; } }, { label: L('Leavers'), color: 'var(--dms-bad)', val: function (k) { return (mv.filter(function (x) { return x.month === k; })[0] || {}).leavers || 0; } }], num) : empty(L('No records.'))),
-      panel(L('Monthly turnover rate'), to.length ? barChart(to.map(function (x) { return x.month; }), 'month', [{ label: L('Turnover %'), color: 'var(--dms-age3)', val: function (k) { return (to.filter(function (x) { return x.month === k; })[0] || {}).rate || 0; } }], function (v) { return pct(v); }) : empty(L('No records.')), '', esc(an.turnover_note ? L(an.turnover_note.basis || '') : '')));
+    h += two(panel(L('Saudization by branch'), bars(sz.by_branch, 'pct', pc)), panel(L('Saudization by job location'), bars(sz.by_location, 'pct', pc)));
+    /* Totals for the chart: the 12 months shown, and the calendar year to date when those months reach back to January. */
+    var yr = String(d.meta.date || TODAY).slice(0, 4), ytd = mv.filter(function (x) { return String(x.month).slice(0, 4) === yr; }), fullYtd = mv.some(function (x) { return String(x.month) <= yr + '-01'; });
+    var tJ = sumOf(mv, function (x) { return x.joiners; }), tL = sumOf(mv, function (x) { return x.leavers; }), yJ = sumOf(ytd, function (x) { return x.joiners; }), yL = sumOf(ytd, function (x) { return x.leavers; });
+    var mvTot = mv.length ? facts([['Joiners · ' + yr + ' to date', fullYtd ? nv(yJ) : '—'], ['Leavers · ' + yr + ' to date', fullYtd ? nv(yL) : '—'], ['Joiners · last 12 months', nv(tJ)], ['Leavers · last 12 months', nv(tL)], ['Net change · last 12 months', tJ === null || tL === null ? '—' : (tJ - tL > 0 ? '+' : tJ - tL < 0 ? '−' : '') + num(Math.abs(tJ - tL))]]) : '';
+    h += two(panel(L('Joiners and leavers by month'), mvTot + (mv.length ? barChart(mv.map(function (x) { return x.month; }), 'month', [{ label: L('Joiners'), color: 'var(--dms-royal)', val: function (k) { return (mv.filter(function (x) { return x.month === k; })[0] || {}).joiners || 0; } }, { label: L('Leavers'), color: 'var(--dms-bad)', val: function (k) { return (mv.filter(function (x) { return x.month === k; })[0] || {}).leavers || 0; } }], num) : empty(L('No records.')))),
+      panel(L('Monthly turnover rate'), to.length ? barChart(to.map(function (x) { return x.month; }), 'month', [{ label: L('Turnover %'), color: 'var(--dms-age3)', val: function (k) { return (to.filter(function (x) { return x.month === k; })[0] || {}).rate || 0; } }], function (v) { return pc(v); }) : empty(L('No records.')), '', esc(an.turnover_note ? L(an.turnover_note.basis || '') : '')));
     var dq = d.data_quality || [];
-    return h + panel(L('Data quality'), mini([['Issue', function (x) { return esc(L(x.label)); }], ['Severity', function (x) { return sevTag(x.severity); }], ['Count', function (x) { return R('dq_' + x.key).length ? '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="' + rowsDrill('dq_' + x.key, x.label, R('dq_' + x.key), x.key === 'leave_status_mismatch' ? 'Leave Application' : 'Employee') + '">' + num(x.count) + '</button>' : nv(x.count); }, 1], ['Share of active', function (x) { return x.pct == null ? '—' : pct(x.pct); }, 1]], dq.slice().sort(function (x, y) { return ({ high: 0, medium: 1, low: 2 }[x.severity] - { high: 0, medium: 1, low: 2 }[y.severity]) || y.count - x.count; })), '', esc(L('Issues are displayed only; fix records in ERPNext after HR review.')));
+    return h + panel(L('Data quality'), mini([['Issue', function (x) { return esc(L(x.label)); }], ['Severity', function (x) { return sevTag(x.severity); }], ['Count', function (x) { return R('dq_' + x.key).length ? '<button type="button" class="dms-linkbtn" data-act="kpi" data-v="' + rowsDrill('dq_' + x.key, x.label, R('dq_' + x.key), x.key === 'leave_status_mismatch' ? 'Leave Application' : 'Employee') + '">' + num(x.count) + '</button>' : nv(x.count); }, 1], ['Share of active', function (x) { return x.pct == null ? '—' : pc(x.pct); }, 1]], dq.slice().sort(function (x, y) { return ({ high: 0, medium: 1, low: 2 }[x.severity] - { high: 0, medium: 1, low: 2 }[y.severity]) || y.count - x.count; })), '', esc(L('Issues are displayed only; fix records in ERPNext after HR review.')));
   }
   function vActions(AM) { return actionsTab(AM, L('Action lists are as of today and follow the company, department, branch and job location filters.')); }
 
@@ -1355,7 +1498,7 @@
     if (id.indexOf('emp:') === 0 && EDET) { return { title: EDET.m && EDET.m.basic ? EDET.m.basic.employee_name + ' · ' + EDET.id : EDET.id, sub: L('Employee details'), link: ['Employee', EDET.id, EDET.id], body: empBody(), ah: 'emp' }; }
     if (id.indexOf('rows:') === 0) {
       var x = DRL[id.slice(5)]; if (!x) { return null; }
-      return { title: L(x.title), sub: num(x.rows.length) + ' ' + L('records'), spec: { rows: x.rows, file: id.slice(5), text: function (r) { return [r.employee, r.employee_name, r.department].join(' '); }, cols: [{ h: L('Employee'), r: function (r) { var n = r.leave_application || r.employee; return n ? docLink(r.leave_application ? 'Leave Application' : 'Employee', n, r.employee_name || n) : '—'; }, c: function (r) { return r.employee; } }, { h: L('Department'), r: function (r) { return bdi(r.department || '—'); }, c: function (r) { return r.department; } }, { h: L('Detail'), r: function (r) { return '<span class="dms-sm">' + esc([r.status, r.first_punch, r.late_by_min != null ? r.late_by_min + ' min' : '', r.documents, r.leave_type, r.from_date && r.to_date ? r.from_date + ' → ' + r.to_date : '', r.missing, r.absence_basis ? L(r.absence_basis) : '', r.nationality].filter(Boolean).join(' · ')) + '</span>'; }, c: function (r) { return r.status || ''; } }] } };
+      return { title: L(x.title), sub: num(x.rows.length) + ' ' + L('records'), spec: { rows: x.rows, file: id.slice(5), facets: fcRows(x.rows, ROWF), text: function (r) { return [r.employee, r.employee_name, r.department].join(' '); }, cols: [{ h: L('Employee'), r: function (r) { var n = r.leave_application || r.employee; return n ? docLink(r.leave_application ? 'Leave Application' : 'Employee', n, r.employee_name || n) : '—'; }, c: function (r) { return r.employee; } }, { h: L('Department'), r: function (r) { return bdi(r.department || '—'); }, c: function (r) { return r.department; } }, { h: L('Detail'), r: function (r) { return '<span class="dms-sm">' + esc([r.status, r.first_punch, r.late_by_min != null ? r.late_by_min + ' min' : '', r.documents, r.leave_type, r.from_date && r.to_date ? r.from_date + ' → ' + r.to_date : '', r.missing, r.absence_basis ? L(r.absence_basis) : '', r.nationality].filter(Boolean).join(' · ')) + '</span>'; }, c: function (r) { return r.status || ''; } }] } };
     }
     if (id.indexOf('cli:') === 0) {
       var k = id.slice(4), cc = actClient(), y = cc && typeof cc === 'object' && cc[k], s = actSpecs().filter(function (z) { return z.id === k; })[0]; if (!y || !s || !y.rows) { return null; }

@@ -3,7 +3,7 @@
    count(distinct), sum/min, group_by). This test answers them with a small join engine over the fixture, and computes every
    expected figure separately with plain JS so the test does not just echo the engine. */
 const { run, getList, cond, fmt, TODAY, add } = require('./dms-harness.cjs');
-const CHILD = { 'Delivery Note': 'Delivery Note Item', 'Purchase Receipt': 'Purchase Receipt Item', 'Sales Order': 'Sales Order Item', 'Purchase Order': 'Purchase Order Item' };
+const CHILD = { 'Delivery Note': 'Delivery Note Item', 'Purchase Receipt': 'Purchase Receipt Item', 'Sales Order': 'Sales Order Item', 'Purchase Order': 'Purchase Order Item', 'Sales Invoice': 'Sales Invoice Item' };
 const Y0 = TODAY.slice(0, 4) + '-01-01';
 const WH = [{ name: 'Stores - DMG', warehouse_name: 'Main Stores', company: 'DM Group KSA', is_group: 0 }, { name: 'Yard - DMG', warehouse_name: 'Yard', company: 'DM Group KSA', is_group: 0 }, { name: 'Stores - DMS', warehouse_name: 'Main Stores', company: 'DM Steel', is_group: 0 }];
 const CUST = ['Al Rajhi Towers', 'Najd Builders', 'Red Sea Marine', 'Eastern Contracting'], SUP = ['Riyadh Steel Co', 'Gulf Fasteners', 'Najd Timber'];
@@ -45,8 +45,21 @@ function build() {
     const q = ret ? -2 : 20, rej = i % 7 === 2 ? 3 : 0;
     item('Purchase Receipt', pr.name, 0, { item_code: l.item_code, item_name: l.item_name, qty: q, received_qty: q + rej, rejected_qty: rej, returned_qty: 0, stock_qty: q, stock_uom: 'Kg', uom: 'Kg', warehouse: l.warehouse, purchase_order: po.name, purchase_order_item: l.name });
   }
+  /* v3 link rule: GDN-NS-901 has no SO / SINV link (-> Goods receipts tab); GDN-DM-902 has no header link but a Sales Invoice line
+     points to it (stays on Delivery notes); GRN-DM-950 is a Purchase Receipt linked to a Sales Order (-> Delivery notes tab) */
+  [['GDN-NS-2026-901', 'Walk-in Customer'], ['GDN-DM-2026-902', 'Najd Builders']].forEach(([nm, cu], i) => {
+    db['Delivery Note'].push({ name: nm, docstatus: 1, posting_date: add(TODAY, -(4 + i)), company: 'DM Group KSA', custom_division: 'Trading', customer: 'CX', customer_name: cu, status: 'Completed', is_return: 0, owner: 'store@dm.sa', sales_order: '', sales_invoice_data: '' });
+    item('Delivery Note', nm, 0, { item_code: 'SCF-11', item_name: 'Coupler', qty: 4, stock_qty: 4, stock_uom: 'Nos', uom: 'Nos', warehouse: 'Stores - DMG', against_sales_order: '', against_sales_invoice: '', so_detail: '', returned_qty: 0 });
+  });
+  db['Sales Invoice'].push({ name: 'ACC-SINV-2026-001', docstatus: 1, posting_date: add(TODAY, -3), company: 'DM Group KSA' });
+  item('Sales Invoice', 'ACC-SINV-2026-001', 0, { item_code: 'SCF-11', qty: 4, delivery_note: 'GDN-DM-2026-902' });
+  db['Purchase Receipt'].push({ name: 'GRN-DM-2026-950', docstatus: 1, posting_date: add(TODAY, -6), company: 'DM Group KSA', supplier: 'S0', supplier_name: 'Riyadh Steel Co', status: 'Completed', is_return: 0, owner: 'store@dm.sa' });
+  item('Purchase Receipt', 'GRN-DM-2026-950', 0, { item_code: 'SCF-10', item_name: 'Scaffold tube', qty: 8, received_qty: 8, rejected_qty: 0, returned_qty: 0, stock_qty: 8, stock_uom: 'Kg', uom: 'Kg', warehouse: 'Stores - DMG', purchase_order: '', purchase_order_item: '', sales_order: 'SAL-ORD-2026-001' });
   return db;
 }
+/* v3 link rule, computed independently of the dashboard */
+function dnLinked(db, d) { return !!(d.sales_order || d.sales_invoice_data) || db['Delivery Note Item'].some(l => l.parent === d.name && (l.against_sales_order || l.against_sales_invoice)) || db['Sales Invoice Item'].some(l => l.delivery_note === d.name); }
+function prLinked(db, d) { return db['Purchase Receipt Item'].some(l => l.parent === d.name && l.sales_order); }
 /* ---- join engine for parent + item queries ---- */
 function ref(s, pdt) { const m = /^`tab(.+?)`\.(\w+)$/.exec(String(s).trim()); return m ? { dt: m[1], f: m[2] } : { dt: pdt, f: String(s).trim() }; }
 function parseField(f, pdt) { let m = /^(count|sum|min|max)\((distinct )?(.+?)\)\s+as\s+(\w+)$/i.exec(f); if (m) { return { agg: m[1].toLowerCase(), distinct: !!m[2], ref: ref(m[3], pdt), as: m[4] }; } m = /^(.+?)\s+as\s+(\w+)$/.exec(f); return m ? { ref: ref(m[1], pdt), as: m[2] } : { ref: ref(f, pdt), as: f }; }
@@ -83,7 +96,9 @@ run({
   slug: 'dn-grn', folder: '03. Procurement & Supply Chain/DN & GRN Tracker', build, methods,
   figures: async (t, H, db) => {
     const dn = db['Delivery Note'].filter(d => inP(d.posting_date)), pr = db['Purchase Receipt'].filter(d => inP(d.posting_date));
-    H.assert.equal(await t.kpiVal(0), fmt(dn.filter(d => d.docstatus === 1).length)); H.assert.equal(await t.kpiVal(1), fmt(pr.filter(d => d.docstatus === 1).length)); H.ok('submitted delivery notes and receipts in the period (distinct documents)');
+    const dnSide = dn.filter(d => dnLinked(db, d)).length + 0, sub = x => x.docstatus === 1;
+    H.assert.equal(await t.kpiVal(0), fmt(dn.filter(d => sub(d) && dnLinked(db, d)).length + pr.filter(d => sub(d) && prLinked(db, d)).length));
+    H.assert.equal(await t.kpiVal(1), fmt(pr.filter(d => sub(d) && !prLinked(db, d)).length + dn.filter(d => sub(d) && !dnLinked(db, d)).length)); H.ok('submitted delivery notes and receipts in the period, split by the SO / SINV link (' + dnSide + ' linked delivery notes)');
     H.assert.equal(await t.kpiVal(2), fmt(db['Sales Order'].filter(o => o.docstatus === 1 && PEND.so.includes(o.status) && inP(o.transaction_date)).length));
     H.assert.equal(await t.kpiVal(4), fmt(overdueOrders(db, 'Sales Order', 'so', true).length)); H.assert.equal(await t.kpiVal(5), fmt(overdueOrders(db, 'Purchase Order', 'po', true).length)); H.ok('orders to deliver and overdue commitments (a line past its date)');
     const rej = pr.filter(d => d.docstatus === 1 && lines(db, 'Purchase Receipt', d).some(l => l.rejected_qty > 0)).length;
@@ -91,7 +106,17 @@ run({
     H.assert.equal((await t.$('[data-act="pending"] b').innerText()).trim(), fmt(P)); H.ok('pending = late deliveries + late receipts (all open, last year included) + rejected receipts + drafts (' + P + ')');
   },
   interactions: async (t, H, db) => {
-    const dn = db['Delivery Note'].filter(d => inP(d.posting_date));
+    await t.$('[data-act="tab"][data-v="dn"]').click(); await t.idle(); await t.$('[data-act="lv"][data-v="dn:doc"]').click(); await t.idle();
+    const dnTab = await t.$('[data-tbl="t_dn"]').innerText(), mvDn = await t.$('[data-tbl="t_mv_dn"]').innerText();
+    H.assert.doesNotMatch(dnTab, /GDN-NS-2026-901/); H.assert.match(mvDn, /GRN-DM-2026-950/); H.assert.match(mvDn, /\b1 record\b/);
+    await t.$('[data-tq="t_dn"]').fill('GDN-DM-2026-902'); await t.page.waitForTimeout(500); await t.idle(); H.assert.match(await t.$('[data-tbl="t_dn"]').innerText(), /GDN-DM-2026-902/); await t.$('[data-tq="t_dn"]').fill(''); await t.page.waitForTimeout(500); await t.idle();
+    H.ok('Delivery notes tab: SO / SINV-linked documents only, incl. a receipt linked to a sales order and a GDN linked through a sales invoice');
+    await t.$('[data-act="tab"][data-v="grn"]').click(); await t.idle(); await t.$('[data-act="lv"][data-v="pr:doc"]').click(); await t.idle();
+    const grTab = await t.$('[data-tbl="t_pr"]').innerText(), mvPr = await t.$('[data-tbl="t_mv_pr"]').innerText();
+    H.assert.doesNotMatch(grTab, /GRN-DM-2026-950/); H.assert.match(mvPr, /GDN-NS-2026-901/); H.assert.doesNotMatch(mvPr, /GDN-DM-2026-902/);
+    H.ok('Goods receipts tab: receipts without an SO link, plus delivery notes with no SO / SINV link');
+    await t.$('[data-act="lv"][data-v="pr:item"]').click(); await t.idle(); await t.$('[data-act="tab"][data-v="dn"]').click(); await t.idle(); await t.$('[data-act="lv"][data-v="dn:item"]').click(); await t.idle();
+    const dn = db['Delivery Note'].filter(d => inP(d.posting_date) && dnLinked(db, d));
     await t.$('[data-act="tab"][data-v="overview"]').click(); await t.idle();
     await t.$('.dms-ov-kpis .dms-kpi[data-v="dx:dn:sub"]').click(); await t.idle();
     H.assert.match(await t.$('[data-tbl="t_dn"]').innerText(), new RegExp('\\b' + dn.filter(d => d.docstatus === 1).length + ' records')); H.ok('the card opens submitted delivery notes, one row per document');

@@ -67,6 +67,10 @@ CFG = {
 
 DOC_TYPES = list(CFG["print_formats"].keys())
 OUTSTANDING = "Customer Outstanding"
+# SOA Request names start with the type: SOA-<customer>-<no.> (statement), CBC-... (balance confirmation), LDG-... (ledger).
+# The DocType names records "format:{naming_prefix}-{customer}-{####}"; the number is the site-wide naming counter.
+NAME_PREFIX = {"Outstanding SOA": "SOA", "Customer Outstanding": "CBC", "Customer Ledger": "LDG"}
+KNOWN_PREFIXES = ["SOA-", "CBC-", "LDG-"]
 ALL_TYPES = DOC_TYPES + [OUTSTANDING]
 DT = CFG["cts_doctype"]
 U = frappe.utils
@@ -607,11 +611,41 @@ def closing_balance(cts):
     return U.flt(rows[-1].balance, 2) if rows else 0.0
 
 
+GENERATED_PDF = ["_Outstanding_SOA", "_Customer_Ledger", "_Customer_Balance_Confirmation"]
+
+
 def remove_files(req):
-    for f in (req.files or []):
-        if f.file_id and frappe.db.exists("File", f.file_id):
-            frappe.delete_doc("File", f.file_id, ignore_permissions=True)
+    # Detach the current PDFs only. Deleting a File removes it from disk at once and a rollback of this request cannot bring it
+    # back (the File record would return pointing at nothing), so the detached files are deleted by purge_old_files on a
+    # later rebuild, after this change has been saved.
+    purge_old_files(req)
     req.set("files", [])
+
+
+def purge_old_files(req):
+    # Delete PDFs this script generated earlier for the request that no files row references any more. Files people attached
+    # themselves (other names) are never touched.
+    keep = [f.file_id for f in (req.files or []) if f.file_id]
+    for f in frappe.get_all("File", filters={"attached_to_doctype": "SOA Request", "attached_to_name": req.name}, fields=["name", "file_name"]):
+        fn = f.file_name or ""
+        if f.name in keep or not fn.lower().endswith(".pdf") or not [g for g in GENERATED_PDF if g in fn]:
+            continue
+        try:
+            frappe.delete_doc("File", f.name, ignore_permissions=True)
+        except Exception:
+            pass
+
+
+def files_missing(req):
+    # True when a files row points at a PDF that is no longer on disk.
+    for f in (req.files or []):
+        try:
+            if not f.file_id or not frappe.db.exists("File", f.file_id):
+                return True
+            frappe.get_doc("File", f.file_id).get_content()
+        except Exception:
+            return True
+    return False
 
 
 def build(req, cts):
@@ -727,8 +761,13 @@ def pdf_safe_html(html):
 def balance_confirmation_pdf(req):
     doctype = CFG["confirmation_doctype"]
     pf = CFG["confirmation_print_format"]
-    # the SOA Request name already starts with "SOA-": name the confirmation like the hand-made ones (CBC-<customer>-<no.>)
-    base = req.name[4:] if req.name.startswith("SOA-") else req.name
+    # the SOA Request name starts with its type prefix (SOA- on older requests, CBC- now): name the confirmation like the
+    # hand-made ones (CBC-<customer>-<no.>)
+    base = req.name
+    for px in KNOWN_PREFIXES:
+        if base.startswith(px):
+            base = base[len(px):]
+            break
     name = "CBC-" + base
     # Reuse one managed confirmation per SOA Request. Manual documents are untouched.
     frappe.db.sql("select name from `tabSOA Request` where name = %(name)s for update", {"name": req.name})
@@ -1461,7 +1500,7 @@ elif action == "create":
         f = soa_from(cust, t) if dt != OUTSTANDING else t
     if not f or not t or str(f) > str(t):
         frappe.throw("Choose a valid date range.")
-    req = frappe.get_doc({"doctype": "SOA Request", "customer": cust, "customer_name": frappe.db.get_value("Customer", cust, "customer_name"),
+    req = frappe.get_doc({"doctype": "SOA Request", "naming_prefix": NAME_PREFIX.get(dt, "SOA"), "customer": cust, "customer_name": frappe.db.get_value("Customer", cust, "customer_name"),
                           "document_type": dt, "from_date": f, "to_date": t, "status": "Processing", "requested_by": user,
                           "sales_person": ", ".join(c["sps"]), "request_note": (args.get("note") or "")[:500]})
     req.insert()
@@ -1509,8 +1548,15 @@ elif action == "manager_file":
     file = frappe.get_doc("File",file_id)
     if file.attached_to_doctype != "SOA Request" or file.attached_to_name != req.name:
         frappe.throw("This attachment does not belong to the request.")
+    try:
+        content = file.get_content()
+    except Exception:
+        content = None
+    if content is None:
+        frappe.throw("The PDF for " + req.name + " is missing on the server. Open the request in the SOA Manager dashboard and use "
+                     + "Open PDF preview (or Re-check) to build it again.", title="PDF missing")
     frappe.response["filename"] = file.file_name
-    frappe.response["filecontent"] = file.get_content()
+    frappe.response["filecontent"] = content
     frappe.response["type"] = "download"
     frappe.response["display_content_as"] = "inline"
     res = None
@@ -1524,7 +1570,7 @@ elif action == "manager_preview":
         frappe.throw("This request is no longer waiting for review.")
     if req.document_type == OUTSTANDING:
         balance_confirmation_pdf(req)
-    elif not req.files:
+    elif not req.files or files_missing(req):
         run_request(req, True)
     req.save(ignore_permissions=True)
     res = {"files":files_of([req.name]).get(req.name, [])}

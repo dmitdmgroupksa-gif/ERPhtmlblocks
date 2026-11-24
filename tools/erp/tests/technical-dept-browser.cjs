@@ -27,17 +27,27 @@ function build() {
       { name: 'DT3', docstatus: 1, status: 'Approved', priority: 'Normal', project_name: 'Villa C', client: 'Client 3', required_date: d(-20), submitted_by: 'eng@dm.test', revision_no: 0, modified: d(-3) + ' 10:00:00' }]
   };
 }
+/* v3: the DMS Technical tab reads the DMS API (the DMS Technical Department dashboard, merged in). Fixture: TS-A1 overdue
+   (required 3 days ago), TS-A2 requested and due tomorrow, TS-R1 under review for 20 days, TS-P1 approved. */
+const tsRow = (n, status, o) => Object.assign({ name: n, status, priority: 'Normal', dms_project: 'PRJ-1', project_code: 'DMS-001', project_name: 'Tower A', client: 'Client 1', sales_person: 'E1', sales_person_name: 'Ahmed Ali', requested_by: 'Eng', request_date: d(-10), required_date: null, submittal_date: null, approval_date: null, revision_no: '0', products: 2, days_left: null, overdue: false, waiting_days: null }, o);
+function dmsApi(a) {
+  const all = [tsRow('TS-A1', 'Requested', { required_date: d(-3), days_left: -3, overdue: true, priority: 'Urgent' }), tsRow('TS-A2', 'Requested', { required_date: d(1), days_left: 1 }), tsRow('TS-R1', 'Under Review', { submittal_date: d(-20), waiting_days: 20 }), tsRow('TS-P1', 'Approved', { approval_date: d(-2) })];
+  const vis = all.filter(r => !a.status || (a.status === 'Overdue' ? r.overdue : r.status === a.status));
+  const counts = { total: all.length, overdue: 1, Requested: 2, 'Under Review': 1, Approved: 1 };
+  return { counts, action: vis.filter(r => r.status === 'Requested'), review: vis.filter(r => r.status === 'Under Review'), approved: vis.filter(r => r.status === 'Approved'), recent: vis,
+    options: { department: [{ value: 'Technical', label: 'Technical' }], sales_person: [{ value: 'E1', label: 'Ahmed Ali' }], dms_project: [{ value: 'PRJ-1', label: 'DMS-001 - Tower A' }] }, today: TODAY };
+}
 const content = t => t.$('[data-ref="content"]').innerText();
 const kpisIn = async t => (await t.$('[data-ref="content"] .dms-kpis').first().locator('.dms-kpi-n').allInnerTexts()).map(s => s.replace(/\s+/g, ' ').trim());
 const rowsIn = async (t, id) => +((await t.$('[data-tbl="' + id + '"]').innerText()).match(/([\d,]+) (?:rows?|records?)\b/)[1].replace(/,/g, ''));
 async function filter(t, k, v) { await t.$('[data-v="filters"]').click(); await t.$('select[data-fd="' + k + '"]').selectOption(v); await t.$('[data-act="fapply"]').click(); await t.idle(); }
 run({
-  slug: 'technical-dept', folder: '06. Technical & Projects/Technical Department', build,
+  slug: 'technical-dept', folder: '06. Technical & Projects/Technical Department', build, methods: { dms_technical_dashboard_data: a => dmsApi(a) },
   figures: async (t, H) => {
     H.assert.deepEqual(await Promise.all([0, 1, 2, 3, 4, 5, 6, 7, 8].map(i => t.kpiVal(i))), ['6', '3', '2', '30%', '2', 'Ahmed Ali', '3', '2', '2']); H.ok('KPIs: 6 submittals, 3 approvals, 2 PQs (cancelled excluded); achievement 30% (Metabase rule); top performer; pending / under approval / rejected');
     H.assert.match(await content(t), /Conversion 50%/); H.ok('conversion 50%');
     const ch = t.log.find(x => x.a.doctype === 'Submittal Request table'); H.assert.equal(ch.a.parent, 'Submittal Request'); H.ok('child rows read from the child table with its parent');
-    H.assert.equal((await t.$('[data-act="pending"] b').innerText()).trim(), '4'); H.ok('pending = 4');
+    H.assert.equal((await t.$('[data-act="pending"] b').innerText()).trim(), '6'); H.ok('pending = 4 + DMS due within 2 days 1 + DMS under review > 14 days 1 = 6');
     await t.$('[data-ref="content"] .dms-kpi[data-v="st:REJECTED"]').click(); await t.$('.dms-modal').waitFor(); await t.idle(); H.assert.match(await t.$('.dms-modal').innerText(), /\(2\)/); await t.page.keyboard.press('Escape'); H.ok('"Rejected / not approved" lists both statuses');
   },
   interactions: async (t, H) => {
@@ -45,11 +55,22 @@ run({
     await t.$('[data-act="tab"][data-v="subs"]').click(); await t.idle(); H.assert.equal(await rowsIn(t, 'sub'), 6);
     await filter(t, 'sp', 'Sara Noor'); H.assert.equal(await rowsIn(t, 'sub'), 2); H.ok('salesperson filter');
     await t.$('.dms-chip-x').first().click(); await t.idle();
-    await t.$('[data-act="tab"][data-v="dms"]').click(); await t.idle(); H.assert.deepEqual(await kpisIn(t), ['3', '2', '1', '1']); H.ok('DMS: 3 total, 2 active, 1 overdue, 1 approved');
+    await t.$('[data-act="tab"][data-v="dms"]').click(); await t.idle(); H.assert.equal((await kpisIn(t))[0], '4'); H.assert.equal(await rowsIn(t, 't_ds_action'), 2); H.ok('DMS Technical tab: API status cards (4) and Action Required (2)');
+    await t.$('[data-ref="content"] .dms-kpi[data-v="dstf:Under Review"]').click(); await t.idle(); H.assert.equal(t.log.filter(x => x.method === 'dms_technical_dashboard_data').pop().a.status, 'Under Review'); H.ok('a DMS status card filters the DMS API');
+    await t.$('select[data-dsf="priority"]').selectOption('Urgent'); await t.idle(); H.assert.equal(t.log.filter(x => x.method === 'dms_technical_dashboard_data').pop().a.priority, 'Urgent'); H.ok('DMS tab filters go to the API');
+    await t.$('select[data-dsf="priority"]').selectOption(''); await t.$('[data-ref="content"] .dms-kpi[data-v="dstf:Under Review"]').click(); await t.idle();
+    await t.$('[data-act="dssub"][data-v="review"]').click(); await t.idle(); H.assert.equal(await rowsIn(t, 't_ds_review'), 1);
+    await t.$('[data-act="dssub"][data-v="all"]').click(); await t.idle(); H.assert.equal(await rowsIn(t, 'dms'), 3); H.ok('DMS sub-lists: Under Review 1; All submittals 3 (every readable DMS submittal)');
     await t.$('[data-act="tab"][data-v="locprod"]').click(); await t.idle(); H.assert.equal(await rowsIn(t, 'loc'), 3); H.ok('location table');
     t.ctl.fail = a => a.doctype === 'DMS Technical Submittal'; await t.$('[data-ref="refresh"]').click(); await t.idle();
     await t.$('[data-act="tab"][data-v="dms"]').click(); await t.idle(); H.assert.match(await content(t), /Source unavailable[\s\S]*DMS Technical Submittal/);
     await t.$('[data-act="tab"][data-v="subs"]').click(); await t.idle(); H.assert.equal(await rowsIn(t, 'sub'), 6); H.ok('a DMS permission failure is isolated');
     t.ctl.fail = () => false; await t.$('[data-ref="refresh"]').click(); await t.idle();
+    /* a user who can read only DMS data (e.g. DMS Sales Dashboard Access) sees the DMS tab and Actions pending */
+    const CC = ['Submittal Request', 'Submittal Request table', 'Approvals', 'Approvals child table', 'Pre - Qualification Submittals'];
+    t.ctl.fail = a => CC.includes(a.doctype); await t.$('[data-ref="refresh"]').click(); await t.idle(); await t.idle();
+    H.assert.deepEqual(await t.$('.dms-tab').evaluateAll(b => b.map(x => x.getAttribute('data-v'))), ['dms', 'actions']); H.assert.doesNotMatch(await t.$('[data-ref="sheet"]').innerText(), /No permission for/); H.ok('DMS-only user: just the DMS tab and Actions pending, no permission banner');
+    t.ctl.fail = () => false; await t.$('[data-ref="refresh"]').click(); await t.idle();
+    H.assert.ok((await t.$('.dms-tab').count()) > 2); H.ok('full access again after reload');
   }
 });

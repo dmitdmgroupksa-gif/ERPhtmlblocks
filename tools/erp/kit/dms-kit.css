@@ -332,6 +332,8 @@ button.dms-acat:hover { background: var(--dms-raised); color: var(--dms-ink); }
 /* ---------- Tables ---------- */
 .dms-toolbar { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 8px; }
 .dms-toolbar .dms-input { max-width: 260px; }
+.dms-toolbar .dms-facet { width: auto; min-width: 0; max-width: 210px; padding-inline-end: 4px; text-overflow: ellipsis; }
+.dms-facet-on { border-color: var(--dms-royal); background: var(--dms-royal-soft); }
 .dms-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .dms-field label { font-size: 12px; font-weight: 500; color: var(--dms-ink2); }
 .dms-input { width: 100%; height: 34px; border: 1px solid var(--dms-line-2); border-radius: var(--dms-r-sm); padding: 0 10px; font-size: 13px; background: var(--dms-card); color: var(--dms-ink); }
@@ -461,6 +463,7 @@ button.dms-split-row:hover .dms-split-l bdi { text-decoration: underline; color:
   .dms-fun > div { grid-template-columns: minmax(90px, 36%) minmax(30px, 1fr) 44px 34px; }
   .dms-chart { grid-template-rows: 170px auto; }
   .dms-toolbar .dms-input { max-width: none; }
+  .dms-toolbar .dms-facet { flex: 1 1 140px; }
 }
 @container dms (max-width: 560px) {   /* 2-up cards: value gets the full width; the change/status chip moves beside the context line */
   .dms-ov-kpis .dms-kpi { display: grid; grid-template-columns: auto minmax(0, 1fr); align-content: start; column-gap: 6px; }

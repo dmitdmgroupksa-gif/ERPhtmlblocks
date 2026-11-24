@@ -29,6 +29,8 @@ v2 moves v1 (the Admin & HR Platforms Expiry Dashboard) onto the shared DM kit. 
   - CR and National Address for every company that isn't cancelled;
   - MISA for parent companies;
   - Iqama, passport, medical insurance and contract for Active employees.
+  - Exception (22 Nov 2026): Saudi nationals (`custom_nationality`) have open-ended contracts. With no contract expiry recorded, the contract shows today + 60 days, 60 days remaining and "Valid · Open-ended". The date moves forward daily and is never counted as missing.
+- **IT subscriptions (22 Nov 2026):** IT Renewals Subscription records appear on the Government Platforms tab only if they name a government platform (Qiwa, Muqeem, GOSI, Mudad, Chamber, Balady and similar). All other records are on the IT Subscriptions tab.
 - **Inactive records:** hidden unless the filter includes them. These are cancelled CRs, employees who aren't Active, Closed facility contracts and cancelled renewals.
 - **Double counting:** a lease end equal to the rent date is counted once.
 - **Also kept:** the platform coverage check, the company summary, the priority list, and every label in the v1 EN/AR dictionary (reused as is).

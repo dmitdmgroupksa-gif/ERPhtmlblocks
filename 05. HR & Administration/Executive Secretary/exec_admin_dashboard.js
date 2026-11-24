@@ -55,6 +55,11 @@
 		'Some sections could not load: {0}': 'تعذّر تحميل بعض الأقسام: {0}', 'Try again': 'حاول مرة أخرى',
 		'Showing {0} of {1}': 'عرض {0} من {1}', 'SAR': 'ر.س', 'Open in ERPNext': 'فتح في النظام',
 		'requests': 'الطلبات', 'renewals': 'التجديدات', 'register': 'المراسلات', 'rent': 'الإيجارات', 'visitors': 'الزوار',
+		'Approvals': 'الاعتمادات', 'Pending approvals': 'اعتمادات معلقة', 'approvals': 'الاعتمادات', '{0} waiting over {1} days': '{0} بانتظار أكثر من {1} أيام', 'None waiting over {0} days': 'لا شيء ينتظر أكثر من {0} أيام',
+		'Approvals pending': 'الاعتمادات المعلقة', 'From the Approvals Pending page · purchase-order items excluded': 'من صفحة الاعتمادات المعلقة · باستثناء أوامر الشراء', '{0} documents': '{0} مستند',
+		'Document': 'المستند', 'Waiting': 'الانتظار', 'Waiting since': 'بانتظار منذ', 'Card': 'البطاقة', 'All cards': 'كل البطاقات', 'All document types': 'كل أنواع المستندات', 'Waiting over {0} days': 'بانتظار أكثر من {0} أيام',
+		'Search document, person or stage': 'ابحث عن مستند أو شخص أو مرحلة', 'Copy reminder': 'نسخ التذكير', 'Reminder copied': 'تم نسخ التذكير', 'Nothing waiting': 'لا شيء بانتظار الاعتماد', 'No approvals are pending.': 'لا توجد اعتمادات معلقة.',
+		'{0} d since last update': '{0} يوم منذ آخر تحديث', 'Could not load this card': 'تعذر تحميل هذه البطاقة', 'All': 'الكل', 'Pending': 'معلق',
 	};
 	const T = (s, ...a) => {
 		let out = s;
@@ -129,9 +134,9 @@
 
 	// ------------------------------------------------------------ state
 	const S = { tab: store.get('esd_tab', 'overview'), data: null, err: '', loading: false, at: null,
-		f: { rq: '', rtype: '', rbranch: '', rstage: '', nq: '', ncat: '', nwin: '', cq: '', ckind: '', cst: '', fq: '', vq: '' } };
+		f: { rq: '', rtype: '', rbranch: '', rstage: '', nq: '', ncat: '', nwin: '', cq: '', ckind: '', cst: '', fq: '', vq: '', aq: '', acard: '', adt: '', aold: '' } };
 	let $root = null, mo = null, timer = null;
-	const TABS = [['overview', 'Overview', 'home'], ['requests', 'Requests', 'clip'], ['renewals', 'Renewals', 'cal'],
+	const TABS = [['overview', 'Overview', 'home'], ['approvals', 'Approvals', 'check'], ['requests', 'Requests', 'clip'], ['renewals', 'Renewals', 'cal'],
 		['register', 'Correspondence', 'mail'], ['rent', 'Facilities & Rent', 'bldg'], ['visitors', 'Visitors', 'users']];
 
 	function themeWatch(el) {
@@ -186,7 +191,10 @@
 			if (t.dataset.go) { if (t.dataset.preset) Object.assign(S.f, JSON.parse(t.dataset.preset)); return switchTab(t.dataset.go); }
 			if (t.dataset.a === 'lang') { store.set(LANG_KEY, LANG === 'ar' ? 'en' : 'ar'); LANG = LANG === 'ar' ? 'en' : 'ar'; return build(); }
 			if (t.dataset.a === 'refresh') return load();
+			if (t.dataset.a === 'apcard') { S.f.acard = S.f.acard === t.dataset.v ? '' : t.dataset.v; return paintBody(); }
+			if (t.dataset.a === 'remind') return copyReminder();
 		});
+		['keydown', 'keypress', 'keyup'].forEach((type) => $root.addEventListener(type, (e) => { const n = e.composedPath ? e.composedPath()[0] : e.target; if (n && (/^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName) || n.isContentEditable)) e.stopPropagation(); }));
 		$root.addEventListener('input', (e) => { const k = e.target.dataset.f; if (k && e.target.tagName !== 'SELECT') { S.f[k] = e.target.value; paintBody(true); } });
 		$root.addEventListener('change', (e) => { const k = e.target.dataset.f; if (k && e.target.tagName === 'SELECT') { S.f[k] = e.target.value; paintBody(true); } });
 	}
@@ -230,7 +238,9 @@
 		const rentOver = rent.filter((r) => r.days < 0).length;
 		const rentAmt = rent.reduce((s, r) => s + (r.amount || 0), 0);
 		const visToday = vis.filter((v) => v.today).length;
-		return { c, req, ren, reg, rent, vis, reqOver, renDue, renExp, sign, toFile, rentOver, rentAmt, visToday, overdue: reqOver + renExp + rentOver };
+		const ap = Array.isArray(d.approvals) ? { cards: [], items: [] } : (d.approvals || { cards: [], items: [] });
+		const apOld = (ap.items || []).filter((r) => r.overdue).length;
+		return { ap, apOld, c, req, ren, reg, rent, vis, reqOver, renDue, renExp, sign, toFile, rentOver, rentAmt, visToday, overdue: reqOver + renExp + rentOver };
 	}
 
 	function paint() {
@@ -252,7 +262,7 @@
 		const warn = $root.querySelector('.esd-warn');
 		warn.hidden = !errs.length;
 		warn.textContent = errs.length ? T('Some sections could not load: {0}', errs.map((k) => T(k) + ' (' + d.errors[k] + ')').join(' · ')) : '';
-		const cnt = { requests: s.req.length, renewals: s.renDue + s.renExp, register: s.sign, rent: s.rent.length, visitors: s.visToday };
+		const cnt = { approvals: (s.ap.items || []).length, requests: s.req.length, renewals: s.renDue + s.renExp, register: s.sign, rent: s.rent.length, visitors: s.visToday };
 		$root.querySelectorAll('.esd-cnt').forEach((el) => { const n = cnt[el.dataset.c]; el.hidden = !n; el.textContent = n || ''; });
 		paintKpis(s);
 		paintBody();
@@ -262,6 +272,7 @@
 		const k = (tone, icon, label, value, sub, go, preset) => `<button type="button" class="esd-kpi esd-card ${tone}" data-go="${go}"${preset ? ` data-preset='${esc(JSON.stringify(preset))}'` : ''}>
 			<span class="esd-kpi-i">${ico(icon)}</span><span class="esd-kpi-t"><span class="esd-kpi-l">${esc(label)}</span><span class="esd-kpi-s">${esc(sub)}</span></span><span class="esd-kpi-v">${esc(value)}</span></button>`;
 		$root.querySelector('.esd-kpis').innerHTML = [
+			k(s.apOld ? 'red' : 'violet', 'check', T('Pending approvals'), (s.ap.items || []).length, s.apOld ? T('{0} waiting over {1} days', s.apOld, s.c.approvals_overdue_days || 3) : T('None waiting over {0} days', s.c.approvals_overdue_days || 3), 'approvals', { acard: '', aold: '' }),
 			k('blue', 'clip', T('Open admin requests'), s.req.length, s.reqOver ? T('{0} older than {1} days', s.reqOver, s.c.overdue_days) : T('All within {0} days', s.c.overdue_days), 'requests', { rstage: '' }),
 			k('amber', 'cal', T('Renewals due in {0} days', s.c.due_days), s.renDue, s.renExp ? T('{0} already expired', s.renExp) : T('None expired'), 'renewals', { nwin: 'due' }),
 			k('violet', 'pen', T('Pending signatures'), s.sign, T('Letters & memos'), 'register', { cst: 'sign' }),
@@ -272,11 +283,11 @@
 
 	function paintBody(keepFocus) {
 		const body = $root.querySelector('.esd-body');
-		const active = document.activeElement;
+		const active = (ROOT && ROOT.activeElement) || document.activeElement;   // inside the block's shadow root, document.activeElement is the host, not the search box
 		const focusKey = keepFocus && active && body.contains(active) ? active.dataset.f : null;
 		const caret = focusKey && active.selectionStart != null ? active.selectionStart : null;
 		const s = stats();
-		const view = { overview: viewOverview, requests: viewRequests, renewals: viewRenewals, register: viewRegister, rent: viewRent, visitors: viewVisitors }[S.tab] || viewOverview;
+		const view = { overview: viewOverview, approvals: viewApprovals, requests: viewRequests, renewals: viewRenewals, register: viewRegister, rent: viewRent, visitors: viewVisitors }[S.tab] || viewOverview;
 		body.innerHTML = `<div class="esd-pane">${view(s)}</div>`;
 		if (focusKey) {
 			const el = body.querySelector(`[data-f="${focusKey}"]`);
@@ -333,12 +344,56 @@
 		const ren = s.ren.slice(0, N);
 		const reg = s.reg.slice().sort((a, b) => (b.pending_signature - a.pending_signature) || (a.date < b.date ? 1 : -1)).slice(0, N);
 		const rent = s.rent.slice(0, N);
-		return `<div class="esd-grid">
+		const ap = (s.ap.items || []).slice(0, N);
+		return `${card('check', T('Approvals pending'), T('{0} documents', (s.ap.items || []).length), ap.length ? table([['Document'], ['Requested by'], ['Waiting'], ['Stage']], ap.map((r) => apRow(r, true))) : empty(T('Nothing waiting'), T('No approvals are pending.'), true), 'approvals', 'esd-ap-ov')}
+		<div class="esd-grid">
 			${card('clip', T('Admin action queue'), T('{0} open', s.req.length), req.length ? table([['Request'], ['Requested by'], ['Date'], ['Age'], ['Stage']], req.map((r) => reqRow(r, true))) : empty(T('Nothing open'), T('No admin requests are waiting.'), true), 'requests')}
 			${card('cal', T('Renewals & expiry'), T('{0} listed', s.ren.length), ren.length ? table([['Item'], ['Expiry'], ['Status']], ren.map((r) => renRow(r, s.c.due_days, true))) : empty(T('Nothing due'), T('No renewals in the next {0} days.', s.c.horizon_days), true), 'renewals')}
 			${card('mail', T('Correspondence register'), T('{0} awaiting filing', s.toFile), reg.length ? table([['Reference'], ['Subject'], ['Date'], ['Status']], reg.map((r) => regRow(r, true))) : empty(T('No correspondence'), T('No letters or memos in the last {0} days.', s.c.register_days)), 'register')}
 			${card('bldg', T('Rent & facility follow-ups'), T('{0} unpaid', s.rent.length), rent.length ? table([['Facility'], ['Landlord'], ['Due'], ['Amount', 'n'], ['Status']], rent.map((r) => rentRow(r, true))) : empty(T('All rent paid'), T('No unpaid instalments in the next {0} days.', s.c.rent_days), true), 'rent')}
 		</div>`;
+	}
+
+	const apAge = (r) => `<span class="esd-age${r.overdue ? ' bad' : ''}" title="${esc(T('{0} d since last update', r.waiting))}">${esc(T('{0} d', r.waiting))}</span>`;
+	const apRow = (r, short) => `<tr data-dt="${esc(r.doctype)}" data-dn="${esc(r.name)}">
+		${td(T('Document'), `<b class="esd-1">${esc(r.title)}</b><small>${open(r.doctype, r.name)} · ${esc(T(r.doctype))}${r.type && !short ? ' · ' + esc(T(r.type)) : ''}</small>`)}
+		${td(T('Requested by'), esc(r.by || '—'))}
+		${short ? '' : td(T('Card'), (r.cards || []).map((c) => badge('grey', c)).join(' '))}
+		${short ? '' : td(T('Date'), esc(fdate(r.date)), 'nw')}
+		${td(T('Waiting'), apAge(r), 'nw')}
+		${td(T('Stage'), badge(r.overdue ? 'red' : 'amber', T(r.state || 'Pending')))}
+		${short ? '' : td(T('Amount'), r.amount ? money(r.amount) : '—', 'n')}</tr>`;
+	function apRows(s) {
+		const f = S.f, days = s.c.approvals_overdue_days || 3;
+		return (s.ap.items || []).filter((r) => (!f.acard || (r.cards || []).includes(f.acard)) && (!f.adt || r.doctype === f.adt) && (!f.aold || r.overdue)
+			&& hit(f.aq, r.name, r.title, r.by, r.state, r.type, r.doctype, (r.cards || []).join(' '))).sort((a, b) => b.waiting - a.waiting);
+	}
+	function reminderText(s, rows) {
+		const cards = (s.ap.cards || []).filter((c) => c.count);
+		const lines = [T('Pending approvals') + ' — ' + fdate(S.data.today), ''];
+		cards.forEach((c) => lines.push('• ' + c.label + ': ' + c.count));
+		lines.push('', T('Waiting') + ':');
+		rows.slice(0, 20).forEach((r, i) => lines.push((i + 1) + '. ' + r.title + ' (' + r.name + ') — ' + (r.state || T('Pending')) + ' — ' + T('{0} d', r.waiting) + (r.by ? ' — ' + r.by : '')));
+		if (rows.length > 20) lines.push('… +' + (rows.length - 20));
+		return lines.join('\n');
+	}
+	function copyReminder() {
+		const s = stats(), txt = reminderText(s, apRows(s));
+		const done = () => { if (frappe.show_alert) frappe.show_alert({ message: T('Reminder copied'), indicator: 'green' }); };
+		if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done, () => { if (frappe.utils && frappe.utils.copy_to_clipboard) frappe.utils.copy_to_clipboard(txt); });
+		else if (frappe.utils && frappe.utils.copy_to_clipboard) frappe.utils.copy_to_clipboard(txt);
+	}
+	function viewApprovals(s) {
+		const f = S.f, days = s.c.approvals_overdue_days || 3, all = s.ap.items || [];
+		const rows = apRows(s);
+		const chips = `<div class="esd-tools esd-ap-cards">${(s.ap.cards || []).map((c) => `<button type="button" class="esd-chip ${f.acard === c.label ? 'on' : ''}${c.error ? ' err' : ''}" data-a="apcard" data-v="${esc(c.label)}" title="${esc(c.error ? T('Could not load this card') + ': ' + c.error : c.doctype)}">${esc(c.label)} <b>${c.error ? '!' : c.count}</b></button>`).join('')}</div>`;
+		const tools = `<div class="esd-tools">${search('aq', 'Search document, person or stage')}
+			<select class="esd-sel" data-f="acard">${opts((s.ap.cards || []).filter((c) => c.count).map((c) => [c.label, c.label]), f.acard, 'All cards')}</select>
+			<select class="esd-sel" data-f="adt">${opts(uniq(all.map((r) => r.doctype)), f.adt, 'All document types')}</select>
+			<select class="esd-sel" data-f="aold"><option value="">${esc(T('All'))}</option><option value="1"${f.aold ? ' selected' : ''}>${esc(T('Waiting over {0} days', days))}</option></select>
+			<button type="button" class="esd-btn esd-btn-sm" data-a="remind">${esc(T('Copy reminder'))}</button></div>`;
+		const inner = rows.length ? table([['Document'], ['Requested by'], ['Card'], ['Date'], ['Waiting'], ['Stage'], ['Amount', 'n']], rows.map((r) => apRow(r))) : all.length ? empty(T('No matches'), T('Try another search or filter.')) : empty(T('Nothing waiting'), T('No approvals are pending.'), true);
+		return card('check', T('Approvals pending'), T('From the Approvals Pending page · purchase-order items excluded'), chips + tools + inner + foot(rows.length, all.length), '', 'full');
 	}
 
 	function viewRequests(s) {

@@ -336,6 +336,8 @@ button.dms-acat:hover { background: var(--dms-raised); color: var(--dms-ink); }
 /* ---------- Tables ---------- */
 .dms-toolbar { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 8px; }
 .dms-toolbar .dms-input { max-width: 260px; }
+.dms-toolbar .dms-facet { width: auto; min-width: 0; max-width: 210px; padding-inline-end: 4px; text-overflow: ellipsis; }
+.dms-facet-on { border-color: var(--dms-royal); background: var(--dms-royal-soft); }
 .dms-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .dms-field label { font-size: 12px; font-weight: 500; color: var(--dms-ink2); }
 .dms-input { width: 100%; height: 34px; border: 1px solid var(--dms-line-2); border-radius: var(--dms-r-sm); padding: 0 10px; font-size: 13px; background: var(--dms-card); color: var(--dms-ink); }
@@ -465,6 +467,7 @@ button.dms-split-row:hover .dms-split-l bdi { text-decoration: underline; color:
   .dms-fun > div { grid-template-columns: minmax(90px, 36%) minmax(30px, 1fr) 44px 34px; }
   .dms-chart { grid-template-rows: 170px auto; }
   .dms-toolbar .dms-input { max-width: none; }
+  .dms-toolbar .dms-facet { flex: 1 1 140px; }
 }
 @container dms (max-width: 560px) {   /* 2-up cards: value gets the full width; the change/status chip moves beside the context line */
   .dms-ov-kpis .dms-kpi { display: grid; grid-template-columns: auto minmax(0, 1fr); align-content: start; column-gap: 6px; }
@@ -501,3 +504,10 @@ button.dms-split-row:hover .dms-split-l bdi { text-decoration: underline; color:
 .ah-preset { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; }
 .dms-kpi-n:has(.dms-sm) { white-space: normal; }
 .ah-mini th, .ah-mini td { padding-inline: 10px; }
+/* KPI cards: never more than two rows on a desktop-width dashboard (columns = half the cards, rounded up). */
+@container dms (min-width: 761px) {
+  .dms-kpis:has(> :nth-child(7):last-child), .dms-kpis:has(> :nth-child(8):last-child) { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .dms-kpis:has(> :nth-child(9):last-child), .dms-kpis:has(> :nth-child(10):last-child) { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .dms-kpis:has(> :nth-child(11):last-child), .dms-kpis:has(> :nth-child(12):last-child) { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .dms-kpis:has(> :nth-child(13):last-child), .dms-kpis:has(> :nth-child(14):last-child) { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+}

@@ -1,4 +1,4 @@
-# DN & GRN Tracker
+# GDN & GRN Tracker
 
 ERP Custom HTML Block: `DN & GRN Tracker Dashboard`
 
@@ -75,3 +75,16 @@ All fields were checked against the ERP map, including `custom_division`, `sales
 No custom API Server Script matched literal method references. This block may use standard Frappe APIs; dynamically constructed calls require separate inspection.
 
 Sources are copied exactly. Server matches include transitive API references. Shared scripts are copied into each dashboard that references them; changes to shared APIs should be kept consistent across these copies.
+
+## 2026-11-22 · v3: GDN / GRN split by Sales Order and Sales Invoice link
+
+- Heading renamed to **GDN & GRN Tracker** (the ERP block name is unchanged).
+- **Delivery notes tab** shows GDN and GRN documents linked to a Sales Order or Sales Invoice only:
+  - Delivery Notes with header `sales_order` or `sales_invoice_data` set, or referenced by a Sales Invoice line;
+  - plus Purchase Receipts with an item-level `sales_order` (own table, "Goods receipts linked to a Sales Order").
+- **Goods receipts tab** shows Purchase Receipts without a Sales Order link, plus Delivery Notes with no Sales Order or Sales Invoice link (own table).
+- Overview cards and the tab cards follow the same split. Charts, warehouses and reports stay by document type.
+- On the live data (2026 to date): 97 unlinked delivery notes moved to Goods receipts, 16 SO-linked receipts moved to Delivery notes.
+- Backup of the previous version in ERPNext: Custom HTML Block `DN & GRN Tracker Dashboard BACKUP 2026-11-22 pre-GDN-split`.
+- Table export is now a PDF on the DM letterhead (all kit dashboards).
+
