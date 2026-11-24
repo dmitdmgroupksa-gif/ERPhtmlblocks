@@ -33,6 +33,10 @@
     'Employee Lifecycle':'دورة حياة الموظف','New joiners':'منضمون جدد','This month':'هذا الشهر','Probation':'فترة التجربة','No reliable data':'لا بيانات موثوقة','In progress':'قيد التنفيذ','Active':'نشط','On roll':'على القوائم','Leavers':'المغادرون','Last 12 months':'آخر 12 شهراً','Probation data is not reliable.':'بيانات فترة التجربة غير موثوقة.',
     'Training & Development':'التدريب والتطوير','Training records are not readable with your permissions.':'سجلات التدريب غير مقروءة بصلاحياتك.','Completed':'مكتمل','Open, not yet due':'مفتوح، لم يحن موعده','Overdue':'متأخر','completion':'الإتمام','Assignments':'التكليفات','Employees not assigned':'موظفون بلا تكليف','Employee Training Progress':'تقدم تدريب الموظفين',
     'HR Analytics Snapshot':'لمحة تحليلات الموارد البشرية','Saudization (provisional)':'السعودة (مؤقتة)','Saudization cannot be calculated for this filter.':'لا يمكن حساب السعودة لهذه التصفية.','Gender':'الجنس','Largest departments (active headcount)':'أكبر الأقسام (عدد الموظفين النشطين)','Saudi':'سعودي',
+    'Forms & Reports':'النماذج والتقارير','HR forms':'نماذج الموارد البشرية','Attendance & leave reports':'تقارير الحضور والإجازات','Employee reports':'تقارير الموظفين','This month':'هذا الشهر',
+    'Appointment letters':'خطابات التعيين','Onboardings':'التوظيف (الإلحاق)','Separations':'إنهاء الخدمة','Work anniversaries':'ذكرى التعيين السنوية',
+    'Appointment letters this month':'خطابات التعيين هذا الشهر','Onboardings this month':'التوظيف هذا الشهر','Separations this month':'إنهاء الخدمة هذا الشهر','Work anniversaries this month':'ذكرى التعيين هذا الشهر',
+    'Disabled in ERP':'معطّل في النظام','Open the ERP forms and reports from the former HR Dash Board workspace.':'افتح نماذج وتقارير النظام التي كانت في مساحة عمل لوحة الموارد البشرية السابقة.',
     'Expired':'منتهية','Due in 30 days':'تستحق خلال 30 يوماً','Due in 31–60 days':'تستحق خلال 31–60 يوماً','Due ≤30d':'≤30 يوماً','Document':'المستند','≤30d':'≤30ي','31–60d':'31–60ي','Status':'الحالة','OK':'سليم','Counts only. Document numbers are never shown here.':'أعداد فقط. لا تُعرض أرقام المستندات هنا.',
     'HR Requests / Employee Relations':'طلبات الموارد البشرية / علاقات الموظفين','Open requests':'الطلبات المفتوحة','Oldest open (days)':'أقدم مفتوح (بالأيام)','Types readable':'أنواع مقروءة','Request type':'نوع الطلب','Request Type':'نوع الطلب','Oldest':'الأقدم','Clear\u200b':'خالٍ','Counts and ages only — no request contents':'أعداد وأعمار فقط — دون محتوى الطلبات',
     'HR Operations Summary':'ملخص عمليات الموارد البشرية','Top data-quality issues':'أهم مشكلات جودة البيانات','Issue':'المشكلة','No data-quality issues found.':'لم تُعثر مشكلات في جودة البيانات.','high':'عالية','medium':'متوسطة','low':'منخفضة','High':'عالية','Medium':'متوسطة','Low':'منخفضة','Severity':'الخطورة',
@@ -164,7 +168,7 @@
   var APP = {
     key: '__dmsAdminHR',
     period: 'custom',
-    tabs: [['overview', 'Overview'], ['employees', 'Employees'], ['attendance', 'Attendance'], ['leave', 'Leave'], ['compliance', 'Documents & Compliance'], ['requests', 'HR Requests'], ['training', 'Training'], ['analytics', 'HR Analytics']].map(function (x) { return { id: x[0], en: x[1], ar: arT(x[1]) }; }).concat([{ id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }]),
+    tabs: [['overview', 'Overview'], ['employees', 'Employees'], ['attendance', 'Attendance'], ['leave', 'Leave'], ['compliance', 'Documents & Compliance'], ['requests', 'HR Requests'], ['training', 'Training'], ['analytics', 'HR Analytics'], ['links', 'Forms & Reports']].map(function (x) { return { id: x[0], en: x[1], ar: arT(x[1]) }; }).concat([{ id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }]),
     filters: [
       { k: 'company', en: 'Company', ar: 'الشركة', none: ['Default company', 'الشركة الافتراضية'], options: function () { return FO.companies || []; } },
       { k: 'department', en: 'Department', ar: 'القسم', none: ['All departments', 'كل الأقسام'], options: function () { return FO.departments || []; } },
@@ -181,7 +185,7 @@
     onTab: function (id) { loadTab(id); },
     actions: function () { return actModel(actSpecs(), 'act', actClient()); },
     banner: function () { var d = D.ov; return d && d.meta.errors && d.meta.errors.length ? alertBox('warn', esc(L('Not readable with your permissions') + ': ' + d.meta.errors.map(function (e) { return e.doctype || e; }).join(', '))) : ''; },
-    content: function (x, AM) { return ({ overview: vOverview, employees: vEmployees, attendance: vAttendance, leave: vMod, compliance: vMod, requests: vMod, training: vMod, analytics: vAnalytics, actions: vActions })[x](AM, x); },
+    content: function (x, AM) { return ({ overview: vOverview, employees: vEmployees, attendance: vAttendance, leave: vMod, compliance: vMod, requests: vMod, training: vMod, analytics: vAnalytics, links: vLinks, actions: vActions })[x](AM, x); },
     drill: function (id) { return drill(id); },
     onAct: function (a, v) { return onAct(a, v); }
   };
@@ -1413,6 +1417,8 @@
       kpi({ label: L('Leavers (12 months)'), val: nv(e.leavers_12m) }),
       kpi({ label: L('Linked to ERPNext user'), val: nv(e.with_user), sub: e.active != null && e.with_user != null ? esc(L((e.active - e.with_user) + ' without user_id')) : '', act: dr('nu', 'Employees without ERPNext user', 'dq_missing_user') })
     ]);
+    var tm = e.this_month;
+    if (tm) { h += panel(L('This month'), facts([['Appointment letters', nv(tm.appointment_letters), '', det && tm.appointment_letters ? rowsDrill('tma', 'Appointment letters this month', R('tm_appointment'), 'Appointment Letter') : null], ['Onboardings', nv(tm.onboardings), '', det && tm.onboardings ? rowsDrill('tmo', 'Onboardings this month', R('tm_onboarding'), 'Employee Onboarding') : null], ['Separations', nv(tm.separations), '', det && tm.separations ? rowsDrill('tms', 'Separations this month', R('tm_separation'), 'Employee Separation') : null], ['Work anniversaries', nv(tm.anniversaries), '', det && tm.anniversaries ? rowsDrill('tmy', 'Work anniversaries this month', R('tm_anniversary')) : null]]), '', tm.from + ' → ' + tm.to); }
     h += two(panel(L('Headcount by department'), bars(e.by_department, 'count')), panel(L('Headcount by branch'), bars(e.by_branch, 'count')));
     h += two(panel(L('Headcount by job location'), bars(e.by_location, 'count')), panel(L('Headcount by designation'), bars(e.by_designation, 'count')));
     h += two(panel(L('Employment type'), bars(e.by_employment_type, 'count')), panel(L('Gender'), bars(e.by_gender, 'count')));
@@ -1456,6 +1462,27 @@
   }
 
   /* ============================================================ analytics (main API) */
+  /* ============================================================ forms & reports (the shortcuts of the retired "HR Dash Board" workspace) */
+  var LINKS = [
+    ['HR forms', [['d', 'Employee Checkin', 'Employee Checkin', 'تسجيل حضور الموظف'], ['d', 'Leave Request Form', 'Leave Request Form', 'نموذج طلب إجازة'], ['d', 'Employee Feedback Records', 'Employee Feedback', 'ملاحظات على الموظف'],
+      ['d', 'Employee Evaluation', 'Employee Evaluation', 'تقييم الموظف'], ['d', 'NDA Form', 'NDA Form', 'اتفاقية السرية'], ['d', 'Code Of Conduct And Ethics Form', 'Code of Conduct', 'مدونة السلوك والأخلاقيات'],
+      ['d', 'Resignation Letter', 'Resignation Letter', 'خطاب الاستقالة'], ['d', 'Attendance Register', 'Attendance Register', 'سجل الحضور'], ['d', 'Qiwa Establishment Monthly', 'Qiwa Establishment Monthly', 'قوى - المنشأة الشهري']]],
+    ['Attendance & leave reports', [['r', 'Daily Attendance Report', 'Daily Attendance Report', 'تقرير الحضور اليومي'], ['r', 'Monthly Attendance Card', 'Monthly Attendance Card', 'تقرير الحضور الشهري'],
+      ['r', 'Monthly Attendance Deduction  Report', 'Monthly Attendance Deduction Report', 'خصم الحضور الشهري'], ['r', 'Leaves Report', 'Leaves Report', 'تقرير الإجازات'],
+      ['r', 'Employee Leave balance Report', 'Employee Leave Balance Report', 'تقرير رصيد إجازات الموظف'], ['r', 'Employees Vacation History Report', 'Employees Vacation History', 'سجل إجازات الموظفين']]],
+    ['Employee reports', [['r', 'Employee Under Probation Period', 'Employees Under Probation', 'الموظفون تحت فترة التجربة'], ['r', 'Employee Aniversary Report', 'Employee Anniversary Report', 'تقرير الذكرى السنوية للموظف'],
+      ['r', 'Job Offer to Employee Mapping Report', 'Job Offer to Employee Mapping', 'ربط عرض العمل بالموظف'], ['x', 'Employee Without Contracts', 'Employees Without Contracts', 'موظف بدون عقد'],
+      ['x', 'Active Employees with No Job Offer Report', 'Active Employees with No Job Offer', 'موظف نشط بدون عرض عمل'], ['x', 'DM Employee List', 'DM Employee List', 'قائمة موظفي DM']]]];
+  function linkUrl(k, n) { var s = G.frappe && frappe.router && frappe.router.slug ? frappe.router.slug(n) : n.toLowerCase().replace(/ /g, '-'); return k === 'd' ? '/app/' + s : '/app/query-report/' + encodeURIComponent(n); }
+  function vLinks() {
+    return alertBox('info', esc(L('Open the ERP forms and reports from the former HR Dash Board workspace.'))) + LINKS.map(function (g) {
+      return panel(L(g[0]), '<div class="ah-links">' + g[1].map(function (x) {
+        var lbl = LANG === 'ar' ? x[3] : x[2], sub = LANG === 'ar' ? x[2] : x[3];
+        if (x[0] === 'x') { return '<div class="ah-link ah-link-off" title="' + esc(x[1]) + '"><b>' + bdi(lbl) + '</b><span class="dms-sm">' + esc(L('Disabled in ERP')) + '</span></div>'; }
+        return '<a class="ah-link" href="' + esc(linkUrl(x[0], x[1])) + '" title="' + esc(x[1]) + '"><b>' + bdi(lbl) + '</b><span class="dms-sm" dir="auto">' + esc(sub) + '</span></a>';
+      }).join('') + '</div>');
+    }).join('');
+  }
   function vAnalytics() {
     if (D.ovErr) { return srcErr(D.ovErr, 'admin_hr_dashboard_data'); } if (!D.ov) { return skel(1, 'dms-skel-panel'); }
     var d = D.ov, an = d.analytics || {}, sz = an.saudization || {}, mv = an.movement || [], to = an.turnover || [];
@@ -1498,7 +1525,7 @@
     if (id.indexOf('emp:') === 0 && EDET) { return { title: EDET.m && EDET.m.basic ? EDET.m.basic.employee_name + ' · ' + EDET.id : EDET.id, sub: L('Employee details'), link: ['Employee', EDET.id, EDET.id], body: empBody(), ah: 'emp' }; }
     if (id.indexOf('rows:') === 0) {
       var x = DRL[id.slice(5)]; if (!x) { return null; }
-      return { title: L(x.title), sub: num(x.rows.length) + ' ' + L('records'), spec: { rows: x.rows, file: id.slice(5), facets: fcRows(x.rows, ROWF), text: function (r) { return [r.employee, r.employee_name, r.department].join(' '); }, cols: [{ h: L('Employee'), r: function (r) { var n = r.leave_application || r.employee; return n ? docLink(r.leave_application ? 'Leave Application' : 'Employee', n, r.employee_name || n) : '—'; }, c: function (r) { return r.employee; } }, { h: L('Department'), r: function (r) { return bdi(r.department || '—'); }, c: function (r) { return r.department; } }, { h: L('Detail'), r: function (r) { return '<span class="dms-sm">' + esc([r.status, r.first_punch, r.late_by_min != null ? r.late_by_min + ' min' : '', r.documents, r.leave_type, r.from_date && r.to_date ? r.from_date + ' → ' + r.to_date : '', r.missing, r.absence_basis ? L(r.absence_basis) : '', r.nationality].filter(Boolean).join(' · ')) + '</span>'; }, c: function (r) { return r.status || ''; } }] } };
+      return { title: L(x.title), sub: num(x.rows.length) + ' ' + L('records'), spec: { rows: x.rows, file: id.slice(5), facets: fcRows(x.rows, ROWF), text: function (r) { return [r.employee, r.employee_name, r.department].join(' '); }, cols: [{ h: L('Employee'), r: function (r) { if (r.doc_dt && r.doc_name) { return docLink(r.doc_dt, r.doc_name, r.employee_name || r.doc_name); } var n = r.leave_application || r.employee; return n ? docLink(r.leave_application ? 'Leave Application' : 'Employee', n, r.employee_name || n) : '—'; }, c: function (r) { return r.employee; } }, { h: L('Department'), r: function (r) { return bdi(r.department || '—'); }, c: function (r) { return r.department; } }, { h: L('Detail'), r: function (r) { return '<span class="dms-sm">' + esc([r.status, r.first_punch, r.late_by_min != null ? r.late_by_min + ' min' : '', r.documents, r.leave_type, r.from_date && r.to_date ? r.from_date + ' → ' + r.to_date : '', r.missing, r.absence_basis ? L(r.absence_basis) : '', r.nationality, r.detail].filter(Boolean).join(' · ')) + '</span>'; }, c: function (r) { return r.status || ''; } }] } };
     }
     if (id.indexOf('cli:') === 0) {
       var k = id.slice(4), cc = actClient(), y = cc && typeof cc === 'object' && cc[k], s = actSpecs().filter(function (z) { return z.id === k; })[0]; if (!y || !s || !y.rows) { return null; }

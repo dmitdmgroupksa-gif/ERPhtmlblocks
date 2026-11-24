@@ -511,3 +511,10 @@ button.dms-split-row:hover .dms-split-l bdi { text-decoration: underline; color:
   .dms-kpis:has(> :nth-child(11):last-child), .dms-kpis:has(> :nth-child(12):last-child) { grid-template-columns: repeat(6, minmax(0, 1fr)); }
   .dms-kpis:has(> :nth-child(13):last-child), .dms-kpis:has(> :nth-child(14):last-child) { grid-template-columns: repeat(7, minmax(0, 1fr)); }
 }
+
+/* Forms & Reports tab (shortcuts of the retired HR Dash Board workspace) */
+.ah-links { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.ah-link { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--dms-line); border-radius: var(--dms-r-sm); background: var(--dms-card); color: var(--dms-ink); text-decoration: none; min-width: 0; }
+.ah-link b { font-weight: 600; overflow-wrap: anywhere; }
+a.ah-link:hover, a.ah-link:focus-visible { border-color: var(--dms-royal); background: var(--dms-royal-soft); color: var(--dms-royal-ink); text-decoration: none; }
+.ah-link-off { opacity: .6; }

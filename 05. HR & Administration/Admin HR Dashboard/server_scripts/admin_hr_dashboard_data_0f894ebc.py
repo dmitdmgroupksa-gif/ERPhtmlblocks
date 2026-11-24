@@ -806,6 +806,42 @@ for e in emps:
 exp_emp_rows = sorted(exp_emp_rows, key=lambda x: x["soonest_days"])
 month_prefix = today_s[:7]
 joined_month_rows = [erow(e, {"date_of_joining": str(e.get("date_of_joining"))}) for e in emps if str(e.get("date_of_joining") or "")[:7] == month_prefix]
+# ---------------- this month (taken over from the retired "HR Dash Board" workspace number cards) ----------------
+# Appointment letters (appointment_date), onboardings and separations (boarding_begins_on) in the current month for the
+# selected company, cancelled documents excluded; work anniversaries = active employees (current filters) who joined
+# in this calendar month of an earlier year.
+m_from = str(U.get_first_day(today))
+m_to = str(U.get_last_day(today))
+
+
+def month_docs(doctype, date_field, fields):
+    return fetch(doctype, [[date_field, ">=", m_from], [date_field, "<=", m_to], ["company", "=", company], ["docstatus", "<", 2]],
+                 fields, date_field + " asc", ERRORS)
+
+
+tm_appt = month_docs("Appointment Letter", "appointment_date", ["name", "applicant_name", "appointment_date"])
+tm_onb = month_docs("Employee Onboarding", "boarding_begins_on", ["name", "employee", "employee_name", "boarding_begins_on", "boarding_status"])
+tm_sep = month_docs("Employee Separation", "boarding_begins_on", ["name", "employee", "employee_name", "boarding_begins_on", "boarding_status"])
+tm_anniv = []
+for e in emps:
+    dj = str(e.get("date_of_joining") or "")
+    if len(dj) >= 10 and dj[5:7] == today_s[5:7] and dj[:4] < today_s[:4]:
+        yrs = int(today_s[:4]) - int(dj[:4])
+        tm_anniv.append(erow(e, {"date_of_joining": dj, "anniversary": today_s[:4] + dj[4:10], "years": yrs,
+                                 "detail": str(yrs) + (" year" if yrs == 1 else " years") + " on " + today_s[:4] + dj[4:10]}))
+tm_anniv = sorted(tm_anniv, key=lambda x: x["anniversary"])
+
+
+def tm_rows(rows, dt, date_field, name_field):
+    return [{"doc_dt": dt, "doc_name": r.get("name"), "employee": r.get("employee"), "employee_name": r.get(name_field),
+             "detail": " · ".join([x for x in [str(r.get(date_field) or ""), r.get("boarding_status") or ""] if x])} for r in (rows or [])]
+
+
+this_month = {"from": m_from, "to": m_to,
+              "appointment_letters": None if tm_appt is None else len(tm_appt),
+              "onboardings": None if tm_onb is None else len(tm_onb),
+              "separations": None if tm_sep is None else len(tm_sep),
+              "anniversaries": len(tm_anniv)}
 d90_ago = str(U.add_days(today, -90))
 recent_joiners = [e for e in emps if e.get("date_of_joining") and str(e.get("date_of_joining")) >= d90_ago]
 status_distribution = groupc([{"status": "Active"} for e in emps] + left, "status")  # base query is status=Active
@@ -817,6 +853,10 @@ if detail:
     ROWS["nationality_missing"] = [erow(e, {}) for e in nat_missing_rows]
     ROWS["expiring_employees"] = exp_emp_rows
     ROWS["joined_month"] = joined_month_rows
+    ROWS["tm_appointment"] = tm_rows(tm_appt, "Appointment Letter", "appointment_date", "applicant_name")
+    ROWS["tm_onboarding"] = tm_rows(tm_onb, "Employee Onboarding", "boarding_begins_on", "employee_name")
+    ROWS["tm_separation"] = tm_rows(tm_sep, "Employee Separation", "boarding_begins_on", "employee_name")
+    ROWS["tm_anniversary"] = tm_anniv
 
 result = {
     "meta": {"generated_at": str(U.now_datetime())[:19], "date": today_s, "company": company,
@@ -831,7 +871,7 @@ result = {
         "by_location": groupc(emps, "custom_job_location"), "by_designation": groupc(emps, "designation")[:15],
         "by_employment_type": groupc(emps, "employment_type"), "by_gender": groupc(emps, "gender"),
         "departments_count": len(dept_set), "saudi": len(saudi), "non_saudi": len(non_saudi), "nationality_missing": len(nat_missing_rows),
-        "expiring_employees": len(exp_emp_rows), "status_distribution": status_distribution, "probation": probation_info,
+        "expiring_employees": len(exp_emp_rows), "status_distribution": status_distribution, "probation": probation_info, "this_month": this_month,
         "joining_trend": [{"label": m["month"], "count": m["joiners"]} for m in movement],
     },
     "attendance": {
