@@ -148,6 +148,16 @@ def status_of(v):
     return ["valid", d]
 
 
+# Saudi nationals have open-ended contracts: with no contract expiry recorded, the contract runs to today + 60 days
+# (moves forward daily), shows 60 days remaining and counts as valid, not missing.
+OPEN_ENDED_DAYS = 60
+SAUDI_NAMES = ["saudi", "saudi arabia", "saudi arabian", "المملكة العربية السعودية", "السعودية", "سعودي"]
+
+
+def is_saudi(e):
+    return str(e.get("custom_nationality") or "").strip().lower() in SAUDI_NAMES
+
+
 def yr(v):
     return int(str(v)[:4]) if v else None
 
@@ -155,13 +165,19 @@ def yr(v):
 def build_docs(emps):
     out = []
     for e in emps:
-        saudi = e.get("custom_nationality") == "Saudi Arabia"
+        saudi = is_saudi(e)
         for dd in DOCS:
             key = dd[0]
             v = e.get(dd[2])
             v2 = e.get(dd[3]) if dd[3] else None
+            open_ended = 0
+            label = None
             if key == "passport" and saudi and not v:
                 st = ["not_required", None]
+            elif key == "contract" and saudi and not v and not v2:
+                st = ["valid", OPEN_ENDED_DAYS]
+                open_ended = 1
+                label = "Valid · Open-ended"
             else:
                 st = status_of(v)
             conflicts = []
@@ -189,8 +205,9 @@ def build_docs(emps):
                     unusual.append("Passport expiry more than 10 years ahead")
             out.append({"employee": e.get("name"), "employee_name": e.get("employee_name"), "company": e.get("company"),
                         "department": e.get("department"), "branch": e.get("branch"), "job_location": e.get("custom_job_location"),
-                        "doc": key, "document": dd[1], "expiry_date": str(v) if v else "", "days": st[1], "status": st[0],
-                        "status_label": STATUS_LABEL[st[0]], "conflict": "; ".join(conflicts), "unusual": "; ".join(unusual),
+                        "doc": key, "document": dd[1], "days": st[1], "status": st[0], "open_ended": open_ended,
+                        "expiry_date": str(U.add_days(today, OPEN_ENDED_DAYS)) if open_ended else (str(v) if v else ""),
+                        "status_label": label or STATUS_LABEL[st[0]], "conflict": "; ".join(conflicts), "unusual": "; ".join(unusual),
                         "attached": 1 if e.get(dd[4]) else 0})
     return out
 
@@ -325,8 +342,8 @@ if mode == "summary":
     kpis = [
         kpi("active", "Total Active Employees", len(emps), len(emps), str(len(req)) + " required documents tracked (" + str(len(docs) - len(req)) + " Saudi passports not required)",
             "Employee.status = Active in the selected company.", None, "employees"),
-        kpi("valid", "Valid Documents", cnt(req, ["valid"]), ecnt(req, ["valid"]), "more than 90 days remaining",
-            "Primary expiry date more than 90 days after today.", "st_valid", "documents"),
+        kpi("valid", "Valid Documents", cnt(req, ["valid"]), ecnt(req, ["valid"]), "more than 90 days remaining, or Saudi open-ended contract",
+            "Primary expiry date more than 90 days after today. Saudi contracts with no expiry recorded are open-ended (today + 60 days) and count as valid.", "st_valid", "documents"),
         kpi("expired", "Expired Documents", cnt(req, ["expired"]), ecnt(req, ["expired"]), "expiry date before today",
             "Primary expiry date earlier than today.", "st_expired", "documents"),
         kpi("d30", "Expiring Within 30 Days", cnt(req, ["due_30"]), ecnt(req, ["due_30"]), "0–30 days (today counts as due, not expired)",
@@ -367,7 +384,7 @@ if mode == "summary":
     for m in months:
         row = {"month": m}
         for dd in DOCS:
-            row[dd[0]] = len([r for r in req if r["doc"] == dd[0] and r["expiry_date"][:7] == m and r["status"] != "expired"])
+            row[dd[0]] = len([r for r in req if r["doc"] == dd[0] and r["expiry_date"][:7] == m and r["status"] != "expired" and not r["open_ended"]])
         fc.append(row)
 
     def group(field):
@@ -434,7 +451,7 @@ if mode == "summary":
            "kpis": kpis, "identity": identity, "categories": cats, "analytics": analytics, "dq": dq, "alerts": alerts, "notifications": notifications,
            "rules": {"buckets": "expired <0 · ≤30 = 0–30 · 31–60 · 61–90 · valid >90 days (from the primary date only)",
                      "passport": "Primary passport_expiry_date; valid_upto only compared. Saudi nationals: passport not required.",
-                     "contract": "Primary agreement_expiry_date (Qiwa); contract_end_date only compared.",
+                     "contract": "Primary agreement_expiry_date (Qiwa); contract_end_date only compared. Saudi nationals with no contract date: open-ended, shown as today + 60 days, 60 days remaining, Valid · Open-ended.",
                      "insurance": "Primary insurance_expiry_date; insurance_status only compared.",
                      "iqama": "expiry_date (Iqama for non-Saudi, Saudi ID for Saudi)."}}
     if detail:

@@ -1,7 +1,7 @@
 /* ===== DM Group KSA — Admin & HR Platforms Expiry Dashboard — SCRIPT field · v2 =====
    Moves v1 onto the DM dashboard standard. Client-side only and read-only: permission-checked get_list / get_count.
-   Kept from v1 unchanged: the four sources (DM Companies Management, DM Facilities Management, Employee, IT Renewals
-   Subscription) and the fields read from each, one item per document expiry field, the status buckets (expired, 0–7,
+   Kept from v1: the sources (DM Companies Management, DM Facilities Management, IT Renewals Subscription; employee
+   document expiries moved to the Admin HR Dashboard on 24 Nov 2026) and the fields read from each, one item per document expiry field, the status buckets (expired, 0–7,
    8–30, 31–60, 61–90, > 90 days, not recorded), the "missing" rule (required slots only), inactive records hidden unless
    asked for, the lease / rent double-count guard, the platform coverage check, every label and the EN/AR dictionary.
    The shared runtime between the "DMS kit" markers is generated from tools/erp/kit/dms-kit.js (edit the kit, not the copy). */
@@ -28,8 +28,8 @@
       empty: 'No records match the current filters.', emptySrc: 'No records found in this source.', err_src: 'Source unavailable', err_perm: 'permission denied for your user', err_tech: 'technical error while reading', err_timeout: 'no response within 10 seconds - press Refresh to retry', err_partial: 'Counts may be incomplete: the number of rows read did not match the ERP record count for',
       nextRenewal: 'Next renewal', basis: 'Status is calculated from the expiry date recorded in ERP.',
       inactiveTag: 'Inactive / cancelled', hidden_inactive: 'record(s) hidden because they are inactive/cancelled (cancelled CR, non-Active employee, Closed facility contract, cancelled renewal).',
-      missingRule: 'Missing = a required slot with no date: CR and National Address for every non-cancelled company, MISA for parent companies, and Iqama / Passport / Medical insurance / Contract for Active employees. Optional facility permits are not counted as missing.',
-      platRegister: 'Platform coverage in ERP', platTracked: 'Tracked', platNone: 'No expiry record in ERP', platInCompany: 'Tracked per company (Company Documents tab)', platInHR: 'Qiwa contract expiries are tracked in the HR tab',
+      missingRule: 'Missing = a required slot with no date: CR and National Address for every non-cancelled company, MISA for parent companies. Optional facility permits are not counted as missing.',
+      platRegister: 'Platform coverage in ERP', platTracked: 'Tracked', platNone: 'No expiry record in ERP', platInCompany: 'Tracked per company (Company Documents tab)', platInHR: 'Employee Qiwa contracts are tracked in the Admin HR Dashboard',
       cat_company: 'Company Documents', cat_facility: 'Facilities & Licences', cat_hr: 'HR & Employee', cat_platform: 'IT & Platform Subscriptions',
       t_cr: 'Commercial Registration', t_na: 'National Address', t_misa: 'MISA Licence',
       t_f_com: 'Commercial Licence', t_f_ind: 'Industrial Licence', t_f_fire: 'Fire Maintenance', t_f_na: 'National Address', t_f_rent: 'Rent / Lease Agreement', t_f_cd: 'Civil Defense', t_f_cr: 'Facility CR', t_f_clean: 'Cleaning Contract', t_f_cam: 'Camera Maintenance', t_f_env1: 'Construction Environmental Permit', t_f_env2: 'Operational Environmental Permit', t_f_lease: 'Lease Contract End',
@@ -62,8 +62,8 @@
       empty: 'لا توجد سجلات مطابقة للمرشحات الحالية.', emptySrc: 'لا توجد سجلات في هذا المصدر.', err_src: 'المصدر غير متاح', err_perm: 'لا تملك صلاحية القراءة', err_tech: 'خطأ تقني أثناء القراءة', err_timeout: 'لا توجد استجابة خلال 10 ثوانٍ - اضغط تحديث لإعادة المحاولة', err_partial: 'قد تكون الأعداد غير مكتملة: عدد الصفوف المقروءة لا يطابق عدد سجلات ERP لـ',
       nextRenewal: 'التجديد القادم', basis: 'الحالة محسوبة من تاريخ الانتهاء المسجل في ERP.',
       inactiveTag: 'غير نشط / ملغى', hidden_inactive: 'سجل مخفي لأنه غير نشط/ملغى (سجل تجاري ملغى، موظف غير نشط، عقد منشأة مغلق، تجديد ملغى).',
-      missingRule: 'غير مسجل = بند مطلوب بلا تاريخ: السجل التجاري والعنوان الوطني لكل شركة غير ملغاة، وترخيص الاستثمار للشركات الأم، والإقامة / الجواز / التأمين الطبي / العقد للموظفين النشطين. تصاريح المنشآت الاختيارية لا تُحتسب كغير مسجلة.',
-      platRegister: 'تغطية المنصات في النظام', platTracked: 'مُتابَع', platNone: 'لا يوجد سجل انتهاء في ERP', platInCompany: 'يُتابع لكل شركة (تبويب مستندات الشركات)', platInHR: 'تُتابع عقود قوى في تبويب الموارد البشرية',
+      missingRule: 'غير مسجل = بند مطلوب بلا تاريخ: السجل التجاري والعنوان الوطني لكل شركة غير ملغاة، وترخيص الاستثمار للشركات الأم. تصاريح المنشآت الاختيارية لا تُحتسب كغير مسجلة.',
+      platRegister: 'تغطية المنصات في النظام', platTracked: 'مُتابَع', platNone: 'لا يوجد سجل انتهاء في ERP', platInCompany: 'يُتابع لكل شركة (تبويب مستندات الشركات)', platInHR: 'تُتابع عقود قوى للموظفين في لوحة الموارد البشرية والإدارية',
       cat_company: 'مستندات الشركات', cat_facility: 'المنشآت والتراخيص', cat_hr: 'الموارد البشرية والموظفون', cat_platform: 'اشتراكات تقنية المعلومات والمنصات',
       t_cr: 'السجل التجاري', t_na: 'العنوان الوطني', t_misa: 'ترخيص وزارة الاستثمار (MISA)',
       t_f_com: 'الرخصة التجارية', t_f_ind: 'الرخصة الصناعية', t_f_fire: 'صيانة الحريق', t_f_na: 'العنوان الوطني', t_f_rent: 'عقد الإيجار / التأجير', t_f_cd: 'الدفاع المدني', t_f_cr: 'سجل المنشأة التجاري', t_f_clean: 'عقد النظافة', t_f_cam: 'صيانة الكاميرات', t_f_env1: 'التصريح البيئي الإنشائي', t_f_env2: 'التصريح البيئي التشغيلي', t_f_lease: 'نهاية عقد التأجير',
@@ -81,21 +81,20 @@
   var APP = {
     key: '__dmxExpiryDashboard',
     period: false,
-    tabs: [['overview', 'tab_overview'], ['platforms', 'tab_platforms'], ['it', 'tab_it'],['companies', 'tab_companies'], ['facilities', 'tab_facilities'], ['hr', 'tab_hr'], ['alerts', 'tab_alerts']].map(function (x) { return { id: x[0], en: T.en[x[1]], ar: T.ar[x[1]] }; }).concat([{ id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }]),
+    tabs: [['overview', 'tab_overview'], ['platforms', 'tab_platforms'], ['it', 'tab_it'],['companies', 'tab_companies'], ['facilities', 'tab_facilities'], ['alerts', 'tab_alerts']].map(function (x) { return { id: x[0], en: T.en[x[1]], ar: T.ar[x[1]] }; }).concat([{ id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }]),
     filters: [
       { k: 'company', en: T.en.f_company, ar: T.ar.f_company, options: function () { return uq(ITEMS.map(function (i) { return i.company; })); } },
       { k: 'category', en: T.en.f_category, ar: T.ar.f_category, options: function () { return Object.keys(CAT).map(function (s) { return { v: s, l: t(CAT[s]) }; }); } },
       { k: 'type', en: T.en.f_type, ar: T.ar.f_type, options: function () { var m = {}; ITEMS.forEach(function (i) { m[i.type] = typeLabel(i); }); return Object.keys(m).map(function (k) { return { v: k, l: m[k] }; }).sort(function (a, b) { return a.l.localeCompare(b.l); }); } },
       { k: 'status', en: T.en.f_status, ar: T.ar.f_status, options: function () { return STATUS.map(function (s) { return { v: s.key, l: t('pr_' + s.key) + ' — ' + t('st_' + s.key) }; }); } },
       { k: 'resp', en: T.en.f_responsible, ar: T.ar.f_responsible, options: function () { return uq(ITEMS.map(function (i) { return i.resp; })); } },
-      { k: 'dept', en: T.en.f_dept, ar: T.ar.f_dept, options: function () { return uq(ITEMS.map(function (i) { return i.dept; })); } },
       { k: 'branch', en: T.en.f_branch, ar: T.ar.f_branch, options: function () { return uq(ITEMS.map(function (i) { return i.branch; })); } },
       { k: 'inactive', en: 'Inactive / historical records', ar: 'السجلات غير النشطة / التاريخية', none: ['Hidden', 'مخفية'], options: function () { return [{ v: '1', l: t('inactive') }]; } },
       { k: 'from', en: T.en.f_from, ar: T.ar.f_from, type: 'date' },
       { k: 'to', en: T.en.f_to, ar: T.ar.f_to, type: 'date' },
       { k: 'q', en: T.en.f_search, ar: T.ar.f_search, type: 'text', ph: [T.en.search_ph, T.ar.search_ph] }
     ],
-    sources: ['company', 'facility', 'employee', 'platform'],
+    sources: ['company', 'facility', 'platform'],
     dtLabels: { 'DM Companies Management': ['Company document', 'مستند شركة'], 'DM Facilities Management': ['Facility', 'منشأة'], 'Employee': ['Employee', 'موظف'], 'IT Renewals Subscription': ['Subscription', 'اشتراك'] },
     title: function () { return t('title'); },
     stamp: function () { return tr('DM Group KSA · status from the expiry date recorded in ERP, as of today', 'مجموعة DM السعودية · الحالة من تاريخ الانتهاء المسجل في النظام حتى اليوم'); },
@@ -1130,11 +1129,9 @@
   var SOURCES = {
     company: { doctype: 'DM Companies Management', label: 'DM Companies Management', fields: ['name', 'company_name', 'type', 'location', 'cr_number', 'unified_number', 'riyadh_chamber', 'misa', 'cr_expiry', 'national_address_expiry', 'misa_expiry', 'cr_cancelled', 'cancellation_date'] },
     facility: { doctype: 'DM Facilities Management', label: 'DM Facilities Management', fields: ['name', 'facility_name', 'facility_detail', 'facility_type', 'facility_contract_status', 'building_no', 'location', 'company', 'contract_number', 'com_act_no', 'municipality', 'issued_authority', 'fire_contractor', 'cleaning_cont', 'camera_contractor', 'rentdate_to', 'lease_end', 'cd_date_to', 'cr_date_to', 'com_lic_exp', 'industrial_expiry', 'construction_environmental_permit_expiry', 'operational_environmental_permit_expiry', 'fire_expiry', 'cleanig_exp_date', 'camera_expiry', 'national_adress_expiry'] },
-    employee: { doctype: 'Employee', label: 'Employee', fields: ['name', 'employee_name', 'status', 'company', 'department', 'branch', 'designation', 'custom_job_location', 'custom_sponsor', 'custom_contract_type', 'custom_nationality', 'expiry_date', 'passport_expiry_date', 'insurance_expiry_date', 'agreement_expiry_date'] },
     platform: { doctype: 'IT Renewals Subscription', label: 'IT Renewals Subscription', fields: ['name', 'type_renewal', 'renewal_name', 'expiry_date', 'next_renewal', 'renewal_period', 'total_amount', 'currency', 'provider__source', 'responsible_person', 'remarks', 'docstatus'] }
   };
-  if (CFG1.includeLegacyContractEnd) { SOURCES.employee.fields.push('contract_end_date'); }
-  var CAT = { company: 'cat_company', facility: 'cat_facility', employee: 'cat_hr', platform: 'cat_platform' };
+  var CAT = { company: 'cat_company', facility: 'cat_facility', platform: 'cat_platform' };
   var CO_TYPES = [['cr', 'cr_expiry', 't_cr'], ['na', 'national_address_expiry', 't_na'], ['misa', 'misa_expiry', 't_misa']];
   var FAC_TYPES = [['f_com', 'com_lic_exp', 't_f_com'], ['f_ind', 'industrial_expiry', 't_f_ind'], ['f_fire', 'fire_expiry', 't_f_fire'], ['f_na', 'national_adress_expiry', 't_f_na'], ['f_rent', 'rentdate_to', 't_f_rent'], ['f_cd', 'cd_date_to', 't_f_cd'], ['f_cr', 'cr_date_to', 't_f_cr'], ['f_clean', 'cleanig_exp_date', 't_f_clean'], ['f_cam', 'camera_expiry', 't_f_cam'], ['f_env1', 'construction_environmental_permit_expiry', 't_f_env1'], ['f_env2', 'operational_environmental_permit_expiry', 't_f_env2'], ['f_lease', 'lease_end', 't_f_lease']];
   var EMP_TYPES = [['e_iqama', 'expiry_date', 't_e_iqama', true], ['e_contract', 'agreement_expiry_date', 't_e_contract', true], ['e_passport', 'passport_expiry_date', 't_e_passport', true], ['e_ins', 'insurance_expiry_date', 't_e_ins', true]];
@@ -1146,22 +1143,16 @@
     function push(o) { var id = o.doctype + '::' + o.rec.name + '::' + o.field; if (seen[id]) { return; } seen[id] = 1; var ok = o.date && /^\d{4}-\d{2}-\d{2}/.test(o.date); o.id = id; o.date = ok ? String(o.date).slice(0, 10) : null; o.days = ok ? diffDays(TODAY, o.date) : null; o.status = o.openEnded ? 'valid' : classify(o.days); items.push(o); }
     (D.company || []).forEach(function (r) { var inactive = r.cr_cancelled == 1; CO_TYPES.forEach(function (ty) { var d = r[ty[1]]; if (!d && (inactive || (ty[0] === 'misa' && r.type !== 'Company'))) { return; } push({ src: 'company', doctype: SOURCES.company.doctype, rec: r, field: ty[1], type: ty[0], typeKey: ty[2], entity: cln(r.company_name || r.name), company: cln(r.company_name || r.name), ref: ty[0] === 'cr' ? r.cr_number : (ty[0] === 'misa' ? r.misa : null), date: d, inactive: inactive, resp: null, remarks: null, dept: null, branch: r.location || null }); }); });
     (D.facility || []).forEach(function (r) { var inactive = r.facility_contract_status === 'Closed'; FAC_TYPES.forEach(function (ty) { var d = r[ty[1]]; if (!d) { return; } if (ty[0] === 'f_lease' && d === r.rentdate_to) { return; } push({ src: 'facility', doctype: SOURCES.facility.doctype, rec: r, field: ty[1], type: ty[0], typeKey: ty[2], entity: cln(r.facility_name || r.name), company: cln(r.company) || null, ref: r.com_act_no || r.contract_number || null, date: d, inactive: inactive, resp: null, remarks: null, dept: null, branch: r.location || null }); }); });
-    (D.employee || []).forEach(function (r) { var inactive = r.status !== 'Active'; EMP_TYPES.forEach(function (ty) { var d = r[ty[1]], oe = false; if (!d && (inactive || !ty[3])) { return; }
-      /* Saudi nationals have open-ended contracts: with no contract expiry recorded, the contract counts as running to today + 60 days (moves forward daily) and is valid, not missing. */
-      if (!d && !inactive && ty[0] === 'e_contract' && isSaudi(r)) { d = addDays(TODAY, OPEN_ENDED_DAYS); oe = true; }
-      push({ openEnded: oe, src: 'employee', doctype: SOURCES.employee.doctype, rec: r, field: ty[1], type: ty[0], typeKey: ty[2], entity: cln(r.employee_name || r.name), company: cln(r.company) || null, ref: null, date: d, inactive: inactive, resp: null, remarks: null, dept: r.department || null, branch: r.branch || null }); }); });
     (D.platform || []).forEach(function (r) { var inactive = r.docstatus === 2, tp = cln(r.type_renewal) || 'Other'; var d = r.expiry_date; if (!d && inactive) { return; } push({ src: 'platform', doctype: SOURCES.platform.doctype, rec: r, field: 'expiry_date', type: 'p:' + tp, typeKey: null, typeLabelRaw: tp, entity: cln(r.renewal_name || r.name), company: null, ref: r.provider__source || null, date: d, inactive: inactive, resp: r.responsible_person || null, remarks: r.remarks || null, dept: null, branch: null, nextRenewal: r.next_renewal || null }); });
     ITEMS = items;
   }
-  var OPEN_ENDED_DAYS = 60;
-  function isSaudi(r) { return /^(saudi|saudi arabia|saudi arabian|المملكة العربية السعودية|السعودية|سعودي)$/i.test(cln(r.custom_nationality)); }
   function typeLabel(it) { return it.typeKey ? t(it.typeKey) : it.typeLabelRaw; }
   function catLabel(it) { return t(CAT[it.src]); }
   /* IT Renewals Subscription holds both IT subscriptions (domains, hosting, software, telecom) and, when recorded there,
      government platform renewals. Only the latter belong on the Government Platforms tab; the rest have their own tab. */
   var GOV_RX = /qiwa|muqeem|muqim|gosi|mudad|chamber|balady|baladi|absher|nitaqat|zatca|etimad|tamm|ajeer|misa|saber|maras|government|ministry|حكوم|وزارة|قوى|مقيم|التأمينات|مدد|الغرفة|بلدي|أبشر/i;
   function isGov(i) { return GOV_RX.test(i.entity + ' ' + (i.typeLabelRaw || '') + ' ' + (i.ref || '')); }
-  var SCOPE = { overview: function () { return true; }, platforms: function (i) { return (i.src === 'platform' && isGov(i)) || i.src === 'company'; }, it: function (i) { return i.src === 'platform' && !isGov(i); }, companies: function (i) { return i.src === 'company'; }, facilities: function (i) { return i.src === 'facility'; }, hr: function (i) { return i.src === 'employee'; }, alerts: function () { return true; }, actions: function () { return true; } };
+  var SCOPE = { overview: function () { return true; }, platforms: function (i) { return (i.src === 'platform' && isGov(i)) || i.src === 'company'; }, it: function (i) { return i.src === 'platform' && !isGov(i); }, companies: function (i) { return i.src === 'company'; }, facilities: function (i) { return i.src === 'facility'; }, alerts: function () { return true; }, actions: function () { return true; } };
   function hpFilter(list, skip) {
     skip = skip || {}; var q = String(F.q || '').trim().toLowerCase();
     return list.filter(function (it) {
@@ -1202,7 +1193,7 @@
     ['a_missing', 'low', 'missing', 'Required expiry date not recorded', 'تاريخ انتهاء مطلوب غير مسجل', 'Record the expiry date in ERP', 'سجّل تاريخ الانتهاء في النظام']];
   function actSpecs() { return ACT.map(function (a) { return { id: a[0], client: true, short: tr(a[3], a[4]), title: tr(a[3], a[4]), why: tr(a[5], a[6]) }; }); }
   function actClient() {
-    if (!ready()) { return null; } var errs = Object.keys(SOURCES).filter(function (k) { return D[k + 'Err']; }); if (errs.length === 4) { return 'ERR:' + D[errs[0] + 'Err']; }
+    if (!ready()) { return null; } var errs = Object.keys(SOURCES).filter(function (k) { return D[k + 'Err']; }); if (errs.length === Object.keys(SOURCES).length) { return 'ERR:' + D[errs[0] + 'Err']; }
     var base = hpFilter(ITEMS, { status: true }), o = {};
     ACT.forEach(function (a) { o[a[0]] = { rows: base.filter(function (i) { return i.status === a[2]; }), item: function (i) { return { p: a[1], score: score(a[1], 0, i.days == null ? 0 : Math.max(0, -i.days)), dt: i.doctype, name: i.rec.name, title: i.entity, desc: typeLabel(i) + ' · ' + catLabel(i) + (i.date ? ' · ' + i.date : ''), who: i.resp || i.company || '', due: daysText(i.days), tone: a[1] === 'high' ? 'bad' : a[1] === 'med' ? 'warn' : 'n' }; } }; });
     return o;
@@ -1309,7 +1300,7 @@
     if (x === 'alerts') { return kpiRow(scoped(x, { status: true }), 'chipk:') + panel(t('tab_alerts'), itemsTable('t_alerts', list, 'alerts')) + noteHTML(x); }
     h += chips(scoped(x, { status: true }));
     if (x === 'platforms') { h += coverage(); }
-    if (x === 'companies' || x === 'facilities' || x === 'hr') { h += typeCards(list); }
+    if (x === 'companies' || x === 'facilities') { h += typeCards(list); }
     if (x === 'facilities') { h += panel(t('ch_types'), stackRows(list, function (i) { return i.type; }, function (k) { var f = list.filter(function (i) { return i.type === k; })[0]; return f ? typeLabel(f) : k; })); }
     return h + panel(t('tab_' + x), itemsTable('t_' + x, list, x)) + noteHTML(x);
   }

@@ -445,9 +445,19 @@ for emp in first_today:
         late_rows.append(erow(e, {"shift": shift, "first_punch": str(t)[11:16], "late_by_min": m - st_min - grace}))
 
 # ---------------- documents & compliance ----------------
+# Saudi nationals have open-ended contracts: with no contract expiry recorded, the contract runs to today + 60 days
+# (moves forward daily), shows 60 days remaining and counts as valid, not missing.
+OPEN_ENDED_DAYS = 60
+SAUDI_NAMES = ["saudi", "saudi arabia", "saudi arabian", "المملكة العربية السعودية", "السعودية", "سعودي"]
+
+
+def open_ended_contract(e):
+    return str(e.get("custom_nationality") or "").strip().lower() in SAUDI_NAMES and not e.get("agreement_expiry_date") and not e.get("contract_end_date")
+
+
 DOCS = [["iqama", "Iqama / ID", "expiry_date", None, "attach_iqama_copy", "Primary: expiry_date"],
         ["passport", "Passport", "passport_expiry_date", "valid_upto", "passport_copy", "Provisional: passport_expiry_date; compared with valid_upto"],
-        ["contract", "Contract", "agreement_expiry_date", "contract_end_date", "attch_contract_copy", "Primary: agreement_expiry_date; compared with contract_end_date"],
+        ["contract", "Contract", "agreement_expiry_date", "contract_end_date", "attch_contract_copy", "Primary: agreement_expiry_date; compared with contract_end_date. Saudi with no date: open-ended (today + 60 days), counted as valid"],
         ["insurance", "Medical insurance", "insurance_expiry_date", None, "attach_medical", "Primary: insurance_expiry_date; compared with insurance_status"]]
 compliance = []
 exp_total = 0
@@ -464,7 +474,9 @@ for dd in DOCS:
     for e in emps:
         v = e.get(dd[2])
         days = None
-        if not v:
+        if key == "contract" and open_ended_contract(e):
+            b["later"] = b["later"] + 1
+        elif not v:
             b["missing"] = b["missing"] + 1
             r_missing.append(erow(e, {"document": dd[1]}))
         else:

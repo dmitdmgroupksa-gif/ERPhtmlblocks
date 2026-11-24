@@ -1,14 +1,14 @@
 /* Browser test + screenshot QA for "05. HR & Administration/Admin & HR Platform" (v2 on the DM kit; Admin & HR Platforms
    Expiry Dashboard). v1's rules are kept: one item per expiry field, buckets expired / 0–7 / 8–30 / 31–60 / 61–90 / > 90 /
    not recorded, "missing" only for required slots, inactive records hidden unless asked for, lease = rent counted once.
-   Fixture (active items 18, inactive 4):
+   Employee document expiries are not part of this dashboard (they live in the Admin HR Dashboard); the Employee rows below
+   must be ignored. Fixture (active items 10, inactive 3):
    - companies: C1 (Company) CR in 5 d, National Address expired 3 d ago, MISA missing; C2 (DM - Branch) CR valid, National
      Address missing, no MISA slot; C3 cancelled (CR expired, hidden);
    - facilities: F1 commercial licence in 20 d, rent in 100 d with the same lease end (counted once), fire in 60 d; F2 Closed (hidden);
-   - employees: E1 Iqama expired 2 d ago, contract in 80 d, passport in 45 d, insurance missing; E2 insurance in 7 d, the rest
-     valid; E3 Left (hidden);
+   - employees: present in ERP but never read or shown;
    - subscriptions: Qiwa in 10 d; GOSI cancelled (hidden); Microsoft 365 with no expiry date (missing).
-   Status counts: expired 2, 0–7 d 2, 8–30 d 2, 31–60 d 2, 61–90 d 1, valid 5, not recorded 4. Pending = 2 + 2 + 2 + 4 = 10. */
+   Status counts: expired 1, 0–7 d 1, 8–30 d 2, 31–60 d 1, 61–90 d 0, valid 2, not recorded 3. Pending = 1 + 1 + 2 + 3 = 7. */
 const { run, TODAY, add } = require('./dms-harness.cjs');
 const d = n => add(TODAY, n);
 function build() {
@@ -37,21 +37,19 @@ async function filter(t, k, v) { await t.$('[data-v="filters"]').click(); await 
 run({
   slug: 'hr-platforms', folder: '05. HR & Administration/Admin & HR Platform', build,
   figures: async (t, H) => {
-    H.assert.deepEqual(await Promise.all([0, 1, 2, 3, 4, 5, 6, 7].map(i => t.kpiVal(i))), ['22', '2', '2', '2', '2', '1', '9', '4']); H.ok('status buckets: 22 active items (Saudi open-ended contract counted valid, not missing) (4 inactive hidden), lease = rent counted once');
-    H.assert.equal((await t.$('[data-act="pending"] b').innerText()).trim(), '10'); H.ok('pending = expired 2 + 0–7 d 2 + 8–30 d 2 + not recorded 4');
+    H.assert.deepEqual(await Promise.all([0, 1, 2, 3, 4, 5, 6, 7].map(i => t.kpiVal(i))), ['10', '1', '1', '2', '1', '0', '2', '3']); H.ok('status buckets: 10 active items, no employee documents (3 inactive hidden), lease = rent counted once');
+    H.assert.equal((await t.$('[data-act="pending"] b').innerText()).trim(), '7'); H.ok('pending = expired 1 + 0–7 d 1 + 8–30 d 2 + not recorded 3');
     const ov = await content(t); H.assert.match(ov, /Microsoft 365|Qiwa subscription/); H.assert.match(ov, /DM Trading[\s\S]*DM Branch Jeddah/); H.ok('priority list and company summary');
     await t.$('[data-ref="content"] .dms-kpi[data-v="st:expired"]').click(); await t.$('.dms-modal').waitFor(); await t.idle();
-    const m = await t.$('.dms-modal').innerText(); H.assert.match(m, /\(2\)/); H.assert.match(m, /Ali Hassan[\s\S]*DM Trading|DM Trading[\s\S]*Ali Hassan/); await t.page.keyboard.press('Escape'); H.ok('a status KPI opens its list');
+    const m = await t.$('.dms-modal').innerText(); H.assert.match(m, /\(1\)/); H.assert.match(m, /DM Trading/); H.assert.doesNotMatch(m, /Ali Hassan/); await t.page.keyboard.press('Escape'); H.ok('a status KPI opens its list');
   },
   interactions: async (t, H) => {
-    await t.$('[data-act="tab"][data-v="hr"]').click(); await t.idle();
-    H.assert.equal(await rowsIn(t, 't_hr'), 12); await t.$('.hp-chip[data-v="expired"]').click(); await t.idle(); H.assert.equal(await rowsIn(t, 't_hr'), 1); H.ok('HR tab: 12 employee items; the expired chip narrows to 1');
-    await t.$('.hp-chip[data-v="expired"]').click(); await t.idle();
-    const sa = (await t.$('[data-tbl="t_hr"] tr').filter({ hasText: 'Faisal Saud' }).filter({ hasText: 'Qiwa Contract' }).innerText()).replace(/\s+/g, ' ');
-    H.assert.match(sa, new RegExp(add(TODAY, 60) + '.* 60 days Valid · Open-ended')); H.ok('Saudi contract with no expiry: today + 60 days, 60 days left, Valid · Open-ended');
-    await t.$('[data-tbl="t_hr"] [data-v^="it:Employee::E1::expiry_date"]').click(); await t.$('.dms-modal').waitFor(); await t.idle();
-    const det = await t.$('.dms-modal').innerText(); H.assert.match(det, /Iqama[\s\S]*2 days overdue/); H.assert.match(det, /Passport/); H.ok('details: selected expiry first, other expiries of the record listed');
-    await t.page.keyboard.press('Escape');
+    H.assert.equal(await t.$('[data-act="tab"][data-v="hr"]').count(), 0); H.assert.doesNotMatch(await t.$('.dms-tabs, [role="tablist"]').first().innerText(), /HR & Employee/);
+    H.assert.doesNotMatch(await content(t), /Ali Hassan|Faisal Saud|Omar Saleh/); H.ok('no HR & Employee tab and no employee documents anywhere');
+    await t.$('[data-ref="content"] .dms-kpi[data-v="st:expired"]').click(); await t.$('.dms-modal').waitFor(); await t.idle();
+    await t.$('.dms-modal [data-v^="it:DM Companies Management::C1::national_address_expiry"]').click(); await t.idle();
+    const det = await t.$('.dms-modal').innerText(); H.assert.match(det, /National Address[\s\S]*3 days overdue/); H.assert.match(det, /Commercial Registration/); H.ok('details: selected expiry first, other expiries of the record listed');
+    await t.page.keyboard.press('Escape'); await t.page.keyboard.press('Escape');
     await t.$('[data-act="tab"][data-v="facilities"]').click(); await t.idle(); H.assert.equal(await rowsIn(t, 't_facilities'), 3); H.ok('facilities: closed facility hidden, lease end equal to rent not double counted');
     await t.$('[data-act="tab"][data-v="it"]').click(); await t.idle(); H.assert.equal(await rowsIn(t, 't_it'), 1);
     const itx = await content(t); H.assert.match(itx, /Microsoft 365/); H.assert.doesNotMatch(itx, /Qiwa subscription/); H.ok('IT Subscriptions tab: IT renewals that are not government platforms');
@@ -59,10 +57,10 @@ run({
     H.assert.doesNotMatch(await t.$('[data-tbl="t_platforms"]').innerText(), /Microsoft 365/); H.ok('Government Platforms: company documents + government renewals only (IT subscriptions excluded)');
     const pl = await content(t); H.assert.match(pl, /Qiwa\s*Tracked \(1\)/); H.assert.match(pl, /MISA\s*Tracked per company/); H.assert.match(pl, /Mudad\s*Not Configured/); H.ok('platform coverage chips (tracked, tracked per company, not configured)');
     await filter(t, 'inactive', '1');
-    await t.$('[data-act="tab"][data-v="overview"]').click(); await t.idle(); H.assert.equal(await t.kpiVal(0), '26'); H.ok('including inactive / historical records: 26');
+    await t.$('[data-act="tab"][data-v="overview"]').click(); await t.idle(); H.assert.equal(await t.kpiVal(0), '13'); H.ok('including inactive / historical records: 13');
     await t.$('.dms-chip-x').first().click(); await t.idle();
-    t.ctl.fail = a => a.doctype === 'Employee'; await t.$('[data-ref="refresh"]').click(); await t.idle();
-    H.assert.match(await t.$('[data-ref="banner"]').innerText(), /Source unavailable[\s\S]*Employee/); H.assert.equal(await t.kpiVal(0), '10'); H.ok('an Employee permission failure is reported and the other three sources still count');
+    t.ctl.fail = a => a.doctype === 'IT Renewals Subscription'; await t.$('[data-ref="refresh"]').click(); await t.idle();
+    H.assert.match(await t.$('[data-ref="banner"]').innerText(), /Source unavailable[\s\S]*IT Renewals Subscription/); H.assert.equal(await t.kpiVal(0), '8'); H.ok('a subscriptions permission failure is reported and the other two sources still count');
     t.ctl.fail = () => false; await t.$('[data-ref="refresh"]').click(); await t.idle();
   }
 });

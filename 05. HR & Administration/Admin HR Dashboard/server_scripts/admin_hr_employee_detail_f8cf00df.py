@@ -224,6 +224,16 @@ leave["balance_note"] = {"actual": "Allocation minus APPROVED leave only (submit
                          "unavailable": "Leave Allocation / Ledger not readable with your permissions."}[balance_state]
 
 # ---------------- documents & compliance (dates and status only; no numbers) ----------------
+# Saudi nationals have open-ended contracts: with no contract expiry recorded, the contract runs to today + 60 days
+# (moves forward daily), shows 60 days remaining and counts as valid, not missing.
+OPEN_ENDED_DAYS = 60
+SAUDI_NAMES = ["saudi", "saudi arabia", "saudi arabian", "المملكة العربية السعودية", "السعودية", "سعودي"]
+
+
+def open_ended_contract(e):
+    return str(e.get("custom_nationality") or "").strip().lower() in SAUDI_NAMES and not e.get("agreement_expiry_date") and not e.get("contract_end_date")
+
+
 def doc_status(v):
     if not v:
         return {"date": "", "days_left": None, "status": "missing"}
@@ -235,6 +245,8 @@ docs = []
 for spec in [["Iqama / ID", "expiry_date", None, "attach_iqama_copy"], ["Passport", "passport_expiry_date", "valid_upto", "passport_copy"],
              ["Contract", "agreement_expiry_date", "contract_end_date", "attch_contract_copy"], ["Medical insurance", "insurance_expiry_date", None, "attach_medical"]]:
     d = doc_status(e.get(spec[1]))
+    if spec[1] == "agreement_expiry_date" and open_ended_contract(e):
+        d = {"date": str(U.add_days(today, OPEN_ENDED_DAYS)), "days_left": OPEN_ENDED_DAYS, "status": "valid", "status_label": "Valid · Open-ended"}
     d["document"] = spec[0]
     d["attachment"] = "attached" if e.get(spec[3]) else "not attached"
     warn = ""
