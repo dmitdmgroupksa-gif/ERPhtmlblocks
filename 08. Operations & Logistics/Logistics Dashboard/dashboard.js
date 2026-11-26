@@ -12,7 +12,7 @@
     period: 'custom',
     tabs: [
       { id: 'overview', en: 'Overview', ar: 'نظرة عامة' }, { id: 'trips', en: 'Trips', ar: 'الرحلات' }, { id: 'map', en: 'Live map', ar: 'الخريطة المباشرة' },
-      { id: 'fleet', en: 'Vehicles & drivers', ar: 'المركبات والسائقون' }, { id: 'perf', en: 'Performance', ar: 'الأداء' }, { id: 'proc', en: 'Procurement', ar: 'المشتريات' }, { id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }
+      { id: 'fleet', en: 'Vehicles & drivers', ar: 'المركبات والسائقون' }, { id: 'perf', en: 'Performance', ar: 'الأداء' }, { id: 'proc', en: 'Procurement', ar: 'المشتريات' }, { id: 'links', en: 'Forms & reports', ar: 'النماذج والتقارير' }, { id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }
     ],
     filters: [
       { k: 'company', en: 'Company', ar: 'الشركة', options: function () { var m = {}; (D.trips || []).forEach(function (r) { if (r.company) { m[r.company] = 1; } }); ['po', 'mr', 'pr'].forEach(function (k) { ((D.proc || {})[k] || []).forEach(function (r) { if (r.company) { m[r.company] = 1; } }); }); return Object.keys(m).sort(); } },
@@ -38,7 +38,7 @@
     afterRender: function (c) { afterRender(c); },
     actions: function () { return actModel(actSpecs(), 'act', actClient()); },
     banner: function () { return banner(); },
-    content: function (t, AM) { return ({ overview: tabOverview, trips: tabTrips, map: tabMap, fleet: tabFleet, perf: tabPerf, proc: tabProc, actions: tabActions })[t](AM); },
+    content: function (t, AM) { return ({ overview: tabOverview, trips: tabTrips, map: tabMap, fleet: tabFleet, perf: tabPerf, proc: tabProc, links: tabLinks, actions: tabActions })[t](AM); },
     drill: function (id) { return drill(id); },
     onAct: function (a, v, n, id) { return onAct(a, v, n, id); }
   };
@@ -1588,6 +1588,16 @@
     if (a === 'map') { if (v === 'refresh') { LIVE.tried = {}; loadLive(false, 'all'); return true; } if (!LIVE.view) { return true; } if (v === 'in') { LIVE.view.z = Math.min(18, LIVE.view.z + 1); } if (v === 'out') { LIVE.view.z = Math.max(3, LIVE.view.z - 1); } if (v === 'fit') { LIVE.refit = true; } drawMap(); return true; }
     if (a === 'pin') { var p = v.split('|'), f = LIVE.pos[p[0]]; LIVE.sel = p[0]; if (p[1] === '1' && f) { LIVE.view = { lat: f.lat, lng: f.lng, z: Math.max(LIVE.view ? LIVE.view.z : 0, 14) }; } renderSoft(); return true; }
     return false;
+  }
+
+  /* Forms & reports: the shortcuts of the former "Dispatch & Logistics" workspace (each keeps its own ERP permissions). */
+  var LINKS = [['Delivery Note', 'Delivery notes', 'سندات التسليم', 'd'], ['Delivery Trip', 'Delivery trips', 'رحلات التسليم', 'd'],
+    ['Delivery Trip Time Tracker', 'Delivery Trip Time Tracker', 'متتبع وقت رحلات التسليم', 'r'], ['Delivery Status Report', 'Delivery Status Report', 'تقرير حالة التسليم', 'r']];
+  function tabLinks() {
+    return panel(tr('Forms & reports', 'النماذج والتقارير'), '<div class="dms-lc-links">' + LINKS.map(function (x) {
+      var href = x[3] === 'd' ? '/app/' + x[0].toLowerCase().replace(/ /g, '-') : '/app/query-report/' + encodeURIComponent(x[0]);
+      return '<a class="dms-link" href="' + href + '" target="_blank" rel="noopener noreferrer">' + esc(tr(x[1], x[2])) + ' ↗</a>';
+    }).join('') + '</div>') + note(esc(tr('From the former Dispatch & Logistics workspace. Each form and report keeps its own ERP permissions.', 'من مساحة عمل الإرسال والخدمات اللوجستية السابقة. يحتفظ كل نموذج وتقرير بصلاحياته في النظام.')));
   }
 
   start();

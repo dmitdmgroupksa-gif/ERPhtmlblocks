@@ -1490,6 +1490,12 @@
     if (det) {
       h += two(panel(L('Late check-ins'), tblRows('t_late', R('late'), [['employee_name', 'Employee', empBtn], ['department', 'Department'], ['shift', 'Shift'], ['first_punch', 'First punch'], ['late_by_min', 'Late (min)', null, 1]], 'late_checkins'), '', esc(L('First punch after shift start plus entry grace.'))),
         panel(L('Absent today'), p.available ? tblRows('t_abs', p.rows, [['employee_name', 'Employee', empBtn], ['department', 'Department'], ['absence_basis', 'Basis', function (r) { return '<span class="dms-sm">' + esc(L(r.absence_basis)) + '</span>'; }]], 'absent_today') : alertBox('warn', esc(L('Employee-level data required'))), '', esc(L('Approved leave & weekoffs excluded'))));
+      /* former Attendance Dashboard cards: absent today by department and by location, Saudi / non-Saudi split */
+      if (p.available && p.rows.length) {
+        var grp = function (key) { var m = {}; p.rows.forEach(function (r) { var k = r[key] || L('Not set'); m[k] = (m[k] || 0) + 1; }); return Object.keys(m).map(function (k) { return { label: k, value: m[k] }; }).sort(function (a, b) { return b.value - a.value; }); };
+        var sa = 0, ns = 0, nn = 0; p.rows.forEach(function (r) { var v = String(r.nationality || '').trim(); if (!v) { nn++; } else if (/^(saudi|saudi arabia|saudi arabian|المملكة العربية السعودية|السعودية|سعودي)$/i.test(v)) { sa++; } else { ns++; } });
+        h += two(panel(L('Absent today by department'), hbars(grp('department'), num)), panel(L('Absent today by location'), hbars(grp('job_location'), num), '', esc(L('Saudi') + ' ' + num(sa) + ' · ' + L('Non-Saudi') + ' ' + num(ns) + (nn ? ' · ' + L('nationality not recorded') + ' ' + num(nn) : ''))));
+      }
       if (R('att_period').length) { h += panel(L('Attendance by employee in the period'), tblRows('t_attp', R('att_period'), [['employee_name', 'Employee', empBtn], ['department', 'Department'], ['present_days', 'Present', null, 1], ['absent_days', 'Absent', null, 1], ['leave_days', 'Leave', null, 1], ['attendance_pct', 'Attendance %', function (r) { return r.attendance_pct == null ? '—' : '<span class="dms-num">' + pc(r.attendance_pct) + '</span>'; }, 1]], 'attendance_period')); }
     }
     return h;
