@@ -680,10 +680,40 @@
     return h + actionsPanel(AM);
   }
 
+  /* ---------- live cards: the count (or sum) an old Number Card showed, with that card's own filters, read under the
+     viewer's ERP permissions and linked to the ERP list with the same filters. Used to move number-card workspaces onto
+     dashboards without changing their figures. groups: [{ en, ar, cards: [{ en, ar, dt, f: [[field, op, value]], sum? }] }].
+     Loaded once per key (day + extra filters), cleared by Refresh. ---------- */
+  var LC = {};
+  function lcList(c, f) {
+    var q = f.map(function (x) { var v = x[1] === '=' ? x[2] : JSON.stringify([x[1], x[2]]); return encodeURIComponent(x[0]) + '=' + encodeURIComponent(v); }).join('&');
+    return '/app/' + String(c.dt).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + (q ? '?' + q : '');
+  }
+  function liveCards(id, groups, extra) {
+    var k = TODAY + '|' + JSON.stringify(extra || []), st = LC[id];
+    if (!st || st.key !== k) {
+      st = LC[id] = { key: k, v: {}, url: {} };
+      var mine = function () { return !destroyed && LC[id] === st; };
+      groups.forEach(function (g, gi) { g.cards.forEach(function (c, ci) {
+        var f = (c.f || []).concat(c.noExtra ? [] : (extra || [])), kk = gi + ':' + ci; st.url[kk] = lcList(c, f);
+        var p = c.sum ? getList({ doctype: c.dt, fields: ['sum(' + c.sum + ') as v'], filters: f, limit_page_length: 1 }, mine).then(function (r) { return +one(r).v || 0; }) : getCount(c.dt, f, mine);
+        p.then(function (n) { if (mine()) { st.v[kk] = n; soon(); } }, function (e) { if (mine()) { st.v[kk] = errKind(e) === 'perm' ? 'ERR:perm' : 'ERR'; soon(); } });
+      }); });
+    }
+    return groups.map(function (g, gi) {
+      return panel(tr(g.en, g.ar || g.en), '<div class="dms-grid dms-kpis dms-lc">' + g.cards.map(function (c, ci) {
+        var v = st.v[gi + ':' + ci], err = typeof v === 'string';
+        return kpi({ label: tr(c.en, c.ar || c.en), val: v === undefined ? '…' : err ? '—' : (c.sum ? cur$(v) : num(v)), sub: err ? esc(v === 'ERR:perm' ? tr('No permission', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : (c.sub ? esc(tr(c.sub[0], c.sub[1] || c.sub[0])) : ''),
+          act: err || v === undefined ? null : 'lc:' + id + ':' + gi + ':' + ci, tip: tr('Open the ERP list with these filters', 'افتح القائمة في النظام بهذه المرشحات') });
+      }).join('') + '</div>', 'dms-lc-g');
+    }).join('');
+  }
+
   /* ---------- drill-downs (overlay) ---------- */
   var OVL = null;
   function openDrill(id) {
     if (id.indexOf('goto:') === 0) { goTab(id.slice(5)); return; }
+    if (id.indexOf('lc:') === 0) { var lp = id.split(':'), ls = LC[lp[1]], lu = ls && ls.url[lp[2] + ':' + lp[3]]; if (lu) { try { G.open(lu, '_blank', 'noopener'); } catch (e) { /* blocked */ } } return; }
     var r = null;
     if (id.indexOf('srv:') === 0 && APP.actSpecs) {
       var s = APP.actSpecs().filter(function (x) { return x.id === id.slice(4); })[0];
@@ -877,7 +907,7 @@
   }
   /* Full reload (filters, refresh): new generation, empty store, tables back to page 1. */
   function reload() {
-    setToday(); PERIOD = curPeriod(); GEN++; D = {}; LOADED = STAMP;
+    setToday(); PERIOD = curPeriod(); GEN++; D = {}; LC = {}; LOADED = STAMP;
     Object.keys(SS).forEach(function (k) { SS[k].dirty = true; SS[k].page = 1; }); Object.keys(TS).forEach(function (k) { TS[k].page = 1; });
     APP.load(); ANIM = true; renderAll();
   }

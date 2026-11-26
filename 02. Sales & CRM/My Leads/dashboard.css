@@ -494,6 +494,10 @@ button.dms-split-row:hover .dms-split-l bdi { text-decoration: underline; color:
   .dms-root :is(input, select, textarea) { font-size: 16px; }
 }
 @media (prefers-reduced-motion: reduce) { .dms-root *, .dms-root *::before, .dms-root *::after { animation: none !important; transition: none !important; } }
+
+/* live cards (former number-card workspaces) */
+.dms-lc-links { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 16px; }
+.dms-lc-g .dms-kpis { margin: 0; }
 /* ==== end DMS kit ==== */
 
 /* ---------- My Leads local additions ---------- */

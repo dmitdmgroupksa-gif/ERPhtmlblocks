@@ -25,6 +25,12 @@ function cond(x, op, v) {
     case 'is': return v === 'set' ? nz(x) !== '' : nz(x) === '';
     case 'like': return new RegExp('^' + String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*') + '$', 'i').test(String(nz(x)));
     case 'not like': return !cond(x, 'like', v);
+    case 'Timespan': {   /* Frappe relative date ranges, against the fixed test day */
+      const y = TODAY.slice(0, 4), wd = new Date(TODAY + 'T00:00:00Z').getUTCDay(), ws = add(TODAY, -wd), ms = TODAY.slice(0, 8) + '01';
+      const R = { today: [TODAY, TODAY], yesterday: [add(TODAY, -1), add(TODAY, -1)], 'this week': [ws, add(ws, 6)], 'last week': [add(ws, -7), add(ws, -1)],
+        'this month': [ms, add(add(ms, 32).slice(0, 8) + '01', -1)], 'this year': [y + '-01-01', y + '-12-31'] }[v];
+      if (!R) { throw new Error('timespan ' + v); } return x != null && x !== '' && d(x) >= R[0] && d(x) <= R[1];
+    }
     default: throw new Error('op ' + op);
   }
 }

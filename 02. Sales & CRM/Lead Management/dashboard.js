@@ -11,7 +11,7 @@
     period: false,
     tabs: [
       { id: 'overview', en: 'Overview', ar: 'نظرة عامة' }, { id: 'leads', en: 'Leads', ar: 'العملاء المحتملون' }, { id: 'report', en: 'Detailed report', ar: 'التقرير التفصيلي' },
-      { id: 'followups', en: 'Follow-up monitoring', ar: 'متابعة المتابعات' }, { id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }
+      { id: 'followups', en: 'Follow-up monitoring', ar: 'متابعة المتابعات' }, { id: 'crm', en: 'CRM pipeline', ar: 'مسار العملاء' }, { id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }
     ],
     filters: [
       { k: 'from', en: 'Lead date from', ar: 'تاريخ العميل من', type: 'date', label: function (v) { return v; } },
@@ -32,7 +32,7 @@
     onTab: function (id) { if (id === 'report' && !D.rids && !D.ridsErr) { rApply(); } },
     actions: function () { return actModel(actSpecs(), 'act', actClient()); },
     banner: function () { return banner(); },
-    content: function (t, AM) { return ({ overview: tabOverview, leads: tabLeads, report: tabReport, followups: tabFu, actions: tabActions })[t](AM); },
+    content: function (t, AM) { return ({ overview: tabOverview, leads: tabLeads, report: tabReport, followups: tabFu, crm: tabLCCrm, actions: tabActions })[t](AM); },
     drill: function (id) { return drill(id); },
     onAct: function (a, v, n, id) { return onAct(a, v, n, id); },
     onInput: function (n) { return onInputApp(n); }
@@ -690,10 +690,40 @@
     return h + actionsPanel(AM);
   }
 
+  /* ---------- live cards: the count (or sum) an old Number Card showed, with that card's own filters, read under the
+     viewer's ERP permissions and linked to the ERP list with the same filters. Used to move number-card workspaces onto
+     dashboards without changing their figures. groups: [{ en, ar, cards: [{ en, ar, dt, f: [[field, op, value]], sum? }] }].
+     Loaded once per key (day + extra filters), cleared by Refresh. ---------- */
+  var LC = {};
+  function lcList(c, f) {
+    var q = f.map(function (x) { var v = x[1] === '=' ? x[2] : JSON.stringify([x[1], x[2]]); return encodeURIComponent(x[0]) + '=' + encodeURIComponent(v); }).join('&');
+    return '/app/' + String(c.dt).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + (q ? '?' + q : '');
+  }
+  function liveCards(id, groups, extra) {
+    var k = TODAY + '|' + JSON.stringify(extra || []), st = LC[id];
+    if (!st || st.key !== k) {
+      st = LC[id] = { key: k, v: {}, url: {} };
+      var mine = function () { return !destroyed && LC[id] === st; };
+      groups.forEach(function (g, gi) { g.cards.forEach(function (c, ci) {
+        var f = (c.f || []).concat(c.noExtra ? [] : (extra || [])), kk = gi + ':' + ci; st.url[kk] = lcList(c, f);
+        var p = c.sum ? getList({ doctype: c.dt, fields: ['sum(' + c.sum + ') as v'], filters: f, limit_page_length: 1 }, mine).then(function (r) { return +one(r).v || 0; }) : getCount(c.dt, f, mine);
+        p.then(function (n) { if (mine()) { st.v[kk] = n; soon(); } }, function (e) { if (mine()) { st.v[kk] = errKind(e) === 'perm' ? 'ERR:perm' : 'ERR'; soon(); } });
+      }); });
+    }
+    return groups.map(function (g, gi) {
+      return panel(tr(g.en, g.ar || g.en), '<div class="dms-grid dms-kpis dms-lc">' + g.cards.map(function (c, ci) {
+        var v = st.v[gi + ':' + ci], err = typeof v === 'string';
+        return kpi({ label: tr(c.en, c.ar || c.en), val: v === undefined ? '…' : err ? '—' : (c.sum ? cur$(v) : num(v)), sub: err ? esc(v === 'ERR:perm' ? tr('No permission', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : (c.sub ? esc(tr(c.sub[0], c.sub[1] || c.sub[0])) : ''),
+          act: err || v === undefined ? null : 'lc:' + id + ':' + gi + ':' + ci, tip: tr('Open the ERP list with these filters', 'افتح القائمة في النظام بهذه المرشحات') });
+      }).join('') + '</div>', 'dms-lc-g');
+    }).join('');
+  }
+
   /* ---------- drill-downs (overlay) ---------- */
   var OVL = null;
   function openDrill(id) {
     if (id.indexOf('goto:') === 0) { goTab(id.slice(5)); return; }
+    if (id.indexOf('lc:') === 0) { var lp = id.split(':'), ls = LC[lp[1]], lu = ls && ls.url[lp[2] + ':' + lp[3]]; if (lu) { try { G.open(lu, '_blank', 'noopener'); } catch (e) { /* blocked */ } } return; }
     var r = null;
     if (id.indexOf('srv:') === 0 && APP.actSpecs) {
       var s = APP.actSpecs().filter(function (x) { return x.id === id.slice(4); })[0];
@@ -887,7 +917,7 @@
   }
   /* Full reload (filters, refresh): new generation, empty store, tables back to page 1. */
   function reload() {
-    setToday(); PERIOD = curPeriod(); GEN++; D = {}; LOADED = STAMP;
+    setToday(); PERIOD = curPeriod(); GEN++; D = {}; LC = {}; LOADED = STAMP;
     Object.keys(SS).forEach(function (k) { SS[k].dirty = true; SS[k].page = 1; }); Object.keys(TS).forEach(function (k) { TS[k].page = 1; });
     APP.load(); ANIM = true; renderAll();
   }
@@ -1554,6 +1584,11 @@
     if (g('data-ff')) { if (FU.f[g('data-ff')] !== n.value) { FU.f[g('data-ff')] = n.value; FU.ver++; renderSoft(); var f1 = HOST.querySelector('[data-ff="' + g('data-ff') + '"]'); if (f1) { f1.focus(); } } return true; }
     return false;
   }
+
+  /* CRM pipeline: the figures of the former "CRM Dashboard" number-card workspace — each card's own filters, counted live under
+     the viewer's ERP permissions; today / yesterday / this week are site dates, not the period. */
+  var LCG_CRM = [{"en": "Lead", "ar": "العملاء المحتملون", "cards": [{"en": "Lead To Quotation", "dt": "Lead", "f": [["status", "=", "Quotation"]]}, {"en": "Open Leads - CP", "dt": "Lead", "f": [["status", "=", "Lead"], ["custom_location", "=", "CP"]]}, {"en": "Allocated Leads - CP", "dt": "Lead", "f": [["custom_allocation_status", "=", "Allocated"], ["custom_location", "=", "CP"]]}, {"en": "Lead To Quotation", "dt": "Lead", "f": [["status", "=", "Quotation"]]}, {"en": "Open Leads", "dt": "Lead", "f": [["status", "=", "Lead"]]}, {"en": "Open Leads - MP", "dt": "Lead", "f": [["status", "=", "Lead"], ["custom_location", "=", "MP"]]}, {"en": "Open Leads - EP", "dt": "Lead", "f": [["status", "=", "Lead"], ["custom_location", "=", "EP"]]}, {"en": "Weekly Leads", "dt": "Lead", "f": [["creation", "Timespan", "last week"]]}, {"en": "Allocated Leads - MP", "dt": "Lead", "f": [["custom_allocation_status", "=", "Allocated"], ["custom_location", "=", "MP"]]}, {"en": "Allocated Leads - EP", "dt": "Lead", "f": [["custom_allocation_status", "=", "Allocated"], ["custom_location", "=", "EP"]]}, {"en": "Lead To Quotation - MP", "dt": "Lead", "f": [["status", "=", "Quotation"], ["custom_location", "=", "MP"]]}, {"en": "Lead To Quotation - EP", "dt": "Lead", "f": [["status", "=", "Quotation"], ["custom_location", "=", "EP"]]}, {"en": "Allocated Leads", "dt": "Lead", "f": [["custom_allocation_status", "=", "Allocated"]]}]}, {"en": "Customer", "ar": "العملاء", "cards": [{"en": "Weekly New Customer", "dt": "Customer", "f": [["creation", "Timespan", "last week"]]}, {"en": "New Customer 2026", "dt": "Customer", "f": [["creation", "Timespan", "this year"]]}, {"en": "Customer 2025", "dt": "Customer", "f": [["creation", "between", ["2025-01-01", "2025-12-31"]]]}, {"en": "Customer 2024", "dt": "Customer", "f": [["creation", "between", ["2024-01-01", "2024-12-31"]]]}, {"en": "Total Customer", "dt": "Customer", "f": []}]}];
+  function tabLCCrm() { return alertBox('info', esc(tr('Live counts under your ERP permissions, with the same rules as the former CRM Dashboard cards. Today / this week are site dates, not the period. Click a number to open the ERP list.', 'أعداد مباشرة حسب صلاحياتك في النظام بنفس قواعد بطاقات مسار العملاء السابقة. اليوم / هذا الأسبوع حسب تاريخ النظام وليس الفترة. انقر الرقم لفتح القائمة في النظام.'))) + liveCards('crm', LCG_CRM, []) + panel(tr('Reports behind the other cards', 'التقارير الخاصة بالبطاقات الأخرى'), '<div class="dms-lc-links">' + ["Approvals Report - CP", "Approvals Report - EP", "Approvals Report - MP", "Approvals Report - SP", "Sales Person Approval List", "Sales Person Approval List - CP", "Sales Person Approval List - EP", "Sales Person Approval List - MP", "Sales Person Project List", "Sales Person Project List - CP", "Sales Person Project List - EP", "Sales Person Project List - MP", "Submittal Report - CP", "Submittal Report - EP", "Submittal Report - MP", "Weekly Expected Quotation Revenue", "Weekly Expected Quotation Revenue - CP", "Weekly Expected Quotation Revenue - EP", "Weekly Expected Quotation Revenue - MP", "Weekly Sales Person Project List", "Weekly Submittal Report - SP"].map(function (n) { return '<a class="dms-link" href="/app/query-report/' + encodeURIComponent(n) + '" target="_blank" rel="noopener noreferrer">' + esc(n) + ' ↗</a>'; }).join('') + '</div>'); }
 
   start();
 })();

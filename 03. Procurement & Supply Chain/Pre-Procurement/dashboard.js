@@ -11,7 +11,7 @@
     period: 'ytd',
     tabs: [
       { id: 'overview', en: 'Overview', ar: 'نظرة عامة' }, { id: 'mr', en: 'Material requests', ar: 'طلبات المواد' }, { id: 'po', en: 'Purchase orders', ar: 'أوامر الشراء' },
-      { id: 'sup', en: 'Suppliers and delays', ar: 'الموردون والتأخيرات' }, { id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }
+      { id: 'sup', en: 'Suppliers and delays', ar: 'الموردون والتأخيرات' }, { id: 'status', en: 'Purchasing status', ar: 'حالة المشتريات' }, { id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }
     ],
     filters: [
       { k: 'company', en: 'Company', ar: 'الشركة', none: ['All system-currency companies', 'كل شركات عملة النظام'], options: function () { return (REF.companies || []).map(function (c) { return { v: c.name, l: c.name + (c.default_currency && c.default_currency !== CUR ? ' (' + c.default_currency + ')' : '') }; }); } },
@@ -26,7 +26,7 @@
     load: function () { loadAll(); },
     actions: function () { return actModel(actSpecs(), 'act', actClient()); },
     banner: function () { return banner(); },
-    content: function (t, AM) { return ({ overview: tabOverview, mr: tabMr, po: tabPo, sup: tabSup, actions: tabActions })[t](AM); },
+    content: function (t, AM) { return ({ overview: tabOverview, mr: tabMr, po: tabPo, sup: tabSup, status: tabLCStatus, actions: tabActions })[t](AM); },
     drill: function (id) { return drill(id); },
     onAct: function (a, v, n, id) { return onAct(a, v, n, id); }
   };
@@ -683,10 +683,40 @@
     return h + actionsPanel(AM);
   }
 
+  /* ---------- live cards: the count (or sum) an old Number Card showed, with that card's own filters, read under the
+     viewer's ERP permissions and linked to the ERP list with the same filters. Used to move number-card workspaces onto
+     dashboards without changing their figures. groups: [{ en, ar, cards: [{ en, ar, dt, f: [[field, op, value]], sum? }] }].
+     Loaded once per key (day + extra filters), cleared by Refresh. ---------- */
+  var LC = {};
+  function lcList(c, f) {
+    var q = f.map(function (x) { var v = x[1] === '=' ? x[2] : JSON.stringify([x[1], x[2]]); return encodeURIComponent(x[0]) + '=' + encodeURIComponent(v); }).join('&');
+    return '/app/' + String(c.dt).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + (q ? '?' + q : '');
+  }
+  function liveCards(id, groups, extra) {
+    var k = TODAY + '|' + JSON.stringify(extra || []), st = LC[id];
+    if (!st || st.key !== k) {
+      st = LC[id] = { key: k, v: {}, url: {} };
+      var mine = function () { return !destroyed && LC[id] === st; };
+      groups.forEach(function (g, gi) { g.cards.forEach(function (c, ci) {
+        var f = (c.f || []).concat(c.noExtra ? [] : (extra || [])), kk = gi + ':' + ci; st.url[kk] = lcList(c, f);
+        var p = c.sum ? getList({ doctype: c.dt, fields: ['sum(' + c.sum + ') as v'], filters: f, limit_page_length: 1 }, mine).then(function (r) { return +one(r).v || 0; }) : getCount(c.dt, f, mine);
+        p.then(function (n) { if (mine()) { st.v[kk] = n; soon(); } }, function (e) { if (mine()) { st.v[kk] = errKind(e) === 'perm' ? 'ERR:perm' : 'ERR'; soon(); } });
+      }); });
+    }
+    return groups.map(function (g, gi) {
+      return panel(tr(g.en, g.ar || g.en), '<div class="dms-grid dms-kpis dms-lc">' + g.cards.map(function (c, ci) {
+        var v = st.v[gi + ':' + ci], err = typeof v === 'string';
+        return kpi({ label: tr(c.en, c.ar || c.en), val: v === undefined ? '…' : err ? '—' : (c.sum ? cur$(v) : num(v)), sub: err ? esc(v === 'ERR:perm' ? tr('No permission', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : (c.sub ? esc(tr(c.sub[0], c.sub[1] || c.sub[0])) : ''),
+          act: err || v === undefined ? null : 'lc:' + id + ':' + gi + ':' + ci, tip: tr('Open the ERP list with these filters', 'افتح القائمة في النظام بهذه المرشحات') });
+      }).join('') + '</div>', 'dms-lc-g');
+    }).join('');
+  }
+
   /* ---------- drill-downs (overlay) ---------- */
   var OVL = null;
   function openDrill(id) {
     if (id.indexOf('goto:') === 0) { goTab(id.slice(5)); return; }
+    if (id.indexOf('lc:') === 0) { var lp = id.split(':'), ls = LC[lp[1]], lu = ls && ls.url[lp[2] + ':' + lp[3]]; if (lu) { try { G.open(lu, '_blank', 'noopener'); } catch (e) { /* blocked */ } } return; }
     var r = null;
     if (id.indexOf('srv:') === 0 && APP.actSpecs) {
       var s = APP.actSpecs().filter(function (x) { return x.id === id.slice(4); })[0];
@@ -880,7 +910,7 @@
   }
   /* Full reload (filters, refresh): new generation, empty store, tables back to page 1. */
   function reload() {
-    setToday(); PERIOD = curPeriod(); GEN++; D = {}; LOADED = STAMP;
+    setToday(); PERIOD = curPeriod(); GEN++; D = {}; LC = {}; LOADED = STAMP;
     Object.keys(SS).forEach(function (k) { SS[k].dirty = true; SS[k].page = 1; }); Object.keys(TS).forEach(function (k) { TS[k].page = 1; });
     APP.load(); ANIM = true; renderAll();
   }
@@ -1303,6 +1333,11 @@
     if (a === 'erp') { var s = actSpecs().filter(function (y) { return y.id === v; })[0]; if (s) { G.open(erpUrl(s.dt, s.f()), '_blank', 'noopener'); } return true; }
     return false;
   }
+
+  /* Purchasing status: the figures of the former "Purchase Dashboard" number-card workspace — each card's own filters, counted live under
+     the viewer's ERP permissions and the Company filter; today / yesterday / this week are site dates, not the period. */
+  var LCG_STATUS = [{"en": "Purchase Order", "ar": "أوامر الشراء", "cards": [{"en": "Purchase Order Draft - All", "dt": "Purchase Order", "f": [["status", "=", "Draft"]]}, {"en": "Purchase Order Draft - Today", "dt": "Purchase Order", "f": [["status", "=", "Draft"], ["creation", "Timespan", "today"]]}, {"en": "Purchase Order - Created Today", "dt": "Purchase Order", "f": [["creation", "Timespan", "today"]]}, {"en": "Purchase Order - To Bill", "dt": "Purchase Order", "f": [["status", "=", "To Bill"]]}, {"en": "Purchase Order - To Receive and Bill", "dt": "Purchase Order", "f": [["status", "=", "To Receive and Bill"]]}, {"en": "Purchase Order - To Receive", "dt": "Purchase Order", "f": [["status", "=", "To Receive"]]}, {"en": "Purchase Order - Cancelled Today", "dt": "Purchase Order", "f": [["creation", "Timespan", "today"], ["status", "=", "Cancelled"]]}, {"en": "Purchase Order - Closed Today", "dt": "Purchase Order", "f": [["status", "=", "Closed"], ["creation", "Timespan", "today"]]}]}, {"en": "Purchase Receipt", "ar": "سندات الاستلام", "cards": [{"en": "Purchase Receipt Pending/To Bill - All", "dt": "Purchase Receipt", "f": [["status", "in", ["Draft", "To Bill"]], ["is_return", "=", 0]]}, {"en": "Purchase Receipt Created - Today", "dt": "Purchase Receipt", "f": [["creation", "Timespan", "today"]]}, {"en": "Purchase Receipt Pending/To Bill - Today", "dt": "Purchase Receipt", "f": [["creation", "Timespan", "today"], ["status", "in", ["Draft", "To Bill"]], ["is_return", "=", 0]]}, {"en": "Purchase Receipt Completed - Today", "dt": "Purchase Receipt", "f": [["creation", "Timespan", "today"], ["status", "=", "Completed"]]}, {"en": "Purchase Receipt Cancelled/Closed - Today", "dt": "Purchase Receipt", "f": [["creation", "Timespan", "today"], ["status", "in", ["Cancelled", "Closed", null]]]}, {"en": "Purchase Receipt Partly Billed", "dt": "Purchase Receipt", "f": [["status", "=", "Partly Billed"]]}]}, {"en": "Purchase Invoice", "ar": "فواتير المشتريات", "cards": [{"en": "Purchase Invoice - Pending", "dt": "Purchase Invoice", "f": [["status", "=", "Draft"]]}, {"en": "Purchase Invoice Created - Today", "dt": "Purchase Invoice", "f": [["creation", "Timespan", "today"]]}, {"en": "Purchase Invoice Draft - Today", "dt": "Purchase Invoice", "f": [["creation", "Timespan", "today"], ["status", "=", "Draft"]]}, {"en": "Purchase Invoice - Unpaid", "dt": "Purchase Invoice", "f": [["status", "=", "Unpaid"]]}, {"en": "Purchase Invoice - Party Paid", "dt": "Purchase Invoice", "f": [["status", "=", "Partly Paid"]]}, {"en": "Purchase Invoice - Overdue", "dt": "Purchase Invoice", "f": [["status", "=", "Overdue"]]}, {"en": "Purchase Invoice - Return/Debit Note/Cancelled", "dt": "Purchase Invoice", "f": [["status", "in", ["Return", "Debit Note Issued", "Cancelled"]], ["creation", "Timespan", "today"]]}]}];
+  function tabLCStatus() { return alertBox('info', esc(tr('Live counts under your ERP permissions, with the same rules as the former Purchase Dashboard cards. Today / this week are site dates, not the period. Click a number to open the ERP list.', 'أعداد مباشرة حسب صلاحياتك في النظام بنفس قواعد بطاقات حالة المشتريات السابقة. اليوم / هذا الأسبوع حسب تاريخ النظام وليس الفترة. انقر الرقم لفتح القائمة في النظام.'))) + liveCards('status', LCG_STATUS, F.company ? [['company', '=', F.company]] : []); }
 
   start();
 })();

@@ -17,7 +17,7 @@
       { id: 'overview', en: 'Overview', ar: 'نظرة عامة' }, { id: 'approvals', en: 'Approvals', ar: 'الاعتمادات' }, { id: 'payments', en: 'Payments', ar: 'المدفوعات' },
       { id: 'journals', en: 'Journals', ar: 'القيود' }, { id: 'ap', en: 'Payables', ar: 'الدائنون' }, { id: 'ar', en: 'Receivables', ar: 'المدينون' },
       { id: 'expenses', en: 'Expense claims', ar: 'مطالبات المصروفات' }, { id: 'bank', en: 'Bank', ar: 'البنك' }, { id: 'audit', en: 'Control exceptions', ar: 'استثناءات الرقابة' },
-      { id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }
+      { id: 'entries', en: 'Entry status', ar: 'حالة القيود والسندات' }, { id: 'actions', en: 'Actions pending', ar: 'الإجراءات المعلقة' }
     ],
     filters: [
       { k: 'company', en: 'Company', ar: 'الشركة', none: ['All system-currency companies', 'كل شركات عملة النظام'], options: function () { return COMPANIES.map(function (c) { return { v: c, l: c + (COMPANY_CURRENCIES[c] && COMPANY_CURRENCIES[c] !== CUR ? ' (' + COMPANY_CURRENCIES[c] + ')' : '') }; }); } },
@@ -39,7 +39,7 @@
     onRefresh: function () { WFDEF = null; loadWF(); },
     actions: function () { return actModel(ACTS(), 'acts', actClient()); },
     banner: function () { var o = otherCos(); return o.length ? alertBox('info', esc(tr('Amounts are in ' + CUR + '. Not included (other currency): ', 'المبالغ بعملة ' + CUR + '. غير مشمولة (عملة أخرى): ') + o.join(', ') + '.')) : ''; },
-    content: function (tb, AM) { sync(); return { overview: tabOverview, approvals: tabApprovals, payments: tabPayments, journals: tabJournals, ap: function () { return tabBalances('ap'); }, ar: function () { return tabBalances('ar'); }, expenses: tabExpenses, bank: tabBank, audit: tabAudit, actions: tabActions }[tb](AM); },
+    content: function (tb, AM) { sync(); return { overview: tabOverview, approvals: tabApprovals, payments: tabPayments, journals: tabJournals, ap: function () { return tabBalances('ap'); }, ar: function () { return tabBalances('ar'); }, expenses: tabExpenses, bank: tabBank, audit: tabAudit, entries: tabLCEntries, actions: tabActions }[tb](AM); },
     drill: function (id) { return drill(id); },
     onAct: function (a, v) {
       if (a === 'chip') { var p = v.split(':'); S[p[0]] = p[1] === 'true' ? true : p[1] === 'false' ? false : p[1]; if (p[0] === 'apRange' || p[0] === 'arRange') { KC = {}; } Object.keys(SS).forEach(function (k) { SS[k].dirty = true; SS[k].page = 1; }); renderSoft(); return true; }
@@ -699,10 +699,40 @@
     return h + actionsPanel(AM);
   }
 
+  /* ---------- live cards: the count (or sum) an old Number Card showed, with that card's own filters, read under the
+     viewer's ERP permissions and linked to the ERP list with the same filters. Used to move number-card workspaces onto
+     dashboards without changing their figures. groups: [{ en, ar, cards: [{ en, ar, dt, f: [[field, op, value]], sum? }] }].
+     Loaded once per key (day + extra filters), cleared by Refresh. ---------- */
+  var LC = {};
+  function lcList(c, f) {
+    var q = f.map(function (x) { var v = x[1] === '=' ? x[2] : JSON.stringify([x[1], x[2]]); return encodeURIComponent(x[0]) + '=' + encodeURIComponent(v); }).join('&');
+    return '/app/' + String(c.dt).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + (q ? '?' + q : '');
+  }
+  function liveCards(id, groups, extra) {
+    var k = TODAY + '|' + JSON.stringify(extra || []), st = LC[id];
+    if (!st || st.key !== k) {
+      st = LC[id] = { key: k, v: {}, url: {} };
+      var mine = function () { return !destroyed && LC[id] === st; };
+      groups.forEach(function (g, gi) { g.cards.forEach(function (c, ci) {
+        var f = (c.f || []).concat(c.noExtra ? [] : (extra || [])), kk = gi + ':' + ci; st.url[kk] = lcList(c, f);
+        var p = c.sum ? getList({ doctype: c.dt, fields: ['sum(' + c.sum + ') as v'], filters: f, limit_page_length: 1 }, mine).then(function (r) { return +one(r).v || 0; }) : getCount(c.dt, f, mine);
+        p.then(function (n) { if (mine()) { st.v[kk] = n; soon(); } }, function (e) { if (mine()) { st.v[kk] = errKind(e) === 'perm' ? 'ERR:perm' : 'ERR'; soon(); } });
+      }); });
+    }
+    return groups.map(function (g, gi) {
+      return panel(tr(g.en, g.ar || g.en), '<div class="dms-grid dms-kpis dms-lc">' + g.cards.map(function (c, ci) {
+        var v = st.v[gi + ':' + ci], err = typeof v === 'string';
+        return kpi({ label: tr(c.en, c.ar || c.en), val: v === undefined ? '…' : err ? '—' : (c.sum ? cur$(v) : num(v)), sub: err ? esc(v === 'ERR:perm' ? tr('No permission', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : (c.sub ? esc(tr(c.sub[0], c.sub[1] || c.sub[0])) : ''),
+          act: err || v === undefined ? null : 'lc:' + id + ':' + gi + ':' + ci, tip: tr('Open the ERP list with these filters', 'افتح القائمة في النظام بهذه المرشحات') });
+      }).join('') + '</div>', 'dms-lc-g');
+    }).join('');
+  }
+
   /* ---------- drill-downs (overlay) ---------- */
   var OVL = null;
   function openDrill(id) {
     if (id.indexOf('goto:') === 0) { goTab(id.slice(5)); return; }
+    if (id.indexOf('lc:') === 0) { var lp = id.split(':'), ls = LC[lp[1]], lu = ls && ls.url[lp[2] + ':' + lp[3]]; if (lu) { try { G.open(lu, '_blank', 'noopener'); } catch (e) { /* blocked */ } } return; }
     var r = null;
     if (id.indexOf('srv:') === 0 && APP.actSpecs) {
       var s = APP.actSpecs().filter(function (x) { return x.id === id.slice(4); })[0];
@@ -896,7 +926,7 @@
   }
   /* Full reload (filters, refresh): new generation, empty store, tables back to page 1. */
   function reload() {
-    setToday(); PERIOD = curPeriod(); GEN++; D = {}; LOADED = STAMP;
+    setToday(); PERIOD = curPeriod(); GEN++; D = {}; LC = {}; LOADED = STAMP;
     Object.keys(SS).forEach(function (k) { SS[k].dirty = true; SS[k].page = 1; }); Object.keys(TS).forEach(function (k) { TS[k].page = 1; });
     APP.load(); ANIM = true; renderAll();
   }
@@ -1757,6 +1787,11 @@
     return h + panel(t('ex_register'), c.p ? skel(1, 'dms-skel-panel') : c.e ? alertBox('err', esc(c.e)) : regTable({ id: 't_exc', rows: l, cols: excCols(), sk: 'n', dir: -1, file: 'control_exceptions', text: function (r) { return t(r.d.label) + ' ' + r.basis; } }), '', esc(tr('Select a check to see its records. Indicative checks scan a capped sample.', 'اختر فحصًا لعرض سجلاته. الفحوص الإرشادية تفحص عينة محدودة.')));
   }
   function tabActions(AM) { return actionsTab(AM, tr('Action lists are as of today across all dates and follow the company filter.', 'قوائم الإجراءات حتى اليوم لكل التواريخ وتتبع مرشح الشركة.')); }
+
+  /* Entry status: the figures of the former "Accounts Dashboard" number-card workspace — each card's own filters, counted live under
+     the viewer's ERP permissions and the Company filter; today / yesterday / this week are site dates, not the period. */
+  var LCG_ENTRIES = [{"en": "Journal Entry", "ar": "قيود اليومية", "cards": [{"en": "Journal Entry Pending - All", "dt": "Journal Entry", "f": [["docstatus", "=", "0"]]}, {"en": "Journal Entry Created - Today", "dt": "Journal Entry", "f": [["creation", "Timespan", "today"]]}, {"en": "Journal Entry Pending - Today", "dt": "Journal Entry", "f": [["docstatus", "=", "0"], ["creation", "Timespan", "today"]]}, {"en": "Journal Entry Approved - Today", "dt": "Journal Entry", "f": [["workflow_state", "=", "Approved"], ["creation", "Timespan", "today"]]}, {"en": "Journal Entry Rejected - Today", "dt": "Journal Entry", "f": [["creation", "Timespan", "today"], ["workflow_state", "=", "Finally Rejected"]]}]}, {"en": "Payment Entry", "ar": "سندات الدفع والقبض", "cards": [{"en": "Payment Entry Pending - All", "dt": "Payment Entry", "f": [["status", "=", "Draft"]]}, {"en": "Payment Entry Created - Today", "dt": "Payment Entry", "f": [["creation", "Timespan", "today"]]}, {"en": "Payment Entry Pending - Today", "dt": "Payment Entry", "f": [["creation", "Timespan", "today"], ["status", "=", "Draft"]]}, {"en": "Payment Entry Approved - Today", "dt": "Payment Entry", "f": [["creation", "Timespan", "today"], ["status", "=", "Submitted"]]}, {"en": "Payment Entry Rejected - Today", "dt": "Payment Entry", "f": [["creation", "Timespan", "today"], ["status", "=", "Cancelled"]]}]}];
+  function tabLCEntries() { return alertBox('info', esc(tr('Live counts under your ERP permissions, with the same rules as the former Accounts Dashboard cards. Today / this week are site dates, not the period. Click a number to open the ERP list.', 'أعداد مباشرة حسب صلاحياتك في النظام بنفس قواعد بطاقات حالة القيود والسندات السابقة. اليوم / هذا الأسبوع حسب تاريخ النظام وليس الفترة. انقر الرقم لفتح القائمة في النظام.'))) + liveCards('entries', LCG_ENTRIES, F.company ? [['company', '=', F.company]] : []); }
 
   start();
 })();
