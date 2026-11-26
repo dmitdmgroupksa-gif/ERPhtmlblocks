@@ -85,6 +85,7 @@ function cond(x, op, v) {
     case '<=': return x != null && d(x) <= v; case '<': return x != null && d(x) < v;
     case '>=': return x != null && d(x) >= v; case '>': return x != null && d(x) > v;
     case 'is': return v === 'set' ? nz(x) !== '' : nz(x) === '';
+    case 'Timespan': return x != null && (v === 'today' ? d(x) === TODAY : v === 'this year' ? d(x).slice(0, 4) === TODAY.slice(0, 4) : (() => { throw new Error('timespan ' + v); })());
     case 'like': return new RegExp('^' + String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*') + '$', 'i').test(String(nz(x)));
     default: throw new Error('op ' + op);
   }
@@ -235,6 +236,13 @@ const box = async l => (await l.boundingBox());
       assert.equal(await t.$('#dms-tab-' + id).getAttribute('aria-selected'), 'true'); assert.ok((await t.$('[data-ref="content"]').innerText()).length > 40, id + ' content');
     }
     ok('all 8 sections render');
+    /* Sales Operations: the old Sales Operation / Quotation Team card filters, counted under the viewer's permissions */
+    await t.$('[data-act="tab"][data-v="ops"]').click(); await t.idle(); await t.page.waitForTimeout(300); await t.idle();
+    const opsTxt = await t.$('[data-ref="content"]').innerText(), hold = db['Sales Order'].filter(s => s.status === 'On Hold').length;
+    const nd = db['Sales Order'].filter(s => s.delivery_status === 'Not Delivered' && s.per_billed != 100 && !['cancelled', 'Pending'].includes(s.workflow_state || '') && !['On Hold', 'Closed'].includes(s.status)).length;
+    assert.match(opsTxt, new RegExp('On hold\\s*' + hold + '\\b')); assert.match(opsTxt, new RegExp('Not delivered\\s*' + nd + '\\b')); assert.doesNotMatch(opsTxt, /Unavailable/);
+    assert.match(opsTxt, /Sales orders and invoices by location\s*(Location|No data)/); assert.ok(await t.noOverflow()); await shot(t.page, 'tab-ops-1440');
+    ok('Sales Operations: old card filters counted live (on hold ' + hold + ', not delivered ' + nd + '), location table');
     const on = await box(t.$('.dms-tab.dms-on')), off = await box(t.$('.dms-tab:not(.dms-on)').first()); assert.ok(on.y < off.y, 'active tab sits higher'); ok('active tab raised above inactive tabs');
     await t.$('#dms-tab-overview').focus(); await t.page.keyboard.press('ArrowRight'); await t.idle();
     assert.equal(await t.$('#dms-tab-leads').getAttribute('aria-selected'), 'true'); await t.page.keyboard.press('Home'); await t.idle(); ok('arrow / Home keys move between tabs');

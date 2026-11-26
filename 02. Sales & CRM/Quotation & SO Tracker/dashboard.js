@@ -565,7 +565,7 @@
     { id: 'overview', en: 'Overview', ar: 'نظرة عامة' }, { id: 'leads', en: 'Lead Tracker', ar: 'متابعة العملاء المحتملين' },
     { id: 'customers', en: 'Customer Analysis', ar: 'تحليل العملاء' }, { id: 'quotes', en: 'Quotation Tracker', ar: 'متابعة عروض الأسعار' },
     { id: 'orders', en: 'Sales Order Tracker', ar: 'متابعة أوامر البيع' }, { id: 'conv', en: 'Conversion Analysis', ar: 'تحليل التحويل' },
-    { id: 'team', en: 'Sales Team & BDM', ar: 'فريق المبيعات و BDM' }, { id: 'actions', en: 'Follow-ups & Actions', ar: 'المتابعة والإجراءات' }
+    { id: 'team', en: 'Sales Team & BDM', ar: 'فريق المبيعات و BDM' }, { id: 'ops', en: 'Sales Operations', ar: 'عمليات المبيعات' }, { id: 'actions', en: 'Follow-ups & Actions', ar: 'المتابعة والإجراءات' }
   ];
   var PERIODS = [['today', 'Today', 'اليوم'], ['yesterday', 'Yesterday', 'أمس'], ['week', 'This week', 'هذا الأسبوع'], ['lastWeek', 'Last week', 'الأسبوع الماضي'],
     ['month', 'This month', 'هذا الشهر'], ['lastMonth', 'Last month', 'الشهر الماضي'], ['quarter', 'This quarter', 'هذا الربع'], ['ytd', 'Year to date', 'السنة حتى اليوم'],
@@ -1206,6 +1206,83 @@
       { k: 'v', h: tr('Order value (SAR)', 'قيمة الأوامر (ريال)'), r: function (r) { return '<span class="dms-num" title="' + esc(moneyFull(r.v)) + '">' + money(r.v) + '</span>'; }, s: function (r) { return r.v; } }, { k: 'l', h: tr('Last order', 'آخر أمر'), r: function (r) { return dt(r.last); }, s: function (r) { return r.last; } }] }) + '</div>';
     return h;
   }
+  /* ---------- Sales Operations: live counts replacing the "Sales Operation" and "Quotation Team Dashboard" number-card
+     workspaces. Each count uses the old card's own filters (so the numbers match), runs under the viewer's ERP permissions
+     and follows the Company filter. "Today" and "this year" are site dates, not the period. The four hard-coded branch
+     cards (CP / MP / EP / WP) are one table over every Sales Order location (the old EP "on hold" card filtered CP). ---------- */
+  var OPS = [
+    ['Quotations', 'عروض الأسعار', [
+      ['Pending approval', 'بانتظار الاعتماد', 'Quotation', [['workflow_state', 'in', ['Pending']]]],
+      ['Created today', 'أُنشئت اليوم', 'Quotation', [['creation', 'Timespan', 'today']]],
+      ['Pending · created today', 'معلقة · أُنشئت اليوم', 'Quotation', [['creation', 'Timespan', 'today'], ['workflow_state', 'in', ['Pending']]]],
+      ['Approved today', 'اعتُمدت اليوم', 'Quotation', [['workflow_state', 'in', ['Approved', 'Accepted By Customer']], ['creation', 'Timespan', 'today']]],
+      ['Rejected today', 'رُفضت اليوم', 'Quotation', [['creation', 'Timespan', 'today'], ['workflow_state', 'like', '%rejected%']]]]],
+    ['Sales orders', 'أوامر البيع', [
+      ['Waiting for approval', 'بانتظار الاعتماد', 'Sales Order', [['workflow_state', 'not in', ['Approved', 'cancelled']]]],
+      ['Created today', 'أُنشئت اليوم', 'Sales Order', [['creation', 'Timespan', 'today']]],
+      ['Pending / draft · today', 'معلقة / مسودة · اليوم', 'Sales Order', [['workflow_state', 'in', ['Pending', 'Draft']], ['transaction_date', 'Timespan', 'today']]],
+      ['Approved today', 'اعتُمدت اليوم', 'Sales Order', [['workflow_state', '=', 'Approved'], ['creation', 'Timespan', 'today']]],
+      ['On hold', 'معلقة', 'Sales Order', [['status', '=', 'On Hold']]],
+      ['Not delivered', 'لم تُسلّم', 'Sales Order', [['delivery_status', '=', 'Not Delivered'], ['per_billed', '!=', 100], ['workflow_state', 'not in', ['cancelled', 'Pending']], ['status', 'not in', ['On Hold', 'Closed']]]],
+      ['Partly delivered', 'مسلّمة جزئيًا', 'Sales Order', [['delivery_status', '=', 'Partly Delivered'], ['per_billed', '!=', 100], ['workflow_state', '!=', 'cancelled'], ['status', '!=', 'Closed']]],
+      ['Fully delivered today', 'سُلّمت بالكامل اليوم', 'Sales Order', [['delivery_status', '=', 'Fully Delivered'], ['modified', 'Timespan', 'today']]]]],
+    ['Delivery notes', 'سندات التسليم', [
+      ['Pending (draft / to bill)', 'معلقة (مسودة / للفوترة)', 'Delivery Note', [['status', 'in', ['Draft', 'To Bill']]]],
+      ['Created today', 'أُنشئت اليوم', 'Delivery Note', [['creation', 'Timespan', 'today']]],
+      ['Draft · today', 'مسودة · اليوم', 'Delivery Note', [['status', '=', 'Draft'], ['creation', 'Timespan', 'today']]],
+      ['To bill · today', 'للفوترة · اليوم', 'Delivery Note', [['status', '=', 'To Bill'], ['creation', 'Timespan', 'today']]],
+      ['Completed · today', 'مكتملة · اليوم', 'Delivery Note', [['status', '=', 'Completed'], ['creation', 'Timespan', 'today']]],
+      ['Returned · today', 'مرتجعة · اليوم', 'Delivery Note', [['status', '=', 'Return Issued'], ['creation', 'Timespan', 'today']]],
+      ['Cancelled / closed · today', 'ملغاة / مغلقة · اليوم', 'Delivery Note', [['status', 'in', ['Cancelled', 'Closed']], ['creation', 'Timespan', 'today']]]]],
+    ['Sales invoices', 'فواتير المبيعات', [
+      ['Draft', 'مسودة', 'Sales Invoice', [['status', '=', 'Draft']]],
+      ['Created today', 'أُنشئت اليوم', 'Sales Invoice', [['creation', 'Timespan', 'today']]],
+      ['Draft · today', 'مسودة · اليوم', 'Sales Invoice', [['status', '=', 'Draft'], ['creation', 'Timespan', 'today']]],
+      ['ZATCA pending · this year', 'بانتظار زاتكا · هذا العام', 'Sales Invoice', [['zatca_status', '=', 'Pending'], ['posting_date', 'Timespan', 'this year']]],
+      ['Unpaid', 'غير مدفوعة', 'Sales Invoice', [['status', '=', 'Unpaid']]],
+      ['Overdue', 'متأخرة السداد', 'Sales Invoice', [['status', 'in', ['Overdue and Discounted', 'Overdue']]]],
+      ['Submitted / partly paid', 'مُرسلة / مدفوعة جزئيًا', 'Sales Invoice', [['status', 'in', ['Submitted', 'Partly Paid', 'Partly Paid and Discounted']]]],
+      ['Return / credit note / cancelled · today', 'مرتجع / إشعار دائن / ملغاة · اليوم', 'Sales Invoice', [['status', 'in', ['Return', 'Credit Note Issued', 'Cancelled']], ['posting_date', 'Timespan', 'today']]],
+      ['Return / credit note / cancelled · this year', 'مرتجع / إشعار دائن / ملغاة · هذا العام', 'Sales Invoice', [['status', 'in', ['Return', 'Credit Note Issued', 'Cancelled']], ['posting_date', 'Timespan', 'this year']]],
+      ['Created this year', 'أُنشئت هذا العام', 'Sales Invoice', [['creation', 'Timespan', 'this year']]]]]
+  ];
+  var OPSD = null;
+  function opsKey() { return TODAY + '|' + (F.company || ''); }
+  function opsCo(f) { return F.company ? f.concat([['company', '=', F.company]]) : f; }
+  function loadOps(force) {
+    var k = opsKey(); if (!force && OPSD && OPSD.key === k) { return; }
+    var D2 = OPSD = { key: k, counts: {}, loc: null, locErr: null }, chk = function () { return OPSD === D2; }, jobs = [];
+    OPS.forEach(function (g, gi) { g[2].forEach(function (c, ci) {
+      jobs.push(getCount(c[2], opsCo(c[3]), chk).then(function (n) { D2.counts[gi + ':' + ci] = n; }, function (e) { D2.counts[gi + ':' + ci] = e && e.status === 403 ? 'ERR:perm' : 'ERR'; }));
+    }); });
+    var so = function (f) { return getList({ doctype: 'Sales Order', fields: ['location_ as loc', 'count(name) as n', 'sum(base_net_total) as v'], filters: opsCo(f), group_by: 'location_', limit_page_length: 500 }, chk); };
+    var mFrom = TODAY.slice(0, 8) + '01';
+    jobs.push(Promise.all([
+      so([['workflow_state', '=', 'Approved'], ['per_billed', '!=', 100], ['status', 'not in', ['On Hold', 'Closed']], ['delivery_status', '=', 'Not Delivered']]),
+      so([['status', '=', 'On Hold']]), so([['creation', 'Timespan', 'today']]),
+      getList({ doctype: 'Sales Invoice', fields: ['location as loc', 'count(name) as n', 'sum(base_net_total) as v'], filters: opsCo([['docstatus', '=', 1], ['posting_date', 'between', [mFrom, TODAY]]]), group_by: 'location', limit_page_length: 500 }, chk)
+    ]).then(function (r) {
+      var L = {}; ['pending', 'hold', 'today', 'inv'].forEach(function (key, i) { (r[i] || []).forEach(function (x) { var l = x.loc || tr('Not set', 'غير محدد'); L[l] = L[l] || { loc: l }; L[l][key] = { n: +x.n || 0, v: +x.v || 0 }; }); });
+      D2.loc = Object.keys(L).map(function (l) { return L[l]; }).sort(function (a, b) { return ((b.pending || {}).v || 0) - ((a.pending || {}).v || 0); });
+    }, function (e) { D2.locErr = e && e.status === 403 ? 'perm' : 'tech'; }));
+    Promise.all(jobs).then(function () { if (chk() && tab === 'ops') { renderSoft(); } });
+  }
+  function tabOps() {
+    if (!OPSD || OPSD.key !== opsKey()) { loadOps(); }
+    var D2 = OPSD, h = alertBox('info', esc(tr('Live counts under your ERP permissions, as of today (not the period). They follow the Company filter. Same rules as the old Sales Operation and Quotation Team cards.', 'أعداد مباشرة حسب صلاحياتك في النظام حتى اليوم (لا تتبع الفترة) وتتبع مرشح الشركة، بنفس قواعد بطاقات عمليات المبيعات وفريق عروض الأسعار السابقة.')));
+    OPS.forEach(function (g, gi) {
+      h += '<section class="dms-panelbox"><div class="dms-ph"><h3 class="dms-h3">' + esc(tr(g[0], g[1])) + '</h3></div><div class="dms-grid dms-kpis qt-ops">' + g[2].map(function (c, ci) {
+        var v = D2.counts[gi + ':' + ci], err = typeof v === 'string';
+        return kpi({ label: tr(c[0], c[1]), val: v === undefined ? '…' : err ? '—' : num(v), sub: err ? esc(v === 'ERR:perm' ? tr('No permission', 'لا صلاحية') : tr('Unavailable', 'غير متاح')) : '' });
+      }).join('') + '</div></section>';
+    });
+    var cell = function (x) { return x ? '<span class="dms-num">' + esc(money(x.v)) + '</span> <span class="dms-sm">· ' + num(x.n) + '</span>' : '<span class="dms-sm">—</span>'; };
+    var body = D2.locErr ? alertBox('err', esc(tr('Not available with your permissions.', 'غير متاح بصلاحياتك.'))) : !D2.loc ? '<div class="dms-skel dms-skel-panel"></div>' : !D2.loc.length ? empty() :
+      '<div class="dms-tablewrap"><table class="dms-table"><thead><tr><th scope="col">' + esc(tr('Location', 'الموقع')) + '</th><th scope="col" class="dms-num">' + esc(tr('Approved, not delivered', 'معتمدة ولم تُسلّم')) + '</th><th scope="col" class="dms-num">' + esc(tr('On hold', 'معلقة')) + '</th><th scope="col" class="dms-num">' + esc(tr('New today', 'جديدة اليوم')) + '</th><th scope="col" class="dms-num">' + esc(tr('Invoiced this month', 'المفوتر هذا الشهر')) + '</th></tr></thead><tbody>' +
+      D2.loc.map(function (r) { return '<tr><td><b>' + bdi(r.loc) + '</b></td><td class="dms-num">' + cell(r.pending) + '</td><td class="dms-num">' + cell(r.hold) + '</td><td class="dms-num">' + cell(r.today) + '</td><td class="dms-num">' + cell(r.inv) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+    h += '<section class="dms-panelbox"><div class="dms-ph"><h3 class="dms-h3">' + esc(tr('Sales orders and invoices by location', 'أوامر البيع والفواتير حسب الموقع')) + '</h3></div>' + body + '<p class="dms-note">' + esc(tr('Value = base_net_total (before VAT) · count. Orders by Sales Order location; invoices by Sales Invoice location, this calendar month.', 'القيمة قبل الضريبة · العدد. الأوامر حسب موقع أمر البيع، والفواتير حسب موقع الفاتورة لهذا الشهر.')) + '</p></section>';
+    return h;
+  }
   function tabActions() {
     var specs = actSpecs(), h = alertBox('info', esc(tr('Action lists are as of today and are not filtered by the period. They respect the company, division, location and salesperson filters where the source supports them.', 'قوائم الإجراءات حتى اليوم وغير مرتبطة بالفترة، وتراعي مرشحات الشركة والقسم والموقع والمندوب حيثما يدعمها المصدر.')));
     if (!ACT.counts && !ACT.loading) { loadActions(); }
@@ -1368,12 +1445,13 @@
       return alertBox('err', esc(tr('Analysis unavailable while a required source cannot be read. Use Refresh to retry.', 'التحليل غير متاح لتعذر قراءة مصدر مطلوب. استخدم التحديث لإعادة المحاولة.'))) + (tab === 'overview' ? actionsPanel() : '');
     }
     if (!PERIOD[0] || PERIOD[0] > PERIOD[1]) { return alertBox('err', esc(tr('Choose a valid date range.', 'اختر نطاق تاريخ صحيحًا.'))); }
-    var body = { overview: tabOverview, leads: tabLeads, customers: tabCustomers, quotes: tabQuotes, orders: tabOrders, conv: tabConv, team: tabTeam, actions: tabActions }[tab](M);
-    return (M.s2 || tab === 'leads' || tab === 'customers' || tab === 'actions' ? '' : '<div class="dms-alert dms-alert-info dms-alert-prog"><span data-ref="prog"></span>' + progressBar() + '</div>') + body;
+    var body = { overview: tabOverview, leads: tabLeads, customers: tabCustomers, quotes: tabQuotes, orders: tabOrders, conv: tabConv, team: tabTeam, ops: tabOps, actions: tabActions }[tab](M);
+    return (M.s2 || tab === 'leads' || tab === 'customers' || tab === 'actions' || tab === 'ops' ? '' : '<div class="dms-alert dms-alert-info dms-alert-prog"><span data-ref="prog"></span>' + progressBar() + '</div>') + body;
   }
   function lazyLoads() {
     if (tab === 'leads' || tab === 'conv') { loadLeads(); }
     if (tab === 'customers') { loadCustomers(); }
+    if (tab === 'ops') { loadOps(); }
     if (!ACT.counts && !ACT.loading && !loading) { loadActions(); }
   }
   function renderAll(soft) {
@@ -1431,7 +1509,7 @@
     if (a === 'closeov') { closeOverlay(); return; }
     if (a === 'tab') { goTab(v); return; }
     if (a === 'lang') { if (LANG !== v) { LANG = v; try { G.localStorage.setItem('dms_lang', LANG); } catch (e) { /* ignore */ } OVL = null; POP = null; CAL = null; renderAll(); renderOverlay(); focusFk('lang:' + v); } return; }
-    if (a === 'refresh') { AGED.rows = null; LEADS.rows = null; CUST.rows = null; ACTTOK++; ACT.counts = null; ACT.items = null; ACT.loading = false; DATA.recon = null; startLoad(true); return; }
+    if (a === 'refresh') { OPSD = null; AGED.rows = null; LEADS.rows = null; CUST.rows = null; ACTTOK++; ACT.counts = null; ACT.items = null; ACT.loading = false; DATA.recon = null; startLoad(true); return; }
     if (a === 'pop') { if (POP === v) { closePop(true); } else { openPop(v); } return; }
     if (a === 'popclose') { closePop(true); return; }
     if (a === 'preset') {
