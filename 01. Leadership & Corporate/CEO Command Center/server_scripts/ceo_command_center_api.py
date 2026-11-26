@@ -428,6 +428,33 @@ def bundle_rows(rows, src, dt, dept, group, sev, title, reason, list_filters, ol
 WF_STATE = {"decision_states": 0, "pending_states": 0, "workflows": 0}
 
 
+# CEO inbox is stage-specific: other roles held by the CEO must not widen it.
+CEO_APPROVAL_ROLES = ["CEO"]
+CEO_DECISION_ACTIONS = ["approve", "first approve", "final approval", "accept"]
+
+
+def ceo_stage_transitions(workflow_name, state):
+    """Return only CEO approval transitions from the document's CURRENT state."""
+    transitions = frappe.get_all("Workflow Transition", filters={
+        "parenttype": "Workflow", "parent": workflow_name, "state": state,
+        "allowed": ["in", CEO_APPROVAL_ROLES]},
+        fields=["action", "next_state", "allow_self_approval", "condition"],
+        limit_page_length=100)
+    return [t for t in transitions if (t.action or "").strip().lower() in CEO_DECISION_ACTIONS
+            and t.next_state != state]
+
+
+def ceo_stage_policy(workflow_name, state, owner):
+    if "CEO" not in user_roles:
+        return None
+    transitions = ceo_stage_transitions(workflow_name, state)
+    eligible = [t for t in transitions if owner != user or t.allow_self_approval]
+    if not eligible:
+        return None
+    return {"mine": sorted(list(set(t.action for t in eligible))), "others": [],
+            "self_ok": True, "conditional": any(bool(t.condition) for t in eligible)}
+
+
 def workflow_pending():
     """Active workflows with their pending-approval states and who may act on each (shared by overview and approvals)."""
     wfs = frappe.get_all("Workflow", filters={"is_active": 1}, fields=["name", "document_type", "workflow_state_field"], limit_page_length=200)
@@ -518,7 +545,9 @@ def src_workflows():
             amt = frappe.utils.flt(r.get("wf_amount")) if amount_f else None
             cur = company_currency.get(r.get("company")) if (amount_f and has_co and dt not in WF_AMOUNT_NO_CURRENCY) else None
             title = (str(r.get("wf_title") or "")[:140] or r.name)
-            if p["mine"] and not (r.owner == user and not p["self_ok"]):
+            if "CEO" in user_roles:
+                p = ceo_stage_policy(w["workflow"], r.wf_state, r.owner)
+            if p and p["mine"] and not (r.owner == user and not p["self_ok"]):
                 WF_STATE["decision_states"] = WF_STATE["decision_states"] + 1
                 acts = sorted(list(set(p["mine"])))
                 reason = "Waiting at '" + r.wf_state + "'. Your permitted actions: " + ", ".join(acts) + "."
@@ -1612,7 +1641,11 @@ def build_approvals():
         pending = unpacked[2]
         mine = {}
         for st in pending:
-            if pending[st]["mine"]:
+            if "CEO" in user_roles:
+                # Only fetch states with an explicit CEO approval transition.
+                if ceo_stage_transitions(w["workflow"], st):
+                    mine[st] = pending[st]
+            elif pending[st]["mine"]:
                 mine[st] = pending[st]
         if not mine:
             continue
@@ -1655,6 +1688,8 @@ def build_approvals():
         prime("User", ids["User"])
         for r in rows:
             p = mine.get(r.wf_state)
+            if "CEO" in user_roles and p:
+                p = ceo_stage_policy(w["workflow"], r.wf_state, r.owner)
             if not p or (r.owner == user and not p["self_ok"]):
                 continue
             items.append(approval_item(dt, pr, r, p, mf))

@@ -102,6 +102,7 @@
     boot: null, overview: null, appr: null, dept: {}, busy: false, error: '', refreshError: '', notices: [], drawer: null, drill: {}, allRows: null
   };
   const UI = { pop: null, fd: null, fs: '', cal: null };   // open popover, filter draft, company search, calendar draft
+  Object.assign(AR, {"Management Insights": "رؤى الإدارة", "Reports": "التقارير", "As of": "حتى", "the end of the selected period": "نهاية الفترة المحددة", "Sales year to date": "المبيعات منذ بداية السنة", "vs last year": "مقابل العام الماضي", "target to date": "الهدف حتى تاريخه", "Collected": "المحصّل", "Year to date": "منذ بداية السنة", "Receivables outstanding": "الذمم المدينة القائمة", "invoices": "فاتورة", "Cash & bank": "النقد والبنوك", "Bank": "البنك", "Cash": "النقد", "Stock value": "قيمة المخزون", "Purchased": "المشتريات", "to bill": "للفوترة", "Sales by month": "المبيعات حسب الشهر", "vs": "مقابل", "Month": "الشهر", "Change": "التغير", "same period": "الفترة نفسها", "Company target": "هدف الشركة", "Locations: achieved vs target": "المواقع: المحقق مقابل الهدف", "Location": "الموقع", "Monthly target": "الهدف الشهري", "Month %": "نسبة الشهر", "Previous month": "الشهر السابق", "YTD %": "نسبة السنة", "Sales orders": "أوامر البيع", "New orders": "أوامر جديدة", "Fully invoiced": "مفوترة بالكامل", "Pending billing": "بانتظار الفوترة", "Closed": "مغلقة", "Payments": "المدفوعات", "Paid out": "المدفوع", "Suppliers": "الموردون", "Employees": "الموظفون", "payments": "دفعة", "Petty cash": "العهدة النقدية", "cash accounts, credits": "حسابات النقد، الدائن", "Cash & bank accounts": "حسابات النقد والبنوك", "Account": "الحساب", "Opening": "الافتتاحي", "In": "وارد", "Out": "صادر", "Closing": "الختامي", "Management reports": "تقارير الإدارة", "Sales, targets & collections": "المبيعات والأهداف والتحصيل", "Form / list": "نموذج / قائمة", "Chart dashboard": "لوحة رسوم", "Report": "تقرير", "Jan": "يناير", "Feb": "فبراير", "Mar": "مارس", "Apr": "أبريل", "May": "مايو", "Jun": "يونيو", "Jul": "يوليو", "Aug": "أغسطس", "Sep": "سبتمبر", "Oct": "أكتوبر", "Nov": "نوفمبر", "Dec": "ديسمبر"});
   const t = s => (S.lang === 'ar' && AR[s]) || s;
   const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const today = () => frappe.datetime.get_today();
@@ -175,9 +176,15 @@
   }
 
   /* ───────── API ───────── */
+  /* Management Insights and Reports (CEO only): the tabs are shown to the CEO role, and ceo_management_insights checks the
+     role again on the server. Reports is a static list of ERP reports; each report keeps its own ERP role permissions. */
+  const isCEO = () => ((window.frappe && frappe.user_roles) || []).includes('CEO');
+  const EXTRA_TABS = () => (isCEO() ? [['insights', 'Management Insights'], ['reports', 'Reports']] : []);
+  const REPORT_LINKS = [["Management reports", "Report", "Monthly Sales Report - Individual"], ["Management reports", "Report", "Customer Payment History"], ["Management reports", "Report", "Brand wise Target"], ["Management reports", "DocType", "Weekly Sales Report"], ["Management reports", "DocType", "Sales person weekly collection - Invoice wise"], ["Management reports", "Report", "PO Analysis Report - SYSS"], ["Management reports", "Report", "Approvals Report"], ["Management reports", "Report", "CR Expiry Report"], ["Management reports", "Report", "Inventory Replenishment Report 2026"], ["Management reports", "Report", "Submittals Report"], ["Management reports", "Report", "Facility Rent Expiry Report"], ["Sales, targets & collections", "Dashboard", "Collection Analysis Dashboard"], ["Sales, targets & collections", "Report", "ERP Employees Activity Reports copy"], ["Sales, targets & collections", "Report", "Daily Visits Task Report"], ["Sales, targets & collections", "Report", "DM sales Reports All Locations % Wise"], ["Sales, targets & collections", "Report", "Salesperson Attendance Today"], ["Sales, targets & collections", "Dashboard", "Department Wise Revenue breakdown"], ["Sales, targets & collections", "Report", "Sales Report - Department wise"], ["Sales, targets & collections", "Report", "Sales Report - Department wise Dated"], ["Sales, targets & collections", "Report", "Sales Vs Target VS Collection Analysis Manual Date"], ["Sales, targets & collections", "Report", "DM Sales Report - Monthlyyy"], ["Sales, targets & collections", "Report", "DM - Outstanding - As Per Submitted Days and Payment Terms - Due Date"], ["Sales, targets & collections", "Report", "Sales Vs Target VS Collection Analysis"], ["Sales, targets & collections", "Report", "DM - Outstanding - As Per Submitted Days and Payment Terms - Posting Date"], ["Sales, targets & collections", "Report", "DM Sales Report - Month Wise"], ["Sales, targets & collections", "Report", "Weekly Collection Invoice Summary Report"]];
   async function call(action, args) {
+    if (action === 'reports') return { links: REPORT_LINKS };
     const body = new URLSearchParams(Object.assign({ action, company: S.company || '', window: String(S.window), from_date: S.from, to_date: S.to }, args || {}));
-    const res = await fetch('/api/method/' + API, { method: 'POST', body, credentials: 'same-origin', signal: controller.signal, headers: { 'X-Frappe-CSRF-Token': frappe.csrf_token, Accept: 'application/json' } });
+    const res = await fetch('/api/method/' + (action === 'insights' ? 'ceo_management_insights' : API), { method: 'POST', body, credentials: 'same-origin', signal: controller.signal, headers: { 'X-Frappe-CSRF-Token': frappe.csrf_token, Accept: 'application/json' } });
     let data = null;
     try { data = await res.json(); } catch (e) { /* non-JSON */ }
     if (!res.ok || !data || !data.message) {
@@ -192,6 +199,7 @@
   function view(tab) {
     if (tab === 'overview') return { action: 'overview', args: {}, get: () => S.overview, set: d => { S.overview = d; } };
     if (tab === 'approvals') return { action: 'approvals', args: {}, get: () => S.appr, set: d => { S.appr = d; AP.sel.clear(); AP.detail = {}; } };
+    if (tab === 'insights' || tab === 'reports') return { action: tab, args: {}, get: () => S[tab], set: d => { S[tab] = d; } };
     return { action: 'department', args: { department: tab }, get: () => S.dept[tab], set: d => { S.dept[tab] = d; } };
   }
   function fetchView(tab) {
@@ -217,7 +225,7 @@
     load();                                                            // first view in parallel with bootstrap
     try {
       S.boot = await bootP;
-      const valid = ['overview', 'approvals'].concat(S.boot.departments.map(d => d.key));
+      const valid = ['overview', 'approvals'].concat(EXTRA_TABS().map(x => x[0]), S.boot.departments.map(d => d.key));
       if (!valid.includes(S.tab)) { S.notices.push('Your remembered tab is no longer available, so Overview is shown.'); S.tab = 'overview'; load(); }
       if (S.company && !S.boot.companies.some(c => c.name === S.company)) { S.notices.push('Your remembered company is not accessible any more; showing all permitted companies.'); S.company = ''; persist(); load(true); }
       if (![7, 14, 30].includes(Number(S.window))) S.window = 7;
@@ -297,7 +305,7 @@
   }
 
   /* ───────── Toolbar: title · decisions · period · filters · refresh · language ───────── */
-  const curData = () => (S.tab === 'overview' ? S.overview : S.tab === 'approvals' ? S.appr : S.dept[S.tab]);
+  const curData = () => (S.tab === 'overview' ? S.overview : S.tab === 'approvals' ? S.appr : S.tab === 'insights' || S.tab === 'reports' ? S[S.tab] : S.dept[S.tab]);
   function decisionsCount() { return S.appr && S.appr._key === key() ? apItems().length : null; }
   function statusLine() {
     const d = curData();
@@ -356,7 +364,7 @@
   }
   function tabs() {
     const m = S.overview?.matrix || {}, dc = decisionsCount();
-    const items = [['overview', t('Overview')], ['approvals', t('Approvals')]].concat(depts().map(d => [d.key, t(d.label)]));
+    const items = [['overview', t('Overview')], ['approvals', t('Approvals')]].concat(EXTRA_TABS().map(x => [x[0], t(x[1])]), depts().map(d => [d.key, t(d.label)]));
     return '<div class="cc-tabs" role="tablist" aria-label="' + esc(t('Sections')) + '">' + items.map(([k, l]) => {
       const c = m[k], hot = c ? (c.critical || 0) + (c.overdue || 0) : 0;
       const badge = k === 'approvals' ? (dc ? '<span class="cc-badge' + (S.appr && apSummary(apItems()).tiers.urgent ? ' bad' : '') + '" title="' + esc(t('Waiting for your decision')) + '">' + n0(dc) + '</span>' : '')
@@ -438,6 +446,49 @@
     return panel(t('Company pulse'), '<div class="cc-pulse">' + cells.join('') + '</div>', esc('Each company in its own currency; nothing is converted or summed across currencies.'));
   }
   function attain(v) { return '<span class="cc-att"><span class="cc-att-b"><i style="width:' + Math.max(0, Math.min(100, v)).toFixed(1) + '%"></i></span>' + pct(v) + '</span>'; }
+
+  /* ───────── Management Insights (CEO) ───────── */
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function chg(cur, prev) { if (!prev || cur == null) return '<span class="muted">—</span>'; const v = 100 * (cur - prev) / Math.abs(prev); return '<span class="' + (v < 0 ? 'cc-neg' : 'cc-pos') + '">' + (v > 0 ? '+' : '') + pct(v) + '</span>'; }
+  function insights() {
+    const d = S.insights; if (!d) return '';
+    const m = d.meta, s = d.sales, c = d.collections, r = d.receivables, cb = d.cash_bank, iv = d.inventory, o = d.orders, p = d.payments, CUR = m.currency;
+    const mon = MONTHS[Number(m.month_from.slice(5, 7)) - 1] + ' ' + m.month_from.slice(0, 4);
+    let h = '<p class="cc-basis">' + esc(t('As of') + ' ' + m.asof + ' · ' + t('the end of the selected period') + (m.company ? ' · ' + m.company : ' · ' + t('All permitted companies'))) + '</p>';
+    h += '<div class="cc-kpis cc-kpis-d">'
+      + kpi({ label: t('Sales') + ' · ' + mon, value: money(s.month, CUR, 1), sub: t('Previous month') + ' ' + money(s.prev_month, CUR, 1) })
+      + kpi({ label: t('Sales year to date'), value: money(s.ytd, CUR, 1), sub: t('vs last year') + ' ' + chg(s.ytd, s.ly_ytd) + ' · ' + t('target to date') + ' ' + pct(100 * s.ytd / (s.ytd_target_to_date || 1)) })
+      + kpi({ label: t('Collected') + ' · ' + mon, value: money(c.month, CUR, 1), sub: t('Year to date') + ' ' + money(c.ytd, CUR, 1) })
+      + kpi({ label: t('Receivables outstanding'), value: money(r.outstanding, CUR, 1), tone: r.overdue ? 'warn' : '', sub: t('Overdue') + ' ' + money(r.overdue, CUR, 1) + ' · ' + n0(r.invoices) + ' ' + t('invoices') })
+      + kpi({ label: t('Cash & bank'), value: money(cb.closing, CUR, 1), sub: t('Bank') + ' ' + money(cb.bank, CUR, 1) + ' · ' + t('Cash') + ' ' + money(cb.cash, CUR, 1) })
+      + kpi({ label: t('Stock value'), value: money(iv.stock_value, CUR, 1), sub: t('Purchased') + ' ' + money(iv.purchased_month, CUR, 1) + ' · ' + t('to bill') + ' ' + money(iv.to_bill, CUR, 1) })
+      + '</div>';
+    const yr = m.asof.slice(0, 4), ly = String(Number(yr) - 1), mx = Math.max(1, ...s.months.map(x => Math.max(x.current || 0, x.previous || 0)));
+    const bar = (v, cls) => '<span class="cc-att-b ' + (cls || '') + '"><i style="width:' + (100 * (v || 0) / mx).toFixed(1) + '%"></i></span>';
+    h += panel(t('Sales by month') + ' · ' + yr + ' ' + t('vs') + ' ' + ly, coTable(s.months.map(x => Object.assign({ label: MONTHS[x.month - 1] }, x)), [[t('Month'), x => esc(t(x.label))],
+      [yr, x => x.current == null ? '<span class="muted">—</span>' : '<span class="cc-ins-bar">' + bar(x.current) + money(x.current, CUR, 1) + '</span>', 1],
+      [ly, x => '<span class="cc-ins-bar">' + bar(x.previous, 'prev') + money(x.previous, CUR, 1) + '</span>', 1], [t('Change'), x => chg(x.current, x.previous), 1]])
+      + '<p class="cc-basis">' + esc(t('Year to date') + ' ' + yr + ': ') + money(s.ytd, CUR) + ' · ' + esc(t('same period') + ' ' + ly + ': ') + money(s.ly_ytd, CUR) + ' · ' + esc(t('Company target') + ' ' + yr + ': ') + money(s.ytd_target, CUR) + '</p>', '', 'cc-ins');
+    h += panel(t('Locations: achieved vs target'), coTable(d.locations, [[t('Location'), x => '<b>' + esc(x.location) + '</b> <span class="muted">· ' + n0(x.salespeople) + '</span>'],
+      [mon, x => money(x.month, CUR, 1), 1], [t('Monthly target'), x => x.target ? money(x.target, CUR, 1) : '<span class="muted">' + t('Not set') + '</span>', 1], [t('Month %'), x => x.pct_month == null ? '<span class="muted">—</span>' : attain(x.pct_month), 1],
+      [t('Previous month'), x => money(x.prev_month, CUR, 1), 1], [t('Year to date'), x => money(x.ytd, CUR, 1), 1], [t('YTD %'), x => x.pct_ytd == null ? '<span class="muted">—</span>' : attain(x.pct_ytd), 1]])
+      + '<p class="cc-basis">' + esc(t('Sales Team share of invoices, grouped by Sales Person location; target = the salespeople\'s monthly targets (Sales Person), YTD target = monthly target × months elapsed. Management accounts excluded, as in the previous location reports.')) + '</p>', '', 'cc-ins');
+    h += '<div class="cc-ins-2">' + panel(t('Sales orders') + ' · ' + mon, '<div class="cc-kpis cc-kpis-d">' + kpi({ label: t('New orders'), value: n0(o.new), sub: money(o.value, CUR, 1) }) + kpi({ label: t('Fully invoiced'), value: n0(o.invoiced) })
+        + kpi({ label: t('Pending billing'), value: n0(o.pending), tone: o.pending ? 'warn' : '' }) + kpi({ label: t('Closed'), value: n0(o.closed) }) + '</div>', '', 'cc-ins')
+      + panel(t('Payments') + ' · ' + mon, '<div class="cc-kpis cc-kpis-d">' + kpi({ label: t('Paid out'), value: money(p.total, CUR, 1) }) + p.by_party.map(x => kpi({ label: t(x.party_type === 'Supplier' ? 'Suppliers' : x.party_type === 'Employee' ? 'Employees' : x.party_type), value: money(x.value, CUR, 1), sub: n0(x.count) + ' ' + t('payments') })).join('')
+        + kpi({ label: t('Petty cash'), value: money(p.petty_cash, CUR, 1), sub: t('cash accounts, credits') }) + '</div>', '', 'cc-ins') + '</div>';
+    const acc = cb.accounts.slice(0, 15);
+    h += panel(t('Cash & bank accounts') + ' · ' + m.asof, coTable(acc, [[t('Account'), x => '<bdi>' + esc(x.name) + '</bdi> <span class="muted">· ' + esc(t(x.type)) + '</span>'], [t('Company'), x => esc(x.company)], [t('Opening'), x => money(x.opening, CUR), 1], [t('In'), x => money(x.in, CUR), 1], [t('Out'), x => money(x.out, CUR), 1], [t('Closing'), x => '<b>' + money(x.closing, CUR) + '</b>', 1]])
+      + (cb.accounts.length > acc.length ? '<p class="cc-basis">' + esc(t('Largest 15 of') + ' ' + cb.accounts.length + ' ' + t('accounts; the totals above include all.')) + '</p>' : ''), '', 'cc-ins');
+    h += '<p class="cc-basis">' + esc(t('Sales are submitted Sales Invoices before VAT, returns net. Collected = customer receipts (Payment Entry, VAT included). Paid out = Payment Entries of type Pay. Petty cash = credits on cash accounts. Cash & bank = ledger balance of every Bank and Cash account. Stock value = current stock value in all warehouses.')) + '</p>';
+    return h;
+  }
+  function reportsTab() {
+    const d = S.reports || { links: REPORT_LINKS }, groups = {};
+    d.links.forEach(x => { (groups[x[0]] = groups[x[0]] || []).push(x); });
+    const url = (ty, n) => ty === 'DocType' ? '/app/' + String(n).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') : ty === 'Dashboard' ? '/app/dashboard-view/' + encodeURIComponent(n) : '/app/query-report/' + encodeURIComponent(n);
+    return '<p class="cc-basis">' + esc(t('ERP reports from the former Management Reports and Sales Comparison workspaces. Each report keeps its own ERP permissions.')) + '</p>' + Object.keys(groups).map(g => panel(t(g), '<div class="cc-links">' + groups[g].map(x => '<a class="cc-linkcard" href="' + esc(url(x[1], x[2])) + '"><b>' + esc(x[2]) + '</b><span class="muted">' + esc(t(x[1] === 'DocType' ? 'Form / list' : x[1] === 'Dashboard' ? 'Chart dashboard' : 'Report')) + '</span></a>').join('') + '</div>', n0(groups[g].length))).join('');
+  }
 
   /* ───────── Department tab ───────── */
   function department() {
@@ -807,7 +858,7 @@
     let body = '';
     if (S.error && !d) body = stateBox(/permission|access/i.test(S.error) ? 'restricted' : 'error', /permission|access/i.test(S.error) ? 'Permission restricted' : 'Source unavailable', S.error) + '<p class="cc-center"><button class="cc-btn" data-action="refresh">' + t('Retry') + '</button></p>';
     else if (!d || d._key !== key() && S.busy) body = skeleton();
-    else body = '<div class="cc-view' + (lastTab !== S.tab ? ' enter' : '') + '"' + (S.busy ? ' aria-busy="true"' : '') + '>' + (S.tab === 'overview' ? overview() : S.tab === 'approvals' ? approvals() : department()) + '</div>';
+    else body = '<div class="cc-view' + (lastTab !== S.tab ? ' enter' : '') + '"' + (S.busy ? ' aria-busy="true"' : '') + '>' + (S.tab === 'overview' ? overview() : S.tab === 'approvals' ? approvals() : S.tab === 'insights' ? insights() : S.tab === 'reports' ? reportsTab() : department()) + '</div>';
     const notes = S.notices.map(n => '<div class="cc-note warn">' + esc(n) + ' <button class="cc-link" data-action="dismiss">OK</button></div>').join('')
       + (S.refreshError ? '<div class="cc-note bad">' + t('Could not refresh:') + ' ' + esc(S.refreshError) + ' <button class="cc-link" data-action="refresh">' + t('Retry') + '</button></div>' : '');
     const foot = S.tab === 'approvals' ? t('Decisions are applied through the ERP workflow with your own permissions, exactly like the button on each form, and are recorded in the document history. Priority rules: urgent = deadline within 3 days, in progress or value ≥ 50,000; high = deadline within 14 days or value ≥ 10,000; routine = requests under 1,000; stale = dates already passed.')
@@ -879,7 +930,7 @@
     if (d.routeList) { openList(S.drawer.list); return; }
     if (d.related) { const p = d.related.split('|'); frappe.set_route('Form', p[0], p[1]); return; }
     switch (d.action) {
-      case 'refresh': { const current = S.dept[S.tab]; S.dept = {}; if (current) S.dept[S.tab] = current; S.drill = {}; if (S.tab !== 'overview') S.overview = null; if (S.tab !== 'approvals') S.appr = null; S.allRows = null; load(true); break; }
+      case 'refresh': { const current = S.dept[S.tab]; S.dept = {}; if (current) S.dept[S.tab] = current; S.drill = {}; if (S.tab !== 'overview') S.overview = null; if (S.tab !== 'approvals') S.appr = null; if (S.tab !== 'insights') S.insights = null; S.allRows = null; load(true); break; }
       case 'close': S.drawer = null; render(); break;
       case 'view-all': S.queueAll = true; S.page = 0; if (!S.group) S.group = S.overview.counts_by_group.decision ? 'decision' : 'escalation'; loadAll(); break;
       case 'view-top': S.queueAll = false; S.page = 0; render(); break;

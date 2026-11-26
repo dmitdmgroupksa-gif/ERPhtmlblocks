@@ -529,3 +529,16 @@
 @container cc (max-width: 640px) { .cc .cc-donut { width: 88px; height: 88px; } .cc .cc-donut > span { width: 62px; height: 62px; } .cc .cc-distribution { gap: 12px; } .cc .cc-trend-b { --odd-only: hidden; } }
 .cc .cc-performance-kpis { grid-column: 1 / -1; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
 @container cc (max-width: 760px) { .cc .cc-performance-kpis, .cc .cc-executive-source .cc-kpis-d { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ───────── Management Insights and Reports tabs (CEO only) ───────── */
+.cc .cc-ins { margin-top: 12px; }
+.cc .cc-ins-bar { display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.cc .cc-ins-bar .cc-att-b { width: 90px; }
+.cc .cc-ins-bar .cc-att-b.prev i { background: var(--line-2); }
+.cc .cc-ins-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+.cc .cc-pos { color: var(--green-ink); } .cc .cc-neg { color: var(--red-ink); }
+.cc .cc-links { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+.cc .cc-linkcard { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--paper); color: var(--ink); text-decoration: none; min-width: 0; }
+.cc .cc-linkcard b { font-weight: 600; overflow-wrap: anywhere; }
+.cc .cc-linkcard:hover, .cc .cc-linkcard:focus-visible { border-color: var(--royal); background: var(--royal-soft); color: var(--royal-ink); text-decoration: none; }
+@container cc (max-width: 520px) { .cc .cc-ins-bar .cc-att-b { display: none; } .cc .cc-ins-2 { grid-template-columns: 1fr; } }

@@ -95,3 +95,11 @@ Policy thresholds (stalled 14 days, receivables follow-up 60 / escalation 120 da
 `npm --prefix tools/erp test` (static checks incl. single-API, read-only, no min()/max() aggregates) and `npm --prefix tools/erp run test:ceo` (browser: tabs, drawer, keyboard, RTL, phone width, restricted/not-configured states).
 
 `npm --prefix tools/erp run bench:ceo` measures the real frontend with a synthetic API and simulated latency. Pass an alternate dashboard directory after `--` to compare versions. This is not a live-site speed measurement. Browser screenshots are generated in `.local/qa/ceo/` (ignored by Git).
+
+## Management Insights and Reports tabs (26 Nov 2026, CEO only)
+
+Replace the number-card workspaces *Management Insights*, *Payments & Collections* and *Management Reports*. Both tabs are shown only to the **CEO** role; the data comes from a separate API, [ceo_management_insights](server_scripts/ceo_management_insights.py), which checks the role again on the server and refuses everyone else.
+
+- **Management Insights:** sales for the month, the previous month, year to date and the same period last year; sales by month for this year against last year; locations against target (Sales Person location and monthly target, the same source as the old location reports, management accounts excluded as before); sales orders of the month; collections; payments (by party type, plus petty cash); every Bank and Cash account's balance; receivables; stock value, purchases and deliveries still to bill. Figures are as of the end of the selected period.
+- **Reports:** links to the 26 working reports of the old Management Reports, Sales Comparison and AR workspaces. Each report keeps its own ERP role permissions.
+- Deployed to the block **Test ceo command centre v2**, on the review workspace **CEO Command Centre v2**. The older live block *CEO Command Center* is not changed.

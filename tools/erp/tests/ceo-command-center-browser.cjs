@@ -10,6 +10,15 @@ const SHOTS = process.env.CEO_SHOTS || path.resolve(__dirname, '../../../.local/
 const EDGE = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
 const SRC = { html: fs.readFileSync(base + 'dashboard.html', 'utf8'), css: fs.readFileSync(base + 'dashboard.css', 'utf8'), js: fs.readFileSync(base + 'dashboard.js', 'utf8') };
 
+/* synthetic Management Insights payload (shape of ceo_management_insights) */
+const INSIGHTS = { meta: { asof: '2026-11-17', month_from: '2026-11-01', prev_month: ['2026-10-01', '2026-10-31'], ytd_from: '2026-01-01', ly_window: ['2025-01-01', '2025-11-17'], company: '', currency: 'SAR', months_elapsed: 11 },
+  sales: { month: 3000000, prev_month: 6000000, ytd: 60000000, ly_ytd: 80000000, ytd_target: 250000000, ytd_target_to_date: 229166667, months: Array.from({ length: 12 }, (_, i) => ({ month: i + 1, current: i < 11 ? 5000000 + i * 100000 : null, previous: 7000000 })) },
+  locations: [{ location: 'CP', salespeople: 6, target: 3000000, month: 1500000, prev_month: 2500000, ytd: 20000000, ytd_target: 33000000, pct_month: 50, pct_ytd: 60.6 }, { location: 'Not set', salespeople: 3, target: 0, month: 10000, prev_month: 0, ytd: 90000, ytd_target: 0, pct_month: null, pct_ytd: null }],
+  orders: { new: 40, invoiced: 30, pending: 8, closed: 2, value: 900000 }, collections: { month: 4000000, prev_month: 7000000, ytd: 90000000 },
+  payments: { total: 2500000, by_party: [{ party_type: 'Supplier', value: 2400000, count: 50 }, { party_type: 'Employee', value: 100000, count: 9 }], petty_cash: 50000 },
+  cash_bank: { opening: 9000000, in: 100000, out: 50000, closing: 9050000, bank: 8800000, cash: 250000, accounts: [{ account: 'A1', name: 'Al Rajhi Bank', type: 'Bank', company: 'DM Trading', opening: 8750000, in: 100000, out: 50000, closing: 8800000 }, { account: 'A2', name: 'Main Cash', type: 'Cash', company: 'DM Trading', opening: 250000, in: 0, out: 0, closing: 250000 }] },
+  receivables: { outstanding: 10000000, overdue: 8000000, invoices: 500 }, inventory: { stock_value: 22000000, purchased_month: 3000000, to_bill: 1500000, to_bill_n: 100 } };
+
 (async () => {
   fs.mkdirSync(SHOTS, { recursive: true });
   const browser = await chromium.launch({ executablePath: fs.existsSync(EDGE) ? EDGE : undefined, headless: true });
@@ -27,6 +36,7 @@ const SRC = { html: fs.readFileSync(base + 'dashboard.html', 'utf8'), css: fs.re
       if (page.ctl.fail && page.ctl.fail(a)) return r.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ exc_type: 'ValidationError', _server_messages: JSON.stringify([JSON.stringify({ message: 'Server busy' })]) }) });
       r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ message: fx.respond(a, q) }) });
     });
+    await page.route('**/api/method/ceo_management_insights', r => { log.push(['insights']); r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ message: INSIGHTS }) }); });
     await page.route('https://fonts.googleapis.com/**', r => r.fulfill({ contentType: 'text/css', body: '' }));
     await page.route('http://cc.test/', r => r.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html data-theme="' + (opts.dark ? 'dark' : 'light') + '"><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:10px;background:#f3f4f6"><div id="t"></div></body></html>' }));
     await page.goto('http://cc.test/');
@@ -35,6 +45,7 @@ const SRC = { html: fs.readFileSync(base + 'dashboard.html', 'utf8'), css: fs.re
       const sh = document.querySelector('#t').attachShadow({ mode: 'open' }); sh.innerHTML = '<style>' + css + '</style>' + html; window.root_element = sh;
       window.frappe = { csrf_token: 't', session: { user: 'ceo@example.com', user_fullname: 'CEO' }, datetime: { get_today: () => '2026-11-17' }, set_route: (...a) => { window.__route = a; }, show_alert: () => {}, msgprint: () => {} }; window.__ = s => s;
     }, { html: SRC.html, css: SRC.css, state: opts.state });
+    if (opts.roles) await page.evaluate(r => { window.frappe.user_roles = r; }, opts.roles);
     await page.addScriptTag({ content: SRC.js });
     const $ = s => page.locator('#t').locator(s);
     const idle = async () => { await page.waitForTimeout(80); await $('.cc-view').first().waitFor(); for (let i = 0; i < 100 && await $('.cc-btn.busy').count(); i++) await page.waitForTimeout(50); await page.waitForTimeout(80); };
@@ -205,6 +216,20 @@ const SRC = { html: fs.readFileSync(base + 'dashboard.html', 'utf8'), css: fs.re
     assert.equal(await $('.cc-executive-source').count(), 2);
     assert.deepEqual(errors, []); await ctx.close();
     ok('layout ' + tag + ': no overflow' + (w <= 768 ? ', touch targets, drawer and calendar in view' : ''));
+  }
+  /* Management Insights + Reports: CEO role only */
+  {
+    const a = await open({ width: 1440, height: 1000 }); await a.idle();
+    assert.equal(await a.$('.cc-tabs [data-tab=insights]').count(), 0); assert.equal(await a.$('.cc-tabs [data-tab=reports]').count(), 0);
+    assert.ok(!a.log.some(x => x[0] === 'insights')); await a.ctx.close(); ok('without the CEO role: no Management Insights / Reports tabs and the insights API is never called');
+    const c = await open({ width: 1440, height: 1000 }, { roles: ['CEO'] }); await c.idle();
+    await c.$('.cc-tabs [data-tab=insights]').click(); await c.idle(); const tx = await c.$('.cc-view').innerText();
+    assert.match(tx, /Sales year to date[\s\S]*60M/); assert.match(tx, /vs last year -25\.0%/); assert.match(tx, /Receivables outstanding[\s\S]*10M/); assert.match(tx, /Cash & bank[\s\S]*9\.05M/);
+    assert.match(tx, /CP[\s\S]*50\.0%[\s\S]*60\.6%/); assert.match(tx, /Not set/); assert.ok(await c.noOverflow()); await shot(c.page, 'insights-en-1440');
+    ok('CEO: Management Insights (sales vs last year, locations vs target, collections, receivables, cash & bank, stock)');
+    await c.$('.cc-tabs [data-tab=reports]').click(); await c.idle(); const hrefs = await c.$('.cc-linkcard').evaluateAll(xs => xs.map(x => x.getAttribute('href')));
+    assert.ok(hrefs.length >= 20); assert.ok(hrefs.includes('/app/query-report/Approvals%20Report')); assert.ok(hrefs.includes('/app/weekly-sales-report')); assert.ok(hrefs.includes('/app/dashboard-view/Collection%20Analysis%20Dashboard'));
+    await shot(c.page, 'reports-en-1440'); assert.deepEqual(c.errors, []); await c.ctx.close(); ok('CEO: Reports tab links the ' + hrefs.length + ' working reports of the old Management Reports / Sales Comparison workspaces');
   }
   await browser.close(); console.log('\nCEO Command Centre: ' + passed + ' browser checks passed · screenshots in ' + SHOTS);
 })().catch(e => { console.error(e); process.exit(1); });
