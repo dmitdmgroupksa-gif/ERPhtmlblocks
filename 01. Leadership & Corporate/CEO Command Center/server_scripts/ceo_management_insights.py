@@ -1,6 +1,6 @@
 # Server Script · type API · method: ceo_management_insights        (CEO Command Centre v2 · "Management Insights" tab)
 # Replaces the number-card workspaces "Management Insights" and "Payments & Collections". Read-only.
-# Access: CFG["roles"] only (company-wide money: sales, collections, payments, cash & bank, inventory value).
+# Access: CFG["roles"] only (CEO, Finance Manager) (company-wide money: sales, collections, payments, cash & bank, inventory value).
 #
 # Figures are anchored on the as-of date (to_date, default today): its month, the previous month, year to date, and the
 # same year-to-date window last year. Company filter optional (all companies otherwise; every company is SAR).
@@ -21,7 +21,7 @@
 #                delivered but not billed (Delivery Notes "To Bill", base_net_total).
 
 CFG = {
-    "roles": ["CEO"],
+    "roles": ["CEO", "Finance Manager"],
     "ytd_target": 250000000,
     "exclude_from_locations": ["Abdullakutty Shahnavas", "Afroze Nakwa", "Ashfak Nakwa", "All", "Basith Shaikh", "Mohsin Ismail",
                                "Arslan Abdul Shakoor", "Murad Ali", "Umar Sherrif", "Mohammed Ashfaq Shekabba", "Shakeel Ahmed Syed",
@@ -36,7 +36,7 @@ U = frappe.utils
 user = frappe.session.user
 roles = [r.role for r in frappe.get_all("Has Role", filters={"parent": user, "parenttype": "User"}, fields=["role"])]
 if user == "Guest" or len([r for r in roles if r in CFG["roles"]]) == 0:
-    frappe.throw("Management Insights are restricted to the CEO.", title="Not Permitted")
+    frappe.throw("Management Insights are restricted to the CEO and the Finance Manager.", title="Not Permitted")
 fd = frappe.form_dict
 today = U.getdate(U.nowdate())
 try:
