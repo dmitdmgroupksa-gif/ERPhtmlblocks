@@ -821,6 +821,13 @@
   /* ---------- filters, period, toolbar, tabs ---------- */
   var F = { period: APP.period || 'month', from: '', to: '', ap: APP.defaultApprovalStatus || '' }, PERIOD = [];
   (APP.filters || []).forEach(function (f) { F[f.k] = ''; });
+  /* Tabs limited by role: a tab {id, en, ar, roles: [...]} is shown only to users holding one of those roles. This hides the
+     tab only; whatever data the tab reads must be checked again on the server (Server Script role check or ERP permissions). */
+  function hasRole(rs) { var ur = (G.frappe && frappe.user_roles) || []; return !rs || !rs.length || rs.some(function (r) { return ur.indexOf(r) >= 0; }); }
+  APP.tabs = APP.tabs.filter(function (x) { return hasRole(x.roles); });
+  if (!APP.tabs.length) { APP.tabs = [{ id: '__none', en: 'No access', ar: 'لا صلاحية' }]; }
+  if (APP.defaultTab && !APP.tabs.some(function (x) { return x.id === APP.defaultTab; })) { APP.defaultTab = null; }
+  APP.hasRole = hasRole;
   var tab = APP.defaultTab || APP.tabs[0].id, POP = null, FD = null, FS = {}, CAL = null, ANIM = false, built = false, AMC = null;
   var PERIODS = [['today', 'Today', 'اليوم'], ['yesterday', 'Yesterday', 'أمس'], ['week', 'This week', 'هذا الأسبوع'], ['lastWeek', 'Last week', 'الأسبوع الماضي'],
     ['month', 'This month', 'هذا الشهر'], ['lastMonth', 'Last month', 'الشهر الماضي'], ['quarter', 'This quarter', 'هذا الربع'], ['ytd', 'Year to date', 'السنة حتى اليوم'],
@@ -950,6 +957,7 @@
         note(esc(tr('Loading from ERPNext…', 'جارٍ التحميل من ERPNext…')));
     }
     if (APP.period !== false && (!PERIOD[0] || PERIOD[0] > PERIOD[1])) { return alertBox('err', esc(tr('Choose a valid date range.', 'اختر نطاق تاريخ صحيحًا.'))); }
+    if (tab === '__none') { return empty(tr('You do not have access to any section of this dashboard.', 'لا تملك صلاحية الوصول إلى أي قسم في هذه اللوحة.')); }
     return APP.content(tab, AMC);
   }
   function renderSoft() {
@@ -975,6 +983,7 @@
 
   /* ---------- navigation and popovers ---------- */
   function goTab(id, focusTab, force) {
+    if (!APP.tabs.some(function (x) { return x.id === id; })) { return; }
     if (tab !== id || force) { tab = id; ANIM = true; if (APP.onTab) { APP.onTab(id); } renderAll(); }
     var t = $('#dms-tab-' + id); if (!t) { return; }
     try { t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) { /* ignore */ }
