@@ -1587,7 +1587,33 @@
 
   /* CRM pipeline: the figures of the former "CRM Dashboard" number-card workspace — each card's own filters, counted live under
      the viewer's ERP permissions; today / yesterday / this week are site dates, not the period. */
-  var LCG_CRM = [{"en": "Lead", "ar": "العملاء المحتملون", "cards": [{"en": "Lead To Quotation", "dt": "Lead", "f": [["status", "=", "Quotation"]]}, {"en": "Open Leads - CP", "dt": "Lead", "f": [["status", "=", "Lead"], ["custom_location", "=", "CP"]]}, {"en": "Allocated Leads - CP", "dt": "Lead", "f": [["custom_allocation_status", "=", "Allocated"], ["custom_location", "=", "CP"]]}, {"en": "Lead To Quotation", "dt": "Lead", "f": [["status", "=", "Quotation"]]}, {"en": "Open Leads", "dt": "Lead", "f": [["status", "=", "Lead"]]}, {"en": "Open Leads - MP", "dt": "Lead", "f": [["status", "=", "Lead"], ["custom_location", "=", "MP"]]}, {"en": "Open Leads - EP", "dt": "Lead", "f": [["status", "=", "Lead"], ["custom_location", "=", "EP"]]}, {"en": "Weekly Leads", "dt": "Lead", "f": [["creation", "Timespan", "last week"]]}, {"en": "Allocated Leads - MP", "dt": "Lead", "f": [["custom_allocation_status", "=", "Allocated"], ["custom_location", "=", "MP"]]}, {"en": "Allocated Leads - EP", "dt": "Lead", "f": [["custom_allocation_status", "=", "Allocated"], ["custom_location", "=", "EP"]]}, {"en": "Lead To Quotation - MP", "dt": "Lead", "f": [["status", "=", "Quotation"], ["custom_location", "=", "MP"]]}, {"en": "Lead To Quotation - EP", "dt": "Lead", "f": [["status", "=", "Quotation"], ["custom_location", "=", "EP"]]}, {"en": "Allocated Leads", "dt": "Lead", "f": [["custom_allocation_status", "=", "Allocated"]]}]}, {"en": "Customer", "ar": "العملاء", "cards": [{"en": "Weekly New Customer", "dt": "Customer", "f": [["creation", "Timespan", "last week"]]}, {"en": "New Customer 2026", "dt": "Customer", "f": [["creation", "Timespan", "this year"]]}, {"en": "Customer 2025", "dt": "Customer", "f": [["creation", "between", ["2025-01-01", "2025-12-31"]]]}, {"en": "Customer 2024", "dt": "Customer", "f": [["creation", "between", ["2024-01-01", "2024-12-31"]]]}, {"en": "Total Customer", "dt": "Customer", "f": []}]}];
+      var LCG_CRM = [
+    { en: 'Lead', ar: 'العملاء المحتملون', cards: [
+      /* All locations */
+      { en: 'Open Leads', dt: 'Lead', f: [['status', '=', 'Lead']] },
+      { en: 'Allocated Leads', dt: 'Lead', f: [['custom_allocation_status', '=', 'Allocated']] },
+      { en: 'Lead To Quotation', dt: 'Lead', f: [['status', '=', 'Quotation']] },
+      { en: 'Weekly Leads', dt: 'Lead', f: [['creation', 'Timespan', 'last week']] },
+      /* CP */
+      { en: 'Open Leads - CP', dt: 'Lead', f: [['status', '=', 'Lead'], ['custom_location', '=', 'CP']] },
+      { en: 'Allocated Leads - CP', dt: 'Lead', f: [['custom_allocation_status', '=', 'Allocated'], ['custom_location', '=', 'CP']] },
+      /* MP */
+      { en: 'Open Leads - MP', dt: 'Lead', f: [['status', '=', 'Lead'], ['custom_location', '=', 'MP']] },
+      { en: 'Allocated Leads - MP', dt: 'Lead', f: [['custom_allocation_status', '=', 'Allocated'], ['custom_location', '=', 'MP']] },
+      { en: 'Lead To Quotation - MP', dt: 'Lead', f: [['status', '=', 'Quotation'], ['custom_location', '=', 'MP']] },
+      /* EP */
+      { en: 'Open Leads - EP', dt: 'Lead', f: [['status', '=', 'Lead'], ['custom_location', '=', 'EP']] },
+      { en: 'Allocated Leads - EP', dt: 'Lead', f: [['custom_allocation_status', '=', 'Allocated'], ['custom_location', '=', 'EP']] },
+      { en: 'Lead To Quotation - EP', dt: 'Lead', f: [['status', '=', 'Quotation'], ['custom_location', '=', 'EP']] }
+    ] },
+    { en: 'Customer', ar: 'العملاء', cards: [
+      { en: 'Weekly New Customer', dt: 'Customer', f: [['creation', 'Timespan', 'last week']] },
+      { en: 'New Customer 2026', dt: 'Customer', f: [['creation', 'Timespan', 'this year']] },
+      { en: 'Customer 2025', dt: 'Customer', f: [['creation', 'between', ['2025-01-01', '2025-12-31']]] },
+      { en: 'Customer 2024', dt: 'Customer', f: [['creation', 'between', ['2024-01-01', '2024-12-31']]] },
+      { en: 'Total Customer', dt: 'Customer', f: [] }
+    ] }
+  ];
   function tabLCCrm() { return alertBox('info', esc(tr('Live counts under your ERP permissions, with the same rules as the former CRM Dashboard cards. Today / this week are site dates, not the period. Click a number to open the ERP list.', 'أعداد مباشرة حسب صلاحياتك في النظام بنفس قواعد بطاقات مسار العملاء السابقة. اليوم / هذا الأسبوع حسب تاريخ النظام وليس الفترة. انقر الرقم لفتح القائمة في النظام.'))) + liveCards('crm', LCG_CRM, []) + panel(tr('Reports behind the other cards', 'التقارير الخاصة بالبطاقات الأخرى'), '<div class="dms-lc-links">' + ["Approvals Report - CP", "Approvals Report - EP", "Approvals Report - MP", "Approvals Report - SP", "Sales Person Approval List", "Sales Person Approval List - CP", "Sales Person Approval List - EP", "Sales Person Approval List - MP", "Sales Person Project List", "Sales Person Project List - CP", "Sales Person Project List - EP", "Sales Person Project List - MP", "Submittal Report - CP", "Submittal Report - EP", "Submittal Report - MP", "Weekly Expected Quotation Revenue", "Weekly Expected Quotation Revenue - CP", "Weekly Expected Quotation Revenue - EP", "Weekly Expected Quotation Revenue - MP", "Weekly Sales Person Project List", "Weekly Submittal Report - SP"].map(function (n) { return '<a class="dms-link" href="/app/query-report/' + encodeURIComponent(n) + '" target="_blank" rel="noopener noreferrer">' + esc(n) + ' ↗</a>'; }).join('') + '</div>'); }
 
   start();

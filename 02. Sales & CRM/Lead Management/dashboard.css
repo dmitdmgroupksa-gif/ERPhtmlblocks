@@ -501,6 +501,7 @@ button.dms-split-row:hover .dms-split-l bdi { text-decoration: underline; color:
 /* ==== end DMS kit ==== */
 
 /* ---------- Lead Management local additions ---------- */
+.dms-root .dms-lc-g { margin-bottom: 12px; }
 .dms-root .lm-tools { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 10px; margin: 0 0 12px; }
 .dms-root .lm-tools > .dms-sm { margin-inline-end: auto; min-height: 32px; display: inline-flex; align-items: center; }
 .dms-root .lm-tools-end { justify-content: flex-end; }
